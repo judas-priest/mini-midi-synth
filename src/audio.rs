@@ -105,9 +105,7 @@ impl AudioBackend {
             &stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 while let Ok(event) = ctrl_rx.pop() {
-                    match event {
-                        ControlEvent::LoadPreset(preset) => synth.load_preset(&preset),
-                    }
+                    synth.handle_control(event);
                 }
 
                 while let Ok(event) = midi_rx.pop() {

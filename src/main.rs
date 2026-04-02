@@ -58,7 +58,7 @@ fn main() -> Result<()> {
     let note_state = midi::new_note_state();
 
     let (midi_tx, midi_rx) = rtrb::RingBuffer::<synth::MidiEvent>::new(256);
-    let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(16);
+    let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(32);
 
     let midi_tx_shared: midi::SharedMidiTx = Arc::new(Mutex::new(midi_tx));
 
@@ -113,9 +113,28 @@ fn main() -> Result<()> {
         Ok(())
     });
 
+    // Create layer states: Layer A with saved preset, Layer B disabled with Init
+    let layer_a = gui::LayerState {
+        preset_idx,
+        edited_params: std::collections::BTreeMap::new(),
+        params_dirty: false,
+        enabled: true,
+        volume: 0.8,
+        min_note: 0,
+        max_note: 127,
+    };
+    let layer_b = gui::LayerState {
+        preset_idx: 0,
+        edited_params: std::collections::BTreeMap::new(),
+        params_dirty: false,
+        enabled: false,
+        volume: 0.5,
+        min_note: 60,
+        max_note: 127,
+    };
+
     let mut app = gui::App {
         presets,
-        preset_idx,
         note_state,
         ctrl_tx,
         sample_rate: actual_sr,
@@ -132,13 +151,16 @@ fn main() -> Result<()> {
         selected_midi_port: config.midi.port_name.clone(),
         settings_status: String::new(),
         is_jack,
-        edited_params: std::collections::BTreeMap::new(),
-        params_dirty: false,
+        layers: vec![layer_a, layer_b],
+        active_layer: 0,
         on_midi_reconnect: Some(on_midi_reconnect),
     };
 
-    // Initialize edited params from selected preset
-    app.load_edited_params();
+    // Initialize edited params from selected presets
+    app.load_edited_params(0);
+    app.load_edited_params(1);
+    // Send initial preset to Layer A
+    app.send_initial_presets();
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()

@@ -86,7 +86,7 @@ impl Voice {
         self.filter_env.note_off();
     }
 
-    pub fn tick(&mut self) -> f32 {
+    pub fn tick(&mut self, pitch_mult: f32) -> f32 {
         if !self.active {
             return 0.0;
         }
@@ -101,7 +101,7 @@ impl Voice {
         let cutoff = self.filter_base_cutoff + self.filter_env_amount * filter_mod;
         self.filter.set_cutoff(cutoff);
 
-        let osc_out = self.osc.tick(self.freq);
+        let osc_out = self.osc.tick(self.freq * pitch_mult);
         let filtered = self.filter.tick(osc_out);
 
         filtered * amp * self.velocity

@@ -67,6 +67,22 @@ pub fn connect(
                             note_state[n as usize].store(0, Ordering::Relaxed);
                             Some(MidiEvent::NoteOff { note: n })
                         }
+                        MidiMessage::PitchBendChange(_, bend) => {
+                            // wmidi PitchBend is 0..16383, center 8192
+                            let raw = u16::from(bend) as f32;
+                            let normalized = (raw - 8192.0) / 8192.0; // -1.0 to +1.0
+                            Some(MidiEvent::PitchBend { value: normalized })
+                        }
+                        MidiMessage::ControlChange(_, cc, val) => {
+                            let cc_num = u8::from(cc);
+                            let v = u8::from(val);
+                            if cc_num == 1 {
+                                // Mod wheel (CC1): 0..127 → 0.0..1.0
+                                Some(MidiEvent::ModWheel { value: v as f32 / 127.0 })
+                            } else {
+                                None
+                            }
+                        }
                         _ => None,
                     };
                     if let Some(ev) = event {

@@ -10,7 +10,7 @@ use rtrb::Producer;
 use crate::config::Config;
 use crate::midi::{self, NoteState};
 use crate::preset::{self, Preset};
-use crate::synth::ControlEvent;
+use crate::synth::{ControlEvent, MAX_LAYERS};
 
 const NOTE_NAMES: &[&str] = &[
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -20,14 +20,31 @@ pub const BUFFER_SIZES: &[u32] = &[0, 16, 32, 48, 64, 128, 256, 512, 1024, 2048]
 
 const OSC_NAMES: &[&str] = &["Sine", "Saw", "Square", "Triangle", "FM"];
 const FILTER_NAMES: &[&str] = &["LowPass", "HighPass", "BandPass"];
+const LAYER_NAMES: &[&str] = &["A", "B"];
 
 fn buffer_label(size: u32) -> String {
     if size == 0 { "Default".to_string() } else { format!("{size}") }
 }
 
+/// Per-layer GUI state
+pub struct LayerState {
+    pub preset_idx: usize,
+    pub edited_params: std::collections::BTreeMap<String, f32>,
+    pub params_dirty: bool,
+    pub enabled: bool,
+    pub volume: f32,
+    pub min_note: u8,
+    pub max_note: u8,
+}
+
+fn note_name(note: u8) -> String {
+    let name = NOTE_NAMES[(note % 12) as usize];
+    let oct = (note as i8 / 12) - 1;
+    format!("{name}{oct}")
+}
+
 pub struct App {
     pub presets: Vec<Preset>,
-    pub preset_idx: usize,
     pub note_state: NoteState,
     pub ctrl_tx: Producer<ControlEvent>,
     pub sample_rate: u32,
@@ -48,9 +65,10 @@ pub struct App {
     pub settings_status: String,
     pub is_jack: bool,
 
-    /// Edited params — clone of current preset, modified by sliders
-    pub edited_params: std::collections::BTreeMap<String, f32>,
-    pub params_dirty: bool,
+    /// Layer states
+    pub layers: Vec<LayerState>,
+    /// Currently edited layer (0 = A, 1 = B)
+    pub active_layer: usize,
 
     pub on_midi_reconnect: Option<Box<dyn FnMut(usize) -> Result<(), String>>>,
 }
@@ -101,32 +119,35 @@ impl eframe::App for App {
             ui.add_space(4.0);
         });
 
-        // Right: preset list
+        // Right: preset list (for active layer)
         egui::SidePanel::right("preset_panel")
             .resizable(true)
             .default_width(160.0)
             .min_width(120.0)
             .show(ctx, |ui| {
                 ui.add_space(4.0);
-                ui.strong("Presets");
+                let layer_label = LAYER_NAMES.get(self.active_layer).unwrap_or(&"?");
+                ui.strong(format!("Presets (Layer {layer_label})"));
                 ui.add_space(4.0);
                 ui.separator();
 
+                let current_preset_idx = self.layers[self.active_layer].preset_idx;
                 let mut new_idx: Option<usize> = None;
                 egui::ScrollArea::vertical()
                     .auto_shrink(false)
                     .show(ui, |ui| {
                         for (i, preset) in self.presets.iter().enumerate() {
-                            let selected = i == self.preset_idx;
+                            let selected = i == current_preset_idx;
                             if ui.selectable_label(selected, &preset.name).clicked() && !selected {
                                 new_idx = Some(i);
                             }
                         }
                     });
                 if let Some(idx) = new_idx {
-                    self.preset_idx = idx;
-                    self.load_edited_params();
-                    self.send_edited_params();
+                    let layer = self.active_layer;
+                    self.layers[layer].preset_idx = idx;
+                    self.load_edited_params(layer);
+                    self.send_edited_params(layer);
                     self.save_config();
                 }
             });
@@ -136,37 +157,65 @@ impl eframe::App for App {
             self.draw_settings(ctx);
         }
 
-        // Central: parameters with sliders
+        // Central: layer tabs + parameters
         egui::CentralPanel::default().show(ctx, |ui| {
+            self.draw_layer_tabs(ui);
+            ui.separator();
+            ui.add_space(4.0);
             self.draw_params_editable(ui);
         });
     }
 }
 
 impl App {
-    /// Load edited_params from the current preset
-    pub fn load_edited_params(&mut self) {
-        if let Some(p) = self.presets.get(self.preset_idx) {
-            self.edited_params = p.params.clone();
+    /// Send initial presets to all layers at startup
+    pub fn send_initial_presets(&mut self) {
+        for i in 0..self.layers.len() {
+            self.send_edited_params(i);
         }
-        self.params_dirty = false;
     }
 
-    /// Send edited params to synth engine
-    fn send_edited_params(&mut self) {
+    /// Load edited_params from the current preset for a given layer
+    pub fn load_edited_params(&mut self, layer: usize) {
+        let preset_idx = self.layers[layer].preset_idx;
+        if let Some(p) = self.presets.get(preset_idx) {
+            self.layers[layer].edited_params = p.params.clone();
+        }
+        self.layers[layer].params_dirty = false;
+    }
+
+    /// Send edited params to synth engine for a given layer
+    fn send_edited_params(&mut self, layer: usize) {
+        let preset_idx = self.layers[layer].preset_idx;
         let preset = Preset {
-            name: self.presets.get(self.preset_idx)
+            name: self.presets.get(preset_idx)
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| "Custom".to_string()),
-            params: self.edited_params.clone(),
+            params: self.layers[layer].edited_params.clone(),
         };
-        let _ = self.ctrl_tx.push(ControlEvent::LoadPreset(preset));
+        let _ = self.ctrl_tx.push(ControlEvent::LoadPreset { layer, preset });
+    }
+
+    fn send_layer_enabled(&mut self, layer: usize) {
+        let enabled = self.layers[layer].enabled;
+        let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer, enabled });
+    }
+
+    fn send_layer_volume(&mut self, layer: usize) {
+        let volume = self.layers[layer].volume;
+        let _ = self.ctrl_tx.push(ControlEvent::SetLayerVolume { layer, volume });
+    }
+
+    fn send_layer_range(&mut self, layer: usize) {
+        let min_note = self.layers[layer].min_note;
+        let max_note = self.layers[layer].max_note;
+        let _ = self.ctrl_tx.push(ControlEvent::SetLayerRange { layer, min_note, max_note });
     }
 
     fn save_config(&mut self) {
         self.config.ui.last_preset = self
             .presets
-            .get(self.preset_idx)
+            .get(self.layers[0].preset_idx)
             .map(|p| p.name.clone());
         let _ = self.config.save();
     }
@@ -182,13 +231,88 @@ impl App {
         }
     }
 
+    fn draw_layer_tabs(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            for i in 0..MAX_LAYERS {
+                let label = *LAYER_NAMES.get(i).unwrap_or(&"?");
+                let is_active = i == self.active_layer;
+                let is_enabled = self.layers[i].enabled;
+
+                let text = if is_enabled {
+                    let range = format!("{}-{}", note_name(self.layers[i].min_note), note_name(self.layers[i].max_note));
+                    format!("Layer {label} [{range}]")
+                } else {
+                    format!("Layer {label} (off)")
+                };
+
+                if ui.selectable_label(is_active, &text).clicked() {
+                    self.active_layer = i;
+                }
+            }
+
+            ui.separator();
+
+            // Layer B enable toggle
+            if MAX_LAYERS > 1 {
+                let mut layer_b_enabled = self.layers[1].enabled;
+                if ui.checkbox(&mut layer_b_enabled, "Split").changed() {
+                    self.layers[1].enabled = layer_b_enabled;
+                    self.send_layer_enabled(1);
+                    if layer_b_enabled {
+                        // Default split: A = C-1..B3, B = C4..G9
+                        self.layers[0].min_note = 0;
+                        self.layers[0].max_note = 59; // B3
+                        self.layers[1].min_note = 60; // C4
+                        self.layers[1].max_note = 127;
+                        self.send_layer_range(0);
+                        self.send_layer_range(1);
+                    } else {
+                        // Disable split: A gets full range
+                        self.layers[0].min_note = 0;
+                        self.layers[0].max_note = 127;
+                        self.send_layer_range(0);
+                    }
+                }
+            }
+
+            // Volume for active layer
+            ui.separator();
+            let layer = self.active_layer;
+            let mut vol = self.layers[layer].volume;
+            ui.label("Vol:");
+            if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(true)).changed() {
+                self.layers[layer].volume = vol;
+                self.send_layer_volume(layer);
+            }
+        });
+
+        // Split point slider (when split enabled)
+        if self.layers[1].enabled {
+            ui.horizontal(|ui| {
+                ui.label("Split point:");
+                let mut split = self.layers[1].min_note;
+                let label = note_name(split);
+                if ui.add(egui::Slider::new(&mut split, 24..=96).text(label)).changed() {
+                    self.layers[0].max_note = split.saturating_sub(1);
+                    self.layers[1].min_note = split;
+                    self.send_layer_range(0);
+                    self.send_layer_range(1);
+                }
+            });
+        }
+    }
+
     fn draw_params_editable(&mut self, ui: &mut egui::Ui) {
+        let layer = self.active_layer;
+        let preset_idx = self.layers[layer].preset_idx;
         let preset_name = self
             .presets
-            .get(self.preset_idx)
+            .get(preset_idx)
             .map(|p| p.name.as_str())
             .unwrap_or("(none)");
-        ui.strong(preset_name);
+
+        let layer_label = LAYER_NAMES.get(layer).unwrap_or(&"?");
+        ui.strong(format!("{preset_name} (Layer {layer_label})"));
         ui.add_space(6.0);
 
         let mut changed = false;
@@ -196,29 +320,29 @@ impl App {
         // Oscillator
         ui.label("Oscillator");
         ui.horizontal(|ui| {
-            let mut osc = self.edited_params.get("osc_type").copied().unwrap_or(0.0) as usize;
+            let mut osc = self.layers[layer].edited_params.get("osc_type").copied().unwrap_or(0.0) as usize;
             ui.label("Type:");
-            egui::ComboBox::from_id_salt("osc_type")
+            egui::ComboBox::from_id_salt(format!("osc_type_{layer}"))
                 .selected_text(*OSC_NAMES.get(osc).unwrap_or(&"?"))
                 .show_ui(ui, |ui| {
                     for (i, name) in OSC_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut osc, i, *name).changed() {
-                            self.edited_params.insert("osc_type".into(), osc as f32);
+                            self.layers[layer].edited_params.insert("osc_type".into(), osc as f32);
                             changed = true;
                         }
                     }
                 });
 
-            let mut detune = self.edited_params.get("osc_detune").copied().unwrap_or(0.0);
+            let mut detune = self.layers[layer].edited_params.get("osc_detune").copied().unwrap_or(0.0);
             ui.label("Detune:");
             if ui.add(egui::Slider::new(&mut detune, 0.0..=0.05).step_by(0.001)).changed() {
-                self.edited_params.insert("osc_detune".into(), detune);
+                self.layers[layer].edited_params.insert("osc_detune".into(), detune);
                 changed = true;
             }
         });
 
         // FM params (only shown when FM osc selected)
-        let osc_type = self.edited_params.get("osc_type").copied().unwrap_or(0.0) as u32;
+        let osc_type = self.layers[layer].edited_params.get("osc_type").copied().unwrap_or(0.0) as u32;
         if osc_type == 4 {
             changed |= self.param_slider(ui, "fm_ratio", "FM Ratio", 0.5, 8.0, false);
             changed |= self.param_slider(ui, "fm_index", "FM Index", 0.1, 10.0, false);
@@ -229,14 +353,14 @@ impl App {
         // Filter
         ui.label("Filter");
         ui.horizontal(|ui| {
-            let mut ft = self.edited_params.get("filter_type").copied().unwrap_or(0.0) as usize;
+            let mut ft = self.layers[layer].edited_params.get("filter_type").copied().unwrap_or(0.0) as usize;
             ui.label("Type:");
-            egui::ComboBox::from_id_salt("filter_type")
+            egui::ComboBox::from_id_salt(format!("filter_type_{layer}"))
                 .selected_text(*FILTER_NAMES.get(ft).unwrap_or(&"?"))
                 .show_ui(ui, |ui| {
                     for (i, name) in FILTER_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut ft, i, *name).changed() {
-                            self.edited_params.insert("filter_type".into(), ft as f32);
+                            self.layers[layer].edited_params.insert("filter_type".into(), ft as f32);
                             changed = true;
                         }
                     }
@@ -267,27 +391,28 @@ impl App {
 
         ui.add_space(6.0);
 
-        // Volume
+        // Volume (per-preset master_volume stored in params)
         changed |= self.param_slider(ui, "master_volume", "Volume", 0.0, 1.0, false);
 
         if changed {
-            self.params_dirty = true;
-            self.send_edited_params();
+            self.layers[layer].params_dirty = true;
+            self.send_edited_params(layer);
         }
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if self.params_dirty {
+            if self.layers[layer].params_dirty {
                 ui.colored_label(egui::Color32::YELLOW, "Modified");
                 ui.separator();
             }
             if ui.button("Save as new preset...").clicked() {
                 self.save_as_user_preset();
             }
-            if self.params_dirty {
+            if self.layers[layer].params_dirty {
                 if ui.button("Reset").clicked() {
-                    self.load_edited_params();
-                    self.send_edited_params();
+                    let l = self.active_layer;
+                    self.load_edited_params(l);
+                    self.send_edited_params(l);
                 }
             }
         });
@@ -295,34 +420,36 @@ impl App {
 
     /// Draw a parameter slider, returns true if changed
     fn param_slider(&mut self, ui: &mut egui::Ui, key: &str, label: &str, min: f32, max: f32, logarithmic: bool) -> bool {
-        let mut val = self.edited_params.get(key).copied().unwrap_or(min);
+        let layer = self.active_layer;
+        let mut val = self.layers[layer].edited_params.get(key).copied().unwrap_or(min);
         let slider = egui::Slider::new(&mut val, min..=max)
             .text(label)
             .logarithmic(logarithmic);
         let resp = ui.add(slider);
         if resp.changed() {
-            self.edited_params.insert(key.into(), val);
+            self.layers[layer].edited_params.insert(key.into(), val);
             return true;
         }
         false
     }
 
     fn save_as_user_preset(&mut self) {
-        let base_name = self.presets.get(self.preset_idx)
+        let layer = self.active_layer;
+        let base_name = self.presets.get(self.layers[layer].preset_idx)
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "Custom".to_string());
 
         let new_name = format!("{base_name} (user)");
         let new_preset = Preset {
             name: new_name.clone(),
-            params: self.edited_params.clone(),
+            params: self.layers[layer].edited_params.clone(),
         };
 
         if let Ok(path) = preset::save_preset(&new_preset) {
             self.settings_status = format!("Saved: {}", path.display());
             self.presets.push(new_preset);
-            self.preset_idx = self.presets.len() - 1;
-            self.params_dirty = false;
+            self.layers[layer].preset_idx = self.presets.len() - 1;
+            self.layers[layer].params_dirty = false;
             self.save_config();
         }
     }
@@ -545,7 +672,6 @@ impl App {
                 wx += key_w;
             }
         }
-
     }
 }
 
