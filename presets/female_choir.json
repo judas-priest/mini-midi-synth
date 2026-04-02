@@ -1,0 +1,29 @@
+{
+  "name": "Female Choir",
+  "params": {
+    "osc_type": 1.0,
+    "osc_detune": 0.0,
+    "osc_count": 3.0,
+    "osc1_level": 0.45,
+    "osc2_type": 1.0,
+    "osc2_detune": 0.012,
+    "osc2_level": 0.35,
+    "osc3_type": 1.0,
+    "osc3_detune": -0.012,
+    "osc3_level": 0.35,
+    "filter_type": 3.0,
+    "formant_voice": 3.0,
+    "formant_vowel": 0.0,
+    "noise_level": 0.04,
+    "amp_attack": 0.6,
+    "amp_decay": 0.5,
+    "amp_sustain": 0.8,
+    "amp_release": 1.8,
+    "filter_attack": 0.8,
+    "filter_decay": 1.0,
+    "filter_sustain": 0.35,
+    "filter_release": 1.5,
+    "chorus_mix": 0.6,
+    "master_volume": 0.45
+  }
+}

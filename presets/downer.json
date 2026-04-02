@@ -1,0 +1,26 @@
+{
+  "name": "Downer",
+  "params": {
+    "osc_type": 4.0,
+    "osc_detune": 0.03,
+    "fm_ratio": 2.0,
+    "fm_index": 6.0,
+    "fm_env_amount": 0.85,
+    "noise_level": 0.1,
+    "filter_cutoff": 200.0,
+    "filter_resonance": 0.45,
+    "filter_type": 0.0,
+    "filter_key_track": 0.3,
+    "filter_env_amount": 10000.0,
+    "amp_attack": 0.001,
+    "amp_decay": 2.5,
+    "amp_sustain": 0.0,
+    "amp_release": 1.5,
+    "filter_attack": 0.001,
+    "filter_decay": 2.0,
+    "filter_sustain": 0.0,
+    "filter_release": 1.0,
+    "chorus_mix": 0.4,
+    "master_volume": 0.7
+  }
+}

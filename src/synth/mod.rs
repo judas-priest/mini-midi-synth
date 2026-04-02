@@ -3,6 +3,7 @@
 pub mod chorus;
 pub mod envelope;
 pub mod filter;
+pub mod formant;
 pub mod oscillator;
 pub mod voice;
 
@@ -75,11 +76,27 @@ impl Layer {
             fm_ratio: p("fm_ratio", 3.5),
             fm_index: p("fm_index", 5.0),
             fm_env_amount: p("fm_env_amount", 0.0),
+            // Multi-osc (defaults = single osc, backward compat)
+            osc_count: p("osc_count", 1.0),
+            osc1_level: p("osc1_level", 1.0),
+            osc2_type: p("osc2_type", 1.0),
+            osc2_detune: p("osc2_detune", 0.0),
+            osc2_level: p("osc2_level", 0.0),
+            osc3_type: p("osc3_type", 1.0),
+            osc3_detune: p("osc3_detune", 0.0),
+            osc3_level: p("osc3_level", 0.0),
+            // Filter 1
             filter_cutoff: p("filter_cutoff", 8000.0),
             filter_resonance: p("filter_resonance", 0.0),
             filter_type: p("filter_type", 0.0),
             filter_env_amount: p("filter_env_amount", 0.0),
             filter_key_track: p("filter_key_track", 0.0),
+            // Filter routing + filter 2 (defaults = single filter, backward compat)
+            filter_routing: p("filter_routing", 0.0),
+            filter2_type: p("filter2_type", 0.0),
+            filter2_cutoff: p("filter2_cutoff", 8000.0),
+            filter2_resonance: p("filter2_resonance", 0.0),
+            // Other
             noise_level: p("noise_level", 0.0),
             amp_attack: p("amp_attack", 0.01),
             amp_decay: p("amp_decay", 0.1),
@@ -102,6 +119,8 @@ impl Layer {
                 p("drawbar_8", 0.0),
                 p("drawbar_9", 0.0),
             ],
+            formant_voice: p("formant_voice", 0.0),
+            formant_vowel: p("formant_vowel", 0.0),
         };
     }
 
@@ -134,11 +153,23 @@ impl Layer {
             fm_ratio: self.params.fm_ratio,
             fm_index: self.params.fm_index,
             fm_env_amount: self.params.fm_env_amount,
+            osc_count: self.params.osc_count,
+            osc1_level: self.params.osc1_level,
+            osc2_type: self.params.osc2_type,
+            osc2_detune: self.params.osc2_detune,
+            osc2_level: self.params.osc2_level,
+            osc3_type: self.params.osc3_type,
+            osc3_detune: self.params.osc3_detune,
+            osc3_level: self.params.osc3_level,
             filter_cutoff: self.params.filter_cutoff,
             filter_resonance: self.params.filter_resonance,
             filter_type: self.params.filter_type,
             filter_env_amount: self.params.filter_env_amount,
             filter_key_track: self.params.filter_key_track,
+            filter_routing: self.params.filter_routing,
+            filter2_type: self.params.filter2_type,
+            filter2_cutoff: self.params.filter2_cutoff,
+            filter2_resonance: self.params.filter2_resonance,
             noise_level: self.params.noise_level,
             amp_attack: self.params.amp_attack,
             amp_decay: self.params.amp_decay,
@@ -151,6 +182,8 @@ impl Layer {
             ks_brightness: self.params.ks_brightness,
             ks_feedback: self.params.ks_feedback,
             organ_drawbars: self.params.organ_drawbars,
+            formant_voice: self.params.formant_voice,
+            formant_vowel: self.params.formant_vowel,
         };
 
         self.voices[idx].note_on(note, velocity, age, &voice_params);
@@ -189,11 +222,27 @@ struct PresetParams {
     fm_ratio: f32,
     fm_index: f32,
     fm_env_amount: f32,
+    // Multi-osc
+    osc_count: f32,
+    osc1_level: f32,
+    osc2_type: f32,
+    osc2_detune: f32,
+    osc2_level: f32,
+    osc3_type: f32,
+    osc3_detune: f32,
+    osc3_level: f32,
+    // Filter 1
     filter_cutoff: f32,
     filter_resonance: f32,
     filter_type: f32,
     filter_env_amount: f32,
     filter_key_track: f32,
+    // Filter routing + filter 2
+    filter_routing: f32,
+    filter2_type: f32,
+    filter2_cutoff: f32,
+    filter2_resonance: f32,
+    // Other
     noise_level: f32,
     amp_attack: f32,
     amp_decay: f32,
@@ -206,6 +255,8 @@ struct PresetParams {
     ks_brightness: f32,
     ks_feedback: f32,
     organ_drawbars: [f32; 9],
+    formant_voice: f32,
+    formant_vowel: f32,
 }
 
 impl Default for PresetParams {
@@ -216,11 +267,23 @@ impl Default for PresetParams {
             fm_ratio: 3.5,
             fm_index: 5.0,
             fm_env_amount: 0.0,
+            osc_count: 1.0,
+            osc1_level: 1.0,
+            osc2_type: 1.0,
+            osc2_detune: 0.0,
+            osc2_level: 0.0,
+            osc3_type: 1.0,
+            osc3_detune: 0.0,
+            osc3_level: 0.0,
             filter_cutoff: 8000.0,
             filter_resonance: 0.0,
             filter_type: 0.0,
             filter_env_amount: 0.0,
             filter_key_track: 0.0,
+            filter_routing: 0.0,
+            filter2_type: 0.0,
+            filter2_cutoff: 8000.0,
+            filter2_resonance: 0.0,
             noise_level: 0.0,
             amp_attack: 0.01,
             amp_decay: 0.1,
@@ -233,6 +296,8 @@ impl Default for PresetParams {
             ks_brightness: 0.5,
             ks_feedback: 0.996,
             organ_drawbars: [0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            formant_voice: 0.0,
+            formant_vowel: 0.0,
         }
     }
 }

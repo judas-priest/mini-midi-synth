@@ -3,6 +3,14 @@
   "params": {
     "osc_type": 2.0,
     "osc_detune": 0.0,
+    "osc_count": 3.0,
+    "osc1_level": 0.45,
+    "osc2_type": 0.0,
+    "osc2_detune": 0.003,
+    "osc2_level": 0.3,
+    "osc3_type": 3.0,
+    "osc3_detune": -0.002,
+    "osc3_level": 0.25,
     "filter_cutoff": 4500.0,
     "filter_resonance": 0.04,
     "filter_type": 0.0,
@@ -15,6 +23,6 @@
     "filter_sustain": 0.0,
     "filter_release": 0.01,
     "filter_env_amount": 3500.0,
-    "master_volume": 0.60
+    "master_volume": 0.52
   }
 }

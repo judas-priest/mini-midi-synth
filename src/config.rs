@@ -28,7 +28,11 @@ pub struct MidiSettings {
 pub struct UiSettings {
     pub window_width: f32,
     pub window_height: f32,
+    #[serde(default)]
+    pub maximized: bool,
     pub last_preset: Option<String>,
+    #[serde(default)]
+    pub collapsed_categories: Vec<String>,
 }
 
 impl Default for Config {
@@ -43,7 +47,9 @@ impl Default for Config {
             ui: UiSettings {
                 window_width: 720.0,
                 window_height: 400.0,
+                maximized: false,
                 last_preset: None,
+                collapsed_categories: Vec::new(),
             },
         }
     }

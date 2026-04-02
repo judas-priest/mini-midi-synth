@@ -134,6 +134,7 @@ fn main() -> Result<()> {
     };
 
     let mut app = gui::App {
+        frame_count: 0,
         presets,
         note_state,
         ctrl_tx,
@@ -154,6 +155,7 @@ fn main() -> Result<()> {
         layers: vec![layer_a, layer_b],
         active_layer: 0,
         on_midi_reconnect: Some(on_midi_reconnect),
+        collapsed_categories: config.ui.collapsed_categories.iter().cloned().collect(),
     };
 
     // Initialize edited params from selected presets
@@ -162,10 +164,13 @@ fn main() -> Result<()> {
     // Send initial preset to Layer A
     app.send_initial_presets();
 
+    let viewport = eframe::egui::ViewportBuilder::default()
+        .with_app_id("mini_midi_synth")
+        .with_inner_size([config.ui.window_width, config.ui.window_height])
+        .with_min_inner_size([500.0, 300.0]);
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([config.ui.window_width, config.ui.window_height])
-            .with_min_inner_size([500.0, 300.0]),
+        viewport,
+        persist_window: true,
         ..Default::default()
     };
 

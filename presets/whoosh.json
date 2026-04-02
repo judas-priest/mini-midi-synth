@@ -1,0 +1,22 @@
+{
+  "name": "Whoosh",
+  "params": {
+    "osc_type": 5.0,
+    "osc_detune": 0.0,
+    "filter_cutoff": 100.0,
+    "filter_resonance": 0.55,
+    "filter_type": 2.0,
+    "filter_key_track": 0.5,
+    "filter_env_amount": 12000.0,
+    "amp_attack": 0.01,
+    "amp_decay": 2.0,
+    "amp_sustain": 0.0,
+    "amp_release": 0.8,
+    "filter_attack": 0.01,
+    "filter_decay": 1.8,
+    "filter_sustain": 0.0,
+    "filter_release": 0.6,
+    "chorus_mix": 0.3,
+    "master_volume": 0.7
+  }
+}

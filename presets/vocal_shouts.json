@@ -1,0 +1,29 @@
+{
+  "name": "Vocal Shouts",
+  "params": {
+    "osc_type": 2.0,
+    "osc_detune": 0.0,
+    "osc_count": 3.0,
+    "osc1_level": 0.45,
+    "osc2_type": 2.0,
+    "osc2_detune": 0.01,
+    "osc2_level": 0.35,
+    "osc3_type": 2.0,
+    "osc3_detune": -0.01,
+    "osc3_level": 0.35,
+    "filter_type": 3.0,
+    "formant_voice": 1.0,
+    "formant_vowel": 0.0,
+    "noise_level": 0.1,
+    "amp_attack": 0.005,
+    "amp_decay": 0.2,
+    "amp_sustain": 0.2,
+    "amp_release": 0.15,
+    "filter_attack": 0.005,
+    "filter_decay": 0.15,
+    "filter_sustain": 0.1,
+    "filter_release": 0.1,
+    "chorus_mix": 0.15,
+    "master_volume": 0.6
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "Taiko Drum",
+  "params": {
+    "osc_type": 4.0,
+    "osc_detune": 0.0,
+    "fm_ratio": 1.0,
+    "fm_index": 6.0,
+    "fm_env_amount": 0.92,
+    "noise_level": 0.18,
+    "filter_cutoff": 120.0,
+    "filter_resonance": 0.15,
+    "filter_type": 0.0,
+    "filter_key_track": 0.3,
+    "filter_env_amount": 3500.0,
+    "amp_attack": 0.001,
+    "amp_decay": 1.8,
+    "amp_sustain": 0.0,
+    "amp_release": 1.2,
+    "filter_attack": 0.001,
+    "filter_decay": 0.06,
+    "filter_sustain": 0.0,
+    "filter_release": 0.4,
+    "chorus_mix": 0.0,
+    "master_volume": 0.92
+  }
+}

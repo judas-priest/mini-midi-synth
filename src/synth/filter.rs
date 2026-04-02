@@ -7,6 +7,7 @@ pub enum FilterType {
     LowPass,
     HighPass,
     BandPass,
+    Formant,
 }
 
 impl FilterType {
@@ -14,7 +15,8 @@ impl FilterType {
         match v as u32 {
             0 => Self::LowPass,
             1 => Self::HighPass,
-            _ => Self::BandPass,
+            2 => Self::BandPass,
+            _ => Self::Formant,
         }
     }
 }
@@ -108,7 +110,7 @@ impl Filter {
         match self.filter_type {
             FilterType::LowPass => v2,
             FilterType::HighPass => input - self.k * v1 - v2,
-            FilterType::BandPass => v1,
+            FilterType::BandPass | FilterType::Formant => v1,
         }
     }
 }

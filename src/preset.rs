@@ -18,8 +18,9 @@ pub struct Preset {
 const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("General", "init", include_str!("../presets/init.json")),
     // Piano
-    ("Piano", "bright_grand", include_str!("../presets/bright_grand.json")),
+    ("Piano", "grand_piano", include_str!("../presets/grand_piano.json")),
     ("Piano", "warm_upright", include_str!("../presets/warm_upright.json")),
+    ("Piano", "bright_grand", include_str!("../presets/bright_grand.json")),
     ("Piano", "honky_tonk", include_str!("../presets/honky_tonk.json")),
     ("Piano", "electric_piano", include_str!("../presets/electric_piano.json")),
     ("Piano", "fm_piano", include_str!("../presets/fm_piano.json")),
@@ -70,6 +71,22 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("FX", "riser", include_str!("../presets/riser.json")),
     ("FX", "wobble", include_str!("../presets/wobble.json")),
     ("FX", "wind", include_str!("../presets/wind.json")),
+    // Drums / Percussion
+    ("Drums", "taiko", include_str!("../presets/taiko.json")),
+    ("Drums", "timpani", include_str!("../presets/timpani.json")),
+    ("Drums", "bass_drum", include_str!("../presets/bass_drum.json")),
+    ("Drums", "gong_crash", include_str!("../presets/gong_crash.json")),
+    // Cinematic
+    ("Cinematic", "braam", include_str!("../presets/braam.json")),
+    ("Cinematic", "whoosh", include_str!("../presets/whoosh.json")),
+    ("Cinematic", "hit_impact", include_str!("../presets/hit_impact.json")),
+    ("Cinematic", "boom", include_str!("../presets/boom.json")),
+    ("Cinematic", "downer", include_str!("../presets/downer.json")),
+    ("Cinematic", "stinger", include_str!("../presets/stinger.json")),
+    // Vocal / Choir
+    ("Vocal", "male_choir", include_str!("../presets/male_choir.json")),
+    ("Vocal", "female_choir", include_str!("../presets/female_choir.json")),
+    ("Vocal", "vocal_shouts", include_str!("../presets/vocal_shouts.json")),
 ];
 
 /// Return user preset directory (~/.config/mini_midi_synth/presets/).

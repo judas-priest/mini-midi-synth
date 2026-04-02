@@ -1,5 +1,6 @@
 /// GUI interface using egui/eframe.
 
+use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -21,8 +22,13 @@ pub const BUFFER_SIZES: &[u32] = &[0, 16, 32, 48, 64, 128, 256, 512, 1024, 2048]
 const OSC_NAMES: &[&str] = &[
     "Sine", "Saw", "Square", "Triangle", "FM", "Noise",
     "Karplus-Strong", "Organ", "FM Piano", "Piano (Physical)", "Piano (Banded)",
+    "Piano (Additive)",
 ];
-const FILTER_NAMES: &[&str] = &["LowPass", "HighPass", "BandPass"];
+const SIMPLE_OSC_NAMES: &[&str] = &["Sine", "Saw", "Square", "Triangle", "FM"];
+const FILTER_NAMES: &[&str] = &["LowPass", "HighPass", "BandPass", "Formant"];
+const FILTER_ROUTING_NAMES: &[&str] = &["Single", "Serial", "Parallel"];
+const FORMANT_VOICE_NAMES: &[&str] = &["Bass", "Tenor", "Alto", "Soprano"];
+const FORMANT_VOWEL_NAMES: &[&str] = &["A (ah)", "E (eh)", "I (ee)", "O (oh)", "U (oo)"];
 const LAYER_NAMES: &[&str] = &["A", "B"];
 
 fn buffer_label(size: u32) -> String {
@@ -47,6 +53,7 @@ fn note_name(note: u8) -> String {
 }
 
 pub struct App {
+    pub frame_count: u64,
     pub presets: Vec<Preset>,
     pub note_state: NoteState,
     pub ctrl_tx: Producer<ControlEvent>,
@@ -74,9 +81,16 @@ pub struct App {
     pub active_layer: usize,
 
     pub on_midi_reconnect: Option<Box<dyn FnMut(usize) -> Result<(), String>>>,
+
+    /// Collapsed preset categories
+    pub collapsed_categories: HashSet<String>,
 }
 
 impl eframe::App for App {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        let _ = self.config.save();
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let has_active_notes = (0..128u8)
             .any(|i| self.note_state[i as usize].load(Ordering::Relaxed) > 0);
@@ -136,27 +150,52 @@ impl eframe::App for App {
 
                 let current_preset_idx = self.layers[self.active_layer].preset_idx;
                 let mut new_idx: Option<usize> = None;
+                let mut toggled_category: Option<String> = None;
+
+                // Collect category info to avoid borrow conflicts
+                let categories: Vec<(String, usize)> = {
+                    let mut cats = Vec::new();
+                    let mut last = String::new();
+                    for (i, p) in self.presets.iter().enumerate() {
+                        if p.category != last {
+                            cats.push((p.category.clone(), i));
+                            last = p.category.clone();
+                        }
+                    }
+                    cats
+                };
+
                 egui::ScrollArea::vertical()
                     .auto_shrink(false)
                     .show(ui, |ui| {
-                        let mut last_category = String::new();
+                        let mut cat_idx = 0;
                         for (i, preset) in self.presets.iter().enumerate() {
-                            if preset.category != last_category {
-                                if !last_category.is_empty() {
-                                    ui.add_space(4.0);
+                            if cat_idx < categories.len() && categories[cat_idx].1 == i {
+                                let cat = &categories[cat_idx].0;
+                                let is_collapsed = self.collapsed_categories.contains(cat);
+                                let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                                if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
+                                    toggled_category = Some(cat.clone());
                                 }
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(140, 140, 140),
-                                    &preset.category,
-                                );
-                                last_category = preset.category.clone();
+                                cat_idx += 1;
                             }
-                            let selected = i == current_preset_idx;
-                            if ui.selectable_label(selected, &preset.name).clicked() && !selected {
-                                new_idx = Some(i);
+                            if !self.collapsed_categories.contains(&preset.category) {
+                                let selected = i == current_preset_idx;
+                                if ui.selectable_label(selected, format!("  {}", preset.name)).clicked() && !selected {
+                                    new_idx = Some(i);
+                                }
                             }
                         }
                     });
+
+                if let Some(cat) = toggled_category {
+                    if self.collapsed_categories.contains(&cat) {
+                        self.collapsed_categories.remove(&cat);
+                    } else {
+                        self.collapsed_categories.insert(cat);
+                    }
+                    self.save_collapsed_categories();
+                }
                 if let Some(idx) = new_idx {
                     let layer = self.active_layer;
                     self.layers[layer].preset_idx = idx;
@@ -233,6 +272,74 @@ impl App {
             .get(self.layers[0].preset_idx)
             .map(|p| p.name.clone());
         let _ = self.config.save();
+    }
+
+    fn save_collapsed_categories(&mut self) {
+        self.config.ui.collapsed_categories = self.collapsed_categories.iter().cloned().collect();
+        let _ = self.config.save();
+    }
+
+    fn save_window_size(&mut self, ctx: &egui::Context) {
+        self.frame_count += 1;
+
+        let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+
+        // Debug: log every ~5 seconds to file + stdout
+        if self.frame_count % 50 == 1 {
+            let inner = ctx.input(|i| i.viewport().inner_rect);
+            let outer = ctx.input(|i| i.viewport().outer_rect);
+            let screen = ctx.screen_rect();
+            let msg = format!(
+                "[win] inner={:?} outer={:?} screen={:.0}x{:.0} max={} fs={}\n",
+                inner.map(|r| (r.width(), r.height())),
+                outer.map(|r| (r.width(), r.height())),
+                screen.width(), screen.height(),
+                maximized, fullscreen,
+            );
+            print!("{msg}");
+            // Also write to file in case terminal swallows output
+            let _ = std::fs::write("/tmp/mini_midi_synth_debug.txt", &msg);
+        }
+
+        // Save maximized/fullscreen state
+        if maximized != self.config.ui.maximized {
+            self.config.ui.maximized = maximized;
+            let _ = self.config.save();
+        }
+
+        if maximized || fullscreen {
+            return;
+        }
+
+        // Try all available rect sources
+        let (w, h) = ctx.input(|i| {
+            let vp = i.viewport();
+            if let Some(rect) = vp.inner_rect {
+                (rect.width(), rect.height())
+            } else if let Some(rect) = vp.outer_rect {
+                (rect.width(), rect.height())
+            } else {
+                (0.0, 0.0)
+            }
+        });
+
+        let (w, h) = if w < 100.0 || h < 100.0 {
+            let rect = ctx.screen_rect();
+            (rect.width(), rect.height())
+        } else {
+            (w, h)
+        };
+
+        if w > 100.0 && h > 100.0
+            && ((w - self.config.ui.window_width).abs() > 5.0
+                || (h - self.config.ui.window_height).abs() > 5.0)
+        {
+            eprintln!("[win] SAVING: {:.0}x{:.0} -> {:.0}x{:.0}", self.config.ui.window_width, self.config.ui.window_height, w, h);
+            self.config.ui.window_width = w;
+            self.config.ui.window_height = h;
+            let _ = self.config.save();
+        }
     }
 
     fn refresh_midi_ports(&mut self) {
@@ -332,8 +439,8 @@ impl App {
 
         let mut changed = false;
 
-        // Oscillator
-        ui.label("Oscillator");
+        // Oscillator 1
+        ui.label("Oscillator 1");
         ui.horizontal(|ui| {
             let mut osc = self.layers[layer].edited_params.get("osc_type").copied().unwrap_or(0.0) as usize;
             ui.label("Type:");
@@ -356,8 +463,10 @@ impl App {
             }
         });
 
-        // Noise level (for all osc types except pure Noise)
         let osc_type = self.layers[layer].edited_params.get("osc_type").copied().unwrap_or(0.0) as u32;
+        let osc_is_simple = osc_type <= 4;
+
+        // Noise level (for all osc types except pure Noise)
         if osc_type != 5 {
             changed |= self.param_slider(ui, "noise_level", "Noise Mix", 0.0, 1.0, false);
         }
@@ -392,10 +501,81 @@ impl App {
             }
         }
 
+        // Multi-osc controls (only for simple osc types)
+        if osc_is_simple {
+            ui.add_space(4.0);
+            let mut osc_count = self.layers[layer].edited_params.get("osc_count").copied().unwrap_or(1.0) as u32;
+            ui.horizontal(|ui| {
+                ui.label("Osc Count:");
+                if ui.add(egui::Slider::new(&mut osc_count, 1..=3)).changed() {
+                    self.layers[layer].edited_params.insert("osc_count".into(), osc_count as f32);
+                    changed = true;
+                }
+            });
+
+            if osc_count >= 1 {
+                changed |= self.param_slider(ui, "osc1_level", "Osc 1 Level", 0.0, 1.0, false);
+            }
+
+            if osc_count >= 2 {
+                ui.add_space(4.0);
+                ui.label("Oscillator 2");
+                ui.horizontal(|ui| {
+                    let mut osc2 = self.layers[layer].edited_params.get("osc2_type").copied().unwrap_or(1.0) as usize;
+                    ui.label("Type:");
+                    egui::ComboBox::from_id_salt(format!("osc2_type_{layer}"))
+                        .selected_text(*SIMPLE_OSC_NAMES.get(osc2).unwrap_or(&"?"))
+                        .show_ui(ui, |ui| {
+                            for (i, name) in SIMPLE_OSC_NAMES.iter().enumerate() {
+                                if ui.selectable_value(&mut osc2, i, *name).changed() {
+                                    self.layers[layer].edited_params.insert("osc2_type".into(), osc2 as f32);
+                                    changed = true;
+                                }
+                            }
+                        });
+
+                    let mut detune2 = self.layers[layer].edited_params.get("osc2_detune").copied().unwrap_or(0.0);
+                    ui.label("Detune:");
+                    if ui.add(egui::Slider::new(&mut detune2, -0.05..=0.05).step_by(0.001)).changed() {
+                        self.layers[layer].edited_params.insert("osc2_detune".into(), detune2);
+                        changed = true;
+                    }
+                });
+                changed |= self.param_slider(ui, "osc2_level", "Osc 2 Level", 0.0, 1.0, false);
+            }
+
+            if osc_count >= 3 {
+                ui.add_space(4.0);
+                ui.label("Oscillator 3");
+                ui.horizontal(|ui| {
+                    let mut osc3 = self.layers[layer].edited_params.get("osc3_type").copied().unwrap_or(1.0) as usize;
+                    ui.label("Type:");
+                    egui::ComboBox::from_id_salt(format!("osc3_type_{layer}"))
+                        .selected_text(*SIMPLE_OSC_NAMES.get(osc3).unwrap_or(&"?"))
+                        .show_ui(ui, |ui| {
+                            for (i, name) in SIMPLE_OSC_NAMES.iter().enumerate() {
+                                if ui.selectable_value(&mut osc3, i, *name).changed() {
+                                    self.layers[layer].edited_params.insert("osc3_type".into(), osc3 as f32);
+                                    changed = true;
+                                }
+                            }
+                        });
+
+                    let mut detune3 = self.layers[layer].edited_params.get("osc3_detune").copied().unwrap_or(0.0);
+                    ui.label("Detune:");
+                    if ui.add(egui::Slider::new(&mut detune3, -0.05..=0.05).step_by(0.001)).changed() {
+                        self.layers[layer].edited_params.insert("osc3_detune".into(), detune3);
+                        changed = true;
+                    }
+                });
+                changed |= self.param_slider(ui, "osc3_level", "Osc 3 Level", 0.0, 1.0, false);
+            }
+        }
+
         ui.add_space(6.0);
 
-        // Filter
-        ui.label("Filter");
+        // Filter 1
+        ui.label("Filter 1");
         ui.horizontal(|ui| {
             let mut ft = self.layers[layer].edited_params.get("filter_type").copied().unwrap_or(0.0) as usize;
             ui.label("Type:");
@@ -411,10 +591,87 @@ impl App {
                 });
         });
 
-        changed |= self.param_slider(ui, "filter_cutoff", "Cutoff", 20.0, 20000.0, true);
-        changed |= self.param_slider(ui, "filter_resonance", "Resonance", 0.0, 1.0, false);
-        changed |= self.param_slider(ui, "filter_env_amount", "Env Amount", 0.0, 15000.0, false);
-        changed |= self.param_slider(ui, "filter_key_track", "Key Track", 0.0, 1.0, false);
+        let filter_type = self.layers[layer].edited_params.get("filter_type").copied().unwrap_or(0.0) as u32;
+        let is_formant = filter_type == 3;
+
+        if is_formant {
+            // Formant filter controls
+            ui.horizontal(|ui| {
+                let mut fv = self.layers[layer].edited_params.get("formant_voice").copied().unwrap_or(0.0) as usize;
+                ui.label("Voice:");
+                egui::ComboBox::from_id_salt(format!("formant_voice_{layer}"))
+                    .selected_text(*FORMANT_VOICE_NAMES.get(fv).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in FORMANT_VOICE_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut fv, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("formant_voice".into(), fv as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+
+                let mut vw = self.layers[layer].edited_params.get("formant_vowel").copied().unwrap_or(0.0) as usize;
+                ui.label("Vowel:");
+                egui::ComboBox::from_id_salt(format!("formant_vowel_{layer}"))
+                    .selected_text(*FORMANT_VOWEL_NAMES.get(vw).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in FORMANT_VOWEL_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut vw, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("formant_vowel".into(), vw as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+        } else {
+            changed |= self.param_slider(ui, "filter_cutoff", "Cutoff", 20.0, 20000.0, true);
+            changed |= self.param_slider(ui, "filter_resonance", "Resonance", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "filter_env_amount", "Env Amount", 0.0, 15000.0, false);
+            changed |= self.param_slider(ui, "filter_key_track", "Key Track", 0.0, 1.0, false);
+        }
+
+        // Filter routing (not available with formant filter)
+        if !is_formant {
+            ui.add_space(4.0);
+            let mut routing = self.layers[layer].edited_params.get("filter_routing").copied().unwrap_or(0.0) as usize;
+            ui.horizontal(|ui| {
+                ui.label("Routing:");
+                egui::ComboBox::from_id_salt(format!("filter_routing_{layer}"))
+                    .selected_text(*FILTER_ROUTING_NAMES.get(routing).unwrap_or(&"Single"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in FILTER_ROUTING_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut routing, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("filter_routing".into(), routing as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+
+            // Filter 2 controls (only when routing != Single)
+            if routing >= 1 {
+                ui.add_space(4.0);
+                ui.label("Filter 2");
+                ui.horizontal(|ui| {
+                    let mut ft2 = self.layers[layer].edited_params.get("filter2_type").copied().unwrap_or(0.0) as usize;
+                    ui.label("Type:");
+                    // Filter 2 only supports LowPass/HighPass/BandPass (no Formant)
+                    let f2_names = &FILTER_NAMES[..3];
+                    egui::ComboBox::from_id_salt(format!("filter2_type_{layer}"))
+                        .selected_text(*f2_names.get(ft2).unwrap_or(&"LowPass"))
+                        .show_ui(ui, |ui| {
+                            for (i, name) in f2_names.iter().enumerate() {
+                                if ui.selectable_value(&mut ft2, i, *name).changed() {
+                                    self.layers[layer].edited_params.insert("filter2_type".into(), ft2 as f32);
+                                    changed = true;
+                                }
+                            }
+                        });
+                });
+                changed |= self.param_slider(ui, "filter2_cutoff", "Cutoff 2", 20.0, 20000.0, true);
+                changed |= self.param_slider(ui, "filter2_resonance", "Resonance 2", 0.0, 1.0, false);
+            }
+        }
 
         ui.add_space(6.0);
 
