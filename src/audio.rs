@@ -113,9 +113,15 @@ impl AudioBackend {
                 }
 
                 for frame in data.chunks_mut(channels) {
-                    let sample = synth.tick();
-                    for s in frame.iter_mut() {
-                        *s = sample;
+                    let (left, right) = synth.tick();
+                    if channels >= 2 {
+                        frame[0] = left;
+                        frame[1] = right;
+                        for s in frame.iter_mut().skip(2) {
+                            *s = 0.0;
+                        }
+                    } else {
+                        frame[0] = (left + right) * 0.5;
                     }
                 }
             },

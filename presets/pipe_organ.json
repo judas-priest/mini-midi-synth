@@ -1,0 +1,32 @@
+{
+  "name": "Pipe Organ",
+  "params": {
+    "osc_type": 7.0,
+    "osc_detune": 0.0,
+    "drawbar_1": 8.0,
+    "drawbar_2": 4.0,
+    "drawbar_3": 8.0,
+    "drawbar_4": 8.0,
+    "drawbar_5": 6.0,
+    "drawbar_6": 8.0,
+    "drawbar_7": 4.0,
+    "drawbar_8": 5.0,
+    "drawbar_9": 6.0,
+    "filter_cutoff": 12000.0,
+    "filter_resonance": 0.0,
+    "filter_type": 0.0,
+    "filter_key_track": 0.2,
+    "amp_attack": 0.04,
+    "amp_decay": 0.05,
+    "amp_sustain": 1.0,
+    "amp_release": 0.08,
+    "filter_attack": 0.01,
+    "filter_decay": 0.1,
+    "filter_sustain": 0.8,
+    "filter_release": 0.1,
+    "filter_env_amount": 0.0,
+    "noise_level": 0.02,
+    "chorus_mix": 0.0,
+    "master_volume": 0.55
+  }
+}

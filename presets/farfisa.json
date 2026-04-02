@@ -1,0 +1,31 @@
+{
+  "name": "Farfisa",
+  "params": {
+    "osc_type": 7.0,
+    "osc_detune": 0.0,
+    "drawbar_1": 0.0,
+    "drawbar_2": 0.0,
+    "drawbar_3": 8.0,
+    "drawbar_4": 8.0,
+    "drawbar_5": 4.0,
+    "drawbar_6": 6.0,
+    "drawbar_7": 0.0,
+    "drawbar_8": 0.0,
+    "drawbar_9": 0.0,
+    "filter_cutoff": 3500.0,
+    "filter_resonance": 0.15,
+    "filter_type": 0.0,
+    "filter_key_track": 0.5,
+    "amp_attack": 0.001,
+    "amp_decay": 0.01,
+    "amp_sustain": 1.0,
+    "amp_release": 0.01,
+    "filter_attack": 0.001,
+    "filter_decay": 0.01,
+    "filter_sustain": 1.0,
+    "filter_release": 0.01,
+    "filter_env_amount": 0.0,
+    "chorus_mix": 0.2,
+    "master_volume": 0.6
+  }
+}

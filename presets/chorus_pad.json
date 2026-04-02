@@ -1,0 +1,22 @@
+{
+  "name": "Chorus Pad",
+  "params": {
+    "osc_type": 1.0,
+    "osc_detune": 0.01,
+    "filter_cutoff": 1200.0,
+    "filter_resonance": 0.15,
+    "filter_type": 0.0,
+    "filter_key_track": 0.3,
+    "amp_attack": 0.8,
+    "amp_decay": 0.5,
+    "amp_sustain": 0.8,
+    "amp_release": 1.5,
+    "filter_attack": 0.5,
+    "filter_decay": 1.0,
+    "filter_sustain": 0.4,
+    "filter_release": 1.0,
+    "filter_env_amount": 2000.0,
+    "chorus_mix": 0.6,
+    "master_volume": 0.6
+  }
+}

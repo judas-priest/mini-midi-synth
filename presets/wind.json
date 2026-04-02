@@ -1,0 +1,20 @@
+{
+  "name": "Wind",
+  "params": {
+    "osc_type": 5.0,
+    "filter_cutoff": 500.0,
+    "filter_resonance": 0.6,
+    "filter_type": 2.0,
+    "amp_attack": 2.0,
+    "amp_decay": 0.5,
+    "amp_sustain": 0.8,
+    "amp_release": 2.0,
+    "filter_attack": 3.0,
+    "filter_decay": 1.0,
+    "filter_sustain": 0.5,
+    "filter_release": 2.0,
+    "filter_env_amount": 4000.0,
+    "chorus_mix": 0.0,
+    "master_volume": 0.5
+  }
+}

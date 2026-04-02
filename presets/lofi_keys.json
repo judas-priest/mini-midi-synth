@@ -1,0 +1,21 @@
+{
+  "name": "Lo-Fi Keys",
+  "params": {
+    "osc_type": 3.0,
+    "osc_detune": 0.008,
+    "filter_cutoff": 1400.0,
+    "filter_resonance": 0.1,
+    "filter_type": 0.0,
+    "amp_attack": 0.005,
+    "amp_decay": 1.5,
+    "amp_sustain": 0.3,
+    "amp_release": 0.5,
+    "filter_attack": 0.001,
+    "filter_decay": 0.8,
+    "filter_sustain": 0.0,
+    "filter_release": 0.3,
+    "filter_env_amount": 1500.0,
+    "chorus_mix": 0.3,
+    "master_volume": 0.65
+  }
+}

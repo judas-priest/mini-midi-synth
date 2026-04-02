@@ -1,11 +1,13 @@
 /// Synth engine: layered polyphonic voice pools + MIDI event dispatch.
 
+pub mod chorus;
 pub mod envelope;
 pub mod filter;
 pub mod oscillator;
 pub mod voice;
 
 use crate::preset::Preset;
+use chorus::Chorus;
 use voice::{Voice, VoiceParams};
 
 /// MIDI events sent from the MIDI thread to the audio thread.
@@ -31,7 +33,7 @@ pub enum ControlEvent {
 }
 
 pub const MAX_LAYERS: usize = 2;
-const VOICES_PER_LAYER: usize = 16;
+const VOICES_PER_LAYER: usize = 12;
 
 /// A single sound layer with its own voice pool and preset parameters.
 struct Layer {
@@ -42,6 +44,7 @@ struct Layer {
     min_note: u8,
     max_note: u8,
     params: PresetParams,
+    chorus_mix: f32,
 }
 
 impl Layer {
@@ -55,6 +58,7 @@ impl Layer {
             min_note: 0,
             max_note: 127,
             params: PresetParams::default(),
+            chorus_mix: 0.0,
         }
     }
 
@@ -64,15 +68,19 @@ impl Layer {
         };
 
         self.volume = p("master_volume", 0.8);
+        self.chorus_mix = p("chorus_mix", 0.0);
         self.params = PresetParams {
             osc_type: p("osc_type", 0.0),
             osc_detune: p("osc_detune", 0.0),
             fm_ratio: p("fm_ratio", 3.5),
             fm_index: p("fm_index", 5.0),
+            fm_env_amount: p("fm_env_amount", 0.0),
             filter_cutoff: p("filter_cutoff", 8000.0),
             filter_resonance: p("filter_resonance", 0.0),
             filter_type: p("filter_type", 0.0),
             filter_env_amount: p("filter_env_amount", 0.0),
+            filter_key_track: p("filter_key_track", 0.0),
+            noise_level: p("noise_level", 0.0),
             amp_attack: p("amp_attack", 0.01),
             amp_decay: p("amp_decay", 0.1),
             amp_sustain: p("amp_sustain", 0.7),
@@ -81,12 +89,29 @@ impl Layer {
             filter_decay: p("filter_decay", 0.2),
             filter_sustain: p("filter_sustain", 0.5),
             filter_release: p("filter_release", 0.3),
+            ks_brightness: p("ks_brightness", 0.5),
+            ks_feedback: p("ks_feedback", 0.996),
+            organ_drawbars: [
+                p("drawbar_1", 0.0),
+                p("drawbar_2", 0.0),
+                p("drawbar_3", 8.0),
+                p("drawbar_4", 0.0),
+                p("drawbar_5", 0.0),
+                p("drawbar_6", 0.0),
+                p("drawbar_7", 0.0),
+                p("drawbar_8", 0.0),
+                p("drawbar_9", 0.0),
+            ],
         };
     }
 
     fn note_on(&mut self, note: u8, velocity: u8) {
-        if !self.enabled { return; }
-        if note < self.min_note || note > self.max_note { return; }
+        if !self.enabled {
+            return;
+        }
+        if note < self.min_note || note > self.max_note {
+            return;
+        }
         self.age_counter += 1;
         let age = self.age_counter;
 
@@ -108,10 +133,13 @@ impl Layer {
             osc_detune: self.params.osc_detune,
             fm_ratio: self.params.fm_ratio,
             fm_index: self.params.fm_index,
+            fm_env_amount: self.params.fm_env_amount,
             filter_cutoff: self.params.filter_cutoff,
             filter_resonance: self.params.filter_resonance,
             filter_type: self.params.filter_type,
             filter_env_amount: self.params.filter_env_amount,
+            filter_key_track: self.params.filter_key_track,
+            noise_level: self.params.noise_level,
             amp_attack: self.params.amp_attack,
             amp_decay: self.params.amp_decay,
             amp_sustain: self.params.amp_sustain,
@@ -120,6 +148,9 @@ impl Layer {
             filter_decay: self.params.filter_decay,
             filter_sustain: self.params.filter_sustain,
             filter_release: self.params.filter_release,
+            ks_brightness: self.params.ks_brightness,
+            ks_feedback: self.params.ks_feedback,
+            organ_drawbars: self.params.organ_drawbars,
         };
 
         self.voices[idx].note_on(note, velocity, age, &voice_params);
@@ -140,7 +171,9 @@ impl Layer {
     }
 
     fn tick(&mut self, pitch_mult: f32) -> f32 {
-        if !self.enabled { return 0.0; }
+        if !self.enabled {
+            return 0.0;
+        }
         let mut out = 0.0;
         for voice in &mut self.voices {
             out += voice.tick(pitch_mult);
@@ -155,10 +188,13 @@ struct PresetParams {
     osc_detune: f32,
     fm_ratio: f32,
     fm_index: f32,
+    fm_env_amount: f32,
     filter_cutoff: f32,
     filter_resonance: f32,
     filter_type: f32,
     filter_env_amount: f32,
+    filter_key_track: f32,
+    noise_level: f32,
     amp_attack: f32,
     amp_decay: f32,
     amp_sustain: f32,
@@ -167,6 +203,9 @@ struct PresetParams {
     filter_decay: f32,
     filter_sustain: f32,
     filter_release: f32,
+    ks_brightness: f32,
+    ks_feedback: f32,
+    organ_drawbars: [f32; 9],
 }
 
 impl Default for PresetParams {
@@ -176,10 +215,13 @@ impl Default for PresetParams {
             osc_detune: 0.0,
             fm_ratio: 3.5,
             fm_index: 5.0,
+            fm_env_amount: 0.0,
             filter_cutoff: 8000.0,
             filter_resonance: 0.0,
             filter_type: 0.0,
             filter_env_amount: 0.0,
+            filter_key_track: 0.0,
+            noise_level: 0.0,
             amp_attack: 0.01,
             amp_decay: 0.1,
             amp_sustain: 0.7,
@@ -188,6 +230,9 @@ impl Default for PresetParams {
             filter_decay: 0.2,
             filter_sustain: 0.5,
             filter_release: 0.3,
+            ks_brightness: 0.5,
+            ks_feedback: 0.996,
+            organ_drawbars: [0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -201,6 +246,7 @@ pub struct SynthEngine {
     /// LFO phase for mod wheel vibrato
     lfo_phase: f32,
     sample_rate: f32,
+    chorus: Chorus,
 }
 
 impl SynthEngine {
@@ -216,6 +262,7 @@ impl SynthEngine {
             mod_wheel: 0.0,
             lfo_phase: 0.0,
             sample_rate,
+            chorus: Chorus::new(sample_rate),
         }
     }
 
@@ -281,17 +328,20 @@ impl SynthEngine {
         for layer in &mut self.layers {
             layer.set_sample_rate(sample_rate);
         }
+        self.chorus.set_sample_rate(sample_rate);
     }
 
-    /// Render one sample (mono).
-    pub fn tick(&mut self) -> f32 {
+    /// Render one sample, returns (left, right) stereo pair.
+    pub fn tick(&mut self) -> (f32, f32) {
         // LFO for mod wheel vibrato (5 Hz sine, up to ~0.5 semitones depth)
         const LFO_FREQ: f32 = 5.0;
         const LFO_MAX_DEPTH: f32 = 0.5; // semitones
         self.lfo_phase += LFO_FREQ / self.sample_rate;
-        if self.lfo_phase >= 1.0 { self.lfo_phase -= 1.0; }
-        let vibrato_semitones = self.mod_wheel * LFO_MAX_DEPTH
-            * (self.lfo_phase * std::f32::consts::TAU).sin();
+        if self.lfo_phase >= 1.0 {
+            self.lfo_phase -= 1.0;
+        }
+        let vibrato_semitones =
+            self.mod_wheel * LFO_MAX_DEPTH * (self.lfo_phase * std::f32::consts::TAU).sin();
 
         // Total pitch offset in semitones
         let pitch_offset = self.pitch_bend_semitones + vibrato_semitones;
@@ -301,10 +351,15 @@ impl SynthEngine {
             (pitch_offset / 12.0).exp2()
         };
 
-        let mut out = 0.0;
+        let mut mono = 0.0;
+        let mut chorus_mix = 0.0_f32;
         for layer in &mut self.layers {
-            out += layer.tick(pitch_mult);
+            mono += layer.tick(pitch_mult);
+            if layer.enabled {
+                chorus_mix = chorus_mix.max(layer.chorus_mix);
+            }
         }
-        out
+
+        self.chorus.tick(mono, chorus_mix)
     }
 }

@@ -18,7 +18,10 @@ const NOTE_NAMES: &[&str] = &[
 
 pub const BUFFER_SIZES: &[u32] = &[0, 16, 32, 48, 64, 128, 256, 512, 1024, 2048];
 
-const OSC_NAMES: &[&str] = &["Sine", "Saw", "Square", "Triangle", "FM"];
+const OSC_NAMES: &[&str] = &[
+    "Sine", "Saw", "Square", "Triangle", "FM", "Noise",
+    "Karplus-Strong", "Organ", "FM Piano", "Piano (Physical)", "Piano (Banded)",
+];
 const FILTER_NAMES: &[&str] = &["LowPass", "HighPass", "BandPass"];
 const LAYER_NAMES: &[&str] = &["A", "B"];
 
@@ -136,7 +139,18 @@ impl eframe::App for App {
                 egui::ScrollArea::vertical()
                     .auto_shrink(false)
                     .show(ui, |ui| {
+                        let mut last_category = String::new();
                         for (i, preset) in self.presets.iter().enumerate() {
+                            if preset.category != last_category {
+                                if !last_category.is_empty() {
+                                    ui.add_space(4.0);
+                                }
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(140, 140, 140),
+                                    &preset.category,
+                                );
+                                last_category = preset.category.clone();
+                            }
                             let selected = i == current_preset_idx;
                             if ui.selectable_label(selected, &preset.name).clicked() && !selected {
                                 new_idx = Some(i);
@@ -191,6 +205,7 @@ impl App {
             name: self.presets.get(preset_idx)
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| "Custom".to_string()),
+            category: String::new(),
             params: self.layers[layer].edited_params.clone(),
         };
         let _ = self.ctrl_tx.push(ControlEvent::LoadPreset { layer, preset });
@@ -341,11 +356,40 @@ impl App {
             }
         });
 
-        // FM params (only shown when FM osc selected)
+        // Noise level (for all osc types except pure Noise)
         let osc_type = self.layers[layer].edited_params.get("osc_type").copied().unwrap_or(0.0) as u32;
-        if osc_type == 4 {
+        if osc_type != 5 {
+            changed |= self.param_slider(ui, "noise_level", "Noise Mix", 0.0, 1.0, false);
+        }
+
+        // FM params (FM and FM Piano)
+        if osc_type == 4 || osc_type == 8 {
             changed |= self.param_slider(ui, "fm_ratio", "FM Ratio", 0.5, 8.0, false);
             changed |= self.param_slider(ui, "fm_index", "FM Index", 0.1, 10.0, false);
+            if osc_type == 4 {
+                changed |= self.param_slider(ui, "fm_env_amount", "FM Env Amount", 0.0, 1.0, false);
+            }
+        }
+
+        // Physical model params (KS, Commuted Piano, Banded WG)
+        if matches!(osc_type, 6 | 9 | 10) {
+            changed |= self.param_slider(ui, "ks_brightness", "Brightness", 0.05, 1.0, false);
+            changed |= self.param_slider(ui, "ks_feedback", "Feedback", 0.9, 0.9999, false);
+        }
+
+        // Organ drawbar params
+        if osc_type == 7 {
+            ui.add_space(4.0);
+            ui.label("Drawbars");
+            let drawbar_names = ["16'", "5⅓'", "8'", "4'", "2⅔'", "2'", "1⅗'", "1⅓'", "1'"];
+            for (i, name) in drawbar_names.iter().enumerate() {
+                let key = format!("drawbar_{}", i + 1);
+                let mut val = self.layers[layer].edited_params.get(&key).copied().unwrap_or(0.0);
+                if ui.add(egui::Slider::new(&mut val, 0.0..=8.0).step_by(1.0).text(*name)).changed() {
+                    self.layers[layer].edited_params.insert(key, val);
+                    changed = true;
+                }
+            }
         }
 
         ui.add_space(6.0);
@@ -370,6 +414,7 @@ impl App {
         changed |= self.param_slider(ui, "filter_cutoff", "Cutoff", 20.0, 20000.0, true);
         changed |= self.param_slider(ui, "filter_resonance", "Resonance", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "filter_env_amount", "Env Amount", 0.0, 15000.0, false);
+        changed |= self.param_slider(ui, "filter_key_track", "Key Track", 0.0, 1.0, false);
 
         ui.add_space(6.0);
 
@@ -393,6 +438,12 @@ impl App {
 
         // Volume (per-preset master_volume stored in params)
         changed |= self.param_slider(ui, "master_volume", "Volume", 0.0, 1.0, false);
+
+        ui.add_space(6.0);
+
+        // Effects
+        ui.label("Effects");
+        changed |= self.param_slider(ui, "chorus_mix", "Chorus", 0.0, 1.0, false);
 
         if changed {
             self.layers[layer].params_dirty = true;
@@ -442,6 +493,7 @@ impl App {
         let new_name = format!("{base_name} (user)");
         let new_preset = Preset {
             name: new_name.clone(),
+            category: "User".to_string(),
             params: self.layers[layer].edited_params.clone(),
         };
 
