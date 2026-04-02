@@ -1,0 +1,20 @@
+{
+  "name": "Riser",
+  "params": {
+    "osc_type": 1.0,
+    "osc_detune": 0.035,
+    "filter_cutoff": 150.0,
+    "filter_resonance": 0.62,
+    "filter_type": 0.0,
+    "amp_attack": 4.0,
+    "amp_decay": 0.1,
+    "amp_sustain": 1.0,
+    "amp_release": 0.6,
+    "filter_attack": 4.0,
+    "filter_decay": 0.1,
+    "filter_sustain": 1.0,
+    "filter_release": 0.6,
+    "filter_env_amount": 12000.0,
+    "master_volume": 0.7
+  }
+}

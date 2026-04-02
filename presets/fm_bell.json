@@ -1,0 +1,22 @@
+{
+  "name": "FM Bell",
+  "params": {
+    "osc_type": 4.0,
+    "osc_detune": 0.0,
+    "fm_ratio": 3.5,
+    "fm_index": 5.0,
+    "filter_cutoff": 6000.0,
+    "filter_resonance": 0.1,
+    "filter_type": 0.0,
+    "amp_attack": 0.001,
+    "amp_decay": 1.5,
+    "amp_sustain": 0.0,
+    "amp_release": 2.0,
+    "filter_attack": 0.001,
+    "filter_decay": 1.0,
+    "filter_sustain": 0.2,
+    "filter_release": 1.5,
+    "filter_env_amount": 3000.0,
+    "master_volume": 0.5
+  }
+}
