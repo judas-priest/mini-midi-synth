@@ -1,0 +1,23 @@
+{
+  "name": "Dirty Saw",
+  "category": "Wavefolder",
+  "params": {
+    "osc_type": 17,
+    "fold_source": 1,
+    "fold_amount": 0.75,
+    "fold_symmetry": 0.35,
+    "filter_cutoff": 3500.0,
+    "filter_resonance": 0.35,
+    "filter_type": 0,
+    "filter_env_amount": 4000.0,
+    "filter_attack": 0.01,
+    "filter_decay": 0.4,
+    "filter_sustain": 0.2,
+    "filter_release": 0.3,
+    "amp_attack": 0.005,
+    "amp_decay": 0.15,
+    "amp_sustain": 0.8,
+    "amp_release": 0.2,
+    "reverb_mix": 0.1
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "TB-303 Acid v2 (Square)",
+  "params": {
+    "osc_type": 2.0,
+    "pulse_width": 0.5,
+    "filter_cutoff": 200.0,
+    "filter_resonance": 0.8,
+    "filter_type": 6.0,
+    "filter_env_amount": 3500.0,
+    "filter_key_track": 0.1,
+    "amp_attack": 0.001,
+    "amp_decay": 0.18,
+    "amp_sustain": 0.0,
+    "amp_release": 0.04,
+    "filter_attack": 0.001,
+    "filter_decay": 0.22,
+    "filter_sustain": 0.0,
+    "filter_release": 0.04,
+    "vel_to_filter": 0.75,
+    "portamento_time": 0.06,
+    "master_volume": 0.75
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Accordion",
+  "params": {
+    "osc_type": 22,
+    "accordion_register": 0,
+    "accordion_bellows": 0.7,
+    "filter_cutoff": 6000,
+    "filter_resonance": 0.1,
+    "amp_attack": 0.03,
+    "amp_decay": 0.1,
+    "amp_sustain": 0.9,
+    "amp_release": 0.15,
+    "chorus_mix": 0.2,
+    "reverb_mix": 0.15
+  }
+}

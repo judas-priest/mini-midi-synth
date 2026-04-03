@@ -13,6 +13,8 @@ pub mod flanger;
 pub mod formant;
 pub mod lfo;
 pub mod looper;
+pub mod sampler;
+pub mod epiano;
 pub mod oscillator;
 pub mod overdrive;
 pub mod piano;
@@ -32,6 +34,7 @@ use eq::ParametricEq;
 use flanger::Flanger;
 use lfo::{Lfo, LfoWaveform};
 use looper::MidiLooper;
+use sampler::SamplerEngine;
 use overdrive::Overdrive;
 use phaser::Phaser;
 use reverb::Reverb;
@@ -83,6 +86,12 @@ pub enum ControlEvent {
     LooperSetBars { bars: u8 },
     LooperSetQuantize { quantize: u8 },
     AllNotesOff,
+    // SF2 sampler controls
+    LoadSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
+    SetLayerSf2Mode { layer: usize, enabled: bool },
+    SetLayerSf2Program { layer: usize, program: u8, bank: u8 },
+    SetDrumsSf2Mode { enabled: bool },
+    SetSf2BlockSize { size: usize },
 }
 
 #[derive(Clone, Copy)]
@@ -184,6 +193,7 @@ struct Layer {
     params: PresetParams,
     lfo: Lfo,
     last_note_freq: Option<f32>,
+    sf2_mode: bool,
 }
 
 impl Layer {
@@ -193,6 +203,7 @@ impl Layer {
             voices, age_counter: 0, volume: 0.8, enabled: true,
             min_note: 0, max_note: 127, params: PresetParams::default(),
             lfo: Lfo::new(sample_rate), last_note_freq: None,
+            sf2_mode: false,
         }
     }
 
@@ -248,6 +259,10 @@ impl Layer {
             sync_ratio: self.params.sync_ratio, sync_shape: self.params.sync_shape,
             supersaw_detune: self.params.supersaw_detune, supersaw_mix: self.params.supersaw_mix,
             pulse_width: self.params.pulse_width,
+            accordion_register: self.params.accordion_register, accordion_bellows: self.params.accordion_bellows,
+            sax_reed_stiffness: self.params.sax_reed_stiffness, sax_embouchure: self.params.sax_embouchure,
+            sax_blow_pressure: self.params.sax_blow_pressure, sax_type: self.params.sax_type,
+            epiano_type: self.params.epiano_type,
             velocity_curve: self.params.velocity_curve, vel_to_filter: self.params.vel_to_filter,
             portamento_time: self.params.portamento_time, _portamento_mode: self.params.portamento_mode,
             unison_voices: self.params.unison_voices, unison_detune: self.params.unison_detune,
@@ -353,6 +368,12 @@ pub struct PresetParams {
     // Supersaw
     supersaw_detune: f32, supersaw_mix: f32,
     pulse_width: f32,
+    // Accordion
+    pub accordion_register: f32, pub accordion_bellows: f32,
+    // Saxophone
+    pub sax_reed_stiffness: f32, pub sax_embouchure: f32, pub sax_blow_pressure: f32, pub sax_type: f32,
+    // Electric Piano
+    pub epiano_type: f32,
     velocity_curve: f32, vel_to_filter: f32,
     lfo_waveform: f32, lfo_rate: f32, lfo_pitch_depth: f32, lfo_filter_depth: f32, lfo_amp_depth: f32,
     portamento_time: f32, portamento_mode: f32,
@@ -392,6 +413,9 @@ impl Default for PresetParams {
             sync_ratio: 2.0, sync_shape: 0.0,
             supersaw_detune: 0.5, supersaw_mix: 0.5,
             pulse_width: 0.5,
+            accordion_register: 0.0, accordion_bellows: 0.7,
+            sax_reed_stiffness: 0.5, sax_embouchure: 0.5, sax_blow_pressure: 0.6, sax_type: 1.0,
+            epiano_type: 0.0,
             velocity_curve: 0.0, vel_to_filter: 0.0,
             lfo_waveform: 0.0, lfo_rate: 5.0, lfo_pitch_depth: 0.0, lfo_filter_depth: 0.0, lfo_amp_depth: 0.0,
             portamento_time: 0.0, portamento_mode: 0.0,
@@ -447,6 +471,10 @@ impl PresetParams {
             sync_ratio: p("sync_ratio", 2.0), sync_shape: p("sync_shape", 0.0),
             supersaw_detune: p("supersaw_detune", 0.5), supersaw_mix: p("supersaw_mix", 0.5),
             pulse_width: p("pulse_width", 0.5),
+            accordion_register: p("accordion_register", 0.0), accordion_bellows: p("accordion_bellows", 0.7),
+            sax_reed_stiffness: p("sax_reed_stiffness", 0.5), sax_embouchure: p("sax_embouchure", 0.5),
+            sax_blow_pressure: p("sax_blow_pressure", 0.6), sax_type: p("sax_type", 1.0),
+            epiano_type: p("epiano_type", 0.0),
             velocity_curve: p("velocity_curve", 0.0), vel_to_filter: p("vel_to_filter", 0.0),
             lfo_waveform: p("lfo_waveform", 0.0), lfo_rate: p("lfo_rate", 5.0),
             lfo_pitch_depth: p("lfo_pitch_depth", 0.0), lfo_filter_depth: p("lfo_filter_depth", 0.0),
@@ -466,6 +494,7 @@ impl PresetParams {
 pub struct SynthEngine {
     layers: Vec<Layer>,
     pub drum_engine: DrumEngine,
+    pub sampler: SamplerEngine,
     pitch_bend_semitones: f32,
     mod_wheel: f32,
     vibrato_phase: f32,
@@ -501,6 +530,7 @@ impl SynthEngine {
         if layers.len() > 1 { layers[1].enabled = false; }
         Self {
             layers, drum_engine: DrumEngine::new(sample_rate),
+            sampler: SamplerEngine::new(sample_rate),
             pitch_bend_semitones: 0.0, mod_wheel: 0.0, vibrato_phase: 0.0,
             aftertouch: 0.0, aftertouch_smooth: 0.0, sample_rate,
             eq: ParametricEq::new(sample_rate),
@@ -629,6 +659,7 @@ impl SynthEngine {
                 // Route drum notes (36-51): always on ch10, or any channel when drum mode active
                 let is_drum_note = note >= 36 && note <= 51;
                 let drum_mode = self.seq_target.load(std::sync::atomic::Ordering::Relaxed) == 0;
+                let sampler_drums = self.sampler.drums_enabled();
                 if channel == 9 || (is_drum_note && drum_mode) {
                     if velocity > 0 {
                         // Record into sequencer if recording
@@ -645,37 +676,81 @@ impl SynthEngine {
                                 }
                             }
                         }
-                        self.drum_engine.note_on(note, velocity);
+                        if sampler_drums {
+                            self.sampler.drum_note_on(note, velocity);
+                        } else {
+                            self.drum_engine.note_on(note, velocity);
+                        }
                     } else {
-                        self.drum_engine.note_off(note);
+                        if sampler_drums {
+                            self.sampler.drum_note_off(note);
+                        } else {
+                            self.drum_engine.note_off(note);
+                        }
                     }
                 } else if velocity == 0 {
-                    for layer in &mut self.layers { layer.note_off(note); }
+                    for (i, layer) in self.layers.iter_mut().enumerate() {
+                        if !layer.enabled { continue; }
+                        if layer.sf2_mode {
+                            self.sampler.note_off(i, note);
+                        } else {
+                            layer.note_off(note);
+                        }
+                    }
                     self.looper.record_event(note, 0);
                 } else {
-                    for layer in &mut self.layers { layer.note_on(note, velocity); }
+                    for (i, layer) in self.layers.iter_mut().enumerate() {
+                        if !layer.enabled { continue; }
+                        if layer.sf2_mode {
+                            if note >= layer.min_note && note <= layer.max_note {
+                                self.sampler.note_on(i, note, velocity);
+                            }
+                        } else {
+                            layer.note_on(note, velocity);
+                        }
+                    }
                     self.looper.record_event(note, velocity);
                 }
             }
             MidiEvent::NoteOff { channel, note } => {
                 if channel == 9 {
-                    self.drum_engine.note_off(note);
+                    if self.sampler.drums_enabled() {
+                        self.sampler.drum_note_off(note);
+                    } else {
+                        self.drum_engine.note_off(note);
+                    }
                 } else {
-                    for layer in &mut self.layers { layer.note_off(note); }
+                    for (i, layer) in self.layers.iter_mut().enumerate() {
+                        if layer.sf2_mode {
+                            self.sampler.note_off(i, note);
+                        } else {
+                            layer.note_off(note);
+                        }
+                    }
                     self.looper.record_event(note, 0);
                 }
             }
-            MidiEvent::PitchBend { value, .. } => { self.pitch_bend_semitones = value * 2.0; }
+            MidiEvent::PitchBend { value, .. } => {
+                self.pitch_bend_semitones = value * 2.0;
+                for i in 0..2 {
+                    if self.layers.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
+                        self.sampler.pitch_bend(i, value);
+                    }
+                }
+            }
             MidiEvent::ModWheel { value, .. } => { self.mod_wheel = value; }
             MidiEvent::ProgramChange { program, .. } => {
-                if let Some(&params) = self.preset_params_cache.get(program as usize) {
+                // In SF2 mode, change the SF2 program; in synth mode, change the synth preset
+                if self.layers.first().map(|l| l.sf2_mode).unwrap_or(false) {
+                    self.sampler.set_layer_program(0, program, 0);
+                } else if let Some(&params) = self.preset_params_cache.get(program as usize) {
                     if let Some(l) = self.layers.get_mut(0) { l.params = params; }
                     self.reset_preset_pickups();
-                    if let Some(atom) = &self.program_change {
-                        atom.store(program, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    self.send_feedback(ParamFeedback::ProgramChanged { program });
                 }
+                if let Some(atom) = &self.program_change {
+                    atom.store(program, std::sync::atomic::Ordering::Relaxed);
+                }
+                self.send_feedback(ParamFeedback::ProgramChanged { program });
             }
             MidiEvent::Aftertouch { channel, value } => {
                 if channel != 9 { self.aftertouch = value; }
@@ -716,6 +791,7 @@ impl SynthEngine {
             }
             ControlEvent::SetLayerVolume { layer, volume } => {
                 if let Some(l) = self.layers.get_mut(layer) { l.volume = volume; }
+                self.sampler.set_layer_volume(layer, volume);
             }
             ControlEvent::SetLayerRange { layer, min_note, max_note } => {
                 if let Some(l) = self.layers.get_mut(layer) { l.min_note = min_note; l.max_note = max_note; }
@@ -785,6 +861,25 @@ impl SynthEngine {
                         layer.note_off(note);
                     }
                 }
+                self.sampler.all_notes_off();
+            }
+            ControlEvent::LoadSoundFont { soundfont } => {
+                self.sampler.load_soundfont(soundfont);
+            }
+            ControlEvent::SetLayerSf2Mode { layer, enabled } => {
+                if let Some(l) = self.layers.get_mut(layer) {
+                    l.sf2_mode = enabled;
+                }
+                self.sampler.set_layer_mode(layer, enabled);
+            }
+            ControlEvent::SetLayerSf2Program { layer, program, bank } => {
+                self.sampler.set_layer_program(layer, program, bank);
+            }
+            ControlEvent::SetDrumsSf2Mode { enabled } => {
+                self.sampler.set_drums_enabled(enabled);
+            }
+            ControlEvent::SetSf2BlockSize { size } => {
+                self.sampler.set_block_size(size);
             }
         }
     }
@@ -793,6 +888,7 @@ impl SynthEngine {
         self.sample_rate = sample_rate;
         for layer in &mut self.layers { layer.set_sample_rate(sample_rate); }
         self.drum_engine.set_sample_rate(sample_rate);
+        self.sampler.set_sample_rate(sample_rate);
         self.eq.set_sample_rate(sample_rate);
         self.compressor.set_sample_rate(sample_rate);
         self.overdrive.set_sample_rate(sample_rate);
@@ -813,9 +909,21 @@ impl SynthEngine {
         for &(note, vel) in &looper_events {
             if note == 0 && vel == 0 { break; }
             if vel > 0 {
-                for layer in &mut self.layers { layer.note_on(note, vel); }
+                for (i, layer) in self.layers.iter_mut().enumerate() {
+                    if layer.sf2_mode {
+                        self.sampler.note_on(i, note, vel);
+                    } else {
+                        layer.note_on(note, vel);
+                    }
+                }
             } else {
-                for layer in &mut self.layers { layer.note_off(note); }
+                for (i, layer) in self.layers.iter_mut().enumerate() {
+                    if layer.sf2_mode {
+                        self.sampler.note_off(i, note);
+                    } else {
+                        layer.note_off(note);
+                    }
+                }
             }
         }
 
@@ -859,6 +967,11 @@ impl SynthEngine {
             let (l, r) = layer.tick(&mods);
             out_l += l; out_r += r;
         }
+
+        // Mix in SF2 sampler
+        let (sf2_l, sf2_r) = self.sampler.tick();
+        out_l += sf2_l;
+        out_r += sf2_r;
 
         // Mix in drum engine
         let (drum_l, drum_r) = self.drum_engine.tick();

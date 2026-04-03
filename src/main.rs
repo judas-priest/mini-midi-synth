@@ -164,6 +164,8 @@ fn main() -> Result<()> {
         volume: 0.8,
         min_note: 0,
         max_note: 127,
+        sf2_mode: config.sf2.layer_a_sf2,
+        sf2_program: config.sf2.layer_a_program,
     };
     let layer_b = gui::LayerState {
         preset_idx: 0,
@@ -173,6 +175,8 @@ fn main() -> Result<()> {
         volume: 0.5,
         min_note: 60,
         max_note: 127,
+        sf2_mode: config.sf2.layer_b_sf2,
+        sf2_program: config.sf2.layer_b_program,
     };
 
     let mut app = gui::App {
@@ -243,6 +247,13 @@ fn main() -> Result<()> {
         setlist_editor_entries: Vec::new(),
         last_config_save: std::time::Instant::now(),
         global_dirty: false,
+        sf2_file_list: gui::scan_sf2_files(),
+        sf2_selected: None,
+        sf2_loaded_name: String::new(),
+        sf2_status: String::new(),
+        sf2_drums_enabled: config.sf2.drums_sf2,
+        sf2_soundfont: None,
+        sf2_block_size: config.sf2.block_size,
     };
 
     app.load_edited_params(0);

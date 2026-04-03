@@ -235,11 +235,26 @@ impl Voice {
                 params.sync_ratio,
                 params.sync_shape as u8,
             ),
+            OscType::Accordion => self.oscs[0].init_accordion(
+                self.freq,
+                self.velocity,
+                params.accordion_register,
+                params.accordion_bellows,
+            ),
+            OscType::Saxophone => self.oscs[0].init_saxophone(
+                self.freq,
+                self.velocity,
+                params.sax_reed_stiffness,
+                params.sax_embouchure,
+                params.sax_blow_pressure,
+                params.sax_type,
+            ),
             OscType::Supersaw => self.oscs[0].init_supersaw(
                 params.supersaw_detune,
                 params.supersaw_mix,
             ),
             OscType::PianoModel => self.oscs[0].init_piano_model(self.freq),
+            OscType::ElectricPiano => self.oscs[0].init_electric_piano(self.freq, params.epiano_type as u8),
             _ => {}
         }
 
@@ -608,6 +623,16 @@ pub struct VoiceParams {
     pub supersaw_mix: f32,
     // Pulse width
     pub pulse_width: f32,
+    // Accordion
+    pub accordion_register: f32,
+    pub accordion_bellows: f32,
+    // Saxophone
+    pub sax_reed_stiffness: f32,
+    pub sax_embouchure: f32,
+    pub sax_blow_pressure: f32,
+    pub sax_type: f32,
+    // Electric Piano
+    pub epiano_type: f32,
     // Dynamics
     pub velocity_curve: f32,
     pub vel_to_filter: f32,

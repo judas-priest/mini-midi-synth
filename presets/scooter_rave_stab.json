@@ -1,0 +1,26 @@
+{
+  "name": "Scooter Rave Stab",
+  "category": "Scooter",
+  "params": {
+    "osc_type": 20,
+    "supersaw_detune": 0.65,
+    "supersaw_mix": 0.8,
+    "filter_cutoff": 250.0,
+    "filter_resonance": 0.35,
+    "filter_type": 4,
+    "filter_env_amount": 10000.0,
+    "filter_key_track": 0.5,
+    "amp_attack": 0.001,
+    "amp_decay": 0.22,
+    "amp_sustain": 0.0,
+    "amp_release": 0.15,
+    "filter_attack": 0.001,
+    "filter_decay": 0.18,
+    "filter_sustain": 0.0,
+    "filter_release": 0.12,
+    "overdrive_gain": 2.0,
+    "overdrive_mix": 0.4,
+    "chorus_mix": 0.2,
+    "master_volume": 0.5
+  }
+}

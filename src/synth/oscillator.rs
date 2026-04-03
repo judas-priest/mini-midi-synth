@@ -3,6 +3,7 @@
 use std::f32::consts::PI;
 
 use super::bass::BassModel;
+use super::epiano::ElectricPianoModel;
 use super::piano::PianoModel;
 
 const TAU: f32 = 2.0 * PI;
@@ -48,6 +49,9 @@ pub enum OscType {
     HardSync,         // 19 — oscillator hard sync (master resets slave)
     Supersaw,         // 20 — Roland JP-8000 style 7-voice supersaw
     PianoModel,       // 21 — inharmonic additive piano with dual-decay and hammer model
+    Accordion,        // 22 — free reed physical model
+    Saxophone,        // 23 — single reed waveguide
+    ElectricPiano,    // 24 — Rhodes/Wurlitzer physical model (tine + pickup)
 }
 
 impl OscType {
@@ -75,6 +79,9 @@ impl OscType {
             19 => Self::HardSync,
             20 => Self::Supersaw,
             21 => Self::PianoModel,
+            22 => Self::Accordion,
+            23 => Self::Saxophone,
+            24 => Self::ElectricPiano,
             _ => Self::Sine,
         }
     }
@@ -129,8 +136,8 @@ pub enum OscState {
         // Dispersion filter: 3 second-order allpass sections for inharmonicity
         disp_z1: [f32; 3],
         disp_z2: [f32; 3],
-        disp_b0: [f32; 3],    // allpass coefficients
-        disp_b1: [f32; 3],
+        _disp_b0: [f32; 3],    // allpass coefficients (used in init)
+        _disp_b1: [f32; 3],
         disp_a1: [f32; 3],
         // Soundboard resonance (2-pole bandpass)
         sb_lp: f32,
@@ -236,6 +243,46 @@ pub enum OscState {
         mix_side: f32,        // side saws level
     },
     PianoModel(PianoModel),   // 24-partial inharmonic additive with dual decay
+    ElectricPiano(ElectricPianoModel), // Rhodes/Wurlitzer tine model
+    Accordion {
+        // Free reed oscillator (2nd order ODE)
+        reed_x: f32,          // displacement
+        reed_v: f32,          // velocity
+        reed_omega: f32,      // angular frequency
+        reed_damping: f32,    // damping factor
+        // Multiple reed registers
+        reed2_x: f32,
+        reed2_v: f32,
+        reed2_omega: f32,
+        // Register mix
+        register_mix: f32,    // 0=fundamental only, 1=full register
+        bellows_pressure: f32,
+        // Tone shaping
+        lp_state: f32,
+        dc_x: f32,
+        dc_y: f32,
+    },
+    Saxophone {
+        // Bore waveguide (bidirectional delay line)
+        bore_fwd: Vec<f32>,   // forward-going wave
+        bore_bwd: Vec<f32>,   // backward-going wave
+        bore_pos: usize,
+        // Reed model
+        reed_stiffness: f32,
+        reed_table_offset: f32,  // embouchure control
+        blowing_pressure: f32,
+        // Bell filter
+        bell_lp: f32,
+        bell_hp: f32,
+        bell_cutoff: f32,
+        // Bore losses
+        bore_lp: f32,
+        // Tone hole filter
+        tonehole_coeff: f32,
+        // DC blocker
+        dc_x: f32,
+        dc_y: f32,
+    },
 }
 
 /// Maximum delay line length: covers MIDI note 21 (A0 ≈ 27.5 Hz) at 192 kHz.
@@ -335,6 +382,10 @@ impl Oscillator {
             OscState::Brass { bore_delay, .. } => {
                 Self::return_buf(&mut self.pool_a, bore_delay);
             }
+            OscState::Saxophone { bore_fwd, bore_bwd, .. } => {
+                Self::return_buf(&mut self.pool_a, bore_fwd);
+                Self::return_buf(&mut self.pool_b, bore_bwd);
+            }
             _ => {}
         }
     }
@@ -377,8 +428,8 @@ impl Oscillator {
                 frac_coeff: [0.0; 2],
                 disp_z1: [0.0; 3],
                 disp_z2: [0.0; 3],
-                disp_b0: [0.0; 3],
-                disp_b1: [0.0; 3],
+                _disp_b0: [0.0; 3],
+                _disp_b1: [0.0; 3],
                 disp_a1: [0.0; 3],
                 sb_lp: 0.0,
                 sb_bp: 0.0,
@@ -481,6 +532,20 @@ impl Oscillator {
                 mix_side: 0.75,
             },
             OscType::PianoModel => OscState::PianoModel(PianoModel::new()),
+            OscType::ElectricPiano => OscState::ElectricPiano(ElectricPianoModel::new()),
+            OscType::Accordion => OscState::Accordion {
+                reed_x: 0.0, reed_v: 0.0, reed_omega: 0.0, reed_damping: 0.0,
+                reed2_x: 0.0, reed2_v: 0.0, reed2_omega: 0.0,
+                register_mix: 0.0, bellows_pressure: 0.0,
+                lp_state: 0.0, dc_x: 0.0, dc_y: 0.0,
+            },
+            OscType::Saxophone => OscState::Saxophone {
+                bore_fwd: Vec::new(), bore_bwd: Vec::new(), bore_pos: 0,
+                reed_stiffness: 0.0, reed_table_offset: 0.0, blowing_pressure: 0.0,
+                bell_lp: 0.0, bell_hp: 0.0, bell_cutoff: 0.0,
+                bore_lp: 0.0, tonehole_coeff: 0.0,
+                dc_x: 0.0, dc_y: 0.0,
+            },
         };
     }
 
@@ -675,8 +740,8 @@ impl Oscillator {
             frac_coeff,
             disp_z1: [0.0; 3],
             disp_z2: [0.0; 3],
-            disp_b0,
-            disp_b1,
+            _disp_b0: disp_b0,
+            _disp_b1: disp_b1,
             disp_a1,
             sb_lp: 0.0,
             sb_bp: 0.0,
@@ -844,6 +909,9 @@ impl Oscillator {
             OscType::HardSync => self.tick_hard_sync(freq),
             OscType::Supersaw => self.tick_supersaw(freq),
             OscType::PianoModel => self.tick_piano_model(),
+            OscType::ElectricPiano => self.tick_electric_piano(),
+            OscType::Accordion => self.tick_accordion(),
+            OscType::Saxophone => self.tick_saxophone(),
             _ => self.tick_standard(freq),
         }
     }
@@ -1031,7 +1099,7 @@ impl Oscillator {
             buffer, buffer2, pos, pos2,
             loss_state1, loss_state2, loss_coeff,
             frac_z1, frac_coeff,
-            disp_z1, disp_z2, disp_b0: _, disp_b1: _, disp_a1,
+            disp_z1, disp_z2, _disp_b0: _, _disp_b1: _, disp_a1,
             sb_lp, sb_bp, sb_freq, sb_q,
             dc_x, dc_y,
         } = &mut self.state
@@ -1064,7 +1132,7 @@ impl Oscillator {
             }
 
             // Also apply dispersion to string 2 (reuse same coefficients)
-            let mut x2 = *loss_state2;
+            let x2 = *loss_state2;
             // Use a lightweight single-section dispersion for string 2
             {
                 let a = disp_a1[0]; // just the first section
@@ -1448,13 +1516,24 @@ impl Oscillator {
             _ => 1000.0, // Tuba
         };
 
-        let pressure = blowing_pressure * velocity;
+        // Pressure must be scaled to compete with spring force (omega²).
+        // For a lip reed, the driving force is pressure * lip_opening.
+        // At small lip_x, spring = omega² * x, driving = pressure * x,
+        // so pressure > omega² is needed for instability.
+        let omega = lip_freq * TAU;
+        let pressure = omega * omega * (0.5 + blowing_pressure * 0.8) * velocity;
+
+        let mut bore = Self::take_buf(&mut self.pool_a, n);
+        // Seed with small impulse to kickstart
+        if !bore.is_empty() {
+            bore[0] = 0.02 * velocity;
+        }
 
         self.state = OscState::Brass {
-            bore_delay: Self::take_buf(&mut self.pool_a, n),
+            bore_delay: bore,
             bore_pos: 0,
-            lip_x: 0.001, // small initial opening
-            lip_v: 0.0,
+            lip_x: 0.01, // initial opening
+            lip_v: omega * 0.005, // initial velocity kick
             lip_freq,
             lip_damping,
             lip_mass_inv: 1.0,
@@ -1484,52 +1563,60 @@ impl Oscillator {
             }
 
             let dt = 1.0 / sample_rate;
-
-            // Read reflected wave from bell end of bore
-            let read_pos = if *bore_pos == 0 { n - 1 } else { *bore_pos - 1 };
-            let reflected = bore_delay[read_pos];
-
-            // Bell filter: split into reflection (LP) and radiation (HP)
-            let bell_alpha = (*bell_cutoff * dt * PI).min(0.99);
-            *bell_lp_state += bell_alpha * (reflected - *bell_lp_state);
-            let bell_reflected = *bell_lp_state * -0.95; // reflected back (inverted, lossy)
-            let bell_radiated = reflected - *bell_lp_state; // HP: radiated output
-
-            // HP filter for output brightness
-            let prev_hp = *bell_hp_state;
-            *bell_hp_state = bell_radiated;
-            let output = bell_radiated * 0.7 + (bell_radiated - prev_hp) * 0.3;
-
-            // Pressure difference across lip reed
-            let delta_p = *blowing_pressure - bell_reflected;
-
-            // Lip reed oscillator (leapfrog integration)
+            let bp = *blowing_pressure;
             let omega = *lip_freq * TAU;
-            let spring_force = -omega * omega * *lip_x;
-            let damping_force = -*lip_damping * omega * *lip_v;
-            let driving_force = delta_p * 0.5;
-            let accel = (spring_force + damping_force + driving_force) * *lip_mass_inv;
+
+            // Read reflected wave from bell end
+            let bell_idx = (*bore_pos + n / 2) % n;
+            let p_at_bell = bore_delay[bell_idx];
+
+            // Bell reflection: LP splits into reflected (stays) and radiated (output)
+            let bell_alpha = (TAU * *bell_cutoff * dt).min(0.95);
+            *bell_lp_state += bell_alpha * (p_at_bell - *bell_lp_state);
+            let bell_reflected = *bell_lp_state * -0.7;
+            let radiated = p_at_bell - *bell_lp_state;
+
+            // Read feedback from bore at lip position
+            let p_back = bore_delay[*bore_pos];
+
+            // Lip reed: driven oscillator with nonlinear coupling to bore
+            // Aero force: pressure * opening (positive feedback when lip opens)
+            let x = *lip_x;
+            let opening = x.max(0.0);
+            let f_aero = bp * (opening + opening * opening * 30.0);
+            let spring = -omega * omega * x;
+            let damp = -*lip_damping * omega * *lip_v;
+            // Bore feedback modulates the driving force
+            let feedback = -p_back * omega * omega * 0.3;
+            let accel = (spring + damp + f_aero + feedback) * *lip_mass_inv;
             *lip_v += accel * dt;
             *lip_x += *lip_v * dt;
 
-            // Lip opening (can't go negative)
-            let lip_opening = lip_x.max(0.0);
+            // Soft limiter
+            let lim = 0.5;
+            if lip_x.abs() > lim {
+                *lip_x = lip_x.signum() * lim;
+                *lip_v *= -0.1;
+            }
 
-            // Flow through lip opening
-            let dp_abs = delta_p.abs().max(0.0001);
-            let flow = lip_opening * dp_abs.sqrt() * delta_p.signum();
+            // Flow into bore: proportional to lip opening
+            let flow = *lip_x * 2.0;
 
-            // Write flow into bore (with mild nonlinearity for brassiness)
-            let bore_input = soft_clip(flow * 1.5);
+            // Mild bore loss
+            *bore_lp_state += 0.3 * (flow - *bore_lp_state);
+            let bore_input = flow * 0.97 + *bore_lp_state * 0.03 + bell_reflected;
 
-            // Bore viscothermal losses (one-pole LP)
-            let bore_lp_coeff = 0.95;
-            *bore_lp_state += bore_lp_coeff * (bore_input - *bore_lp_state);
-
-            bore_delay[*bore_pos] = *bore_lp_state + bell_reflected;
+            bore_delay[*bore_pos] = bore_input;
             *bore_pos = (*bore_pos + 1) % n;
 
-            output.clamp(-1.0, 1.0)
+            // DC blocker on output
+            let prev_hp = *bell_hp_state;
+            *bell_hp_state = radiated;
+            let _output = radiated - prev_hp + *bell_hp_state * 0.995;
+            // Actually simpler: just use radiated scaled up
+            let out = radiated * 3.0;
+
+            out.clamp(-1.0, 1.0)
         } else {
             0.0
         }
@@ -1889,7 +1976,28 @@ impl Oscillator {
         }
     }
 
-}
+    // ── ElectricPiano ──
+
+    pub fn init_electric_piano(&mut self, freq: f32, ep_type: u8) {
+        self.reclaim_buffers();
+        let brightness = self.ks_brightness;
+        let feedback = self.ks_feedback;
+        let sample_rate = self.sample_rate;
+        self.state = OscState::ElectricPiano(ElectricPianoModel::new());
+        if let OscState::ElectricPiano(ref mut ep) = self.state {
+            ep.init(freq, sample_rate, brightness, feedback, ep_type);
+        }
+    }
+
+    fn tick_electric_piano(&mut self) -> f32 {
+        if let OscState::ElectricPiano(ref mut ep) = self.state {
+            ep.tick()
+        } else {
+            0.0
+        }
+    }
+
+} // impl Oscillator
 
 // ─── Modal Resonator frequency ratio tables ──────────────────────────
 
@@ -2040,8 +2148,257 @@ fn fast_exp(x: f32) -> f32 {
     y.max(0.0)
 }
 
+impl Oscillator {
+    pub fn init_accordion(
+        &mut self,
+        freq: f32,
+        velocity: f32,
+        register: f32,    // 0=fundamental, 1=octave+, 2=musette (detuned), 3=master
+        bellows: f32,      // 0-1 bellows pressure
+    ) {
+        let sr = self.sample_rate;
+        let omega = freq * TAU;
+        // Damping: Q ≈ 8-15 for accordion reeds
+        let q = 10.0 + velocity * 5.0;
+        let damping = omega / q;
+
+        // Second reed: depends on register
+        let (omega2, mix) = match register as u32 {
+            0 => (omega, 0.0),                              // single reed
+            1 => (omega * 2.0, 0.4),                        // octave up
+            2 => (omega * (1.0 + 0.002), 0.5),              // musette (slightly detuned)
+            _ => (omega * 2.0, 0.3),                        // master (mix)
+        };
+        let _damping2 = omega2 / (q * 0.9);
+        let _ = sr; // used implicitly via tick
+
+        // Bellows pressure needs to exceed the critical threshold for self-oscillation.
+        // Scale so that the Bernoulli force can overcome spring restoring at small displacement.
+        // Critical pressure ~ omega^2 * displacement / (displacement + displacement^3 * 50)
+        // At small x: ~ omega^2. So bp must be > omega^2 for instability.
+        let bp = omega * omega * (0.5 + bellows * 0.8) * velocity;
+
+        self.state = OscState::Accordion {
+            reed_x: 0.01,  // initial displacement to start oscillation
+            reed_v: omega * 0.01, // initial velocity kick
+            reed_omega: omega,
+            reed_damping: damping,
+            reed2_x: 0.01,
+            reed2_v: omega2 * 0.01,
+            reed2_omega: omega2,
+            register_mix: mix,
+            bellows_pressure: bp,
+            lp_state: 0.0,
+            dc_x: 0.0,
+            dc_y: 0.0,
+        };
+    }
+
+    fn tick_accordion(&mut self) -> f32 {
+        let dt = 1.0 / self.sample_rate;
+
+        if let OscState::Accordion {
+            reed_x, reed_v, reed_omega, reed_damping,
+            reed2_x, reed2_v, reed2_omega,
+            register_mix, bellows_pressure,
+            lp_state, dc_x, dc_y,
+        } = &mut self.state
+        {
+            let bp = *bellows_pressure;
+            let omega = *reed_omega;
+
+            // Reed 1: free reed driven by Bernoulli-like nonlinear force
+            // The key insight: force must overcome spring restoring force.
+            // Use velocity-dependent driving: pressure drives reed when moving
+            // in the direction of airflow (positive displacement).
+            let x1 = *reed_x;
+            // Aerodynamic force: proportional to pressure, nonlinear in displacement
+            // Positive feedback when reed opens (x > 0): airflow accelerates reed
+            let f_aero = bp * (x1 + x1.abs() * x1 * 50.0);
+            let spring = -omega * omega * x1;
+            let damp = -*reed_damping * *reed_v;
+            let accel = spring + damp + f_aero;
+            *reed_v += accel * dt;
+            *reed_x += *reed_v * dt;
+            // Soft limit via cubic saturation instead of hard clamp
+            let lim = 0.5;
+            if reed_x.abs() > lim {
+                *reed_x = reed_x.signum() * lim;
+                *reed_v *= -0.1; // bounce off limit
+            }
+
+            let out1 = *reed_x;
+
+            // Reed 2 (register reed)
+            let omega2 = *reed2_omega;
+            let x2 = *reed2_x;
+            let f_aero2 = bp * (x2 + x2.abs() * x2 * 50.0);
+            let spring2 = -omega2 * omega2 * x2;
+            let damp2 = -(omega2 / 12.0) * *reed2_v;
+            let accel2 = spring2 + damp2 + f_aero2;
+            *reed2_v += accel2 * dt;
+            *reed2_x += *reed2_v * dt;
+            if reed2_x.abs() > lim {
+                *reed2_x = reed2_x.signum() * lim;
+                *reed2_v *= -0.1;
+            }
+
+            let out2 = *reed2_x;
+
+            // Mix registers
+            let mixed = out1 * (1.0 - *register_mix) + out2 * *register_mix;
+
+            // Mild LP filter for body resonance
+            let lp_alpha = 0.15;
+            *lp_state += lp_alpha * (mixed - *lp_state);
+            let shaped = mixed * 0.6 + *lp_state * 0.4;
+
+            // DC blocker
+            let dc_out = shaped - *dc_x + 0.995 * *dc_y;
+            *dc_x = shaped;
+            *dc_y = dc_out;
+
+            // Scale output — reed displacement is now larger, scale accordingly
+            (dc_out * 2.0).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    // ─── Saxophone (Single Reed Waveguide) ─────────────────────────
+
+    pub fn init_saxophone(
+        &mut self,
+        freq: f32,
+        velocity: f32,
+        reed_stiffness: f32,  // 0-1
+        embouchure: f32,      // 0-1
+        blow_pressure: f32,   // 0-1
+        sax_type: f32,        // 0=soprano, 1=alto, 2=tenor, 3=bari
+    ) {
+        self.reclaim_buffers();
+        let sr = self.sample_rate;
+        let delay_total = sr / freq;
+        let n = (delay_total as usize).max(4);
+
+        // Bell cutoff depends on sax type
+        let bell_cutoff = match sax_type as u32 {
+            0 => 3500.0, // soprano
+            1 => 2500.0, // alto
+            2 => 2000.0, // tenor
+            _ => 1500.0, // bari
+        };
+
+        // Reed stiffness affects reflection: stiffer reed = brighter, harder to play
+        let stiff = 0.3 + reed_stiffness * 0.4; // 0.3-0.7
+        // Embouchure offset shifts the operating point
+        let offset = 0.6 + embouchure * 0.15; // 0.6-0.75 (needs to be > 0.5 for self-oscillation)
+        let pressure = (0.5 + blow_pressure * 0.4) * velocity; // higher base pressure
+
+        // Tone hole coefficient: simulates open holes shifting pitch
+        let tonehole = 0.97 + 0.02 * (1.0 - freq / 2000.0).max(0.0);
+
+        let mut fwd = Self::take_buf(&mut self.pool_a, n);
+        let bwd = Self::take_buf(&mut self.pool_b, n);
+        // Seed forward bore with a small impulse to kickstart oscillation
+        if !fwd.is_empty() {
+            fwd[0] = 0.05 * velocity;
+        }
+
+        self.state = OscState::Saxophone {
+            bore_fwd: fwd,
+            bore_bwd: bwd,
+            bore_pos: 0,
+            reed_stiffness: stiff,
+            reed_table_offset: offset,
+            blowing_pressure: pressure,
+            bell_lp: 0.0,
+            bell_hp: 0.0,
+            bell_cutoff,
+            bore_lp: 0.0,
+            tonehole_coeff: tonehole,
+            dc_x: 0.0,
+            dc_y: 0.0,
+        };
+    }
+
+    fn tick_saxophone(&mut self) -> f32 {
+        let sr = self.sample_rate;
+
+        if let OscState::Saxophone {
+            bore_fwd, bore_bwd, bore_pos,
+            reed_stiffness, reed_table_offset, blowing_pressure,
+            bell_lp, bell_hp, bell_cutoff,
+            bore_lp, tonehole_coeff,
+            dc_x, dc_y,
+        } = &mut self.state
+        {
+            let n = bore_fwd.len();
+            if n == 0 { return 0.0; }
+
+            let dt = 1.0 / sr;
+
+            // Read from the opposite end of the bore (half-wavelength delay)
+            let bell_idx = (*bore_pos + n / 2) % n;
+            let p_at_bell = bore_fwd[bell_idx];
+
+            // Bell reflection filter: LP splits into reflected (stays in bore) and radiated (output)
+            let alpha = (TAU * *bell_cutoff * dt).min(0.95);
+            *bell_lp += alpha * (p_at_bell - *bell_lp);
+            let reflected = *bell_lp * -0.7; // reflection with sign inversion and loss
+            let radiated = p_at_bell - *bell_lp; // radiated = HP component
+
+            // Write reflection back into backward-travelling wave
+            bore_bwd[bell_idx] = reflected * *tonehole_coeff;
+
+            // Reed interaction: read the backward wave arriving at reed
+            let p_back = bore_bwd[*bore_pos];
+
+            // Reed table: nonlinear reflection coefficient
+            // delta_p is pressure difference driving the reed
+            let delta_p = p_back + *blowing_pressure;
+            let reed_refl = (*reed_table_offset - *reed_stiffness * delta_p).clamp(-1.0, 1.0);
+
+            // Pressure entering bore from reed junction
+            // When reed_refl ~ 1: reed closed, reflects backward wave back
+            // When reed_refl ~ 0: reed open, lets blowing pressure through
+            let p_into_bore = *blowing_pressure * (1.0 - reed_refl) * 0.5
+                            + p_back * reed_refl;
+
+            // Mild bore loss (viscothermal, but not heavy filtering)
+            *bore_lp += 0.4 * (p_into_bore - *bore_lp);
+            let bore_out = p_into_bore * 0.98 + *bore_lp * 0.02;
+
+            // Write into forward-travelling delay
+            bore_fwd[*bore_pos] = bore_out;
+
+            // Advance delay line position
+            *bore_pos = (*bore_pos + 1) % n;
+
+            // Output: radiated sound, scaled up
+            let raw_out = radiated * 4.0;
+
+            // DC blocker
+            let dc_out = raw_out - *dc_x + 0.995 * *dc_y;
+            *dc_x = raw_out;
+            *dc_y = dc_out;
+
+            // Track for HP (remove residual DC wobble)
+            *bell_hp = dc_out;
+            let _ = bell_hp; // suppress warning
+
+            dc_out.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+// ─── Free functions ────────────────────────────────────────────────
+
 /// Soft clipping / saturation: tanh approximation for growl/fret buzz.
 #[inline]
+#[allow(dead_code)]
 fn soft_clip(x: f32) -> f32 {
     if x.abs() < 0.5 {
         x

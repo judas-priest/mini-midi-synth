@@ -12,7 +12,35 @@ pub struct Config {
     pub ui: UiSettings,
     #[serde(default)]
     pub cc_map: Option<crate::cc_map::CcMapRaw>,
+    #[serde(default)]
+    pub sf2: Sf2Settings,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Sf2Settings {
+    /// Path to the loaded SF2 file.
+    pub file_path: Option<String>,
+    /// Layer A uses SF2 mode.
+    #[serde(default)]
+    pub layer_a_sf2: bool,
+    /// GM program number for layer A.
+    #[serde(default)]
+    pub layer_a_program: u8,
+    /// Layer B uses SF2 mode.
+    #[serde(default)]
+    pub layer_b_sf2: bool,
+    /// GM program number for layer B.
+    #[serde(default)]
+    pub layer_b_program: u8,
+    /// Drums use SF2 mode.
+    #[serde(default)]
+    pub drums_sf2: bool,
+    /// SF2 internal block size (samples). Higher = less CPU, more latency.
+    #[serde(default = "default_sf2_block_size")]
+    pub block_size: usize,
+}
+
+fn default_sf2_block_size() -> usize { 8 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioSettings {
@@ -54,6 +82,7 @@ impl Default for Config {
             },
             midi: MidiSettings { port_name: None },
             cc_map: None,
+            sf2: Sf2Settings::default(),
             ui: UiSettings {
                 window_width: 720.0,
                 window_height: 400.0,

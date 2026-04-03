@@ -1,0 +1,14 @@
+{
+  "name": "Wurlitzer 200A",
+  "osc_type": 24,
+  "epiano_type": 1,
+  "ks_brightness": 0.62,
+  "ks_feedback": 0.45,
+  "filter_cutoff": 4000.0,
+  "filter_resonance": 0.15,
+  "attack": 0.002,
+  "decay": 0.4,
+  "sustain": 0.65,
+  "release": 0.3,
+  "volume": 0.75
+}

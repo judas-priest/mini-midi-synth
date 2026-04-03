@@ -3,8 +3,8 @@
   "params": {
     "osc_type": 21.0,
     "ks_brightness": 0.18,
-    "ks_feedback": 0.9965,
-    "amp_attack": 0.003,
+    "ks_feedback": 0.083,
+    "amp_attack": 0.002,
     "amp_decay": 4.0,
     "amp_sustain": 0.0,
     "amp_release": 0.8,

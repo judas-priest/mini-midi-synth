@@ -2,10 +2,10 @@
   "name": "Warm Upright (Physical)",
   "params": {
     "osc_type": 21.0,
-    "ks_brightness": 0.42,
-    "ks_feedback": 0.9975,
+    "ks_brightness": 0.38,
+    "ks_feedback": 0.250,
     "amp_attack": 0.001,
-    "amp_decay": 5.0,
+    "amp_decay": 6.0,
     "amp_sustain": 0.0,
     "amp_release": 1.0,
     "filter_cutoff": 20000.0,

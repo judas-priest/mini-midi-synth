@@ -1,0 +1,31 @@
+{
+  "name": "Metal Snare Crack (No Body)",
+  "params": {
+    "osc_type": 12.0,
+
+    "drum_pitch_amount": 10.0,
+    "drum_pitch_decay": 320.0,
+    "drum_noise_level": 0.90,
+    "drum_noise_decay": 25.0,
+    "drum_noise_color": 0.82,
+
+    "noise_level": 0.0,
+
+    "filter_type": 1.0,
+    "filter_cutoff": 380.0,
+    "filter_resonance": 0.0,
+    "filter_key_track": 0.0,
+    "filter_env_amount": 0.0,
+    "filter_attack": 0.001,
+    "filter_decay": 0.1,
+    "filter_sustain": 0.0,
+    "filter_release": 0.04,
+
+    "amp_attack": 0.001,
+    "amp_decay": 0.10,
+    "amp_sustain": 0.0,
+    "amp_release": 0.03,
+
+    "master_volume": 0.95
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Stage 73",
+  "osc_type": 24,
+  "epiano_type": 2,
+  "ks_brightness": 0.65,
+  "ks_feedback": 0.58,
+  "filter_cutoff": 3200.0,
+  "filter_resonance": 0.12,
+  "attack": 0.002,
+  "decay": 0.5,
+  "sustain": 0.7,
+  "release": 0.4,
+  "volume": 0.75
+}

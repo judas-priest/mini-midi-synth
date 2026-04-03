@@ -1,0 +1,25 @@
+{
+  "name": "DX7 E.Piano 1 (fm_ratio 14)",
+  "params": {
+    "osc_type": 8.0,
+    "fm_ratio": 14.0,
+    "fm_index": 3.2,
+    "fm_env_amount": 0.92,
+    "filter_cutoff": 12000.0,
+    "filter_resonance": 0.0,
+    "filter_type": 0.0,
+    "filter_key_track": 0.5,
+    "amp_attack": 0.001,
+    "amp_decay": 2.2,
+    "amp_sustain": 0.0,
+    "amp_release": 1.0,
+    "filter_attack": 0.001,
+    "filter_decay": 0.8,
+    "filter_sustain": 0.0,
+    "filter_release": 0.5,
+    "filter_env_amount": 6000.0,
+    "vel_to_filter": 0.8,
+    "chorus_mix": 0.12,
+    "master_volume": 0.75
+  }
+}

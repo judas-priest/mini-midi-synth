@@ -32,6 +32,10 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Piano", "warm_upright_v2", include_str!("../presets/warm_upright_v2.json")),
     ("Piano", "bright_studio_piano", include_str!("../presets/bright_studio_piano.json")),
     ("Piano", "soft_piano", include_str!("../presets/soft_piano.json")),
+    // Electric Piano physical model (Rhodes/Wurlitzer/Stage73)
+    ("Piano", "rhodes_piano", include_str!("../presets/rhodes_piano.json")),
+    ("Piano", "wurlitzer", include_str!("../presets/wurlitzer.json")),
+    ("Piano", "stage73", include_str!("../presets/stage73.json")),
     // Organ
     ("Organ", "organ_classic", include_str!("../presets/organ_classic.json")),
     ("Organ", "hammond_b3", include_str!("../presets/hammond_b3.json")),
@@ -54,6 +58,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     // Woodwind
     ("Wind", "flute", include_str!("../presets/flute.json")),
     ("Wind", "clarinet", include_str!("../presets/clarinet.json")),
+    ("Wind", "shakuhachi", include_str!("../presets/shakuhachi.json")),
     // Strings (Bowed)
     ("Strings (Bowed)", "violin", include_str!("../presets/violin.json")),
     ("Strings (Bowed)", "viola", include_str!("../presets/viola.json")),
@@ -103,6 +108,9 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Drums", "bass_drum", include_str!("../presets/bass_drum.json")),
     ("Drums", "gong_crash", include_str!("../presets/gong_crash.json")),
     ("Drums", "snare", include_str!("../presets/snare.json")),
+    ("Drums", "metal_kick", include_str!("../presets/metal_kick.json")),
+    ("Drums", "metal_snare", include_str!("../presets/metal_snare.json")),
+    ("Drums", "metal_snare_crack", include_str!("../presets/metal_snare_crack.json")),
     // Cinematic
     ("Cinematic", "braam", include_str!("../presets/braam.json")),
     ("Cinematic", "whoosh", include_str!("../presets/whoosh.json")),
@@ -120,6 +128,9 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     // Wavefolder
     ("Wavefolder", "wavefold_lead", include_str!("../presets/wavefold_lead.json")),
     ("Wavefolder", "harsh_fold", include_str!("../presets/harsh_fold.json")),
+    ("Wavefolder", "dirty_saw", include_str!("../presets/dirty_saw.json")),
+    ("Wavefolder", "crushed_lead", include_str!("../presets/crushed_lead.json")),
+    ("Wavefolder", "distorted_square", include_str!("../presets/distorted_square.json")),
     // Modal
     ("Modal", "vibraphone_modal", include_str!("../presets/vibraphone_modal.json")),
     ("Modal", "church_bell_modal", include_str!("../presets/church_bell_modal.json")),
@@ -139,14 +150,44 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     // Iconic
     ("Iconic", "tb303_acid", include_str!("../presets/tb303_acid.json")),
     ("Iconic", "tb303_square", include_str!("../presets/tb303_square.json")),
+    ("Iconic", "tb303_acid_v2", include_str!("../presets/tb303_acid_v2.json")),
+    ("Iconic", "tb303_square_v2", include_str!("../presets/tb303_square_v2.json")),
     ("Iconic", "jump_brass", include_str!("../presets/jump_brass.json")),
     ("Iconic", "blade_runner", include_str!("../presets/blade_runner.json")),
     ("Iconic", "juno_pad", include_str!("../presets/juno_pad.json")),
     ("Iconic", "prophet_brass", include_str!("../presets/prophet_brass.json")),
     ("Iconic", "cs80_strings", include_str!("../presets/cs80_strings.json")),
     ("Iconic", "odyssey_lead", include_str!("../presets/odyssey_lead.json")),
+    ("Iconic", "the_sync", include_str!("../presets/the_sync.json")),
+    ("Iconic", "fairlight_arr1", include_str!("../presets/fairlight_arr1.json")),
+    ("Iconic", "synth_brass_80s", include_str!("../presets/synth_brass_80s.json")),
+    ("Iconic", "dx7_epiano_v2", include_str!("../presets/dx7_epiano_v2.json")),
+    ("Iconic", "house_piano_m1", include_str!("../presets/house_piano_m1.json")),
+    ("Iconic", "dx7_bass", include_str!("../presets/dx7_bass.json")),
+    ("Iconic", "dx7_tubular_bell", include_str!("../presets/dx7_tubular_bell.json")),
+    ("Iconic", "d50_pizzagogo", include_str!("../presets/d50_pizzagogo.json")),
     ("Iconic", "minimoog_lead", include_str!("../presets/minimoog_lead.json")),
     ("Iconic", "dx7_epiano", include_str!("../presets/dx7_epiano.json")),
+    // Scooter style
+    ("Scooter", "scooter_hyper_lead", include_str!("../presets/scooter_hyper_lead.json")),
+    ("Scooter", "scooter_hoover", include_str!("../presets/scooter_hoover.json")),
+    ("Scooter", "scooter_hard_stab", include_str!("../presets/scooter_hard_stab.json")),
+    ("Scooter", "scooter_hard_bass", include_str!("../presets/scooter_hard_bass.json")),
+    ("Scooter", "scooter_rave_stab", include_str!("../presets/scooter_rave_stab.json")),
+    ("Scooter", "scooter_supersaw_lead", include_str!("../presets/scooter_supersaw_lead.json")),
+    ("Scooter", "scooter_rave_pad", include_str!("../presets/scooter_rave_pad.json")),
+    ("Scooter", "scooter_arpegg", include_str!("../presets/scooter_arpegg.json")),
+    // Accordion
+    ("Accordion", "accordion", include_str!("../presets/accordion.json")),
+    ("Accordion", "accordion_musette", include_str!("../presets/accordion_musette.json")),
+    ("Accordion", "accordion_master", include_str!("../presets/accordion_master.json")),
+    ("Accordion", "harmonica", include_str!("../presets/harmonica.json")),
+    ("Accordion", "blues_harp", include_str!("../presets/blues_harp.json")),
+    // Saxophone
+    ("Saxophone", "soprano_sax", include_str!("../presets/soprano_sax.json")),
+    ("Saxophone", "alto_sax", include_str!("../presets/alto_sax.json")),
+    ("Saxophone", "tenor_sax", include_str!("../presets/tenor_sax.json")),
+    ("Saxophone", "bari_sax", include_str!("../presets/bari_sax.json")),
 ];
 
 /// Return user preset directory (~/.config/mini_midi_synth/presets/).

@@ -31,7 +31,7 @@ const OSC_NAMES: &[&str] = &[
     "Karplus-Strong", "Organ", "FM Piano", "Piano (Physical)", "Piano (Banded)",
     "Piano (Additive)", "Drum Synth", "Bass Guitar", "Bowed String", "Brass",
     "Phase Dist", "Wavefolder", "Modal", "Hard Sync", "Supersaw",
-    "Piano (Inharmonic)",
+    "Piano (Inharmonic)", "Accordion", "Saxophone", "E.Piano (Rhodes/Wurli)",
 ];
 const PD_SHAPE_NAMES: &[&str] = &["Saw", "Square", "Pulse", "DoubleSine", "SawPulse", "Reso1", "Reso2", "Reso3"];
 const FOLD_SOURCE_NAMES: &[&str] = &["Sine", "Triangle", "Saw"];
@@ -44,6 +44,8 @@ const BASS_STYLE_NAMES: &[&str] = &["Finger", "Pick", "Slap"];
 const BASS_PICKUP_NAMES: &[&str] = &["Bridge", "Neck", "Both"];
 const BOWED_BODY_NAMES: &[&str] = &["Violin", "Viola", "Cello", "Double Bass"];
 const BRASS_BELL_NAMES: &[&str] = &["Trumpet", "French Horn", "Trombone", "Tuba"];
+const ACCORDION_REGISTER_NAMES: &[&str] = &["Fundamental", "Octave+", "Musette", "Master"];
+const SAX_TYPE_NAMES: &[&str] = &["Soprano", "Alto", "Tenor", "Baritone"];
 const SIMPLE_OSC_NAMES: &[&str] = &["Sine", "Saw", "Square", "Triangle", "FM"];
 const FILTER_NAMES: &[&str] = &["LowPass", "HighPass", "BandPass", "Formant", "Moog 24dB", "Moog 12dB", "Diode 18dB"];
 const FILTER_ROUTING_NAMES: &[&str] = &["Single", "Serial", "Parallel"];
@@ -64,6 +66,35 @@ pub struct LayerState {
     pub volume: f32,
     pub min_note: u8,
     pub max_note: u8,
+    pub sf2_mode: bool,
+    pub sf2_program: u8,
+}
+
+/// Scan for .sf2 files in the standard data directory.
+pub fn scan_sf2_files() -> Vec<(String, std::path::PathBuf)> {
+    let dir = sf2_dir();
+    let mut result = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("sf2") {
+                let name = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("?")
+                    .to_string();
+                result.push((name, path));
+            }
+        }
+    }
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    result
+}
+
+fn sf2_dir() -> std::path::PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("mini_midi_synth")
+        .join("sf2")
 }
 
 fn note_name(note: u8) -> String {
@@ -160,6 +191,14 @@ pub struct App {
     pub setlist_editor_entries: Vec<String>,
     pub last_config_save: std::time::Instant,
     pub global_dirty: bool,
+    // SF2 sampler
+    pub sf2_file_list: Vec<(String, std::path::PathBuf)>,
+    pub sf2_selected: Option<usize>,
+    pub sf2_loaded_name: String,
+    pub sf2_status: String,
+    pub sf2_drums_enabled: bool,
+    pub sf2_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
+    pub sf2_block_size: usize,
 }
 
 impl eframe::App for App {
@@ -286,72 +325,141 @@ impl eframe::App for App {
             self.draw_setlist_bar(ui);
         });
 
-        // Right: preset list (for active layer)
+        // Right: preset list (for active layer) or GM instrument list (SF2 mode)
         egui::SidePanel::right("preset_panel")
             .resizable(true)
             .default_width(160.0)
             .min_width(120.0)
             .show(ctx, |ui| {
+                let layer = self.active_layer;
+                let is_sf2 = self.layers[layer].sf2_mode && self.sf2_soundfont.is_some();
+                let layer_label = LAYER_NAMES.get(layer).unwrap_or(&"?");
+
                 ui.add_space(4.0);
-                let layer_label = LAYER_NAMES.get(self.active_layer).unwrap_or(&"?");
-                ui.strong(format!("Presets (Layer {layer_label})"));
+                if is_sf2 {
+                    ui.strong(format!("GM Instruments (Layer {layer_label})"));
+                } else {
+                    ui.strong(format!("Presets (Layer {layer_label})"));
+                }
                 ui.add_space(4.0);
                 ui.separator();
 
-                let current_preset_idx = self.layers[self.active_layer].preset_idx;
-                let mut new_idx: Option<usize> = None;
-                let mut toggled_category: Option<String> = None;
+                if is_sf2 {
+                    // GM instrument list with same category style as synth presets
+                    use crate::synth::sampler::GM_PROGRAM_NAMES;
+                    let current_program = self.layers[layer].sf2_program;
+                    let mut toggled_cat: Option<&str> = None;
 
-                // Collect category info to avoid borrow conflicts
-                let categories: Vec<(String, usize)> = {
-                    let mut cats = Vec::new();
-                    let mut last = String::new();
-                    for (i, p) in self.presets.iter().enumerate() {
-                        if p.category != last {
-                            cats.push((p.category.clone(), i));
-                            last = p.category.clone();
-                        }
-                    }
-                    cats
-                };
+                    let gm_categories: &[(&str, usize, usize)] = &[
+                        ("Piano", 0, 8),
+                        ("Chromatic Perc", 8, 16),
+                        ("Organ", 16, 24),
+                        ("Guitar", 24, 32),
+                        ("Bass", 32, 40),
+                        ("Strings", 40, 48),
+                        ("Ensemble", 48, 56),
+                        ("Brass", 56, 64),
+                        ("Reed", 64, 72),
+                        ("Pipe", 72, 80),
+                        ("Synth Lead", 80, 88),
+                        ("Synth Pad", 88, 96),
+                        ("Synth FX", 96, 104),
+                        ("Ethnic", 104, 112),
+                        ("Percussive", 112, 120),
+                        ("Sound FX", 120, 128),
+                    ];
 
-                egui::ScrollArea::vertical()
-                    .auto_shrink(false)
-                    .show(ui, |ui| {
-                        let mut cat_idx = 0;
-                        for (i, preset) in self.presets.iter().enumerate() {
-                            if cat_idx < categories.len() && categories[cat_idx].1 == i {
-                                let cat = &categories[cat_idx].0;
-                                let is_collapsed = self.collapsed_categories.contains(cat);
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .show(ui, |ui| {
+                            for &(cat_name, start, end) in gm_categories {
+                                let is_collapsed = self.collapsed_categories.contains(cat_name);
                                 let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
-                                if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
-                                    toggled_category = Some(cat.clone());
+                                if ui.selectable_label(false, format!("{arrow} {cat_name}")).clicked() {
+                                    toggled_cat = Some(cat_name);
                                 }
-                                cat_idx += 1;
+                                if !is_collapsed {
+                                    for i in start..end {
+                                        let name = GM_PROGRAM_NAMES[i];
+                                        let selected = current_program == i as u8;
+                                        if ui.selectable_label(selected, format!("  {name}")).clicked() && !selected {
+                                            self.layers[layer].sf2_program = i as u8;
+                                            let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Program {
+                                                layer, program: i as u8, bank: 0,
+                                            });
+                                            if layer == 0 { self.config.sf2.layer_a_program = i as u8; }
+                                            else { self.config.sf2.layer_b_program = i as u8; }
+                                            let _ = self.config.save();
+                                        }
+                                    }
+                                }
                             }
-                            if !self.collapsed_categories.contains(&preset.category) {
-                                let selected = i == current_preset_idx;
-                                if ui.selectable_label(selected, format!("  {}", preset.name)).clicked() && !selected {
-                                    new_idx = Some(i);
-                                }
+                        });
+
+                    if let Some(cat) = toggled_cat {
+                        let cat_string = cat.to_string();
+                        if self.collapsed_categories.contains(&cat_string) {
+                            self.collapsed_categories.remove(&cat_string);
+                        } else {
+                            self.collapsed_categories.insert(cat_string);
+                        }
+                        self.save_collapsed_categories();
+                    }
+                } else {
+                    // Synth preset list
+                    let current_preset_idx = self.layers[layer].preset_idx;
+                    let mut new_idx: Option<usize> = None;
+                    let mut toggled_category: Option<String> = None;
+
+                    let categories: Vec<(String, usize)> = {
+                        let mut cats = Vec::new();
+                        let mut last = String::new();
+                        for (i, p) in self.presets.iter().enumerate() {
+                            if p.category != last {
+                                cats.push((p.category.clone(), i));
+                                last = p.category.clone();
                             }
                         }
-                    });
+                        cats
+                    };
 
-                if let Some(cat) = toggled_category {
-                    if self.collapsed_categories.contains(&cat) {
-                        self.collapsed_categories.remove(&cat);
-                    } else {
-                        self.collapsed_categories.insert(cat);
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .show(ui, |ui| {
+                            let mut cat_idx = 0;
+                            for (i, preset) in self.presets.iter().enumerate() {
+                                if cat_idx < categories.len() && categories[cat_idx].1 == i {
+                                    let cat = &categories[cat_idx].0;
+                                    let is_collapsed = self.collapsed_categories.contains(cat);
+                                    let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                                    if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
+                                        toggled_category = Some(cat.clone());
+                                    }
+                                    cat_idx += 1;
+                                }
+                                if !self.collapsed_categories.contains(&preset.category) {
+                                    let selected = i == current_preset_idx;
+                                    if ui.selectable_label(selected, format!("  {}", preset.name)).clicked() && !selected {
+                                        new_idx = Some(i);
+                                    }
+                                }
+                            }
+                        });
+
+                    if let Some(cat) = toggled_category {
+                        if self.collapsed_categories.contains(&cat) {
+                            self.collapsed_categories.remove(&cat);
+                        } else {
+                            self.collapsed_categories.insert(cat);
+                        }
+                        self.save_collapsed_categories();
                     }
-                    self.save_collapsed_categories();
-                }
-                if let Some(idx) = new_idx {
-                    let layer = self.active_layer;
-                    self.layers[layer].preset_idx = idx;
-                    self.load_edited_params(layer);
-                    self.send_edited_params(layer);
-                    self.save_config();
+                    if let Some(idx) = new_idx {
+                        self.layers[layer].preset_idx = idx;
+                        self.load_edited_params(layer);
+                        self.send_edited_params(layer);
+                        self.save_config();
+                    }
                 }
             });
 
@@ -381,9 +489,38 @@ impl eframe::App for App {
                 self.draw_looper(ui);
                 ui.separator();
                 ui.add_space(4.0);
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                    self.draw_params_editable(ui);
-                });
+                let layer = self.active_layer;
+                let is_sf2 = self.layers[layer].sf2_mode;
+                // Synth / SF2 toggle
+                if self.sf2_soundfont.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.label("Mode:");
+                        let mut sf2 = is_sf2;
+                        if ui.selectable_label(!sf2, "Synth").clicked() { sf2 = false; }
+                        if ui.selectable_label(sf2, "SF2").clicked() { sf2 = true; }
+                        if sf2 != is_sf2 {
+                            self.layers[layer].sf2_mode = sf2;
+                            let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer, enabled: sf2 });
+                            // Save to config
+                            if layer == 0 { self.config.sf2.layer_a_sf2 = sf2; }
+                            else { self.config.sf2.layer_b_sf2 = sf2; }
+                            let _ = self.config.save();
+                        }
+                    });
+                }
+                if is_sf2 && self.sf2_soundfont.is_some() {
+                    use crate::synth::sampler::GM_PROGRAM_NAMES;
+                    let prog = self.layers[layer].sf2_program;
+                    let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
+                    ui.colored_label(
+                        egui::Color32::from_rgb(160, 160, 160),
+                        format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_loaded_name, prog, name),
+                    );
+                } else {
+                    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                        self.draw_params_editable(ui);
+                    });
+                }
             }
         });
     }
@@ -403,6 +540,29 @@ impl App {
         }
         // Ensure config has global params persisted (first run migration)
         self.save_global_to_config();
+
+        // Load SF2 from config if set
+        if let Some(sf2_path) = &self.config.sf2.file_path {
+            // Find in file list
+            let idx = self.sf2_file_list.iter().position(|(_, p)| p.to_string_lossy() == sf2_path.as_str());
+            if let Some(idx) = idx {
+                self.sf2_selected = Some(idx);
+                self.load_sf2(idx);
+            } else {
+                // Try loading directly from path
+                let path = std::path::PathBuf::from(sf2_path);
+                if path.exists() {
+                    let name = path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("?")
+                        .to_string();
+                    self.sf2_file_list.push((name, path));
+                    let idx = self.sf2_file_list.len() - 1;
+                    self.sf2_selected = Some(idx);
+                    self.load_sf2(idx);
+                }
+            }
+        }
     }
 
     fn save_global_to_config(&mut self) {
@@ -443,6 +603,65 @@ impl App {
         let min_note = self.layers[layer].min_note;
         let max_note = self.layers[layer].max_note;
         let _ = self.ctrl_tx.push(ControlEvent::SetLayerRange { layer, min_note, max_note });
+    }
+
+    fn load_sf2(&mut self, idx: usize) {
+        let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
+            self.sf2_status = "File not found".to_string();
+            return;
+        };
+        match std::fs::File::open(&path) {
+            Ok(mut file) => {
+                use std::io::BufReader;
+                let mut reader = BufReader::new(&mut file);
+                match rustysynth::SoundFont::new(&mut reader) {
+                    Ok(sf) => {
+                        let sf = std::sync::Arc::new(sf);
+                        self.sf2_soundfont = Some(sf.clone());
+                        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
+                        let _ = self.ctrl_tx.push(ControlEvent::LoadSoundFont { soundfont: sf });
+                        self.sf2_loaded_name = name;
+                        self.sf2_status = "Loaded".to_string();
+                        // Apply per-layer SF2 modes
+                        for i in 0..2 {
+                            if self.layers[i].sf2_mode {
+                                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: true });
+                                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Program {
+                                    layer: i, program: self.layers[i].sf2_program, bank: 0,
+                                });
+                            }
+                        }
+                        if self.sf2_drums_enabled {
+                            let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
+                        }
+                        // Save to config
+                        self.config.sf2.file_path = Some(path.to_string_lossy().to_string());
+                        let _ = self.config.save();
+                    }
+                    Err(e) => {
+                        self.sf2_status = format!("Parse error: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                self.sf2_status = format!("Open error: {e}");
+            }
+        }
+    }
+
+    fn unload_sf2(&mut self) {
+        self.sf2_soundfont = None;
+        self.sf2_loaded_name.clear();
+        self.sf2_status.clear();
+        // Disable SF2 modes on all layers
+        for i in 0..2 {
+            self.layers[i].sf2_mode = false;
+            let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: false });
+        }
+        self.sf2_drums_enabled = false;
+        let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
+        self.config.sf2.file_path = None;
+        let _ = self.config.save();
     }
 
     fn save_config(&mut self) {
@@ -905,6 +1124,72 @@ impl App {
             });
             changed |= self.param_slider(ui, "lip_tension", "Lip Tension", 0.0, 1.0, false);
             changed |= self.param_slider(ui, "blowing_pressure", "Blowing Pressure", 0.0, 1.0, false);
+        }
+
+        // Accordion params
+        if osc_type == 22 {
+            ui.add_space(4.0);
+            ui.strong("Accordion");
+            ui.horizontal(|ui| {
+                let mut reg = self.layers[layer].edited_params.get("accordion_register").copied().unwrap_or(0.0) as usize;
+                ui.label("Register:");
+                egui::ComboBox::from_id_salt(format!("accordion_reg_{layer}"))
+                    .selected_text(*ACCORDION_REGISTER_NAMES.get(reg).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in ACCORDION_REGISTER_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut reg, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("accordion_register".into(), reg as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "accordion_bellows", "Bellows Pressure", 0.0, 1.0, false);
+        }
+
+        // Saxophone params
+        if osc_type == 23 {
+            ui.add_space(4.0);
+            ui.strong("Saxophone");
+            ui.horizontal(|ui| {
+                let mut st = self.layers[layer].edited_params.get("sax_type").copied().unwrap_or(1.0) as usize;
+                ui.label("Type:");
+                egui::ComboBox::from_id_salt(format!("sax_type_{layer}"))
+                    .selected_text(*SAX_TYPE_NAMES.get(st).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in SAX_TYPE_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut st, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("sax_type".into(), st as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "sax_reed_stiffness", "Reed Stiffness", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "sax_embouchure", "Embouchure", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "sax_blow_pressure", "Blow Pressure", 0.0, 1.0, false);
+        }
+
+        // Electric Piano params
+        if osc_type == 24 {
+            ui.add_space(4.0);
+            ui.strong("Electric Piano");
+            ui.horizontal(|ui| {
+                let mut ep_t = self.layers[layer].edited_params.get("epiano_type").copied().unwrap_or(0.0) as usize;
+                ui.label("Model:");
+                egui::ComboBox::from_id_salt(format!("epiano_type_{layer}"))
+                    .selected_text(*["Rhodes MkII", "Wurlitzer 200A", "Stage 73"].get(ep_t).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in ["Rhodes MkII", "Wurlitzer 200A", "Stage 73"].iter().enumerate() {
+                            if ui.selectable_value(&mut ep_t, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("epiano_type".into(), ep_t as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "ks_brightness", "Brightness (Strike)", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "ks_feedback", "Sustain", 0.0, 1.0, false);
         }
 
         // Square wave — pulse width control
@@ -2243,6 +2528,91 @@ impl App {
                         self.apply_midi();
                     }
                 });
+
+                // SF2 SoundFont section
+                ui.add_space(12.0);
+                ui.heading("SoundFont (SF2)");
+
+                ui.horizontal(|ui| {
+                    let current = if self.sf2_loaded_name.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        self.sf2_loaded_name.clone()
+                    };
+                    ui.label("File:");
+                    egui::ComboBox::from_id_salt("sf2_file")
+                        .selected_text(&current)
+                        .width(220.0)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(self.sf2_selected.is_none(), "(none)").clicked() {
+                                self.sf2_selected = None;
+                            }
+                            for (i, (name, _)) in self.sf2_file_list.iter().enumerate() {
+                                if ui.selectable_label(self.sf2_selected == Some(i), name).clicked() {
+                                    self.sf2_selected = Some(i);
+                                }
+                            }
+                        });
+                });
+
+                ui.horizontal(|ui| {
+                    if ui.button("Load").clicked() {
+                        if let Some(idx) = self.sf2_selected {
+                            self.load_sf2(idx);
+                        } else {
+                            self.unload_sf2();
+                        }
+                    }
+                    if ui.button("\u{21BB} Scan").clicked() {
+                        self.sf2_file_list = scan_sf2_files();
+                    }
+                    if ui.button("Open folder").clicked() {
+                        let dir = sf2_dir();
+                        let _ = std::fs::create_dir_all(&dir);
+                        let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+                    }
+                });
+
+                if !self.sf2_loaded_name.is_empty() {
+                    ui.horizontal(|ui| {
+                        let mut drums = self.sf2_drums_enabled;
+                        if ui.checkbox(&mut drums, "SF2 Drums").changed() {
+                            self.sf2_drums_enabled = drums;
+                            let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: drums });
+                            self.config.sf2.drums_sf2 = drums;
+                            let _ = self.config.save();
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Block size:");
+                        let mut bs = self.sf2_block_size;
+                        let old = bs;
+                        egui::ComboBox::from_id_salt("sf2_block")
+                            .selected_text(format!("{bs} samples"))
+                            .show_ui(ui, |ui| {
+                                for &s in &[8, 16, 32, 64] {
+                                    let ms = s as f32 / self.sample_rate as f32 * 1000.0;
+                                    ui.selectable_value(&mut bs, s, format!("{s} ({ms:.2}ms)"));
+                                }
+                            });
+                        if bs != old {
+                            self.sf2_block_size = bs;
+                            let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: bs });
+                            self.config.sf2.block_size = bs;
+                            let _ = self.config.save();
+                        }
+                    });
+                }
+
+                ui.colored_label(
+                    egui::Color32::from_rgb(140, 140, 140),
+                    format!("Place .sf2 files in: {}", sf2_dir().display()),
+                );
+
+                if !self.sf2_status.is_empty() {
+                    ui.colored_label(egui::Color32::YELLOW, &self.sf2_status);
+                }
 
                 if !self.settings_status.is_empty() {
                     ui.add_space(6.0);

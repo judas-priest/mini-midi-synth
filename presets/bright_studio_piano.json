@@ -2,10 +2,10 @@
   "name": "Bright Studio Piano",
   "params": {
     "osc_type": 21.0,
-    "ks_brightness": 0.92,
-    "ks_feedback": 0.9992,
+    "ks_brightness": 0.88,
+    "ks_feedback": 0.667,
     "amp_attack": 0.001,
-    "amp_decay": 10.0,
+    "amp_decay": 11.0,
     "amp_sustain": 0.0,
     "amp_release": 2.0,
     "filter_cutoff": 20000.0,
