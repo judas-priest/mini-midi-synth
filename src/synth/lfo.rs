@@ -76,8 +76,9 @@ impl Lfo {
                     self.sh_value =
                         (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
                 }
-                // Slew limiter to avoid zipper noise (~5ms smoothing)
-                self.sh_smooth += 0.005 * (self.sh_value - self.sh_smooth);
+                // Slew limiter: rate-dependent (~25% of LFO period for transition)
+                let coeff = (rate * 4.0 / self.sample_rate).clamp(0.0001, 0.5);
+                self.sh_smooth += coeff * (self.sh_value - self.sh_smooth);
                 self.sh_smooth
             }
         }

@@ -300,6 +300,106 @@ pub fn list_drum_kits() -> Vec<(String, PathBuf)> {
 }
 
 // ---------------------------------------------------------------------------
+// MIDI drum import
+// ---------------------------------------------------------------------------
+
+/// Import drum patterns from a standard MIDI file (.mid).
+/// Extracts notes on channel 10 (GM drums), quantizes to 16-step grid,
+/// splits into bars (up to 8 patterns).
+pub fn import_midi_drums(path: &std::path::Path) -> Result<(Vec<DrumPattern>, f32)> {
+    use crate::synth::drum::{DRUM_NOTE_BASE, NUM_DRUM_SLOTS};
+
+    let data = fs::read(path).context("Failed to read MIDI file")?;
+    let smf = midly::Smf::parse(&data).map_err(|e| anyhow::anyhow!("MIDI parse error: {e}"))?;
+
+    let ppq = match smf.header.timing {
+        midly::Timing::Metrical(tpb) => tpb.as_int() as u32,
+        midly::Timing::Timecode(fps, sub) => {
+            // Approximate: treat as if metrical
+            (fps.as_int() as u32) * (sub as u32)
+        }
+    };
+    if ppq == 0 {
+        anyhow::bail!("Invalid MIDI timing (PPQ=0)");
+    }
+
+    // 16 steps per bar in 4/4 = 16th notes
+    let ticks_per_step = ppq * 4 / 16; // ppq * 4 quarter notes / 16 steps
+
+    // Extract tempo (first tempo event, default 120 BPM)
+    let mut bpm: f32 = 120.0;
+    for track in &smf.tracks {
+        for event in track {
+            if let midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(t)) = event.kind {
+                bpm = 60_000_000.0 / t.as_int() as f32;
+                break;
+            }
+        }
+        if (bpm - 120.0).abs() > 0.01 { break; }
+    }
+
+    // GM drum note range we support: 36-51 (slots 0-15)
+    // Also map note 35 (Acoustic Bass Drum) → slot 0 (Kick)
+    let map_note = |note: u8| -> Option<usize> {
+        if note == 35 { return Some(0); } // Bass drum → kick
+        if note >= DRUM_NOTE_BASE && note < DRUM_NOTE_BASE + NUM_DRUM_SLOTS as u8 {
+            Some((note - DRUM_NOTE_BASE) as usize)
+        } else {
+            None // outside our range
+        }
+    };
+
+    // Collect all (absolute_step, slot, velocity) hits across all tracks
+    let mut hits: Vec<(u32, usize, u8)> = Vec::new();
+
+    for track in &smf.tracks {
+        let mut abs_tick: u64 = 0;
+        for event in track {
+            abs_tick += event.delta.as_int() as u64;
+            if let midly::TrackEventKind::Midi { channel, message } = event.kind {
+                // Channel 9 = GM drums (0-indexed)
+                if channel.as_int() != 9 { continue; }
+                let (note, vel) = match message {
+                    midly::MidiMessage::NoteOn { key, vel } => {
+                        (key.as_int(), vel.as_int())
+                    }
+                    _ => continue,
+                };
+                if vel == 0 { continue; } // NoteOn vel=0 = NoteOff
+                if let Some(slot) = map_note(note) {
+                    let step = ((abs_tick as f64 / ticks_per_step as f64).round()) as u32;
+                    hits.push((step, slot, vel));
+                }
+            }
+        }
+    }
+
+    if hits.is_empty() {
+        anyhow::bail!("No drum notes found on channel 10");
+    }
+
+    // Find total steps and split into bars of 16
+    let max_step = hits.iter().map(|(s, _, _)| *s).max().unwrap_or(0);
+    let num_bars = ((max_step / 16) + 1).min(8) as usize; // cap at 8 patterns
+
+    let mut patterns: Vec<DrumPattern> = vec![DrumPattern::default(); num_bars];
+
+    for (step, slot, vel) in &hits {
+        let bar = (*step / 16) as usize;
+        let step_in_bar = (*step % 16) as usize;
+        if bar < num_bars && step_in_bar < 16 && *slot < NUM_DRUM_SLOTS {
+            // Take highest velocity if multiple hits on same step
+            let existing = patterns[bar].steps[*slot][step_in_bar].velocity;
+            if *vel > existing {
+                patterns[bar].steps[*slot][step_in_bar].velocity = *vel;
+            }
+        }
+    }
+
+    Ok((patterns, bpm))
+}
+
+// ---------------------------------------------------------------------------
 // Performance presets (split/layer combos)
 // ---------------------------------------------------------------------------
 
@@ -313,6 +413,12 @@ pub struct PartConfig {
     pub key_high: u8,
     #[serde(default)]
     pub param_overrides: BTreeMap<String, f32>,
+    /// If true, this layer uses SF2 soundfont instead of DSP preset.
+    #[serde(default)]
+    pub sf2_mode: bool,
+    /// SF2 program number (0-127).
+    #[serde(default)]
+    pub sf2_program: u8,
 }
 
 /// A saved split/layer configuration.

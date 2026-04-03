@@ -169,6 +169,7 @@ pub struct App {
     pub drum_kit_name: String,
     pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
     pub drum_kit_status: String,
+    pub drum_midi_import_path: String,
     // Looper
     pub show_looper: bool,
     pub looper_atoms: std::sync::Arc<LooperAtoms>,
@@ -193,11 +194,14 @@ pub struct App {
     pub global_dirty: bool,
     // SF2 sampler
     pub sf2_file_list: Vec<(String, std::path::PathBuf)>,
-    pub sf2_selected: Option<usize>,
-    pub sf2_loaded_name: String,
+    pub sf2_keys_selected: Option<usize>,
+    pub sf2_keys_loaded_name: String,
+    pub sf2_drums_selected: Option<usize>,
+    pub sf2_drums_loaded_name: String,
     pub sf2_status: String,
     pub sf2_drums_enabled: bool,
-    pub sf2_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
+    pub sf2_keys_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
+    pub sf2_drums_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
     pub sf2_block_size: usize,
 }
 
@@ -285,11 +289,12 @@ impl eframe::App for App {
                     ));
                 });
             });
-            ui.add_space(2.0);
+            ui.add_space(4.0);
         });
 
         // Global controls bar
         egui::TopBottomPanel::top("global_controls").show(ctx, |ui| {
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
                 // Master Volume (global)
                 let mut vol = self.global_params.get("master_volume").copied().unwrap_or(0.8);
@@ -311,6 +316,7 @@ impl eframe::App for App {
                     self.global_dirty = true;
                 }
             });
+            ui.add_space(4.0);
         });
 
         // Bottom: keyboard
@@ -332,7 +338,7 @@ impl eframe::App for App {
             .min_width(120.0)
             .show(ctx, |ui| {
                 let layer = self.active_layer;
-                let is_sf2 = self.layers[layer].sf2_mode && self.sf2_soundfont.is_some();
+                let is_sf2 = self.layers[layer].sf2_mode && self.sf2_keys_soundfont.is_some();
                 let layer_label = LAYER_NAMES.get(layer).unwrap_or(&"?");
 
                 ui.add_space(4.0);
@@ -478,21 +484,24 @@ impl eframe::App for App {
 
         // Central: layer tabs + parameters / drum sequencer
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.draw_layer_tabs(ui);
-            ui.separator();
             ui.add_space(4.0);
+            self.draw_layer_tabs(ui);
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(6.0);
             if self.show_drums {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     self.draw_drum_sequencer(ui);
                 });
             } else {
                 self.draw_looper(ui);
+                ui.add_space(2.0);
                 ui.separator();
-                ui.add_space(4.0);
+                ui.add_space(6.0);
                 let layer = self.active_layer;
                 let is_sf2 = self.layers[layer].sf2_mode;
                 // Synth / SF2 toggle
-                if self.sf2_soundfont.is_some() {
+                if self.sf2_keys_soundfont.is_some() {
                     ui.horizontal(|ui| {
                         ui.label("Mode:");
                         let mut sf2 = is_sf2;
@@ -508,13 +517,13 @@ impl eframe::App for App {
                         }
                     });
                 }
-                if is_sf2 && self.sf2_soundfont.is_some() {
+                if is_sf2 && self.sf2_keys_soundfont.is_some() {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
                     let prog = self.layers[layer].sf2_program;
                     let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
                     ui.colored_label(
                         egui::Color32::from_rgb(160, 160, 160),
-                        format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_loaded_name, prog, name),
+                        format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_keys_loaded_name, prog, name),
                     );
                 } else {
                     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
@@ -542,26 +551,41 @@ impl App {
         self.save_global_to_config();
 
         // Load SF2 from config if set
-        if let Some(sf2_path) = &self.config.sf2.file_path {
-            // Find in file list
-            let idx = self.sf2_file_list.iter().position(|(_, p)| p.to_string_lossy() == sf2_path.as_str());
+        // Keys SF2 (fallback to legacy file_path)
+        let keys_path = self.config.sf2.keys_file_path.clone()
+            .or_else(|| self.config.sf2.file_path.clone());
+        if let Some(sf2_path) = keys_path {
+            let idx = self.find_or_add_sf2(&sf2_path);
             if let Some(idx) = idx {
-                self.sf2_selected = Some(idx);
-                self.load_sf2(idx);
-            } else {
-                // Try loading directly from path
-                let path = std::path::PathBuf::from(sf2_path);
-                if path.exists() {
-                    let name = path.file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("?")
-                        .to_string();
-                    self.sf2_file_list.push((name, path));
-                    let idx = self.sf2_file_list.len() - 1;
-                    self.sf2_selected = Some(idx);
-                    self.load_sf2(idx);
-                }
+                self.sf2_keys_selected = Some(idx);
+                self.load_sf2_keys(idx);
             }
+        }
+        // Drums SF2
+        if let Some(sf2_path) = self.config.sf2.drums_file_path.clone() {
+            let idx = self.find_or_add_sf2(&sf2_path);
+            if let Some(idx) = idx {
+                self.sf2_drums_selected = Some(idx);
+                self.load_sf2_drums(idx);
+            }
+        }
+    }
+
+    fn find_or_add_sf2(&mut self, sf2_path: &str) -> Option<usize> {
+        let idx = self.sf2_file_list.iter().position(|(_, p)| p.to_string_lossy() == sf2_path);
+        if let Some(idx) = idx {
+            return Some(idx);
+        }
+        let path = std::path::PathBuf::from(sf2_path);
+        if path.exists() {
+            let name = path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string();
+            self.sf2_file_list.push((name, path));
+            Some(self.sf2_file_list.len() - 1)
+        } else {
+            None
         }
     }
 
@@ -605,62 +629,108 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetLayerRange { layer, min_note, max_note });
     }
 
-    fn load_sf2(&mut self, idx: usize) {
-        let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
-            self.sf2_status = "File not found".to_string();
-            return;
-        };
-        match std::fs::File::open(&path) {
+    /// Parse an SF2 file and return the Arc<SoundFont>, or set sf2_status on error.
+    fn parse_sf2(&mut self, path: &std::path::Path) -> Option<std::sync::Arc<rustysynth::SoundFont>> {
+        match std::fs::File::open(path) {
             Ok(mut file) => {
                 use std::io::BufReader;
                 let mut reader = BufReader::new(&mut file);
                 match rustysynth::SoundFont::new(&mut reader) {
-                    Ok(sf) => {
-                        let sf = std::sync::Arc::new(sf);
-                        self.sf2_soundfont = Some(sf.clone());
-                        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
-                        let _ = self.ctrl_tx.push(ControlEvent::LoadSoundFont { soundfont: sf });
-                        self.sf2_loaded_name = name;
-                        self.sf2_status = "Loaded".to_string();
-                        // Apply per-layer SF2 modes
-                        for i in 0..2 {
-                            if self.layers[i].sf2_mode {
-                                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: true });
-                                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Program {
-                                    layer: i, program: self.layers[i].sf2_program, bank: 0,
-                                });
-                            }
-                        }
-                        if self.sf2_drums_enabled {
-                            let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
-                        }
-                        // Save to config
-                        self.config.sf2.file_path = Some(path.to_string_lossy().to_string());
-                        let _ = self.config.save();
-                    }
-                    Err(e) => {
-                        self.sf2_status = format!("Parse error: {e}");
-                    }
+                    Ok(sf) => Some(std::sync::Arc::new(sf)),
+                    Err(e) => { self.sf2_status = format!("Parse error: {e}"); None }
                 }
             }
-            Err(e) => {
-                self.sf2_status = format!("Open error: {e}");
-            }
+            Err(e) => { self.sf2_status = format!("Open error: {e}"); None }
         }
     }
 
-    fn unload_sf2(&mut self) {
-        self.sf2_soundfont = None;
-        self.sf2_loaded_name.clear();
-        self.sf2_status.clear();
-        // Disable SF2 modes on all layers
+    fn load_sf2_keys(&mut self, idx: usize) {
+        let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
+            self.sf2_status = "File not found".to_string();
+            return;
+        };
+        // Reuse existing drums soundfont if same file
+        let sf = if self.sf2_drums_loaded_name == name {
+            self.sf2_drums_soundfont.clone()
+        } else {
+            None
+        };
+        let sf = match sf {
+            Some(s) => s,
+            None => match self.parse_sf2(&path) {
+                Some(s) => s,
+                None => return,
+            },
+        };
+        self.sf2_keys_soundfont = Some(sf.clone());
+        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
+        let _ = self.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
+        self.sf2_keys_loaded_name = name;
+        self.sf2_status = "Keys SF2 loaded".to_string();
+        // Apply per-layer SF2 modes
+        for i in 0..2 {
+            if self.layers[i].sf2_mode {
+                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: true });
+                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Program {
+                    layer: i, program: self.layers[i].sf2_program, bank: 0,
+                });
+            }
+        }
+        self.config.sf2.keys_file_path = Some(path.to_string_lossy().to_string());
+        self.config.sf2.file_path = self.config.sf2.keys_file_path.clone(); // compat
+        let _ = self.config.save();
+    }
+
+    fn load_sf2_drums(&mut self, idx: usize) {
+        let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
+            self.sf2_status = "File not found".to_string();
+            return;
+        };
+        // Reuse existing keys soundfont if same file
+        let sf = if self.sf2_keys_loaded_name == name {
+            self.sf2_keys_soundfont.clone()
+        } else {
+            None
+        };
+        let sf = match sf {
+            Some(s) => s,
+            None => match self.parse_sf2(&path) {
+                Some(s) => s,
+                None => return,
+            },
+        };
+        self.sf2_drums_soundfont = Some(sf.clone());
+        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
+        let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf });
+        self.sf2_drums_loaded_name = name;
+        self.sf2_status = "Drums SF2 loaded".to_string();
+        if self.sf2_drums_enabled {
+            let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
+        }
+        self.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
+        let _ = self.config.save();
+    }
+
+    fn unload_sf2_keys(&mut self) {
+        self.sf2_keys_soundfont = None;
+        self.sf2_keys_loaded_name.clear();
         for i in 0..2 {
             self.layers[i].sf2_mode = false;
             let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: false });
         }
+        let _ = self.ctrl_tx.push(ControlEvent::UnloadKeysSoundFont);
+        self.config.sf2.keys_file_path = None;
+        self.config.sf2.file_path = None;
+        let _ = self.config.save();
+    }
+
+    fn unload_sf2_drums(&mut self) {
+        self.sf2_drums_soundfont = None;
+        self.sf2_drums_loaded_name.clear();
         self.sf2_drums_enabled = false;
         let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
-        self.config.sf2.file_path = None;
+        let _ = self.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);
+        self.config.sf2.drums_file_path = None;
         let _ = self.config.save();
     }
 
@@ -694,10 +764,19 @@ impl App {
             self.layers[i].min_note = part.key_low;
             self.layers[i].max_note = part.key_high;
             self.layers[i].edited_params = part.param_overrides.clone();
+            self.layers[i].sf2_mode = part.sf2_mode;
+            self.layers[i].sf2_program = part.sf2_program;
             self.send_edited_params(i);
             self.send_layer_enabled(i);
             self.send_layer_volume(i);
             self.send_layer_range(i);
+            // Restore SF2 mode for this layer
+            let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: part.sf2_mode });
+            if part.sf2_mode {
+                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Program {
+                    layer: i, program: part.sf2_program, bank: 0,
+                });
+            }
         }
         true
     }
@@ -883,6 +962,7 @@ impl App {
         }
 
         // Performance save/load
+        ui.add_space(2.0);
         ui.horizontal(|ui| {
             ui.label("Perf:");
             ui.add(egui::TextEdit::singleline(&mut self.perf_name).desired_width(120.0).hint_text("name"));
@@ -898,6 +978,8 @@ impl App {
                         key_low: l.min_note,
                         key_high: l.max_note,
                         param_overrides: l.edited_params.clone(),
+                        sf2_mode: l.sf2_mode,
+                        sf2_program: l.sf2_program,
                     }
                 }).collect();
                 let perf = Performance {
@@ -941,10 +1023,18 @@ impl App {
                             self.layers[i].min_note = part.key_low;
                             self.layers[i].max_note = part.key_high;
                             self.layers[i].edited_params = part.param_overrides.clone();
+                            self.layers[i].sf2_mode = part.sf2_mode;
+                            self.layers[i].sf2_program = part.sf2_program;
                             self.send_edited_params(i);
                             self.send_layer_enabled(i);
                             self.send_layer_volume(i);
                             self.send_layer_range(i);
+                            let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: part.sf2_mode });
+                            if part.sf2_mode {
+                                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Program {
+                                    layer: i, program: part.sf2_program, bank: 0,
+                                });
+                            }
                         }
                         self.perf_status = format!("Loaded: {}", perf.name);
                     }
@@ -1771,6 +1861,39 @@ impl App {
             }
         });
 
+        // Import MIDI drums
+        ui.horizontal(|ui| {
+            ui.label("MIDI:");
+            ui.add(egui::TextEdit::singleline(&mut self.drum_midi_import_path)
+                .desired_width(240.0).hint_text("path to .mid file"));
+            if ui.button("Import").clicked() && !self.drum_midi_import_path.trim().is_empty() {
+                let path = std::path::PathBuf::from(self.drum_midi_import_path.trim());
+                match preset::import_midi_drums(&path) {
+                    Ok((patterns_vec, bpm)) => {
+                        let mut patterns = [DrumPattern::default(); 8];
+                        for i in 0..patterns_vec.len().min(8) {
+                            patterns[i] = patterns_vec[i];
+                        }
+                        self.drum_patterns = patterns;
+                        self.drum_bpm = bpm;
+                        self.drum_kit_status = format!(
+                            "Imported {} bar(s) @ {:.0} BPM from {}",
+                            patterns_vec.len().min(8), bpm,
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        );
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
+                            patterns: Box::new(patterns),
+                            params: Box::new(self.drum_params),
+                            bpm,
+                            swing: self.drum_swing,
+                            volume: self.drum_volume,
+                        });
+                    }
+                    Err(e) => { self.drum_kit_status = format!("Import error: {e}"); }
+                }
+            }
+        });
+
         ui.add_space(4.0);
 
         // Step grid
@@ -2533,36 +2656,67 @@ impl App {
                 ui.add_space(12.0);
                 ui.heading("SoundFont (SF2)");
 
+                // Keys SF2
                 ui.horizontal(|ui| {
-                    let current = if self.sf2_loaded_name.is_empty() {
+                    let current = if self.sf2_keys_loaded_name.is_empty() {
                         "(none)".to_string()
                     } else {
-                        self.sf2_loaded_name.clone()
+                        self.sf2_keys_loaded_name.clone()
                     };
-                    ui.label("File:");
-                    egui::ComboBox::from_id_salt("sf2_file")
+                    ui.label("Keys:");
+                    egui::ComboBox::from_id_salt("sf2_keys_file")
                         .selected_text(&current)
                         .width(220.0)
                         .show_ui(ui, |ui| {
-                            if ui.selectable_label(self.sf2_selected.is_none(), "(none)").clicked() {
-                                self.sf2_selected = None;
+                            if ui.selectable_label(self.sf2_keys_selected.is_none(), "(none)").clicked() {
+                                self.sf2_keys_selected = None;
                             }
                             for (i, (name, _)) in self.sf2_file_list.iter().enumerate() {
-                                if ui.selectable_label(self.sf2_selected == Some(i), name).clicked() {
-                                    self.sf2_selected = Some(i);
+                                if ui.selectable_label(self.sf2_keys_selected == Some(i), name).clicked() {
+                                    self.sf2_keys_selected = Some(i);
                                 }
                             }
                         });
+                    if ui.button("Load").clicked() {
+                        if let Some(idx) = self.sf2_keys_selected {
+                            self.load_sf2_keys(idx);
+                        } else {
+                            self.unload_sf2_keys();
+                        }
+                    }
+                });
+
+                // Drums SF2
+                ui.horizontal(|ui| {
+                    let current = if self.sf2_drums_loaded_name.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        self.sf2_drums_loaded_name.clone()
+                    };
+                    ui.label("Drums:");
+                    egui::ComboBox::from_id_salt("sf2_drums_file")
+                        .selected_text(&current)
+                        .width(220.0)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(self.sf2_drums_selected.is_none(), "(none)").clicked() {
+                                self.sf2_drums_selected = None;
+                            }
+                            for (i, (name, _)) in self.sf2_file_list.iter().enumerate() {
+                                if ui.selectable_label(self.sf2_drums_selected == Some(i), name).clicked() {
+                                    self.sf2_drums_selected = Some(i);
+                                }
+                            }
+                        });
+                    if ui.button("Load").clicked() {
+                        if let Some(idx) = self.sf2_drums_selected {
+                            self.load_sf2_drums(idx);
+                        } else {
+                            self.unload_sf2_drums();
+                        }
+                    }
                 });
 
                 ui.horizontal(|ui| {
-                    if ui.button("Load").clicked() {
-                        if let Some(idx) = self.sf2_selected {
-                            self.load_sf2(idx);
-                        } else {
-                            self.unload_sf2();
-                        }
-                    }
                     if ui.button("\u{21BB} Scan").clicked() {
                         self.sf2_file_list = scan_sf2_files();
                     }
@@ -2573,7 +2727,7 @@ impl App {
                     }
                 });
 
-                if !self.sf2_loaded_name.is_empty() {
+                if !self.sf2_drums_loaded_name.is_empty() {
                     ui.horizontal(|ui| {
                         let mut drums = self.sf2_drums_enabled;
                         if ui.checkbox(&mut drums, "SF2 Drums").changed() {
@@ -2583,7 +2737,9 @@ impl App {
                             let _ = self.config.save();
                         }
                     });
+                }
 
+                if self.sf2_keys_soundfont.is_some() || self.sf2_drums_soundfont.is_some() {
                     ui.horizontal(|ui| {
                         ui.label("Block size:");
                         let mut bs = self.sf2_block_size;

@@ -67,11 +67,12 @@ impl BodyMode {
 
     #[inline]
     fn tick(&mut self, input: f32, sr: f32) -> f32 {
-        let w = (PI * self.freq / sr).sin() * 2.0;
+        // Trapezoidal SVF (stable up to Nyquist, unlike Chamberlin sin()*2)
+        let g = (PI * self.freq.min(sr * 0.45) / sr).tan();
         let q_inv = 1.0 / self.q;
-        let hp = input - self.lp - q_inv * self.bp;
-        self.bp += w * hp;
-        self.lp += w * self.bp;
+        let hp = (input - self.lp - q_inv * self.bp) / (1.0 + g * (g + q_inv));
+        self.bp += g * hp;
+        self.lp += g * self.bp;
         self.bp * self.gain
     }
 }

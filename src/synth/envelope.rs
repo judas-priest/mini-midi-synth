@@ -59,7 +59,7 @@ impl Envelope {
 
         // Overshoot targets for analog-style exponential curves
         self.attack_target = 1.0 + 0.3; // Charge past 1.0 for concave-up attack
-        self.decay_target = self.sustain - 0.001; // Slight undershoot below sustain
+        self.decay_target = (self.sustain - 0.001).max(-0.001); // Never undershoot below -0.001
         self.release_target = -0.01; // Slight undershoot below 0
     }
 
@@ -99,9 +99,13 @@ impl Envelope {
                     + (1.0 - self.decay_coeff) * self.decay_target;
                 if self.output <= self.sustain + 0.001 {
                     self.output = self.sustain;
-                    self.stage = EnvStage::Sustain;
+                    if self.sustain < 0.0001 {
+                        self.stage = EnvStage::Idle; // sustain=0: note is dead
+                    } else {
+                        self.stage = EnvStage::Sustain;
+                    }
                 }
-                self.output
+                self.output.max(0.0) // never output negative amplitude
             }
             EnvStage::Sustain => {
                 self.output = self.sustain;

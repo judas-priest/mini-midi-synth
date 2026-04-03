@@ -87,7 +87,10 @@ pub enum ControlEvent {
     LooperSetQuantize { quantize: u8 },
     AllNotesOff,
     // SF2 sampler controls
-    LoadSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
+    LoadKeysSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
+    LoadDrumsSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
+    UnloadKeysSoundFont,
+    UnloadDrumsSoundFont,
     SetLayerSf2Mode { layer: usize, enabled: bool },
     SetLayerSf2Program { layer: usize, program: u8, bank: u8 },
     SetDrumsSf2Mode { enabled: bool },
@@ -705,7 +708,7 @@ impl SynthEngine {
                             if note >= layer.min_note && note <= layer.max_note {
                                 self.sampler.note_on(i, note, velocity);
                             }
-                        } else {
+                        } else if note >= layer.min_note && note <= layer.max_note {
                             layer.note_on(note, velocity);
                         }
                     }
@@ -738,7 +741,15 @@ impl SynthEngine {
                     }
                 }
             }
-            MidiEvent::ModWheel { value, .. } => { self.mod_wheel = value; }
+            MidiEvent::ModWheel { value, .. } => {
+                self.mod_wheel = value;
+                // Forward to SF2 sampler as CC1 on active SF2 layers
+                for i in 0..2 {
+                    if self.layers.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
+                        self.sampler.mod_wheel(i, value);
+                    }
+                }
+            }
             MidiEvent::ProgramChange { program, .. } => {
                 // In SF2 mode, change the SF2 program; in synth mode, change the synth preset
                 if self.layers.first().map(|l| l.sf2_mode).unwrap_or(false) {
@@ -863,8 +874,17 @@ impl SynthEngine {
                 }
                 self.sampler.all_notes_off();
             }
-            ControlEvent::LoadSoundFont { soundfont } => {
-                self.sampler.load_soundfont(soundfont);
+            ControlEvent::LoadKeysSoundFont { soundfont } => {
+                self.sampler.load_keys_soundfont(soundfont);
+            }
+            ControlEvent::LoadDrumsSoundFont { soundfont } => {
+                self.sampler.load_drums_soundfont(soundfont);
+            }
+            ControlEvent::UnloadKeysSoundFont => {
+                self.sampler.unload_keys();
+            }
+            ControlEvent::UnloadDrumsSoundFont => {
+                self.sampler.unload_drums();
             }
             ControlEvent::SetLayerSf2Mode { layer, enabled } => {
                 if let Some(l) = self.layers.get_mut(layer) {
@@ -877,6 +897,7 @@ impl SynthEngine {
             }
             ControlEvent::SetDrumsSf2Mode { enabled } => {
                 self.sampler.set_drums_enabled(enabled);
+                self.drum_engine.sf2_mode = enabled;
             }
             ControlEvent::SetSf2BlockSize { size } => {
                 self.sampler.set_block_size(size);
@@ -973,10 +994,15 @@ impl SynthEngine {
         out_l += sf2_l;
         out_r += sf2_r;
 
-        // Mix in drum engine
-        let (drum_l, drum_r) = self.drum_engine.tick();
+        // Mix in drum engine + route SF2 drum triggers
+        let ((drum_l, drum_r), drum_triggers) = self.drum_engine.tick();
         out_l += drum_l;
         out_r += drum_r;
+        for i in 0..drum_triggers.count {
+            let (slot, vel) = drum_triggers.triggers[i];
+            let note = drum::DRUM_NOTE_BASE + slot;
+            self.sampler.drum_note_on(note, vel);
+        }
 
         // Effects chain: EQ → Compressor → Overdrive → Phaser → Flanger → Tremolo → Bitcrusher → Chorus → Delay → Reverb
         let (out_l, out_r) = self.eq.tick(out_l, out_r);
@@ -1022,3 +1048,68 @@ impl SynthEngine {
         (tl * vol, tr * vol)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn accordion_full_chain() {
+        let mut synth = SynthEngine::new(44100.0);
+        let presets = crate::preset::load_all_presets();
+        // Find accordion preset
+        let acc_idx = presets.iter().position(|p| p.name == "Accordion").expect("No accordion preset");
+        let params = PresetParams::from_map(&presets[acc_idx].params);
+        eprintln!("Accordion osc_type={}", params.osc_type);
+        synth.set_presets(presets);
+        synth.handle_control(ControlEvent::LoadPreset { layer: 0, params });
+        // Note on
+        synth.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+        let mut max_val = 0.0_f32;
+        for _ in 0..44100 {
+            let (l, r) = synth.tick();
+            max_val = max_val.max(l.abs().max(r.abs()));
+        }
+        eprintln!("Accordion full chain max: {}", max_val);
+        assert!(max_val > 0.01, "Accordion full chain: no sound! max={}", max_val);
+    }
+    
+    #[test]
+    fn saxophone_full_chain() {
+        let mut synth = SynthEngine::new(44100.0);
+        let presets = crate::preset::load_all_presets();
+        let sax_idx = presets.iter().position(|p| p.name == "Alto Saxophone").expect("No alto sax preset");
+        let params = PresetParams::from_map(&presets[sax_idx].params);
+        eprintln!("Saxophone osc_type={}", params.osc_type);
+        synth.set_presets(presets);
+        synth.handle_control(ControlEvent::LoadPreset { layer: 0, params });
+        synth.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+        let mut max_val = 0.0_f32;
+        for _ in 0..44100 {
+            let (l, r) = synth.tick();
+            max_val = max_val.max(l.abs().max(r.abs()));
+        }
+        eprintln!("Saxophone full chain max: {}", max_val);
+        assert!(max_val > 0.01, "Saxophone full chain: no sound! max={}", max_val);
+    }
+
+    #[test]
+    fn brass_full_chain() {
+        let mut synth = SynthEngine::new(44100.0);
+        let presets = crate::preset::load_all_presets();
+        let idx = presets.iter().position(|p| p.name == "Trumpet").expect("No trumpet preset");
+        let params = PresetParams::from_map(&presets[idx].params);
+        eprintln!("Trumpet osc_type={}", params.osc_type);
+        synth.set_presets(presets);
+        synth.handle_control(ControlEvent::LoadPreset { layer: 0, params });
+        synth.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+        let mut max_val = 0.0_f32;
+        for _ in 0..44100 {
+            let (l, r) = synth.tick();
+            max_val = max_val.max(l.abs().max(r.abs()));
+        }
+        eprintln!("Trumpet full chain max: {}", max_val);
+        assert!(max_val > 0.01, "Trumpet full chain: no sound! max={}", max_val);
+    }
+}
+

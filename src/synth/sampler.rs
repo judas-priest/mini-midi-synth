@@ -1,5 +1,6 @@
 /// SF2 sampler engine wrapping rustysynth.
-/// Block-buffered rendering for efficiency (64 samples at a time).
+/// Separate synthesizers for keys (ch0/ch1) and drums (ch9),
+/// allowing different SF2 files. Arc<SoundFont> deduplicates when same file.
 
 use std::sync::Arc;
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
@@ -59,14 +60,80 @@ pub const GM_PROGRAM_NAMES: [&str; 128] = [
     "Telephone Ring", "Helicopter", "Applause", "Gunshot",
 ];
 
-pub struct SamplerEngine {
+/// Internal sub-synth: one rustysynth Synthesizer + its render buffers.
+struct SubSynth {
     soundfont: Option<Arc<SoundFont>>,
     synth: Option<Synthesizer>,
     buf_left: [f32; MAX_BLOCK_SIZE],
     buf_right: [f32; MAX_BLOCK_SIZE],
     buf_pos: usize,
+}
+
+impl SubSynth {
+    fn new() -> Self {
+        Self {
+            soundfont: None,
+            synth: None,
+            buf_left: [0.0; MAX_BLOCK_SIZE],
+            buf_right: [0.0; MAX_BLOCK_SIZE],
+            buf_pos: DEFAULT_BLOCK_SIZE,
+        }
+    }
+
+    fn rebuild(&mut self, sf: Option<Arc<SoundFont>>, sample_rate: i32, block_size: usize) {
+        let sf = match sf {
+            Some(s) => s,
+            None => { self.synth = None; self.soundfont = None; return; }
+        };
+        let mut settings = SynthesizerSettings::new(sample_rate);
+        settings.block_size = block_size;
+        settings.enable_reverb_and_chorus = false;
+        match Synthesizer::new(&sf, &settings) {
+            Ok(synth) => {
+                self.synth = Some(synth);
+                self.soundfont = Some(sf);
+                self.buf_pos = block_size;
+            }
+            Err(_) => {
+                self.synth = None;
+                self.soundfont = None;
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    fn is_loaded(&self) -> bool {
+        self.synth.is_some()
+    }
+
+    fn midi(&mut self, ch: i32, cmd: i32, d1: i32, d2: i32) {
+        if let Some(synth) = &mut self.synth {
+            synth.process_midi_message(ch, cmd, d1, d2);
+        }
+    }
+
+    #[inline]
+    fn tick(&mut self, block_size: usize) -> (f32, f32) {
+        let synth = match &mut self.synth {
+            Some(s) => s,
+            None => return (0.0, 0.0),
+        };
+        let bs = block_size;
+        if self.buf_pos >= bs {
+            synth.render(&mut self.buf_left[..bs], &mut self.buf_right[..bs]);
+            self.buf_pos = 0;
+        }
+        let l = self.buf_left[self.buf_pos];
+        let r = self.buf_right[self.buf_pos];
+        self.buf_pos += 1;
+        (l, r)
+    }
+}
+
+pub struct SamplerEngine {
+    keys: SubSynth,
+    drums: SubSynth,
     pub block_size: usize,
-    // Per-layer: channel 0 = layer A, channel 1 = layer B, channel 9 = drums
     layer_sf2: [bool; 2],
     layer_program: [u8; 2],
     layer_bank: [u8; 2],
@@ -77,11 +144,8 @@ pub struct SamplerEngine {
 impl SamplerEngine {
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            soundfont: None,
-            synth: None,
-            buf_left: [0.0; MAX_BLOCK_SIZE],
-            buf_right: [0.0; MAX_BLOCK_SIZE],
-            buf_pos: DEFAULT_BLOCK_SIZE, // force render on first tick
+            keys: SubSynth::new(),
+            drums: SubSynth::new(),
             block_size: DEFAULT_BLOCK_SIZE,
             layer_sf2: [false; 2],
             layer_program: [0; 2],
@@ -91,92 +155,78 @@ impl SamplerEngine {
         }
     }
 
-    /// Load an SF2 soundfont. Creates the internal Synthesizer.
-    pub fn load_soundfont(&mut self, sf: Arc<SoundFont>) {
-        self.rebuild_synth(Some(sf));
+    /// Load SF2 for keys (layers A/B).
+    pub fn load_keys_soundfont(&mut self, sf: Arc<SoundFont>) {
+        self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
+        // Restore programs on new synth
+        if let Some(synth) = &mut self.keys.synth {
+            for i in 0..2 {
+                if self.layer_sf2[i] {
+                    synth.process_midi_message(i as i32, 0xB0, 0, self.layer_bank[i] as i32);
+                    synth.process_midi_message(i as i32, 0xC0, self.layer_program[i] as i32, 0);
+                }
+            }
+        }
     }
 
-    /// Set block size and recreate synth if loaded.
+    /// Load SF2 for drums (ch9).
+    pub fn load_drums_soundfont(&mut self, sf: Arc<SoundFont>) {
+        self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
+    }
+
+    pub fn unload_keys(&mut self) {
+        self.keys.rebuild(None, self.sample_rate, self.block_size);
+    }
+
+    pub fn unload_drums(&mut self) {
+        self.drums.rebuild(None, self.sample_rate, self.block_size);
+    }
+
+    #[allow(dead_code)]
+    pub fn keys_loaded(&self) -> bool { self.keys.is_loaded() }
+    #[allow(dead_code)]
+    pub fn drums_loaded(&self) -> bool { self.drums.is_loaded() }
+
     pub fn set_block_size(&mut self, size: usize) {
         let size = size.clamp(8, MAX_BLOCK_SIZE);
         self.block_size = size;
-        if let Some(sf) = self.soundfont.clone() {
-            self.rebuild_synth(Some(sf));
-        }
-    }
-
-    fn rebuild_synth(&mut self, sf: Option<Arc<SoundFont>>) {
-        let sf = match sf {
-            Some(s) => s,
-            None => { self.synth = None; self.soundfont = None; return; }
-        };
-        let mut settings = SynthesizerSettings::new(self.sample_rate);
-        settings.block_size = self.block_size;
-        settings.enable_reverb_and_chorus = false;
-        match Synthesizer::new(&sf, &settings) {
-            Ok(mut synth) => {
+        if let Some(sf) = self.keys.soundfont.clone() {
+            self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
+            // Restore programs
+            if let Some(synth) = &mut self.keys.synth {
                 for i in 0..2 {
                     if self.layer_sf2[i] {
+                        synth.process_midi_message(i as i32, 0xB0, 0, self.layer_bank[i] as i32);
                         synth.process_midi_message(i as i32, 0xC0, self.layer_program[i] as i32, 0);
                     }
                 }
-                self.synth = Some(synth);
-                self.soundfont = Some(sf);
-                self.buf_pos = self.block_size;
-            }
-            Err(_) => {
-                self.synth = None;
-                self.soundfont = None;
             }
         }
-    }
-
-    /// Unload current soundfont.
-    #[allow(dead_code)]
-    pub fn unload(&mut self) {
-        self.synth = None;
-        self.soundfont = None;
-    }
-
-    #[allow(dead_code)]
-    pub fn is_loaded(&self) -> bool {
-        self.synth.is_some()
+        if let Some(sf) = self.drums.soundfont.clone() {
+            self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
+        }
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate as i32;
-        if let Some(sf) = self.soundfont.clone() {
-            self.load_soundfont(sf);
+        if let Some(sf) = self.keys.soundfont.clone() {
+            self.load_keys_soundfont(sf);
+        }
+        if let Some(sf) = self.drums.soundfont.clone() {
+            self.load_drums_soundfont(sf);
         }
     }
 
     pub fn set_layer_mode(&mut self, layer: usize, enabled: bool) {
-        if layer < 2 {
-            self.layer_sf2[layer] = enabled;
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn layer_sf2(&self, layer: usize) -> bool {
-        if layer < 2 { self.layer_sf2[layer] } else { false }
+        if layer < 2 { self.layer_sf2[layer] = enabled; }
     }
 
     pub fn set_layer_program(&mut self, layer: usize, program: u8, bank: u8) {
         if layer >= 2 { return; }
         self.layer_program[layer] = program;
         self.layer_bank[layer] = bank;
-        if let Some(synth) = &mut self.synth {
-            let ch = layer as i32;
-            // Bank select MSB
-            synth.process_midi_message(ch, 0xB0, 0, bank as i32);
-            // Program change
-            synth.process_midi_message(ch, 0xC0, program as i32, 0);
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn layer_program(&self, layer: usize) -> u8 {
-        if layer < 2 { self.layer_program[layer] } else { 0 }
+        self.keys.midi(layer as i32, 0xB0, 0, bank as i32);
+        self.keys.midi(layer as i32, 0xC0, program as i32, 0);
     }
 
     pub fn set_drums_enabled(&mut self, enabled: bool) {
@@ -187,76 +237,57 @@ impl SamplerEngine {
         self.drums_sf2
     }
 
-    /// Set layer volume via MIDI CC7 on the layer's channel.
     pub fn set_layer_volume(&mut self, layer: usize, volume: f32) {
         if layer >= 2 { return; }
-        if let Some(synth) = &mut self.synth {
-            let cc_val = (volume * 127.0).round().clamp(0.0, 127.0) as i32;
-            synth.process_midi_message(layer as i32, 0xB0, 7, cc_val);
-        }
+        let cc_val = (volume * 127.0).round().clamp(0.0, 127.0) as i32;
+        self.keys.midi(layer as i32, 0xB0, 7, cc_val);
     }
 
     pub fn note_on(&mut self, layer: usize, note: u8, velocity: u8) {
         if layer >= 2 { return; }
-        if let Some(synth) = &mut self.synth {
-            synth.process_midi_message(layer as i32, 0x90, note as i32, velocity as i32);
-        }
+        self.keys.midi(layer as i32, 0x90, note as i32, velocity as i32);
     }
 
     pub fn note_off(&mut self, layer: usize, note: u8) {
         if layer >= 2 { return; }
-        if let Some(synth) = &mut self.synth {
-            synth.process_midi_message(layer as i32, 0x80, note as i32, 0);
-        }
+        self.keys.midi(layer as i32, 0x80, note as i32, 0);
     }
 
     pub fn drum_note_on(&mut self, note: u8, velocity: u8) {
-        if let Some(synth) = &mut self.synth {
-            synth.process_midi_message(9, 0x90, note as i32, velocity as i32);
-        }
+        self.drums.midi(9, 0x90, note as i32, velocity as i32);
     }
 
     pub fn drum_note_off(&mut self, note: u8) {
-        if let Some(synth) = &mut self.synth {
-            synth.process_midi_message(9, 0x80, note as i32, 0);
-        }
+        self.drums.midi(9, 0x80, note as i32, 0);
     }
 
     pub fn pitch_bend(&mut self, layer: usize, value: f32) {
         if layer >= 2 { return; }
-        if let Some(synth) = &mut self.synth {
-            // Convert -1..1 to 0..16383 (center=8192)
-            let raw = ((value + 1.0) * 0.5 * 16383.0).round().clamp(0.0, 16383.0) as i32;
-            let lsb = raw & 0x7F;
-            let msb = (raw >> 7) & 0x7F;
-            synth.process_midi_message(layer as i32, 0xE0, lsb, msb);
-        }
+        let raw = ((value + 1.0) * 0.5 * 16383.0).round().clamp(0.0, 16383.0) as i32;
+        let lsb = raw & 0x7F;
+        let msb = (raw >> 7) & 0x7F;
+        self.keys.midi(layer as i32, 0xE0, lsb, msb);
+    }
+
+    pub fn mod_wheel(&mut self, layer: usize, value: f32) {
+        if layer >= 2 { return; }
+        let cc_val = (value * 127.0).round().clamp(0.0, 127.0) as i32;
+        self.keys.midi(layer as i32, 0xB0, 1, cc_val);
     }
 
     pub fn all_notes_off(&mut self) {
-        if let Some(synth) = &mut self.synth {
-            for ch in 0..16 {
-                // CC 123 = All Notes Off
-                synth.process_midi_message(ch, 0xB0, 123, 0);
-            }
+        for ch in 0..16 {
+            self.keys.midi(ch, 0xB0, 123, 0);
+            self.drums.midi(ch, 0xB0, 123, 0);
         }
     }
 
-    /// Get next stereo sample. Renders a new block when buffer is exhausted.
+    /// Get next stereo sample from both keys and drums synths.
     #[inline]
     pub fn tick(&mut self) -> (f32, f32) {
-        let synth = match &mut self.synth {
-            Some(s) => s,
-            None => return (0.0, 0.0),
-        };
         let bs = self.block_size;
-        if self.buf_pos >= bs {
-            synth.render(&mut self.buf_left[..bs], &mut self.buf_right[..bs]);
-            self.buf_pos = 0;
-        }
-        let l = self.buf_left[self.buf_pos];
-        let r = self.buf_right[self.buf_pos];
-        self.buf_pos += 1;
-        (l, r)
+        let (kl, kr) = self.keys.tick(bs);
+        let (dl, dr) = self.drums.tick(bs);
+        (kl + dl, kr + dr)
     }
 }

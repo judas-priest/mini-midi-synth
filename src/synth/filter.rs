@@ -153,7 +153,7 @@ impl Filter {
         // SVF from Andrew Simper / Cytomic
         let x = PI * self.cutoff / self.sample_rate;
         self.g = fast_tan(x);
-        self.k = 2.0 - 2.0 * self.resonance;
+        self.k = (2.0 - 2.0 * self.resonance).max(0.005);
         self.a1 = 1.0 / (1.0 + self.g * (self.g + self.k));
         self.a2 = self.g * self.a1;
         self.a3 = self.g * self.a2;

@@ -24,7 +24,9 @@ const TANK_AP2_COEFF: f32 = 0.50;
 
 // LFO excursion at reference rate
 const LFO_EXCURSION_BASE: f32 = 8.0;
-const LFO_RATE_HZ: f32 = 1.0;
+// Two rates with irrational ratio to prevent periodic artifacts (FV-1 approach)
+const LFO_RATE_L_HZ: f32 = 0.97;
+const LFO_RATE_R_HZ: f32 = 1.13;
 
 // Output tap positions (at 29761 Hz)
 // Left output: taps from R and L delay lines
@@ -233,8 +235,9 @@ pub struct Reverb {
     // Tank feedback
     left_out: f32,
     right_out: f32,
-    // Modulation LFO
-    lfo_phase: f32,
+    // Modulation LFOs (two with irrational ratio for smoother modulation)
+    lfo_phase_l: f32,
+    lfo_phase_r: f32,
     lfo_excursion: f32,
     // Output taps
     taps: DattorroTaps,
@@ -271,7 +274,8 @@ impl Reverb {
             left_out: 0.0,
             right_out: 0.0,
             // LFO
-            lfo_phase: 0.0,
+            lfo_phase_l: 0.0,
+            lfo_phase_r: 0.25, // start 90° offset
             lfo_excursion: LFO_EXCURSION_BASE * sample_rate / REFERENCE_SR,
             // Taps
             taps: DattorroTaps::new(sample_rate),
@@ -330,14 +334,13 @@ impl Reverb {
         // --- Damping coefficient ---
         let damp = damping * 0.9; // 0..0.9
 
-        // --- LFO ---
-        let lfo_inc = LFO_RATE_HZ / self.sample_rate;
-        self.lfo_phase += lfo_inc;
-        if self.lfo_phase >= 1.0 {
-            self.lfo_phase -= 1.0;
-        }
-        let lfo_sin = (self.lfo_phase * std::f32::consts::TAU).sin();
-        let lfo_cos = ((self.lfo_phase + 0.25) * std::f32::consts::TAU).sin(); // 90 deg offset for R
+        // --- LFO (two independent LFOs with irrational rate ratio) ---
+        self.lfo_phase_l += LFO_RATE_L_HZ / self.sample_rate;
+        if self.lfo_phase_l >= 1.0 { self.lfo_phase_l -= 1.0; }
+        self.lfo_phase_r += LFO_RATE_R_HZ / self.sample_rate;
+        if self.lfo_phase_r >= 1.0 { self.lfo_phase_r -= 1.0; }
+        let lfo_sin = (self.lfo_phase_l * std::f32::consts::TAU).sin();
+        let lfo_cos = (self.lfo_phase_r * std::f32::consts::TAU).sin();
 
         let excursion_l = self.lfo_excursion * lfo_sin;
         let excursion_r = self.lfo_excursion * lfo_cos;

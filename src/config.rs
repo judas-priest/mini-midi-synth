@@ -18,8 +18,15 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Sf2Settings {
-    /// Path to the loaded SF2 file.
+    /// Path to the loaded SF2 file (legacy, used as fallback for keys_file_path).
+    #[serde(default)]
     pub file_path: Option<String>,
+    /// Path to the SF2 file for keys (layers A/B).
+    #[serde(default)]
+    pub keys_file_path: Option<String>,
+    /// Path to the SF2 file for drums.
+    #[serde(default)]
+    pub drums_file_path: Option<String>,
     /// Layer A uses SF2 mode.
     #[serde(default)]
     pub layer_a_sf2: bool,

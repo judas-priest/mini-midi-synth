@@ -37,8 +37,9 @@ const NUM_PARTIALS: usize = 24;
 /// (Real upright piano B at C4 is ~0.001-0.003, but those large values push
 ///  the upper partials into metallic/noise-like territory with 24 partials.)
 fn b_coefficient(midi_note: f32) -> f32 {
+    // Conklin (1999) concert grand fit: 0.00006 at A0, ~0.015 at C8
     let n = (midi_note - 21.0).clamp(0.0, 87.0) / 87.0;
-    0.00020 * (4.5 * n).exp()
+    0.00006 * (5.52 * n).exp()
 }
 
 /// Hammer hardness exponent p across the keyboard.

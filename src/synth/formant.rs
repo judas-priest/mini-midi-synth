@@ -152,44 +152,97 @@ impl ResonantBP {
     }
 }
 
-/// Formant filter bank: 5 parallel resonant bandpass filters.
+/// Formant filter bank: 5 parallel resonant bandpass filters with smooth morphing.
 #[derive(Clone)]
 pub struct FormantFilter {
     filters: [ResonantBP; NUM_FORMANTS],
+    // Smooth interpolation targets and current values
+    target_freq: [f32; NUM_FORMANTS],
+    target_bw: [f32; NUM_FORMANTS],
+    target_gain_db: [f32; NUM_FORMANTS],
+    current_freq: [f32; NUM_FORMANTS],
+    current_bw: [f32; NUM_FORMANTS],
+    current_gain_db: [f32; NUM_FORMANTS],
+    smooth_coeff: f32,
+    dirty: bool,
     sample_rate: f32,
 }
 
 impl FormantFilter {
     pub fn new(sample_rate: f32) -> Self {
+        // ~30ms smoothing time
+        let smooth_coeff = 1.0 / (0.03 * sample_rate);
         Self {
             filters: std::array::from_fn(|_| ResonantBP::new()),
+            target_freq: [500.0; NUM_FORMANTS],
+            target_bw: [100.0; NUM_FORMANTS],
+            target_gain_db: [0.0; NUM_FORMANTS],
+            current_freq: [500.0; NUM_FORMANTS],
+            current_bw: [100.0; NUM_FORMANTS],
+            current_gain_db: [0.0; NUM_FORMANTS],
+            smooth_coeff,
+            dirty: false,
             sample_rate,
         }
     }
 
-    /// Configure formants for a given voice type and vowel.
+    /// Configure formants for a given voice type and vowel (sets targets for morphing).
     pub fn set_voice_vowel(&mut self, voice: VoiceType, vowel: Vowel) {
         let data = &FORMANT_TABLE[voice as usize][vowel as usize];
         for i in 0..NUM_FORMANTS {
             let [freq, gain_db, bw] = data[i];
-            self.filters[i].set_params(freq, bw, gain_db, self.sample_rate);
+            self.target_freq[i] = freq;
+            self.target_gain_db[i] = gain_db;
+            self.target_bw[i] = bw;
         }
+        self.dirty = true;
     }
 
     #[allow(dead_code)]
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        self.smooth_coeff = 1.0 / (0.03 * sr);
     }
 
     pub fn reset(&mut self) {
         for f in &mut self.filters {
             f.reset();
         }
+        // Snap current to target on reset (no morphing on note-on)
+        self.current_freq = self.target_freq;
+        self.current_bw = self.target_bw;
+        self.current_gain_db = self.target_gain_db;
+        for i in 0..NUM_FORMANTS {
+            self.filters[i].set_params(
+                self.current_freq[i], self.current_bw[i],
+                self.current_gain_db[i], self.sample_rate,
+            );
+        }
+        self.dirty = false;
     }
 
     /// Process one sample: sum of all 5 parallel bandpass outputs.
     #[inline]
     pub fn tick(&mut self, input: f32) -> f32 {
+        // Smoothly interpolate formant parameters to prevent clicks
+        if self.dirty {
+            let c = self.smooth_coeff;
+            let mut still_dirty = false;
+            for i in 0..NUM_FORMANTS {
+                self.current_freq[i] += c * (self.target_freq[i] - self.current_freq[i]);
+                self.current_bw[i] += c * (self.target_bw[i] - self.current_bw[i]);
+                self.current_gain_db[i] += c * (self.target_gain_db[i] - self.current_gain_db[i]);
+                if (self.target_freq[i] - self.current_freq[i]).abs() > 0.5 {
+                    still_dirty = true;
+                }
+                self.filters[i].set_params(
+                    self.current_freq[i], self.current_bw[i],
+                    self.current_gain_db[i], self.sample_rate,
+                );
+            }
+            self.dirty = still_dirty;
+        }
+
         let mut out = 0.0;
         for f in &mut self.filters {
             out += f.tick(input);

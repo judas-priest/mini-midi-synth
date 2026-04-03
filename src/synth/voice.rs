@@ -426,9 +426,11 @@ impl Voice {
             self.oscs[0].set_pd_depth(depth);
         }
 
-        // Portamento
+        // Portamento (log-frequency domain for perceptually uniform glide)
         if self.porta_coeff < 0.999 {
-            self.freq += (self.target_freq - self.freq) * self.porta_coeff;
+            let log_f = self.freq.ln();
+            let log_t = self.target_freq.ln();
+            self.freq = (log_f + (log_t - log_f) * self.porta_coeff).exp();
         } else {
             self.freq = self.target_freq;
         }

@@ -7,6 +7,22 @@ use rtrb::Consumer;
 
 use crate::synth::{ControlEvent, MidiEvent, SynthEngine};
 
+/// Soft limiter: transparent below threshold, tanh-shaped saturation above.
+/// Zero-latency, no lookahead needed for a soft synth.
+#[inline]
+fn soft_limit(x: f32) -> f32 {
+    const THRESH: f32 = 0.8;
+    if x.abs() <= THRESH {
+        x
+    } else {
+        let sign = x.signum();
+        let excess = (x.abs() - THRESH) / (1.0 - THRESH);
+        // tanh approximation: x/(1+|x|)
+        let shaped = excess / (1.0 + excess);
+        sign * (THRESH + (1.0 - THRESH) * shaped)
+    }
+}
+
 pub struct AudioConfig {
     pub host_id: HostId,
     pub sample_rate: u32,
@@ -104,16 +120,29 @@ impl AudioBackend {
         let stream = device.build_output_stream(
             &stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                // Flush denormals to zero (DAZ+FTZ) — prevents CPU spikes
+                // when filter/reverb tails decay to subnormal floats.
+                #[cfg(target_arch = "x86_64")]
+                let _old_mxcsr: u32 = unsafe {
+                    let mut old: u32 = 0;
+                    std::arch::asm!("stmxcsr [{}]", in(reg) &mut old, options(nostack));
+                    let new = old | 0x8040; // FTZ (bit 15) | DAZ (bit 6)
+                    std::arch::asm!("ldmxcsr [{}]", in(reg) &new, options(nostack));
+                    old
+                };
+
                 while let Ok(event) = ctrl_rx.pop() {
                     synth.handle_control(event);
                 }
 
-                while let Ok(event) = midi_rx.pop() {
-                    synth.handle_event(event);
-                }
-
                 for frame in data.chunks_mut(channels) {
+                    while let Ok(event) = midi_rx.pop() {
+                        synth.handle_event(event);
+                    }
                     let (left, right) = synth.tick();
+                    // Soft limiter: transparent below 0.8, tanh-shaped above
+                    let left = soft_limit(left);
+                    let right = soft_limit(right);
                     if channels >= 2 {
                         frame[0] = left;
                         frame[1] = right;
@@ -123,6 +152,12 @@ impl AudioBackend {
                     } else {
                         frame[0] = (left + right) * 0.5;
                     }
+                }
+
+                // Restore MXCSR
+                #[cfg(target_arch = "x86_64")]
+                unsafe {
+                    std::arch::asm!("ldmxcsr [{}]", in(reg) &_old_mxcsr, options(nostack));
                 }
             },
             |err| {

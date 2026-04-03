@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 // ---------------------------------------------------------------------------
 
 pub const NUM_DRUM_SLOTS: usize = 16; // notes 36..=51
-const DRUM_NOTE_BASE: u8 = 36;
+pub const DRUM_NOTE_BASE: u8 = 36;
 
 /// Choke group IDs. 0 = no choke group.
 /// Closed HH (42), Pedal HH (44), Open HH (46) share group 1.
@@ -844,12 +844,19 @@ const TOM_FREQS: [(usize, f32); 6] = [
     (14, 240.0), // 50 High Tom
 ];
 
+/// Sequencer triggers returned from tick() for SF2 routing.
+pub struct DrumTriggers {
+    pub triggers: [(u8, u8); NUM_DRUM_SLOTS], // (fire, velocity_raw)
+    pub count: usize,
+}
+
 pub struct DrumEngine {
     voices: [DrumVoice; NUM_DRUM_SLOTS],
     pub params: [DrumSlotParams; NUM_DRUM_SLOTS],
     pub sequencer: StepSequencer,
     pub volume: f32,
     pub enabled: bool,
+    pub sf2_mode: bool,
     sample_rate: f32,
     /// Shared atom for GUI to read current step position.
     step_atom: Arc<AtomicU8>,
@@ -885,6 +892,7 @@ impl DrumEngine {
             sequencer: StepSequencer::new(),
             volume: 0.8,
             enabled: true,
+            sf2_mode: false,
             sample_rate,
             step_atom: Arc::new(AtomicU8::new(0)),
             play_atom: Arc::new(AtomicU8::new(0)),
@@ -972,35 +980,47 @@ impl DrumEngine {
 
     /// Returns (left, right) stereo pair.
     #[inline]
-    pub fn tick(&mut self) -> (f32, f32) {
-        if !self.enabled { return (0.0, 0.0); }
+    /// Returns (left, right) audio and any sequencer triggers for SF2 routing.
+    pub fn tick(&mut self) -> ((f32, f32), DrumTriggers) {
+        let empty_triggers = DrumTriggers { triggers: [(0, 0); NUM_DRUM_SLOTS], count: 0 };
+        if !self.enabled { return ((0.0, 0.0), empty_triggers); }
 
         // Process sequencer
         let triggers = self.sequencer.tick(self.sample_rate);
         self.step_atom.store(self.sequencer.current_step, Ordering::Relaxed);
         self.play_atom.store(self.sequencer.playing as u8, Ordering::Relaxed);
         self.rec_atom.store(self.sequencer.recording as u8, Ordering::Relaxed);
+
+        let mut sf2_triggers = DrumTriggers { triggers: [(0, 0); NUM_DRUM_SLOTS], count: 0 };
+
         for slot in 0..NUM_DRUM_SLOTS {
             let (fire, vel) = triggers[slot];
             if fire > 0 {
-                self.trigger_slot(slot, vel as f32 / 127.0);
+                if self.sf2_mode {
+                    sf2_triggers.triggers[sf2_triggers.count] = (slot as u8, vel);
+                    sf2_triggers.count += 1;
+                } else {
+                    self.trigger_slot(slot, vel as f32 / 127.0);
+                }
             }
         }
 
-        // Mix all voices
+        // Mix all voices (DSP — produces sound only when not in sf2_mode)
         let mut out_l = 0.0_f32;
         let mut out_r = 0.0_f32;
-        for i in 0..NUM_DRUM_SLOTS {
-            let sample = self.voices[i].tick();
-            if sample.abs() < 0.00001 { continue; }
-            let level = self.params[i].level;
-            let pan = self.params[i].pan;
-            let s = sample * level;
-            out_l += s * (0.5 - pan * 0.5).sqrt();
-            out_r += s * (0.5 + pan * 0.5).sqrt();
+        if !self.sf2_mode {
+            for i in 0..NUM_DRUM_SLOTS {
+                let sample = self.voices[i].tick();
+                if sample.abs() < 0.00001 { continue; }
+                let level = self.params[i].level;
+                let pan = self.params[i].pan;
+                let s = sample * level;
+                out_l += s * (0.5 - pan * 0.5).sqrt();
+                out_r += s * (0.5 + pan * 0.5).sqrt();
+            }
         }
         let vol = self.volume * self.volume; // perceptual curve
-        (out_l * vol, out_r * vol)
+        ((out_l * vol, out_r * vol), sf2_triggers)
     }
 
     pub fn slot_name(slot: usize) -> &'static str {
