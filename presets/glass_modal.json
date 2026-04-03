@@ -1,0 +1,17 @@
+{
+    "name": "Glass (Modal)",
+    "category": "Modal",
+    "params": {
+        "osc_type": 18,
+        "modal_material": 2,
+        "modal_brightness": 0.8,
+        "modal_damping": 0.25,
+        "modal_strike_pos": 0.5,
+        "filter_cutoff": 14000.0,
+        "filter_type": 0,
+        "amp_attack": 0.001,
+        "amp_decay": 1.2,
+        "amp_sustain": 0.0,
+        "amp_release": 0.6
+    }
+}

@@ -1,6 +1,5 @@
 /// Juno-style stereo chorus effect.
 
-use std::f32::consts::TAU;
 
 const BUFFER_SIZE: usize = 4096;
 const LFO_RATE1: f32 = 0.513;
@@ -14,6 +13,9 @@ pub struct Chorus {
     lfo_phase1: f32,
     lfo_phase2: f32,
     sample_rate: f32,
+    /// BBD-style lowpass filter state (one-pole per channel)
+    bbd_lp_l: f32,
+    bbd_lp_r: f32,
 }
 
 impl Chorus {
@@ -24,6 +26,8 @@ impl Chorus {
             lfo_phase1: 0.0,
             lfo_phase2: 0.25,
             sample_rate,
+            bbd_lp_l: 0.0,
+            bbd_lp_r: 0.0,
         }
     }
 
@@ -36,8 +40,9 @@ impl Chorus {
             return (input, input);
         }
 
-        let lfo1 = (self.lfo_phase1 * TAU).sin();
-        let lfo2 = (self.lfo_phase2 * TAU).sin();
+        // Triangle LFO for authentic Juno character (more linear sweep than sine)
+        let lfo1 = 1.0 - 4.0 * (self.lfo_phase1 - 0.5).abs();  // triangle wave [-1,1]
+        let lfo2 = 1.0 - 4.0 * (self.lfo_phase2 - 0.5).abs();
         self.lfo_phase1 += LFO_RATE1 / self.sample_rate;
         if self.lfo_phase1 >= 1.0 {
             self.lfo_phase1 -= 1.0;
@@ -53,8 +58,16 @@ impl Chorus {
         let delay_l = center + depth * lfo1;
         let delay_r = center + depth * lfo2;
 
-        let wet_l = self.read_cubic(delay_l);
-        let wet_r = self.read_cubic(delay_r);
+        let mut wet_l = self.read_cubic(delay_l);
+        let mut wet_r = self.read_cubic(delay_r);
+
+        // BBD lowpass emulation (~10kHz at 48kHz) — one-pole per channel
+        // Coefficient ~0.65 gives roughly 10kHz cutoff at 48kHz sample rate
+        let bbd_coeff = 0.65;
+        wet_l = self.bbd_lp_l + bbd_coeff * (wet_l - self.bbd_lp_l);
+        self.bbd_lp_l = wet_l;
+        wet_r = self.bbd_lp_r + bbd_coeff * (wet_r - self.bbd_lp_r);
+        self.bbd_lp_r = wet_r;
 
         let dry = 1.0 - mix;
         (input * dry + wet_l * mix, input * dry + wet_r * mix)
@@ -87,5 +100,7 @@ impl Chorus {
         self.sample_rate = sample_rate;
         self.buffer = vec![0.0; BUFFER_SIZE];
         self.write_pos = 0;
+        self.bbd_lp_l = 0.0;
+        self.bbd_lp_r = 0.0;
     }
 }

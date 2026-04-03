@@ -1,0 +1,17 @@
+{
+    "name": "Church Bell (Modal)",
+    "category": "Modal",
+    "params": {
+        "osc_type": 18,
+        "modal_material": 7,
+        "modal_brightness": 0.6,
+        "modal_damping": 0.15,
+        "modal_strike_pos": 0.35,
+        "filter_cutoff": 12000.0,
+        "filter_type": 0,
+        "amp_attack": 0.001,
+        "amp_decay": 2.5,
+        "amp_sustain": 0.0,
+        "amp_release": 1.0
+    }
+}

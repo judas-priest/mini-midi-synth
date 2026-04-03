@@ -1,0 +1,25 @@
+{
+    "name": "Juno Pad",
+    "category": "Iconic",
+    "params": {
+        "osc_type": 2,
+        "osc_detune": 0.0,
+        "pulse_width": 0.35,
+        "filter_cutoff": 3000.0,
+        "filter_resonance": 0.1,
+        "filter_type": 0,
+        "filter_env_amount": 800.0,
+        "amp_attack": 0.6,
+        "amp_decay": 0.3,
+        "amp_sustain": 0.85,
+        "amp_release": 1.5,
+        "filter_attack": 0.4,
+        "filter_decay": 0.5,
+        "filter_sustain": 0.6,
+        "filter_release": 1.5,
+        "lfo_filter_depth": 0.08,
+        "unison_voices": 3,
+        "unison_detune": 15.0,
+        "unison_spread": 0.6
+    }
+}

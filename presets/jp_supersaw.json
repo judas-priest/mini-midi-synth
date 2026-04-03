@@ -1,0 +1,16 @@
+{
+    "name": "JP Supersaw",
+    "category": "Supersaw",
+    "params": {
+        "osc_type": 20,
+        "supersaw_detune": 0.5,
+        "supersaw_mix": 0.6,
+        "filter_cutoff": 10000.0,
+        "filter_resonance": 0.1,
+        "filter_type": 0,
+        "amp_attack": 0.01,
+        "amp_decay": 0.2,
+        "amp_sustain": 0.8,
+        "amp_release": 0.3
+    }
+}

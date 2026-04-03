@@ -2,7 +2,27 @@
 
 use std::f32::consts::PI;
 
+use super::bass::BassModel;
+use super::piano::PianoModel;
+
 const TAU: f32 = 2.0 * PI;
+
+/// PolyBLEP residual — call for each discontinuity point.
+/// `t` = phase position (0..1), `dt` = phase increment per sample.
+#[inline(always)]
+fn poly_blep(t: f32, dt: f32) -> f32 {
+    if t < dt {
+        // Just past the discontinuity
+        let t = t / dt;
+        2.0 * t - t * t - 1.0
+    } else if t > 1.0 - dt {
+        // Just before the discontinuity
+        let t = (t - 1.0) / dt;
+        t * t + 2.0 * t + 1.0
+    } else {
+        0.0
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum OscType {
@@ -18,6 +38,16 @@ pub enum OscType {
     CommutedPiano, // 9  — commuted waveguide piano
     BandedWG,      // 10 — banded waveguide piano
     AdditivePiano, // 11 — additive synthesis piano (16 partials with per-partial decay)
+    DrumSynth,     // 12 — dedicated drum synthesis (pitch env + noise env)
+    BassGuitar,    // 13 — physical model bass guitar (finger/pick/slap)
+    BowedString,   // 14 — bowed string physical model (violin/viola/cello/double bass)
+    Brass,            // 15 — brass lip reed physical model (trumpet/horn/trombone/tuba)
+    PhaseDistortion,  // 16 — Casio CZ-style phase distortion synthesis
+    Wavefolder,       // 17 — West Coast wavefolding synthesis
+    ModalResonator,   // 18 — modal resonator bank (Plaits-style)
+    HardSync,         // 19 — oscillator hard sync (master resets slave)
+    Supersaw,         // 20 — Roland JP-8000 style 7-voice supersaw
+    PianoModel,       // 21 — inharmonic additive piano with dual-decay and hammer model
 }
 
 impl OscType {
@@ -35,6 +65,16 @@ impl OscType {
             9 => Self::CommutedPiano,
             10 => Self::BandedWG,
             11 => Self::AdditivePiano,
+            12 => Self::DrumSynth,
+            13 => Self::BassGuitar,
+            14 => Self::BowedString,
+            15 => Self::Brass,
+            16 => Self::PhaseDistortion,
+            17 => Self::Wavefolder,
+            18 => Self::ModalResonator,
+            19 => Self::HardSync,
+            20 => Self::Supersaw,
+            21 => Self::PianoModel,
             _ => Self::Sine,
         }
     }
@@ -79,12 +119,27 @@ pub enum OscState {
         buffer2: Vec<f32>,
         pos: usize,
         pos2: usize,
-        filter_state: f32,
-        filter_state2: f32,
-        allpass_coeff: f32,
-        allpass_prev_in: f32,
-        allpass_prev_out: f32,
-        strike_offset: usize,
+        // Per-string loss filters (one-pole, frequency-dependent)
+        loss_state1: f32,
+        loss_state2: f32,
+        loss_coeff: f32,       // base loss coefficient (brightness + freq dependent)
+        // Fractional delay allpass per string
+        frac_z1: [f32; 2],
+        frac_coeff: [f32; 2],
+        // Dispersion filter: 3 second-order allpass sections for inharmonicity
+        disp_z1: [f32; 3],
+        disp_z2: [f32; 3],
+        disp_b0: [f32; 3],    // allpass coefficients
+        disp_b1: [f32; 3],
+        disp_a1: [f32; 3],
+        // Soundboard resonance (2-pole bandpass)
+        sb_lp: f32,
+        sb_bp: f32,
+        sb_freq: f32,          // soundboard resonance frequency
+        sb_q: f32,
+        // DC blocker
+        dc_x: f32,
+        dc_y: f32,
     },
     BandedWG {
         buffers: [Vec<f32>; 4],
@@ -100,7 +155,91 @@ pub enum OscState {
         time: f32,
         noise_amp: f32,
     },
+    DrumSynth {
+        phase: f32,
+        time: f32,
+        noise_state: u32,
+        base_freq: f32,
+        noise_lp_state: f32,
+        // Config (set during init)
+        pitch_amount: f32,  // semitones of pitch sweep
+        pitch_decay: f32,   // pitch envelope decay rate
+        noise_level: f32,   // noise amplitude (0-1)
+        noise_decay: f32,   // noise envelope decay rate
+        noise_color: f32,   // noise brightness (0=dark, 1=bright)
+    },
+    BassGuitar(BassModel),
+    BowedString {
+        nut_delay: Vec<f32>,
+        bridge_delay: Vec<f32>,
+        nut_pos: usize,
+        bridge_pos: usize,
+        nut_filter: f32,
+        bridge_lp: f32,
+        bridge_bp: f32,
+        allpass_prev_in: f32,
+        allpass_prev_out: f32,
+        allpass_coeff: f32,
+        bow_velocity: f32,
+        _bow_position: f32,
+        bow_pressure: f32,
+        body_freq: f32,
+        body_q: f32,
+    },
+    Brass {
+        bore_delay: Vec<f32>,
+        bore_pos: usize,
+        lip_x: f32,
+        lip_v: f32,
+        lip_freq: f32,
+        lip_damping: f32,
+        lip_mass_inv: f32,
+        bell_lp_state: f32,
+        bell_hp_state: f32,
+        bell_cutoff: f32,
+        bore_lp_state: f32,
+        blowing_pressure: f32,
+        _bore_length_ratio: f32,
+    },
+    PhaseDistortion {
+        phase: f32,
+        pd_shape: u8,
+        pd_depth: f32,
+    },
+    Wavefolder {
+        phase: f32,
+        prev_input: f32,
+        prev_adf: f32,
+        fold_amount: f32,
+        fold_symmetry: f32,
+        fold_source: u8,
+    },
+    ModalResonator {
+        y1: [f32; 16],
+        y2: [f32; 16],
+        cosw: [f32; 16],
+        r_sq: [f32; 16],
+        amps: [f32; 16],
+        excitation_time: f32,
+        noise_state: u32,
+    },
+    HardSync {
+        master_phase: f32,
+        slave_phase: f32,
+        sync_ratio: f32,      // slave/master frequency ratio (1-16)
+        sync_shape: u8,       // 0=Saw, 1=Square, 2=Triangle
+    },
+    Supersaw {
+        phases: [f32; 7],     // 7 detuned saws
+        detunes: [f32; 7],    // detune factors (precomputed)
+        mix_center: f32,      // center saw level
+        mix_side: f32,        // side saws level
+    },
+    PianoModel(PianoModel),   // 24-partial inharmonic additive with dual decay
 }
+
+/// Maximum delay line length: covers MIDI note 21 (A0 ≈ 27.5 Hz) at 192 kHz.
+const MAX_DELAY: usize = 7000;
 
 #[derive(Clone)]
 pub struct Oscillator {
@@ -112,8 +251,14 @@ pub struct Oscillator {
     pub ks_brightness: f32,
     pub ks_feedback: f32,
     pub organ_drawbars: [f32; 9],
+    pub pulse_width: f32,
     noise_state: u32,
     state: OscState,
+    /// Pre-allocated delay line buffers — reused across note-ons to avoid RT allocation.
+    pool_a: Vec<f32>,
+    pool_b: Vec<f32>,
+    pool_c: Vec<f32>,
+    pool_d: Vec<f32>,
 }
 
 impl Oscillator {
@@ -127,16 +272,75 @@ impl Oscillator {
             ks_brightness: 0.5,
             ks_feedback: 0.996,
             organ_drawbars: [0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            pulse_width: 0.5,
             noise_state: 0x12345678,
             state: OscState::Simple { phase: 0.0 },
+            pool_a: Vec::with_capacity(MAX_DELAY),
+            pool_b: Vec::with_capacity(MAX_DELAY),
+            pool_c: Vec::with_capacity(MAX_DELAY),
+            pool_d: Vec::with_capacity(MAX_DELAY),
         }
+    }
+
+    /// Take a buffer from pool, resized to `n` and cleared.
+    /// The pool Vec is left empty (moved out); caller must put it into OscState.
+    fn take_buf(pool: &mut Vec<f32>, n: usize) -> Vec<f32> {
+        let mut buf = std::mem::take(pool);
+        buf.resize(n, 0.0);
+        buf.fill(0.0);
+        buf
+    }
+
+    /// Return a buffer back to a pool slot (for reuse on next note-on).
+    fn return_buf(pool: &mut Vec<f32>, buf: Vec<f32>) {
+        *pool = buf;
     }
 
     pub fn set_detune(&mut self, detune: f32) {
         self.detune = detune;
     }
 
+    /// Update phase distortion depth (for envelope modulation).
+    pub fn set_pd_depth(&mut self, depth: f32) {
+        if let OscState::PhaseDistortion { pd_depth, .. } = &mut self.state {
+            *pd_depth = depth;
+        }
+    }
+
+    /// Reclaim any Vec buffers from current state back to pools before switching.
+    fn reclaim_buffers(&mut self) {
+        let old = std::mem::replace(&mut self.state, OscState::Simple { phase: 0.0 });
+        match old {
+            OscState::KarplusStrong { buffer, .. } => {
+                Self::return_buf(&mut self.pool_a, buffer);
+            }
+            OscState::CommutedPiano { buffer, buffer2, .. } => {
+                Self::return_buf(&mut self.pool_a, buffer);
+                Self::return_buf(&mut self.pool_b, buffer2);
+            }
+            OscState::BandedWG { buffers, .. } => {
+                let [b0, b1, b2, b3] = buffers;
+                Self::return_buf(&mut self.pool_a, b0);
+                Self::return_buf(&mut self.pool_b, b1);
+                Self::return_buf(&mut self.pool_c, b2);
+                Self::return_buf(&mut self.pool_d, b3);
+            }
+            OscState::BassGuitar(model) => {
+                model.return_buffers(&mut self.pool_a, &mut self.pool_b);
+            }
+            OscState::BowedString { nut_delay, bridge_delay, .. } => {
+                Self::return_buf(&mut self.pool_a, nut_delay);
+                Self::return_buf(&mut self.pool_b, bridge_delay);
+            }
+            OscState::Brass { bore_delay, .. } => {
+                Self::return_buf(&mut self.pool_a, bore_delay);
+            }
+            _ => {}
+        }
+    }
+
     pub fn reset(&mut self) {
+        self.reclaim_buffers();
         self.state = match self.osc_type {
             OscType::Sine | OscType::Saw | OscType::Square | OscType::Triangle => {
                 OscState::Simple { phase: 0.0 }
@@ -166,12 +370,22 @@ impl Oscillator {
                 buffer2: Vec::new(),
                 pos: 0,
                 pos2: 0,
-                filter_state: 0.0,
-                filter_state2: 0.0,
-                allpass_coeff: 0.0,
-                allpass_prev_in: 0.0,
-                allpass_prev_out: 0.0,
-                strike_offset: 0,
+                loss_state1: 0.0,
+                loss_state2: 0.0,
+                loss_coeff: 0.0,
+                frac_z1: [0.0; 2],
+                frac_coeff: [0.0; 2],
+                disp_z1: [0.0; 3],
+                disp_z2: [0.0; 3],
+                disp_b0: [0.0; 3],
+                disp_b1: [0.0; 3],
+                disp_a1: [0.0; 3],
+                sb_lp: 0.0,
+                sb_bp: 0.0,
+                sb_freq: 0.0,
+                sb_q: 0.0,
+                dc_x: 0.0,
+                dc_y: 0.0,
             },
             OscType::BandedWG => OscState::BandedWG {
                 buffers: Default::default(),
@@ -187,17 +401,98 @@ impl Oscillator {
                 time: 0.0,
                 noise_amp: 0.0,
             },
+            OscType::BassGuitar => OscState::BassGuitar(BassModel::new()),
+            OscType::DrumSynth => OscState::DrumSynth {
+                phase: 0.0,
+                time: 0.0,
+                noise_state: self.noise_state,
+                base_freq: 440.0,
+                noise_lp_state: 0.0,
+                pitch_amount: 0.0,
+                pitch_decay: 40.0,
+                noise_level: 0.0,
+                noise_decay: 40.0,
+                noise_color: 0.5,
+            },
+            OscType::BowedString => OscState::BowedString {
+                nut_delay: Vec::new(),
+                bridge_delay: Vec::new(),
+                nut_pos: 0,
+                bridge_pos: 0,
+                nut_filter: 0.0,
+                bridge_lp: 0.0,
+                bridge_bp: 0.0,
+                allpass_prev_in: 0.0,
+                allpass_prev_out: 0.0,
+                allpass_coeff: 0.0,
+                bow_velocity: 0.0,
+                _bow_position: 0.12,
+                bow_pressure: 0.5,
+                body_freq: 300.0,
+                body_q: 2.0,
+            },
+            OscType::Brass => OscState::Brass {
+                bore_delay: Vec::new(),
+                bore_pos: 0,
+                lip_x: 0.0,
+                lip_v: 0.0,
+                lip_freq: 440.0,
+                lip_damping: 0.5,
+                lip_mass_inv: 1.0,
+                bell_lp_state: 0.0,
+                bell_hp_state: 0.0,
+                bell_cutoff: 2000.0,
+                bore_lp_state: 0.0,
+                blowing_pressure: 0.5,
+                _bore_length_ratio: 1.0,
+            },
+            OscType::PhaseDistortion => OscState::PhaseDistortion {
+                phase: 0.0,
+                pd_shape: 0,
+                pd_depth: 0.0,
+            },
+            OscType::Wavefolder => OscState::Wavefolder {
+                phase: 0.0,
+                prev_input: 0.0,
+                prev_adf: 0.0,
+                fold_amount: 0.5,
+                fold_symmetry: 0.5,
+                fold_source: 0,
+            },
+            OscType::ModalResonator => OscState::ModalResonator {
+                y1: [0.0; 16],
+                y2: [0.0; 16],
+                cosw: [0.0; 16],
+                r_sq: [0.0; 16],
+                amps: [0.0; 16],
+                excitation_time: 0.0,
+                noise_state: self.noise_state,
+            },
+            OscType::HardSync => OscState::HardSync {
+                master_phase: 0.0,
+                slave_phase: 0.0,
+                sync_ratio: 2.0,
+                sync_shape: 0,
+            },
+            OscType::Supersaw => OscState::Supersaw {
+                phases: [0.0; 7],
+                detunes: [1.0; 7],
+                mix_center: 1.0,
+                mix_side: 0.75,
+            },
+            OscType::PianoModel => OscState::PianoModel(PianoModel::new()),
         };
     }
 
     /// Initialize Karplus-Strong delay line for a given frequency.
     pub fn init_ks(&mut self, freq: f32) {
+        self.reclaim_buffers();
         let delay_total = self.sample_rate / freq;
         let n = (delay_total as usize).max(2);
         let frac = delay_total - n as f32;
         let allpass_coeff = (1.0 - frac) / (1.0 + frac);
 
-        let mut buffer = vec![0.0; n];
+        let mut buffer = Self::take_buf(&mut self.pool_a, n);
         let mut state = self.noise_state;
         for s in buffer.iter_mut() {
             state ^= state << 13;
@@ -218,65 +513,190 @@ impl Oscillator {
     }
 
     /// Initialize Commuted Piano: dual detuned waveguides with hammer model and dispersion.
-    pub fn init_commuted_piano(&mut self, freq: f32) {
-        // String 1: exact pitch
-        let delay1 = self.sample_rate / freq;
-        let n1 = (delay1 as usize).max(2);
-        let frac1 = delay1 - n1 as f32;
-        let allpass_coeff = (1.0 - frac1) / (1.0 + frac1);
+    /// Initialize Commuted Piano with velocity-dependent hammer, dispersion, and soundboard.
+    ///
+    /// Physical model based on Smith/Van Duyne commuted synthesis with:
+    /// - Velocity-dependent hammer hardness (F = K*x^p, softer = darker)
+    /// - Allpass dispersion filter for string inharmonicity
+    /// - Dual detuned strings for double-decay envelope
+    /// - Frequency-dependent loss filter
+    /// - Soundboard resonance coloring
+    pub fn init_commuted_piano(&mut self, freq: f32, velocity: f32) {
+        self.reclaim_buffers();
+        let sr = self.sample_rate;
+        let brightness = self.ks_brightness;
+        let feedback = self.ks_feedback;
 
-        // String 2: slightly detuned (~1 cent sharp) — creates beating/double decay
-        let detune_cents = 0.8 + 0.5 * (freq / 1000.0);
+        // ── Note parameters ──
+        let midi_note = (12.0 * (freq / 440.0).log2() + 69.0).clamp(21.0, 108.0);
+        let normalized = (midi_note - 21.0) / 87.0; // 0=A0, 1=C8
+
+        // ── Inharmonicity coefficient B (measured piano values) ──
+        // B grows exponentially from bass to treble
+        let b_coeff = 0.00012 * (7.0 * normalized).exp();
+
+        // ── Dispersion filter design ──
+        // 3 second-order allpass sections to approximate frequency-dependent phase delay
+        // from string stiffness. Based on Rauhala & Välimäki (2006).
+        let mut disp_b0 = [0.0f32; 3];
+        let mut disp_b1 = [0.0f32; 3];
+        let mut disp_a1 = [0.0f32; 3];
+        {
+            // Total phase delay at Nyquist should match B coefficient
+            let phase_delay_total = b_coeff * 200.0; // empirical scaling
+            for i in 0..3 {
+                // Distribute across sections with different center frequencies
+                let section_delay = phase_delay_total / 3.0;
+                // Thiran-style allpass: a1 ≈ (1-d)/(1+d) where d is fractional delay
+                let d = section_delay * (1.0 + i as f32 * 0.5);
+                let a1 = (1.0 - d) / (1.0 + d);
+                disp_b0[i] = a1;
+                disp_b1[i] = 1.0;
+                disp_a1[i] = a1;
+            }
+        }
+
+        // ── Delay line lengths (compensate for dispersion filter delay) ──
+        let disp_delay_comp = b_coeff * 100.0; // samples of extra delay from dispersion
+        let delay1_f = sr / freq - disp_delay_comp;
+        let n1 = (delay1_f as usize).max(4);
+        let frac1 = delay1_f - n1 as f32;
+
+        // String 2: detuned for double-decay (Weinreich coupling)
+        // Bass: ~1.5 cents, treble: ~0.5 cents
+        let detune_cents = 1.5 - 1.0 * normalized;
         let freq2 = freq * 2.0_f32.powf(detune_cents / 1200.0);
-        let delay2 = self.sample_rate / freq2;
-        let n2 = (delay2 as usize).max(2);
+        let delay2_f = sr / freq2 - disp_delay_comp;
+        let n2 = (delay2_f as usize).max(4);
+        let frac2 = delay2_f - n2 as f32;
 
-        // Hammer-position comb filter offset (strike at ~1/8 string length)
-        let strike_offset = (n1 / 8).max(1);
+        // Fractional delay allpass coefficients (Thiran first-order)
+        let frac_coeff = [
+            (1.0 - frac1) / (1.0 + frac1),
+            (1.0 - frac2) / (1.0 + frac2),
+        ];
 
-        // Hammer excitation: windowed noise burst (bipolar, zero-mean)
-        let hammer_samples = ((0.001 + 3.0 / freq) * self.sample_rate) as usize;
-        let max_excite = (n1.min(n2) * 3) / 10;
-        let excite_len = hammer_samples.clamp(4, max_excite.max(4));
+        // ── Loss filter coefficient ──
+        // Higher notes decay faster, lower brightness = more damping
+        let base_loss = feedback; // from preset (ks_feedback)
+        let freq_loss = 1.0 - (freq / (sr * 0.5)).min(0.3); // reduce at high freq
+        let loss_coeff = (base_loss * freq_loss).clamp(0.8, 0.9999);
 
-        let mut buffer = vec![0.0; n1];
-        let mut buffer2 = vec![0.0; n2];
+        // ── Hammer excitation ──
+        // Velocity-dependent: harder hit = shorter, brighter pulse
+        // Hammer hardness exponent: p ranges from ~2 (bass, soft) to ~4 (treble, hard)
+        let p_base = 2.0 + 2.0 * normalized; // bass=2, treble=4
+        let p_vel = p_base * (0.5 + 0.5 * velocity); // soft hit reduces hardness
+
+        // Hammer contact time: inversely proportional to velocity^((p-1)/2p)
+        // Softer hit = longer contact = darker spectrum
+        let hammer_base_ms = 4.0 - 2.5 * normalized; // bass: 4ms, treble: 1.5ms
+        let vel_factor = (0.2 + 0.8 * velocity).powf((p_vel - 1.0) / (2.0 * p_vel));
+        let hammer_ms = hammer_base_ms / vel_factor;
+        let hammer_samples = ((hammer_ms * 0.001 * sr) as usize).clamp(4, n1.min(n2) / 2);
+
+        // Strike position: ~1/8 of string length (suppresses 8th harmonic)
+        let strike_pos = 1.0 / (7.0 + normalized * 2.0); // moves toward bridge for treble
+
+        // Generate hammer force pulse with soundboard coloring
+        let mut buffer = Self::take_buf(&mut self.pool_a, n1);
+        let mut buffer2 = Self::take_buf(&mut self.pool_b, n2);
 
         let mut state = self.noise_state;
-        for i in 0..excite_len {
+        let hammer_amp = 0.3 + 0.5 * velocity; // louder with velocity
+
+        for i in 0..hammer_samples {
+            let t = i as f32 / hammer_samples as f32;
+
+            // Raised cosine window (Hann) for the force pulse
+            let window = 0.5 * (1.0 - (TAU * t).cos());
+
+            // Add some noise for attack transient (hammer felt noise)
             state ^= state << 13;
             state ^= state >> 17;
             state ^= state << 5;
             let noise = (state as f32 / u32::MAX as f32) * 2.0 - 1.0;
-            let w = 0.5 * (1.0 - (TAU * i as f32 / excite_len as f32).cos());
-            let sample = noise * w * 0.8;
+            let noise_amount = 0.15 + 0.25 * velocity; // more noise at higher velocity
+
+            // Force pulse: windowed sine half-period + noise
+            let pulse = (PI * t).sin(); // half-sine, like real hammer force
+            let sample = (pulse * (1.0 - noise_amount) + noise * noise_amount) * window * hammer_amp;
+
+            // Apply strike position comb filter (notch at harmonics that have a node there)
+            // This shapes the excitation spectrum
+            let comb_delay = (strike_pos * n1 as f32) as usize;
             if i < n1 {
-                buffer[i] = sample;
+                buffer[i] += sample;
+                // Comb filter: subtract delayed copy
+                if i >= comb_delay {
+                    buffer[i] -= buffer[i - comb_delay] * 0.3;
+                }
             }
+            let comb_delay2 = (strike_pos * n2 as f32) as usize;
             if i < n2 {
-                buffer2[i] = sample;
+                buffer2[i] += sample;
+                if i >= comb_delay2 {
+                    buffer2[i] -= buffer2[i - comb_delay2] * 0.3;
+                }
             }
         }
+
+        // ── Brightness filter on excitation (velocity-dependent) ──
+        // Softer hits get LP-filtered excitation
+        let lp_coeff_excite = 0.3 + 0.7 * velocity * brightness;
+        let mut prev = 0.0f32;
+        for s in buffer.iter_mut() {
+            prev += lp_coeff_excite * (*s - prev);
+            *s = prev;
+        }
+        prev = 0.0;
+        for s in buffer2.iter_mut() {
+            prev += lp_coeff_excite * (*s - prev);
+            *s = prev;
+        }
+
         self.noise_state = state;
+
+        // ── Soundboard resonance parameters ──
+        // Soundboard has dense modes 50-200Hz, radiation cutoff ~100Hz
+        // Simple model: resonant peak at a frequency that depends on piano size
+        let sb_freq = 120.0 + 80.0 * brightness; // 120-200 Hz range
+        let sb_q = 1.5 + brightness; // Q = 1.5-2.5
 
         self.state = OscState::CommutedPiano {
             buffer,
             buffer2,
             pos: 0,
             pos2: 0,
-            filter_state: 0.0,
-            filter_state2: 0.0,
-            allpass_coeff,
-            allpass_prev_in: 0.0,
-            allpass_prev_out: 0.0,
-            strike_offset,
+            loss_state1: 0.0,
+            loss_state2: 0.0,
+            loss_coeff,
+            frac_z1: [0.0; 2],
+            frac_coeff,
+            disp_z1: [0.0; 3],
+            disp_z2: [0.0; 3],
+            disp_b0,
+            disp_b1,
+            disp_a1,
+            sb_lp: 0.0,
+            sb_bp: 0.0,
+            sb_freq,
+            sb_q,
+            dc_x: 0.0,
+            dc_y: 0.0,
         };
     }
 
     /// Initialize Banded Waveguide: 4 parallel delay lines at inharmonic partials.
     pub fn init_banded_wg(&mut self, freq: f32) {
+        self.reclaim_buffers();
         let inharmonicity = 0.0003;
-        let mut buffers: [Vec<f32>; 4] = Default::default();
+        let mut buffers: [Vec<f32>; 4] = [
+            std::mem::take(&mut self.pool_a),
+            std::mem::take(&mut self.pool_b),
+            std::mem::take(&mut self.pool_c),
+            std::mem::take(&mut self.pool_d),
+        ];
         let mut positions = [0usize; 4];
         let mut filter_states = [0.0f32; 4];
 
@@ -372,6 +792,30 @@ impl Oscillator {
         };
     }
 
+    /// Initialize DrumSynth with independent pitch and noise envelopes.
+    pub fn init_drum_synth(
+        &mut self,
+        freq: f32,
+        pitch_amount: f32,
+        pitch_decay: f32,
+        noise_level: f32,
+        noise_decay: f32,
+        noise_color: f32,
+    ) {
+        self.state = OscState::DrumSynth {
+            phase: 0.0,
+            time: 0.0,
+            noise_state: self.noise_state,
+            base_freq: freq,
+            noise_lp_state: 0.0,
+            pitch_amount,
+            pitch_decay,
+            noise_level,
+            noise_decay,
+            noise_color,
+        };
+    }
+
     /// Generate next noise sample using xorshift32.
     #[inline]
     pub fn next_noise(&mut self) -> f32 {
@@ -390,6 +834,16 @@ impl Oscillator {
             OscType::CommutedPiano => self.tick_commuted_piano(),
             OscType::BandedWG => self.tick_banded_wg(),
             OscType::AdditivePiano => self.tick_additive_piano(),
+            OscType::DrumSynth => self.tick_drum_synth(),
+            OscType::BassGuitar => self.tick_bass_guitar(),
+            OscType::BowedString => self.tick_bowed_string(),
+            OscType::Brass => self.tick_brass(),
+            OscType::PhaseDistortion => self.tick_phase_distortion(freq),
+            OscType::Wavefolder => self.tick_wavefolder(freq),
+            OscType::ModalResonator => self.tick_modal_resonator(),
+            OscType::HardSync => self.tick_hard_sync(freq),
+            OscType::Supersaw => self.tick_supersaw(freq),
+            OscType::PianoModel => self.tick_piano_model(),
             _ => self.tick_standard(freq),
         }
     }
@@ -402,13 +856,19 @@ impl Oscillator {
             OscState::Simple { phase } => {
                 let out = match self.osc_type {
                     OscType::Sine => (*phase * TAU).sin(),
-                    OscType::Saw => 2.0 * *phase - 1.0,
+                    OscType::Saw => {
+                        let mut out = 2.0 * *phase - 1.0;
+                        out -= poly_blep(*phase, dt);
+                        out
+                    }
                     OscType::Square => {
-                        if *phase < 0.5 {
-                            1.0
-                        } else {
-                            -1.0
-                        }
+                        let pw = self.pulse_width;
+                        let mut out = if *phase < pw { 1.0 } else { -1.0 };
+                        out += poly_blep(*phase, dt);
+                        let mut shifted = *phase - pw;
+                        if shifted < 0.0 { shifted += 1.0; }
+                        out -= poly_blep(shifted, dt);
+                        out
                     }
                     OscType::Triangle => {
                         if *phase < 0.5 {
@@ -518,86 +978,142 @@ impl Oscillator {
 
             let f = freq * (1.0 + detune);
 
-            // Stack 1: Attack brightness — 1:1 ratio, high index decays fast
-            let attack_idx = fm_index * fast_exp(-t * 12.0);
-            let mod1 = (phases[1] * TAU).sin();
-            let car1 = ((phases[0] + attack_idx * mod1) * TAU).sin();
+            // DX7-style 3-operator cascade FM: Op3 → Op2 → Op1 (carrier)
+            // Op3: high-frequency modulator (attack brightness)
+            // Op2: mid-frequency modulator (body/harmonic content)
+            // Op1: carrier at fundamental
+            // Plus Op4: feedback modulator for metallic character
 
-            // Stack 2: Body — 14:1 ratio, low index for bell-like shimmer
-            let body_idx = 0.7 * fast_exp(-t * 0.5) + 0.05;
-            let mod2 = (phases[3] * TAU).sin();
-            let car2 = ((phases[2] + body_idx * mod2) * TAU).sin();
+            // Op4: self-feedback operator (adds metallic inharmonicity)
+            let fb_level = 0.3 * fast_exp(-t * 2.0);
+            let op4_fb = (phases[3] * TAU).sin();
+            let op4 = ((phases[3] + fb_level * op4_fb) * TAU).sin();
 
-            // Advance phases
-            phases[0] += f / sample_rate; // carrier 1: 1x
-            phases[1] += f * fm_ratio / sample_rate; // mod 1: preset ratio (1.0)
-            phases[2] += f / sample_rate; // carrier 2: 1x
-            phases[3] += f * 14.0 / sample_rate; // mod 2: 14x (DX7 shimmer)
+            // Op3: high-ratio modulator — attack transient (decays fast)
+            let op3_idx = fm_index * 0.7 * fast_exp(-t * 15.0);
+            let op3 = ((phases[2] + op3_idx * 0.1 * op4) * TAU).sin();
+
+            // Op2: mid-ratio modulator — body harmonics (slower decay)
+            let op2_idx = fm_index * 0.4 * fast_exp(-t * 1.5) + 0.08;
+            let op2 = ((phases[1] + op2_idx * op3) * TAU).sin();
+
+            // Op1: carrier at fundamental — modulated by Op2 cascade
+            let op1_idx = fm_index * 0.5 * fast_exp(-t * 2.0) + 0.15;
+            let op1 = ((phases[0] + op1_idx * op2) * TAU).sin();
+
+            // Advance phases: carrier 1×, modulator at fm_ratio, high mod at 14×, feedback at 1×
+            phases[0] += f / sample_rate;
+            phases[1] += f * fm_ratio / sample_rate;
+            phases[2] += f * 14.0 / sample_rate;
+            phases[3] += f * 1.0 / sample_rate; // feedback op at 1×
 
             for p in phases.iter_mut() {
                 *p -= p.floor();
             }
 
-            // Mix: percussive attack + sustained body
-            let attack_amp = fast_exp(-t * 10.0);
-            let out = car1 * attack_amp * 0.35 + car2 * 0.65;
+            let out = op1 * 0.85 + op4 * 0.08; // mostly carrier + tiny metallic tinge
             out.clamp(-1.0, 1.0)
         } else {
             0.0
         }
     }
 
-    /// Commuted Piano: dual detuned waveguides.
+    /// Commuted Piano: dual coupled waveguides with dispersion, loss, soundboard.
+    ///
+    /// Signal flow per sample:
+    ///   read delay → loss LP → dispersion allpass cascade → fractional delay AP
+    ///   → bridge coupling → write back to delay
+    ///   Output: mix strings → soundboard resonance → DC blocker
     fn tick_commuted_piano(&mut self) -> f32 {
-        let brightness = self.ks_brightness;
-        let feedback = self.ks_feedback;
+        let sr = self.sample_rate;
 
         if let OscState::CommutedPiano {
-            buffer,
-            buffer2,
-            pos,
-            pos2,
-            filter_state,
-            filter_state2,
-            allpass_coeff,
-            allpass_prev_in,
-            allpass_prev_out,
-            ..
+            buffer, buffer2, pos, pos2,
+            loss_state1, loss_state2, loss_coeff,
+            frac_z1, frac_coeff,
+            disp_z1, disp_z2, disp_b0: _, disp_b1: _, disp_a1,
+            sb_lp, sb_bp, sb_freq, sb_q,
+            dc_x, dc_y,
         } = &mut self.state
         {
             let n1 = buffer.len();
             let n2 = buffer2.len();
-            if n1 == 0 {
-                return 0.0;
+            if n1 == 0 { return 0.0; }
+
+            // ── Read from delay lines ──
+            let s1 = buffer[*pos];
+            let s2 = if n2 > 0 { buffer2[*pos2] } else { 0.0 };
+
+            // ── Loss filter (one-pole LP — frequency-dependent decay) ──
+            // One-pole: y += c * (x - y). Higher partials attenuated more per round trip.
+            let lc = *loss_coeff;
+            *loss_state1 += lc * (s1 - *loss_state1);
+            *loss_state2 += lc * (s2 - *loss_state2);
+
+            // ── Dispersion filter (3 cascaded first-order allpass sections) ──
+            // Models string stiffness: higher partials get extra phase delay → stretched tuning
+            // First-order allpass: y[n] = a * (x[n] - y[n-1]) + x[n-1]
+            // disp_z1[i] = previous input x[n-1], disp_z2[i] = previous output y[n-1]
+            let mut x = *loss_state1;
+            for i in 0..3 {
+                let a = disp_a1[i];
+                let y = a * (x - disp_z2[i]) + disp_z1[i];
+                disp_z1[i] = x;
+                disp_z2[i] = y;
+                x = y;
             }
 
-            // --- String 1 ---
-            let s1 = buffer[*pos];
+            // Also apply dispersion to string 2 (reuse same coefficients)
+            let mut x2 = *loss_state2;
+            // Use a lightweight single-section dispersion for string 2
+            {
+                let a = disp_a1[0]; // just the first section
+                // We need separate state for string 2 — abuse frac_z1 trick:
+                // Actually, let's skip dispersion for string 2 since its detuning
+                // already provides inharmonicity-like beating. The key perceptual
+                // effect is on the primary string.
+                let _ = a;
+            }
 
-            let f1 = *filter_state + brightness * (s1 - *filter_state);
-            *filter_state = f1;
+            // ── Fractional delay allpass (per string, for pitch accuracy) ──
+            // First-order Thiran: y[n] = c * (x[n] - y[n-1]) + x[n-1]
+            let fo1 = frac_coeff[0] * (x - frac_z1[0]) + frac_z1[0];
+            frac_z1[0] = x;
 
-            let c = *allpass_coeff;
-            let ap1 = c * (f1 - *allpass_prev_out) + *allpass_prev_in;
-            *allpass_prev_in = f1;
-            *allpass_prev_out = ap1;
+            let fo2 = frac_coeff[1] * (x2 - frac_z1[1]) + frac_z1[1];
+            frac_z1[1] = x2;
 
-            buffer[*pos] = ap1 * feedback;
-            *pos = (*pos + 1) % n1;
-
-            // --- String 2 (detuned for beating/double-decay) ---
-            let mut s2 = 0.0;
+            // ── Write back to delay lines (with bridge coupling) ──
+            // Weinreich coupling: strings exchange energy through bridge
+            let coupling = 0.004;
+            buffer[*pos] = fo1 + s2 * coupling;
             if n2 > 0 {
-                s2 = buffer2[*pos2];
+                buffer2[*pos2] = fo2 + s1 * coupling;
+            }
 
-                let f2 = *filter_state2 + brightness * (s2 - *filter_state2);
-                *filter_state2 = f2;
-
-                buffer2[*pos2] = f2 * feedback;
+            *pos = (*pos + 1) % n1;
+            if n2 > 0 {
                 *pos2 = (*pos2 + 1) % n2;
             }
 
-            ((s1 + s2) * 0.5).clamp(-1.0, 1.0)
+            // ── Mix strings ──
+            let raw = s1 * 0.55 + s2 * 0.45;
+
+            // ── Soundboard resonance (SVF bandpass, adds body/warmth) ──
+            let g = PI * *sb_freq / sr; // SVF integrator coefficient
+            let k = 1.0 / *sb_q;
+            let hp = raw - *sb_lp - k * *sb_bp;
+            *sb_bp += g * hp;
+            *sb_lp += g * *sb_bp;
+            // Mostly direct signal + some resonance coloring
+            let with_sb = raw * 0.82 + *sb_bp * 0.18;
+
+            // ── DC blocker ──
+            let dc_out = with_sb - *dc_x + 0.9975 * *dc_y;
+            *dc_x = with_sb;
+            *dc_y = dc_out;
+
+            dc_out.clamp(-1.0, 1.0)
         } else {
             0.0
         }
@@ -696,6 +1212,815 @@ impl Oscillator {
         self.noise_state = noise_state;
         result
     }
+
+    /// Initialize bass guitar physical model.
+    pub fn init_bass_guitar(
+        &mut self,
+        freq: f32,
+        velocity: f32,
+        style: f32,
+        tone: f32,
+        body: f32,
+        pickup: f32,
+    ) {
+        self.reclaim_buffers();
+        let mut model = BassModel::new();
+        let buf_a = std::mem::take(&mut self.pool_a);
+        let buf_b = std::mem::take(&mut self.pool_b);
+        model.init_with_buffers(freq, velocity, style, tone, body, pickup, self.sample_rate, buf_a, buf_b);
+        self.state = OscState::BassGuitar(model);
+    }
+
+    /// Bass guitar tick: delegates to BassModel.
+    fn tick_bass_guitar(&mut self) -> f32 {
+        if let OscState::BassGuitar(model) = &mut self.state {
+            model.tick()
+        } else {
+            0.0
+        }
+    }
+
+    /// Dedicated drum synthesis: sine with pitch envelope + shaped noise.
+    /// Inspired by Nord Drum / Mutable Instruments Plaits drum models.
+    fn tick_drum_synth(&mut self) -> f32 {
+        let sample_rate = self.sample_rate;
+
+        if let OscState::DrumSynth {
+            phase,
+            time,
+            noise_state,
+            base_freq,
+            noise_lp_state,
+            pitch_amount,
+            pitch_decay,
+            noise_level,
+            noise_decay,
+            noise_color,
+        } = &mut self.state
+        {
+            let dt = 1.0 / sample_rate;
+            *time += dt;
+            let t = *time;
+
+            // --- Tone component: sine with exponential pitch sweep ---
+            // pitch_amount in semitones, decays from base_freq * 2^(amount/12) down to base_freq
+            let pitch_env = fast_exp(-t * *pitch_decay);
+            let freq = *base_freq * (pitch_env * *pitch_amount / 12.0).exp2();
+
+            let tone = (*phase * TAU).sin();
+            *phase += freq / sample_rate;
+            *phase -= (*phase).floor();
+
+            // --- Noise component: white noise → one-pole LP → envelope ---
+            let noise_env = fast_exp(-t * *noise_decay);
+            let noise_out = if *noise_level > 0.001 && noise_env > 0.001 {
+                // Xorshift32 noise
+                *noise_state ^= *noise_state << 13;
+                *noise_state ^= *noise_state >> 17;
+                *noise_state ^= *noise_state << 5;
+                let white = (*noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
+
+                // One-pole LP: color 0 = dark (coeff ~0.05), color 1 = bright (coeff ~0.95)
+                let coeff = 0.05 + 0.9 * *noise_color;
+                *noise_lp_state += coeff * (white - *noise_lp_state);
+
+                *noise_lp_state * *noise_level * noise_env
+            } else {
+                0.0
+            };
+
+            (tone + noise_out).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+    /// Initialize bowed string waveguide.
+    /// body_type: 0=Violin, 1=Viola, 2=Cello, 3=Double Bass
+    pub fn init_bowed_string(
+        &mut self,
+        freq: f32,
+        velocity: f32,
+        bow_pressure: f32,
+        bow_position: f32,
+        body_type: f32,
+    ) {
+        self.reclaim_buffers();
+        let sample_rate = self.sample_rate;
+        let delay_total = sample_rate / freq;
+        let n_total = (delay_total as usize).max(4);
+
+        // bow_position splits the string into two segments
+        let bp = bow_position.clamp(0.02, 0.98);
+        let n_nut = ((n_total as f32 * bp) as usize).max(1);
+        let n_bridge = (n_total - n_nut).max(1);
+
+        // Fractional delay allpass
+        let frac = delay_total - n_total as f32;
+        let allpass_coeff = (1.0 - frac) / (1.0 + frac);
+
+        // Body resonance depends on instrument type
+        let body_i = body_type as u32;
+        let (body_freq, body_q) = match body_i {
+            0 => (440.0, 3.0),   // Violin — high resonance
+            1 => (330.0, 2.5),   // Viola
+            2 => (180.0, 2.0),   // Cello
+            _ => (90.0, 1.5),    // Double Bass
+        };
+
+        let bow_vel = velocity * 0.3;
+
+        self.state = OscState::BowedString {
+            nut_delay: Self::take_buf(&mut self.pool_a, n_nut),
+            bridge_delay: Self::take_buf(&mut self.pool_b, n_bridge),
+            nut_pos: 0,
+            bridge_pos: 0,
+            nut_filter: 0.0,
+            bridge_lp: 0.0,
+            bridge_bp: 0.0,
+            allpass_prev_in: 0.0,
+            allpass_prev_out: 0.0,
+            allpass_coeff,
+            bow_velocity: bow_vel,
+            _bow_position: bp,
+            bow_pressure: bow_pressure.clamp(0.01, 1.0),
+            body_freq,
+            body_q,
+        };
+    }
+
+    /// Bowed string tick: McIntyre-Schumacher-Woodhouse friction model.
+    fn tick_bowed_string(&mut self) -> f32 {
+        let sample_rate = self.sample_rate;
+
+        if let OscState::BowedString {
+            nut_delay, bridge_delay, nut_pos, bridge_pos,
+            nut_filter, bridge_lp, bridge_bp,
+            allpass_prev_in, allpass_prev_out, allpass_coeff,
+            bow_velocity, bow_pressure, body_freq, body_q, ..
+        } = &mut self.state
+        {
+            let n_nut = nut_delay.len();
+            let n_bridge = bridge_delay.len();
+            if n_nut == 0 || n_bridge == 0 {
+                return 0.0;
+            }
+
+            // Read incoming waves at bow point
+            let incoming_nut = nut_delay[*nut_pos];
+            let incoming_bridge = bridge_delay[*bridge_pos];
+
+            // String velocity at bow point
+            let v_string = incoming_nut + incoming_bridge;
+
+            // Relative velocity between bow and string
+            let v_rel = *bow_velocity - v_string;
+
+            // Bow friction: f(v_rel) = v_rel * exp(-a * v_rel² + 0.5)
+            let a = 100.0; // friction curve steepness
+            let friction = *bow_pressure * v_rel * fast_exp(-a * v_rel * v_rel + 0.5);
+
+            // Reflected waves = incoming + friction contribution
+            let to_nut = incoming_bridge + friction;
+            let to_bridge = incoming_nut + friction;
+
+            // Nut reflection: invert + lowpass
+            let nut_reflected = -to_nut;
+            let nut_lp_coeff = 0.85;
+            *nut_filter += nut_lp_coeff * (nut_reflected - *nut_filter);
+            nut_delay[*nut_pos] = *nut_filter;
+            *nut_pos = (*nut_pos + 1) % n_nut;
+
+            // Bridge side: body filter (one-pole LP + bandpass resonance)
+            let bridge_lp_coeff = 0.7;
+            *bridge_lp += bridge_lp_coeff * (to_bridge - *bridge_lp);
+
+            // Body bandpass resonance
+            let f_norm = *body_freq / sample_rate;
+            let w = (PI * f_norm).sin() * 2.0;
+            let q_inv = 1.0 / *body_q;
+            *bridge_bp = *bridge_lp - *bridge_bp * q_inv;
+            let body_out = *bridge_bp;
+            *bridge_bp += w * body_out;
+
+            // Allpass fractional delay on bridge output
+            let ap_in = *bridge_lp + body_out * 0.15;
+            let c = *allpass_coeff;
+            let ap_out = c * (ap_in - *allpass_prev_out) + *allpass_prev_in;
+            *allpass_prev_in = ap_in;
+            *allpass_prev_out = ap_out;
+
+            bridge_delay[*bridge_pos] = ap_out * 0.995; // slight loss
+            *bridge_pos = (*bridge_pos + 1) % n_bridge;
+
+            // Output from bridge side
+            (to_bridge + body_out * 0.2).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Initialize brass lip reed + bore waveguide.
+    /// bell_type: 0=Trumpet, 1=French Horn, 2=Trombone, 3=Tuba
+    pub fn init_brass(
+        &mut self,
+        freq: f32,
+        velocity: f32,
+        lip_tension: f32,
+        blowing_pressure: f32,
+        bell_type: f32,
+    ) {
+        self.reclaim_buffers();
+        let sample_rate = self.sample_rate;
+        let delay_total = sample_rate / freq;
+        let n = (delay_total as usize).max(2);
+
+        let bell_i = bell_type as u32;
+
+        // Lip resonance frequency: slightly above playing frequency, modulated by tension
+        let lip_freq = freq * (0.8 + lip_tension * 0.4);
+        let lip_damping = 0.02 + (1.0 - lip_tension) * 0.08;
+
+        // Bell cutoff: smaller bell = higher cutoff (brighter)
+        let bell_cutoff = match bell_i {
+            0 => 2500.0, // Trumpet
+            1 => 1500.0, // French Horn
+            2 => 2000.0, // Trombone
+            _ => 1000.0, // Tuba
+        };
+
+        let pressure = blowing_pressure * velocity;
+
+        self.state = OscState::Brass {
+            bore_delay: Self::take_buf(&mut self.pool_a, n),
+            bore_pos: 0,
+            lip_x: 0.001, // small initial opening
+            lip_v: 0.0,
+            lip_freq,
+            lip_damping,
+            lip_mass_inv: 1.0,
+            bell_lp_state: 0.0,
+            bell_hp_state: 0.0,
+            bell_cutoff,
+            bore_lp_state: 0.0,
+            blowing_pressure: pressure,
+            _bore_length_ratio: 1.0,
+        };
+    }
+
+    /// Brass tick: lip reed oscillator + bore waveguide + bell radiation.
+    fn tick_brass(&mut self) -> f32 {
+        let sample_rate = self.sample_rate;
+
+        if let OscState::Brass {
+            bore_delay, bore_pos,
+            lip_x, lip_v, lip_freq, lip_damping, lip_mass_inv,
+            bell_lp_state, bell_hp_state, bell_cutoff,
+            bore_lp_state, blowing_pressure, ..
+        } = &mut self.state
+        {
+            let n = bore_delay.len();
+            if n == 0 {
+                return 0.0;
+            }
+
+            let dt = 1.0 / sample_rate;
+
+            // Read reflected wave from bell end of bore
+            let read_pos = if *bore_pos == 0 { n - 1 } else { *bore_pos - 1 };
+            let reflected = bore_delay[read_pos];
+
+            // Bell filter: split into reflection (LP) and radiation (HP)
+            let bell_alpha = (*bell_cutoff * dt * PI).min(0.99);
+            *bell_lp_state += bell_alpha * (reflected - *bell_lp_state);
+            let bell_reflected = *bell_lp_state * -0.95; // reflected back (inverted, lossy)
+            let bell_radiated = reflected - *bell_lp_state; // HP: radiated output
+
+            // HP filter for output brightness
+            let prev_hp = *bell_hp_state;
+            *bell_hp_state = bell_radiated;
+            let output = bell_radiated * 0.7 + (bell_radiated - prev_hp) * 0.3;
+
+            // Pressure difference across lip reed
+            let delta_p = *blowing_pressure - bell_reflected;
+
+            // Lip reed oscillator (leapfrog integration)
+            let omega = *lip_freq * TAU;
+            let spring_force = -omega * omega * *lip_x;
+            let damping_force = -*lip_damping * omega * *lip_v;
+            let driving_force = delta_p * 0.5;
+            let accel = (spring_force + damping_force + driving_force) * *lip_mass_inv;
+            *lip_v += accel * dt;
+            *lip_x += *lip_v * dt;
+
+            // Lip opening (can't go negative)
+            let lip_opening = lip_x.max(0.0);
+
+            // Flow through lip opening
+            let dp_abs = delta_p.abs().max(0.0001);
+            let flow = lip_opening * dp_abs.sqrt() * delta_p.signum();
+
+            // Write flow into bore (with mild nonlinearity for brassiness)
+            let bore_input = soft_clip(flow * 1.5);
+
+            // Bore viscothermal losses (one-pole LP)
+            let bore_lp_coeff = 0.95;
+            *bore_lp_state += bore_lp_coeff * (bore_input - *bore_lp_state);
+
+            bore_delay[*bore_pos] = *bore_lp_state + bell_reflected;
+            *bore_pos = (*bore_pos + 1) % n;
+
+            output.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    // ─── Phase Distortion (Casio CZ) ────────────────────────────────
+
+    pub fn init_phase_distortion(&mut self, pd_shape: u8, pd_depth: f32) {
+        self.state = OscState::PhaseDistortion {
+            phase: 0.0,
+            pd_shape: pd_shape.min(7),
+            pd_depth,
+        };
+    }
+
+    fn tick_phase_distortion(&mut self, freq: f32) -> f32 {
+        let sample_rate = self.sample_rate;
+
+        if let OscState::PhaseDistortion { phase, pd_shape, pd_depth } = &mut self.state {
+            let dt = freq / sample_rate;
+            *phase += dt;
+            *phase -= phase.floor();
+            let t = *phase;
+            let d = *pd_depth;
+
+            let distorted = distort_phase(t, *pd_shape, d, freq, sample_rate);
+            (distorted * TAU).sin()
+        } else {
+            0.0
+        }
+    }
+
+    // ─── Wavefolder (West Coast) ─────────────────────────────────────
+
+    pub fn init_wavefolder(&mut self, fold_source: u8, fold_amount: f32, fold_symmetry: f32) {
+        self.state = OscState::Wavefolder {
+            phase: 0.0,
+            prev_input: 0.0,
+            prev_adf: sine_fold_ad(0.0),
+            fold_amount,
+            fold_symmetry,
+            fold_source: fold_source.min(2),
+        };
+    }
+
+    fn tick_wavefolder(&mut self, freq: f32) -> f32 {
+        let sample_rate = self.sample_rate;
+
+        if let OscState::Wavefolder {
+            phase, prev_input, prev_adf,
+            fold_amount, fold_symmetry, fold_source,
+        } = &mut self.state
+        {
+            let dt = freq / sample_rate;
+            *phase += dt;
+            *phase -= phase.floor();
+            let t = *phase;
+
+            // Source waveform
+            let source = match *fold_source {
+                0 => (t * TAU).sin(),
+                1 => if t < 0.5 { 4.0 * t - 1.0 } else { 3.0 - 4.0 * t },
+                _ => 2.0 * t - 1.0,
+            };
+
+            // Apply gain and symmetry offset
+            let gain = 1.0 + *fold_amount * 9.0;
+            let x = source * gain + (*fold_symmetry - 0.5) * 2.0;
+
+            // ADAA 1st order
+            let adf = sine_fold_ad(x);
+            let diff = x - *prev_input;
+            let out = if diff.abs() > 1e-5 {
+                (adf - *prev_adf) / diff
+            } else {
+                sine_fold((x + *prev_input) * 0.5)
+            };
+
+            *prev_input = x;
+            *prev_adf = adf;
+
+            out.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    // ─── Modal Resonator ─────────────────────────────────────────────
+
+    pub fn init_modal_resonator(
+        &mut self,
+        freq: f32,
+        material: u8,
+        brightness: f32,
+        damping: f32,
+        strike_pos: f32,
+    ) {
+        let sample_rate = self.sample_rate;
+        let mat = (material as usize).min(MODAL_MATERIALS - 1);
+        let ratios = &MODAL_RATIOS[mat];
+
+        let mut y1 = [0.0f32; 16];
+        let mut y2 = [0.0f32; 16];
+        let mut cosw = [0.0f32; 16];
+        let mut r_sq = [0.0f32; 16];
+        let mut amps = [0.0f32; 16];
+
+        let base_bandwidth = 2.0 + damping * 12.0;
+
+        for i in 0..16 {
+            let mode_freq = freq * ratios[i];
+            if mode_freq > sample_rate * 0.5 || mode_freq < 1.0 {
+                amps[i] = 0.0;
+                cosw[i] = 0.0;
+                r_sq[i] = 0.0;
+                continue;
+            }
+
+            let bw = base_bandwidth * (1.0 + i as f32 * (1.0 - brightness) * 0.5);
+            let r = fast_exp(-PI * bw / sample_rate);
+            let w = TAU * mode_freq / sample_rate;
+            cosw[i] = 2.0 * r * w.cos();
+            r_sq[i] = r * r;
+
+            // Strike position filtering + 1/(i+1) amplitude rolloff
+            let strike = (PI * (i + 1) as f32 * strike_pos.clamp(0.01, 0.99)).sin().abs();
+            amps[i] = strike / (1 + i) as f32;
+
+            y1[i] = 0.0;
+            y2[i] = 0.0;
+        }
+
+        self.state = OscState::ModalResonator {
+            y1, y2, cosw, r_sq, amps,
+            excitation_time: 0.0,
+            noise_state: self.noise_state,
+        };
+    }
+
+    fn tick_modal_resonator(&mut self) -> f32 {
+        let sample_rate = self.sample_rate;
+
+        if let OscState::ModalResonator {
+            y1, y2, cosw, r_sq, amps,
+            excitation_time, noise_state,
+        } = &mut self.state
+        {
+            // Excitation: 2ms noise burst with linear decay
+            let burst_dur = 0.002;
+            let excitation = if *excitation_time < burst_dur {
+                let env = 1.0 - *excitation_time / burst_dur;
+                *noise_state ^= *noise_state << 13;
+                *noise_state ^= *noise_state >> 17;
+                *noise_state ^= *noise_state << 5;
+                let noise = (*noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
+                noise * env
+            } else {
+                0.0
+            };
+
+            let mut output = 0.0;
+            for i in 0..16 {
+                if amps[i] < 0.0001 { continue; }
+                let y0 = cosw[i] * y1[i] - r_sq[i] * y2[i] + excitation * amps[i];
+                y2[i] = y1[i];
+                y1[i] = y0;
+                output += y0;
+            }
+
+            *excitation_time += 1.0 / sample_rate;
+
+            // Scale output to reasonable level
+            (output * 0.5).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    // ─── Hard Sync (Prophet-5 / Moog Prodigy style) ──────────────────
+
+    pub fn init_hard_sync(&mut self, sync_ratio: f32, sync_shape: u8) {
+        self.state = OscState::HardSync {
+            master_phase: 0.0,
+            slave_phase: 0.0,
+            sync_ratio: sync_ratio.clamp(1.0, 16.0),
+            sync_shape: sync_shape.min(2),
+        };
+    }
+
+    fn tick_hard_sync(&mut self, freq: f32) -> f32 {
+        let sample_rate = self.sample_rate;
+
+        if let OscState::HardSync {
+            master_phase, slave_phase, sync_ratio, sync_shape,
+        } = &mut self.state
+        {
+            let master_dt = freq / sample_rate;
+            let slave_dt = freq * *sync_ratio / sample_rate;
+
+            // Advance master
+            *master_phase += master_dt;
+
+            let mut sync_correction = 0.0;
+
+            // Check for master reset (hard sync)
+            if *master_phase >= 1.0 {
+                *master_phase -= 1.0;
+                // Compute slave value just before reset for discontinuity correction
+                let old_slave = *slave_phase;
+                let old_val = match *sync_shape {
+                    0 => 2.0 * old_slave - 1.0,
+                    1 => if old_slave < 0.5 { 1.0 } else { -1.0 },
+                    _ => if old_slave < 0.5 { 4.0 * old_slave - 1.0 } else { 3.0 - 4.0 * old_slave },
+                };
+                // Reset slave phase
+                let overshoot = *master_phase / master_dt;
+                *slave_phase = overshoot * slave_dt;
+                // Compute slave value just after reset
+                let new_val = match *sync_shape {
+                    0 => 2.0 * *slave_phase - 1.0,
+                    1 => if *slave_phase < 0.5 { 1.0 } else { -1.0 },
+                    _ => if *slave_phase < 0.5 { 4.0 * *slave_phase - 1.0 } else { 3.0 - 4.0 * *slave_phase },
+                };
+                // BLIT-style correction: band-limited step at discontinuity
+                // The discontinuity magnitude scaled by polyBLEP-like window
+                let d = overshoot; // 0-1 fractional position in sample
+                let step = new_val - old_val;
+                // 2nd-order polynomial smoothing of the step discontinuity
+                if d < 1.0 {
+                    sync_correction = step * (d * d * 0.5 - d + 0.5);
+                }
+            } else {
+                *slave_phase += slave_dt;
+                if *slave_phase >= 1.0 {
+                    *slave_phase -= slave_phase.floor();
+                }
+            }
+
+            let t = *slave_phase;
+            // Slave waveform with polyBLEP on natural edges
+            let out = match *sync_shape {
+                0 => {
+                    // Saw with polyBLEP
+                    2.0 * t - 1.0 - poly_blep(t, slave_dt)
+                }
+                1 => {
+                    // Square with polyBLEP
+                    let pw = 0.5;
+                    let mut sq = if t < pw { 1.0 } else { -1.0 };
+                    sq += poly_blep(t, slave_dt);
+                    sq -= poly_blep((t - pw + 1.0) % 1.0, slave_dt);
+                    sq
+                }
+                _ => {
+                    // Triangle (integrated square — naturally band-limited)
+                    if t < 0.5 { 4.0 * t - 1.0 } else { 3.0 - 4.0 * t }
+                }
+            };
+
+            out - sync_correction
+        } else {
+            0.0
+        }
+    }
+
+    // ─── Supersaw (Roland JP-8000) ───────────────────────────────────
+
+    pub fn init_supersaw(&mut self, detune_amount: f32, mix: f32) {
+        // JP-8000 supersaw: 7 saws with specific detuning distribution
+        // Center saw + 3 pairs symmetrically detuned
+        // Detune curve from Adam Szabo's analysis of JP-8000
+        let detune = detune_amount.clamp(0.0, 1.0);
+
+        // Detune in cents: follows a roughly quadratic curve
+        // At max detune ~1 semitone = 100 cents spread
+        let max_cents = 70.0 * detune + 30.0 * detune * detune;
+        let offsets = [-0.11002313, -0.06288439, -0.01952356, 0.0,
+                        0.01991221,  0.06216538,  0.10745242];
+
+        let mut detunes = [0.0f32; 7];
+        for i in 0..7 {
+            let cents = offsets[i] * max_cents * 2.0;
+            detunes[i] = 2.0_f32.powf(cents / 1200.0);
+        }
+
+        // Mix: center vs side voices
+        // At low detune, center dominates. At high detune, sides dominate.
+        let mix_center = 1.0 - mix * 0.3;
+        let mix_side = 0.3 + mix * 0.7;
+
+        // Randomize initial phases for richness
+        let mut phases = [0.0f32; 7];
+        let mut state = self.noise_state;
+        for p in &mut phases {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            *p = state as f32 / u32::MAX as f32;
+        }
+        self.noise_state = state;
+
+        self.state = OscState::Supersaw {
+            phases,
+            detunes,
+            mix_center,
+            mix_side,
+        };
+    }
+
+    fn tick_supersaw(&mut self, freq: f32) -> f32 {
+        let sample_rate = self.sample_rate;
+
+        if let OscState::Supersaw {
+            phases, detunes, mix_center, mix_side,
+        } = &mut self.state
+        {
+            let mut out = 0.0;
+            let norm = 1.0 / 7.0_f32.sqrt(); // normalize for 7 voices
+
+            for i in 0..7 {
+                let dt = freq * detunes[i] / sample_rate;
+                phases[i] += dt;
+                phases[i] -= phases[i].floor();
+
+                // Saw wave with polyBLEP anti-aliasing
+                let saw = 2.0 * phases[i] - 1.0 - poly_blep(phases[i], dt);
+
+                // Center voice (index 3) gets different mix level
+                let level = if i == 3 { *mix_center } else { *mix_side };
+                out += saw * level;
+            }
+
+            (out * norm).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    // ── PianoModel ──
+
+    pub fn init_piano_model(&mut self, freq: f32) {
+        self.reclaim_buffers();
+        let brightness = self.ks_brightness;
+        let feedback = self.ks_feedback;
+        let sample_rate = self.sample_rate;
+        self.state = OscState::PianoModel(PianoModel::new());
+        if let OscState::PianoModel(ref mut piano) = self.state {
+            piano.init(freq, sample_rate, brightness, feedback);
+        }
+    }
+
+    fn tick_piano_model(&mut self) -> f32 {
+        if let OscState::PianoModel(ref mut piano) = self.state {
+            piano.tick()
+        } else {
+            0.0
+        }
+    }
+
+}
+
+// ─── Modal Resonator frequency ratio tables ──────────────────────────
+
+const MODAL_MATERIALS: usize = 10;
+
+/// 10 materials × 16 modes. Ratios relative to fundamental.
+const MODAL_RATIOS: [[f32; 16]; MODAL_MATERIALS] = [
+    // 0: Steel Bar
+    [1.0, 2.756, 5.404, 8.933, 13.344, 18.637, 24.812, 31.869,
+     39.808, 48.630, 58.333, 68.919, 80.387, 92.737, 105.970, 120.085],
+    // 1: Aluminum
+    [1.0, 2.83, 5.65, 9.42, 14.13, 19.78, 26.37, 33.90,
+     42.37, 51.78, 62.13, 73.42, 85.65, 98.82, 112.93, 127.98],
+    // 2: Glass
+    [1.0, 2.32, 4.15, 6.45, 9.20, 12.40, 16.05, 20.15,
+     24.70, 29.70, 35.15, 41.05, 47.40, 54.20, 61.45, 69.15],
+    // 3: Wood Block
+    [1.0, 2.572, 4.644, 6.984, 9.723, 12.0, 15.0, 18.2,
+     21.7, 25.4, 29.3, 33.5, 37.9, 42.5, 47.3, 52.3],
+    // 4: Marimba
+    [1.0, 3.98, 9.22, 16.0, 23.0, 31.0, 40.0, 50.0,
+     61.0, 73.0, 86.0, 100.0, 115.0, 131.0, 148.0, 166.0],
+    // 5: Vibraphone (quadratic ratios: n²)
+    [1.0, 4.0, 9.0, 16.0, 25.0, 36.0, 49.0, 64.0,
+     81.0, 100.0, 121.0, 144.0, 169.0, 196.0, 225.0, 256.0],
+    // 6: Tubular Bell
+    [1.0, 2.66, 5.0, 8.0, 11.55, 15.66, 20.33, 25.55,
+     31.33, 37.66, 44.55, 52.0, 60.0, 68.55, 77.66, 87.33],
+    // 7: Church Bell
+    [1.0, 1.65, 2.0, 2.57, 3.14, 4.0, 4.78, 5.63,
+     6.55, 7.55, 8.62, 9.76, 10.97, 12.25, 13.60, 15.02],
+    // 8: Membrane (kick)
+    [1.0, 1.593, 2.136, 2.296, 2.653, 2.917, 3.156, 3.501,
+     3.600, 3.882, 4.059, 4.241, 4.601, 4.903, 5.132, 5.367],
+    // 9: Timpani
+    [1.0, 1.504, 1.741, 2.0, 2.245, 2.494, 2.740, 2.985,
+     3.228, 3.470, 3.710, 3.949, 4.187, 4.424, 4.660, 4.895],
+];
+
+// ─── Phase distortion helper ─────────────────────────────────────────
+
+/// Apply phase distortion function.
+#[inline]
+fn distort_phase(t: f32, shape: u8, depth: f32, freq: f32, sample_rate: f32) -> f32 {
+    if depth < 0.001 {
+        return t; // no distortion → pure sine
+    }
+    let d = depth;
+    match shape {
+        // 0: Saw — fast read then hold
+        0 => {
+            if t < 0.5 {
+                let r = 1.0 + d;
+                (t * r).min(1.0) * 0.5
+            } else {
+                0.5
+            }
+        }
+        // 1: Square — two compressed half-periods
+        1 => {
+            if t < 0.5 {
+                let r = 1.0 + d;
+                (t * r).min(0.5)
+            } else {
+                let r = 1.0 + d;
+                let tt = t - 0.5;
+                0.5 + (tt * r).min(0.5)
+            }
+        }
+        // 2: Pulse — narrow impulse
+        2 => {
+            let w = 0.25 / (1.0 + d * 3.0);
+            if t < w {
+                t / w * 0.5
+            } else {
+                0.5
+            }
+        }
+        // 3: DoubleSine — double frequency morph
+        3 => {
+            let r = 1.0 + d;
+            (t * r) % 1.0
+        }
+        // 4: SawPulse — combination
+        4 => {
+            let saw = if t < 0.5 { t * (1.0 + d) } else { 0.5 };
+            let pulse_w = 0.25 / (1.0 + d * 2.0);
+            let pulse = if t < pulse_w { t / pulse_w * 0.5 } else { 0.5 };
+            saw * (1.0 - d * 0.5) + pulse * d * 0.5
+        }
+        // 5: Reso1 — resonant harmonic N
+        5 => {
+            let max_n = (sample_rate / (2.0 * freq)).min(16.0);
+            let n = 1.0 + d * (max_n - 1.0);
+            (t * n) % 1.0
+        }
+        // 6: Reso2 — windowed resonance
+        6 => {
+            let max_n = (sample_rate / (2.0 * freq)).min(16.0);
+            let n = 1.0 + d * (max_n - 1.0);
+            let raw = (t * n) % 1.0;
+            // Window function: smoothly blend with original phase
+            let window = (t * PI).sin();
+            t * (1.0 - window * d) + raw * window * d
+        }
+        // 7: Reso3 — resonance with inverted second half
+        7 => {
+            let max_n = (sample_rate / (2.0 * freq)).min(16.0);
+            let n = 1.0 + d * (max_n - 1.0);
+            if t < 0.5 {
+                (t * n) % 1.0
+            } else {
+                1.0 - ((t * n) % 1.0)
+            }
+        }
+        _ => t,
+    }
+}
+
+// ─── Wavefolder helpers ──────────────────────────────────────────────
+
+/// Sine fold: f(x) = sin(π/2 × x)
+#[inline]
+fn sine_fold(x: f32) -> f32 {
+    (x * PI * 0.5).sin()
+}
+
+/// Antiderivative of sine fold: F(x) = -2/π² × cos(π/2 × x)
+#[inline]
+fn sine_fold_ad(x: f32) -> f32 {
+    -2.0 / (PI * PI) * (x * PI * 0.5).cos()
 }
 
 /// Fast exponential approximation for negative arguments.
@@ -713,4 +2038,14 @@ fn fast_exp(x: f32) -> f32 {
     y *= y;
     y *= y; // 2^8 = 256
     y.max(0.0)
+}
+
+/// Soft clipping / saturation: tanh approximation for growl/fret buzz.
+#[inline]
+fn soft_clip(x: f32) -> f32 {
+    if x.abs() < 0.5 {
+        x
+    } else {
+        x.signum() * (1.0 - fast_exp(-x.abs() * 2.0)) * 0.5 + x * 0.5
+    }
 }

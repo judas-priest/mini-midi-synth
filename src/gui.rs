@@ -8,10 +8,17 @@ use cpal::HostId;
 use eframe::egui;
 use rtrb::Producer;
 
+use crate::cc_map::CcMap;
 use crate::config::Config;
 use crate::midi::{self, NoteState};
-use crate::preset::{self, Preset};
-use crate::synth::{ControlEvent, MAX_LAYERS};
+use crate::preset::{self, Preset, DrumKit, Performance, PartConfig, SetList};
+use crate::synth::{ControlEvent, DrumParam, ParamFeedback, MAX_LAYERS};
+use crate::synth::drum::{NUM_DRUM_SLOTS, DRUM_NAMES, DrumSlotParams, DrumPattern};
+use crate::synth::looper::LooperAtoms;
+
+const VELOCITY_CURVE_NAMES: &[&str] = &["Linear", "Exponential", "Logarithmic", "Fixed"];
+const LFO_WAVEFORM_NAMES: &[&str] = &["Sine", "Triangle", "Square", "Sample & Hold"];
+const PORTAMENTO_MODE_NAMES: &[&str] = &["Off", "Always", "Legato"];
 
 const NOTE_NAMES: &[&str] = &[
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -22,10 +29,23 @@ pub const BUFFER_SIZES: &[u32] = &[0, 16, 32, 48, 64, 128, 256, 512, 1024, 2048]
 const OSC_NAMES: &[&str] = &[
     "Sine", "Saw", "Square", "Triangle", "FM", "Noise",
     "Karplus-Strong", "Organ", "FM Piano", "Piano (Physical)", "Piano (Banded)",
-    "Piano (Additive)",
+    "Piano (Additive)", "Drum Synth", "Bass Guitar", "Bowed String", "Brass",
+    "Phase Dist", "Wavefolder", "Modal", "Hard Sync", "Supersaw",
+    "Piano (Inharmonic)",
 ];
+const PD_SHAPE_NAMES: &[&str] = &["Saw", "Square", "Pulse", "DoubleSine", "SawPulse", "Reso1", "Reso2", "Reso3"];
+const FOLD_SOURCE_NAMES: &[&str] = &["Sine", "Triangle", "Saw"];
+const MODAL_MATERIAL_NAMES: &[&str] = &[
+    "Steel Bar", "Aluminum", "Glass", "Wood Block", "Marimba",
+    "Vibraphone", "Tubular Bell", "Church Bell", "Membrane", "Timpani",
+];
+const SYNC_SHAPE_NAMES: &[&str] = &["Saw", "Square", "Triangle"];
+const BASS_STYLE_NAMES: &[&str] = &["Finger", "Pick", "Slap"];
+const BASS_PICKUP_NAMES: &[&str] = &["Bridge", "Neck", "Both"];
+const BOWED_BODY_NAMES: &[&str] = &["Violin", "Viola", "Cello", "Double Bass"];
+const BRASS_BELL_NAMES: &[&str] = &["Trumpet", "French Horn", "Trombone", "Tuba"];
 const SIMPLE_OSC_NAMES: &[&str] = &["Sine", "Saw", "Square", "Triangle", "FM"];
-const FILTER_NAMES: &[&str] = &["LowPass", "HighPass", "BandPass", "Formant"];
+const FILTER_NAMES: &[&str] = &["LowPass", "HighPass", "BandPass", "Formant", "Moog 24dB", "Moog 12dB", "Diode 18dB"];
 const FILTER_ROUTING_NAMES: &[&str] = &["Single", "Serial", "Parallel"];
 const FORMANT_VOICE_NAMES: &[&str] = &["Bass", "Tenor", "Alto", "Soprano"];
 const FORMANT_VOWEL_NAMES: &[&str] = &["A (ah)", "E (eh)", "I (ee)", "O (oh)", "U (oo)"];
@@ -48,14 +68,15 @@ pub struct LayerState {
 
 fn note_name(note: u8) -> String {
     let name = NOTE_NAMES[(note % 12) as usize];
-    let oct = (note as i8 / 12) - 1;
+    let oct = (note as i8 / 12) - 2;
     format!("{name}{oct}")
 }
 
 pub struct App {
-    pub frame_count: u64,
+    pub _frame_count: u64,
     pub presets: Vec<Preset>,
     pub note_state: NoteState,
+    pub pad_state: midi::PadState,
     pub ctrl_tx: Producer<ControlEvent>,
     pub sample_rate: u32,
 
@@ -84,20 +105,116 @@ pub struct App {
 
     /// Collapsed preset categories
     pub collapsed_categories: HashSet<String>,
+
+    /// Feedback from audio thread
+    pub feedback_rx: Option<rtrb::Consumer<ParamFeedback>>,
+    /// CC mapping
+    pub cc_map: CcMap,
+    /// MIDI Learn target parameter key
+    pub midi_learn_target: Option<String>,
+    /// Program change atom for preset feedback
+    pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Show help dialog
+    pub show_help: bool,
+    /// Global params display values (effects, volume, lfo rate)
+    pub global_params: std::collections::BTreeMap<String, f32>,
+    /// Pickup indicators: param_key → knob position (for showing direction arrow)
+    pub pickup_indicators: std::collections::BTreeMap<String, f32>,
+
+    // Drum sequencer GUI state
+    pub show_drums: bool,
+    pub drum_patterns: [DrumPattern; 8],
+    pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
+    pub drum_volume: f32,
+    pub drum_bpm: f32,
+    pub drum_swing: f32,
+    pub drum_playing: bool,
+    pub drum_recording: bool,
+    pub drum_current_pattern: u8,
+    pub drum_step_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub drum_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub drum_rec_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    // Drum kit save/load
+    pub drum_kit_name: String,
+    pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
+    pub drum_kit_status: String,
+    // Looper
+    pub show_looper: bool,
+    pub looper_atoms: std::sync::Arc<LooperAtoms>,
+    pub looper_bars: u8,
+    /// 0 = SEQ buttons → drums, 1 = SEQ buttons → looper
+    pub seq_target_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    // Performance save/load
+    pub perf_name: String,
+    pub perf_list: Vec<(String, std::path::PathBuf)>,
+    pub perf_status: String,
+    // Navigate button timing
+    pub nav_press_time: Option<std::time::Instant>,
+    // Set list
+    pub setlist: Option<SetList>,
+    pub setlist_index: usize,
+    pub setlist_list: Vec<(String, std::path::PathBuf)>,
+    pub setlist_status: String,
+    pub show_setlist_editor: bool,
+    pub setlist_editor_name: String,
+    pub setlist_editor_entries: Vec<String>,
+    pub last_config_save: std::time::Instant,
+    pub global_dirty: bool,
 }
 
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        let _ = self.config.save();
+        self.save_global_to_config();
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Increase base font size and spacing
+        ctx.style_mut(|style| {
+            style.text_styles.get_mut(&egui::TextStyle::Body).unwrap().size = 15.0;
+            style.text_styles.get_mut(&egui::TextStyle::Button).unwrap().size = 15.0;
+            style.text_styles.get_mut(&egui::TextStyle::Monospace).unwrap().size = 14.0;
+            style.text_styles.get_mut(&egui::TextStyle::Small).unwrap().size = 13.0;
+            style.text_styles.get_mut(&egui::TextStyle::Heading).unwrap().size = 20.0;
+            style.spacing.slider_width = 250.0;
+            style.spacing.item_spacing = egui::vec2(8.0, 5.0);
+        });
+
         let has_active_notes = (0..128u8)
             .any(|i| self.note_state[i as usize].load(Ordering::Relaxed) > 0);
-        if has_active_notes {
+        let looper_active = self.looper_atoms.state.load(Ordering::Relaxed) != 0;
+        if has_active_notes || self.drum_playing || looper_active {
             ctx.request_repaint_after(Duration::from_millis(33));
         } else {
             ctx.request_repaint_after(Duration::from_millis(100));
+        }
+
+        // Drain feedback from audio thread
+        self.drain_feedback();
+
+        // Autosave global params (vol/tone) 2 seconds after last change
+        if self.global_dirty && self.last_config_save.elapsed() > Duration::from_secs(2) {
+            self.save_global_to_config();
+            self.global_dirty = false;
+        }
+
+        // Sync drum play/rec state from engine (for MIDI-triggered changes)
+        self.drum_playing = self.drum_play_atom.load(Ordering::Relaxed) != 0;
+        self.drum_recording = self.drum_rec_atom.load(Ordering::Relaxed) != 0;
+
+        // MIDI Learn indicator
+        if self.midi_learn_target.is_some() {
+            let target_name = self.midi_learn_target.clone().unwrap_or_default();
+            egui::TopBottomPanel::top("midi_learn_bar").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.colored_label(egui::Color32::YELLOW, format!("MIDI Learn: move a CC for '{target_name}'..."));
+                    if ui.button("Cancel").clicked() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        // handled below
+                    }
+                });
+            });
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.midi_learn_target = None;
+            }
         }
 
         // Top bar
@@ -109,6 +226,9 @@ impl eframe::App for App {
                     if self.show_settings {
                         self.refresh_midi_ports();
                     }
+                }
+                if ui.button("?").on_hover_text("CC Mapping Help").clicked() {
+                    self.show_help = !self.show_help;
                 }
 
                 ui.separator();
@@ -129,11 +249,41 @@ impl eframe::App for App {
             ui.add_space(2.0);
         });
 
+        // Global controls bar
+        egui::TopBottomPanel::top("global_controls").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                // Master Volume (global)
+                let mut vol = self.global_params.get("master_volume").copied().unwrap_or(0.8);
+                ui.label("Vol:");
+                if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false)).changed() {
+                    self.global_params.insert("master_volume".into(), vol);
+                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_volume", value: vol });
+                    self.global_dirty = true;
+                }
+
+                ui.separator();
+
+                // Master Tone (global)
+                let mut tone = self.global_params.get("master_tone").copied().unwrap_or(20000.0);
+                ui.label("Tone:");
+                if ui.add(egui::Slider::new(&mut tone, 200.0..=20000.0).logarithmic(true).show_value(false)).changed() {
+                    self.global_params.insert("master_tone".into(), tone);
+                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_tone", value: tone });
+                    self.global_dirty = true;
+                }
+            });
+        });
+
         // Bottom: keyboard
         egui::TopBottomPanel::bottom("keyboard_panel").show(ctx, |ui| {
             ui.add_space(4.0);
             self.draw_keyboard(ui);
             ui.add_space(4.0);
+        });
+
+        // Setlist bar (above keyboard)
+        egui::TopBottomPanel::bottom("setlist_bar").show(ctx, |ui| {
+            self.draw_setlist_bar(ui);
         });
 
         // Right: preset list (for active layer)
@@ -209,13 +359,32 @@ impl eframe::App for App {
         if self.show_settings {
             self.draw_settings(ctx);
         }
+        // Help window
+        if self.show_help {
+            self.draw_help(ctx);
+        }
+        // Setlist editor window
+        if self.show_setlist_editor {
+            self.draw_setlist_editor(ctx);
+        }
 
-        // Central: layer tabs + parameters
+        // Central: layer tabs + parameters / drum sequencer
         egui::CentralPanel::default().show(ctx, |ui| {
             self.draw_layer_tabs(ui);
             ui.separator();
             ui.add_space(4.0);
-            self.draw_params_editable(ui);
+            if self.show_drums {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    self.draw_drum_sequencer(ui);
+                });
+            } else {
+                self.draw_looper(ui);
+                ui.separator();
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    self.draw_params_editable(ui);
+                });
+            }
         });
     }
 }
@@ -226,28 +395,38 @@ impl App {
         for i in 0..self.layers.len() {
             self.send_edited_params(i);
         }
+        // Send global params (volume, tone) to engine
+        for (key, val) in &self.global_params {
+            if let Some(static_key) = crate::cc_map::resolve_key(key) {
+                let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: static_key, value: *val });
+            }
+        }
+        // Ensure config has global params persisted (first run migration)
+        self.save_global_to_config();
     }
 
-    /// Load edited_params from the current preset for a given layer
+    fn save_global_to_config(&mut self) {
+        self.config.ui.master_volume = self.global_params.get("master_volume").copied().unwrap_or(0.8);
+        self.config.ui.master_tone = self.global_params.get("master_tone").copied().unwrap_or(20000.0);
+        let _ = self.config.save();
+        self.last_config_save = std::time::Instant::now();
+    }
+
+    /// Load edited_params from the current preset for a given layer.
+    /// Preserves global params (effects, volume) so they don't reset on preset change.
     pub fn load_edited_params(&mut self, layer: usize) {
         let preset_idx = self.layers[layer].preset_idx;
         if let Some(p) = self.presets.get(preset_idx) {
             self.layers[layer].edited_params = p.params.clone();
         }
+        // Global params (volume, tone) are NOT in presets — don't insert them
         self.layers[layer].params_dirty = false;
     }
 
     /// Send edited params to synth engine for a given layer
     fn send_edited_params(&mut self, layer: usize) {
-        let preset_idx = self.layers[layer].preset_idx;
-        let preset = Preset {
-            name: self.presets.get(preset_idx)
-                .map(|p| p.name.clone())
-                .unwrap_or_else(|| "Custom".to_string()),
-            category: String::new(),
-            params: self.layers[layer].edited_params.clone(),
-        };
-        let _ = self.ctrl_tx.push(ControlEvent::LoadPreset { layer, preset });
+        let params = crate::synth::PresetParams::from_map(&self.layers[layer].edited_params);
+        let _ = self.ctrl_tx.push(ControlEvent::LoadPreset { layer, params });
     }
 
     fn send_layer_enabled(&mut self, layer: usize) {
@@ -274,19 +453,68 @@ impl App {
         let _ = self.config.save();
     }
 
+    /// Load a performance by name (for setlist navigation).
+    /// Returns true if found and loaded.
+    fn load_performance_by_name(&mut self, name: &str) -> bool {
+        let path = self.perf_list.iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, p)| p.clone());
+        let Some(path) = path else { return false; };
+        let Ok(perf) = preset::load_performance(&path) else { return false; };
+        // AllNotesOff for smooth transition
+        let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+        self.perf_name = perf.name.clone();
+        for (i, part) in perf.parts.iter().enumerate() {
+            if i >= self.layers.len() { break; }
+            let preset_idx = self.presets.iter()
+                .position(|p| p.name == part.preset_name)
+                .unwrap_or(0);
+            self.layers[i].preset_idx = preset_idx;
+            self.layers[i].enabled = part.enabled;
+            self.layers[i].volume = part.volume;
+            self.layers[i].min_note = part.key_low;
+            self.layers[i].max_note = part.key_high;
+            self.layers[i].edited_params = part.param_overrides.clone();
+            self.send_edited_params(i);
+            self.send_layer_enabled(i);
+            self.send_layer_volume(i);
+            self.send_layer_range(i);
+        }
+        true
+    }
+
+    /// Navigate setlist: delta = 1 (next) or -1 (prev).
+    fn setlist_navigate(&mut self, delta: i32) {
+        let (entries_len, name) = {
+            let Some(sl) = &self.setlist else { return; };
+            if sl.entries.is_empty() { return; }
+            let new_idx = (self.setlist_index as i32 + delta)
+                .clamp(0, sl.entries.len() as i32 - 1) as usize;
+            if new_idx == self.setlist_index { return; }
+            self.setlist_index = new_idx;
+            (sl.entries.len(), sl.entries[new_idx].clone())
+        };
+        let new_idx = self.setlist_index;
+        if self.load_performance_by_name(&name) {
+            self.setlist_status = format!("{}/{}: {}", new_idx + 1, entries_len, name);
+        } else {
+            self.setlist_status = format!("{}/{}: {} (not found!)", new_idx + 1, entries_len, name);
+        }
+    }
+
     fn save_collapsed_categories(&mut self) {
         self.config.ui.collapsed_categories = self.collapsed_categories.iter().cloned().collect();
         let _ = self.config.save();
     }
 
-    fn save_window_size(&mut self, ctx: &egui::Context) {
-        self.frame_count += 1;
+    fn _save_window_size(&mut self, ctx: &egui::Context) {
+        self._frame_count += 1;
 
         let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
         let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
 
         // Debug: log every ~5 seconds to file + stdout
-        if self.frame_count % 50 == 1 {
+        if self._frame_count % 50 == 1 {
             let inner = ctx.input(|i| i.viewport().inner_rect);
             let outer = ctx.input(|i| i.viewport().outer_rect);
             let screen = ctx.screen_rect();
@@ -357,7 +585,7 @@ impl App {
         ui.horizontal(|ui| {
             for i in 0..MAX_LAYERS {
                 let label = *LAYER_NAMES.get(i).unwrap_or(&"?");
-                let is_active = i == self.active_layer;
+                let is_active = i == self.active_layer && !self.show_drums && !self.show_looper;
                 let is_enabled = self.layers[i].enabled;
 
                 let text = if is_enabled {
@@ -369,8 +597,20 @@ impl App {
 
                 if ui.selectable_label(is_active, &text).clicked() {
                     self.active_layer = i;
+                    self.show_drums = false;
+                    self.show_looper = false;
+                    self.seq_target_atom.store(1, Ordering::Relaxed); // synth → looper
                 }
             }
+
+            // Drums tab
+            if ui.selectable_label(self.show_drums, "Drums").clicked() {
+                self.show_drums = true;
+                self.show_looper = false;
+                self.seq_target_atom.store(0, Ordering::Relaxed); // drums
+            }
+
+            // Looper tab removed — controls are now inline in synth panel
 
             ui.separator();
 
@@ -422,6 +662,81 @@ impl App {
                 }
             });
         }
+
+        // Performance save/load
+        ui.horizontal(|ui| {
+            ui.label("Perf:");
+            ui.add(egui::TextEdit::singleline(&mut self.perf_name).desired_width(120.0).hint_text("name"));
+            if ui.button("Save").clicked() && !self.perf_name.trim().is_empty() {
+                let parts: Vec<PartConfig> = self.layers.iter().enumerate().map(|(i, l)| {
+                    let preset_name = self.presets.get(l.preset_idx)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default();
+                    PartConfig {
+                        preset_name,
+                        enabled: l.enabled || i == 0,
+                        volume: l.volume,
+                        key_low: l.min_note,
+                        key_high: l.max_note,
+                        param_overrides: l.edited_params.clone(),
+                    }
+                }).collect();
+                let perf = Performance {
+                    name: self.perf_name.trim().to_string(),
+                    category: String::new(),
+                    parts,
+                };
+                match preset::save_performance(&perf) {
+                    Ok(path) => {
+                        self.perf_status = format!("Saved: {}", path.display());
+                        self.perf_list = preset::list_performances();
+                    }
+                    Err(e) => { self.perf_status = format!("Error: {e}"); }
+                }
+            }
+            ui.separator();
+            let mut load_perf: Option<std::path::PathBuf> = None;
+            egui::ComboBox::from_id_salt("perf_load")
+                .selected_text(if self.perf_list.is_empty() { "No performances" } else { "Load..." })
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for (name, path) in &self.perf_list {
+                        if ui.selectable_label(false, name).clicked() {
+                            load_perf = Some(path.clone());
+                        }
+                    }
+                });
+            if let Some(path) = load_perf {
+                match preset::load_performance(&path) {
+                    Ok(perf) => {
+                        self.perf_name = perf.name.clone();
+                        for (i, part) in perf.parts.iter().enumerate() {
+                            if i >= self.layers.len() { break; }
+                            // Find preset by name
+                            let preset_idx = self.presets.iter()
+                                .position(|p| p.name == part.preset_name)
+                                .unwrap_or(0);
+                            self.layers[i].preset_idx = preset_idx;
+                            self.layers[i].enabled = part.enabled;
+                            self.layers[i].volume = part.volume;
+                            self.layers[i].min_note = part.key_low;
+                            self.layers[i].max_note = part.key_high;
+                            self.layers[i].edited_params = part.param_overrides.clone();
+                            self.send_edited_params(i);
+                            self.send_layer_enabled(i);
+                            self.send_layer_volume(i);
+                            self.send_layer_range(i);
+                        }
+                        self.perf_status = format!("Loaded: {}", perf.name);
+                    }
+                    Err(e) => { self.perf_status = format!("Error: {e}"); }
+                }
+            }
+            if !self.perf_status.is_empty() {
+                ui.separator();
+                ui.label(egui::RichText::new(&self.perf_status).small().weak());
+            }
+        });
     }
 
     fn draw_params_editable(&mut self, ui: &mut egui::Ui) {
@@ -440,7 +755,7 @@ impl App {
         let mut changed = false;
 
         // Oscillator 1
-        ui.label("Oscillator 1");
+        ui.strong("Oscillator 1");
         ui.horizontal(|ui| {
             let mut osc = self.layers[layer].edited_params.get("osc_type").copied().unwrap_or(0.0) as usize;
             ui.label("Type:");
@@ -489,7 +804,7 @@ impl App {
         // Organ drawbar params
         if osc_type == 7 {
             ui.add_space(4.0);
-            ui.label("Drawbars");
+            ui.strong("Drawbars");
             let drawbar_names = ["16'", "5⅓'", "8'", "4'", "2⅔'", "2'", "1⅗'", "1⅓'", "1'"];
             for (i, name) in drawbar_names.iter().enumerate() {
                 let key = format!("drawbar_{}", i + 1);
@@ -499,6 +814,206 @@ impl App {
                     changed = true;
                 }
             }
+        }
+
+        // Drum synth params
+        if osc_type == 12 {
+            ui.add_space(4.0);
+            ui.strong("Drum Synth");
+            changed |= self.param_slider(ui, "drum_pitch_amount", "Pitch Sweep (st)", 0.0, 72.0, false);
+            changed |= self.param_slider(ui, "drum_pitch_decay", "Pitch Decay", 5.0, 200.0, false);
+            changed |= self.param_slider(ui, "drum_noise_level", "Noise Level", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "drum_noise_decay", "Noise Decay", 5.0, 200.0, false);
+            changed |= self.param_slider(ui, "drum_noise_color", "Noise Color", 0.0, 1.0, false);
+        }
+
+        // Bass guitar params
+        if osc_type == 13 {
+            ui.add_space(4.0);
+            ui.strong("Bass Guitar");
+            ui.horizontal(|ui| {
+                let mut style = self.layers[layer].edited_params.get("bass_style").copied().unwrap_or(0.0) as usize;
+                ui.label("Style:");
+                egui::ComboBox::from_id_salt(format!("bass_style_{layer}"))
+                    .selected_text(*BASS_STYLE_NAMES.get(style).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in BASS_STYLE_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut style, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("bass_style".into(), style as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            ui.horizontal(|ui| {
+                let mut pu = self.layers[layer].edited_params.get("bass_pickup").copied().unwrap_or(0.0) as usize;
+                ui.label("Pickup:");
+                egui::ComboBox::from_id_salt(format!("bass_pickup_{layer}"))
+                    .selected_text(*BASS_PICKUP_NAMES.get(pu).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in BASS_PICKUP_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut pu, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("bass_pickup".into(), pu as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "bass_tone", "Tone", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "bass_body", "Body", 0.0, 1.0, false);
+        }
+
+        // Bowed string params
+        if osc_type == 14 {
+            ui.add_space(4.0);
+            ui.strong("Bowed String");
+            ui.horizontal(|ui| {
+                let mut bt = self.layers[layer].edited_params.get("body_type").copied().unwrap_or(0.0) as usize;
+                ui.label("Body:");
+                egui::ComboBox::from_id_salt(format!("body_type_{layer}"))
+                    .selected_text(*BOWED_BODY_NAMES.get(bt).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in BOWED_BODY_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut bt, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("body_type".into(), bt as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "bow_pressure", "Bow Pressure", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "bow_position", "Bow Position", 0.0, 1.0, false);
+        }
+
+        // Brass params
+        if osc_type == 15 {
+            ui.add_space(4.0);
+            ui.strong("Brass");
+            ui.horizontal(|ui| {
+                let mut bt = self.layers[layer].edited_params.get("bell_type").copied().unwrap_or(0.0) as usize;
+                ui.label("Type:");
+                egui::ComboBox::from_id_salt(format!("bell_type_{layer}"))
+                    .selected_text(*BRASS_BELL_NAMES.get(bt).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in BRASS_BELL_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut bt, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("bell_type".into(), bt as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "lip_tension", "Lip Tension", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "blowing_pressure", "Blowing Pressure", 0.0, 1.0, false);
+        }
+
+        // Square wave — pulse width control
+        if osc_type == 2 {
+            let pw = self.layers[layer].edited_params.get("pulse_width").copied().unwrap_or(0.5);
+            let mut pw_val = pw;
+            ui.horizontal(|ui| {
+                ui.label("Pulse Width");
+                if ui.add(egui::Slider::new(&mut pw_val, 0.05..=0.95)).changed() {
+                    self.layers[layer].edited_params.insert("pulse_width".into(), pw_val);
+                    self.layers[layer].params_dirty = true;
+                }
+            });
+        }
+
+        // Phase Distortion params
+        if osc_type == 16 {
+            ui.add_space(4.0);
+            ui.strong("Phase Distortion");
+            ui.horizontal(|ui| {
+                let mut shape = self.layers[layer].edited_params.get("pd_shape").copied().unwrap_or(0.0) as usize;
+                ui.label("Shape:");
+                egui::ComboBox::from_id_salt(format!("pd_shape_{layer}"))
+                    .selected_text(*PD_SHAPE_NAMES.get(shape).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in PD_SHAPE_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut shape, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("pd_shape".into(), shape as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "pd_depth", "Depth (DCW)", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "pd_env_amount", "Env → Depth", 0.0, 1.0, false);
+        }
+
+        // Wavefolder params
+        if osc_type == 17 {
+            ui.add_space(4.0);
+            ui.strong("Wavefolder");
+            ui.horizontal(|ui| {
+                let mut src = self.layers[layer].edited_params.get("fold_source").copied().unwrap_or(0.0) as usize;
+                ui.label("Source:");
+                egui::ComboBox::from_id_salt(format!("fold_source_{layer}"))
+                    .selected_text(*FOLD_SOURCE_NAMES.get(src).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in FOLD_SOURCE_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut src, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("fold_source".into(), src as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "fold_amount", "Fold Amount", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "fold_symmetry", "Symmetry", 0.0, 1.0, false);
+        }
+
+        // Modal Resonator params
+        if osc_type == 18 {
+            ui.add_space(4.0);
+            ui.strong("Modal Resonator");
+            ui.horizontal(|ui| {
+                let mut mat = self.layers[layer].edited_params.get("modal_material").copied().unwrap_or(0.0) as usize;
+                ui.label("Material:");
+                egui::ComboBox::from_id_salt(format!("modal_material_{layer}"))
+                    .selected_text(*MODAL_MATERIAL_NAMES.get(mat).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in MODAL_MATERIAL_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut mat, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("modal_material".into(), mat as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "modal_brightness", "Brightness", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "modal_damping", "Damping", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "modal_strike_pos", "Strike Position", 0.0, 1.0, false);
+        }
+
+        // Hard Sync params
+        if osc_type == 19 {
+            ui.add_space(4.0);
+            ui.label("Hard Sync");
+            ui.horizontal(|ui| {
+                let mut shape = self.layers[layer].edited_params.get("sync_shape").copied().unwrap_or(0.0) as usize;
+                ui.label("Slave Wave:");
+                egui::ComboBox::from_id_salt(format!("sync_shape_{layer}"))
+                    .selected_text(*SYNC_SHAPE_NAMES.get(shape).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in SYNC_SHAPE_NAMES.iter().enumerate() {
+                            if ui.selectable_value(&mut shape, i, *name).changed() {
+                                self.layers[layer].edited_params.insert("sync_shape".into(), shape as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "sync_ratio", "Sync Ratio", 1.0, 16.0, false);
+        }
+
+        // Supersaw params
+        if osc_type == 20 {
+            ui.add_space(4.0);
+            ui.label("Supersaw");
+            changed |= self.param_slider(ui, "supersaw_detune", "Detune", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "supersaw_mix", "Mix", 0.0, 1.0, false);
         }
 
         // Multi-osc controls (only for simple osc types)
@@ -519,7 +1034,7 @@ impl App {
 
             if osc_count >= 2 {
                 ui.add_space(4.0);
-                ui.label("Oscillator 2");
+                ui.strong("Oscillator 2");
                 ui.horizontal(|ui| {
                     let mut osc2 = self.layers[layer].edited_params.get("osc2_type").copied().unwrap_or(1.0) as usize;
                     ui.label("Type:");
@@ -546,7 +1061,7 @@ impl App {
 
             if osc_count >= 3 {
                 ui.add_space(4.0);
-                ui.label("Oscillator 3");
+                ui.strong("Oscillator 3");
                 ui.horizontal(|ui| {
                     let mut osc3 = self.layers[layer].edited_params.get("osc3_type").copied().unwrap_or(1.0) as usize;
                     ui.label("Type:");
@@ -575,7 +1090,7 @@ impl App {
         ui.add_space(6.0);
 
         // Filter 1
-        ui.label("Filter 1");
+        ui.strong("Filter 1");
         ui.horizontal(|ui| {
             let mut ft = self.layers[layer].edited_params.get("filter_type").copied().unwrap_or(0.0) as usize;
             ui.label("Type:");
@@ -651,18 +1166,22 @@ impl App {
             // Filter 2 controls (only when routing != Single)
             if routing >= 1 {
                 ui.add_space(4.0);
-                ui.label("Filter 2");
+                ui.strong("Filter 2");
                 ui.horizontal(|ui| {
-                    let mut ft2 = self.layers[layer].edited_params.get("filter2_type").copied().unwrap_or(0.0) as usize;
+                    let ft2 = self.layers[layer].edited_params.get("filter2_type").copied().unwrap_or(0.0) as usize;
                     ui.label("Type:");
-                    // Filter 2 only supports LowPass/HighPass/BandPass (no Formant)
-                    let f2_names = &FILTER_NAMES[..3];
+                    // Filter 2: LP/HP/BP + Moog (skip Formant index 3)
+                    let f2_names: &[&str] = &["LowPass", "HighPass", "BandPass", "Moog 24dB", "Moog 12dB", "Diode 18dB"];
+                    let f2_values: &[usize] = &[0, 1, 2, 4, 5, 6]; // maps to FilterType param values
+                    let f2_display = f2_values.iter().position(|&v| v == ft2).unwrap_or(0);
+                    let mut f2_sel = f2_display;
                     egui::ComboBox::from_id_salt(format!("filter2_type_{layer}"))
-                        .selected_text(*f2_names.get(ft2).unwrap_or(&"LowPass"))
+                        .selected_text(*f2_names.get(f2_sel).unwrap_or(&"LowPass"))
                         .show_ui(ui, |ui| {
                             for (i, name) in f2_names.iter().enumerate() {
-                                if ui.selectable_value(&mut ft2, i, *name).changed() {
-                                    self.layers[layer].edited_params.insert("filter2_type".into(), ft2 as f32);
+                                if ui.selectable_value(&mut f2_sel, i, *name).changed() {
+                                    let param_val = f2_values[f2_sel];
+                                    self.layers[layer].edited_params.insert("filter2_type".into(), param_val as f32);
                                     changed = true;
                                 }
                             }
@@ -676,7 +1195,7 @@ impl App {
         ui.add_space(6.0);
 
         // Amp Envelope
-        ui.label("Amp Envelope");
+        ui.strong("Amp Envelope");
         changed |= self.param_slider(ui, "amp_attack", "Attack", 0.001, 5.0, true);
         changed |= self.param_slider(ui, "amp_decay", "Decay", 0.0, 5.0, false);
         changed |= self.param_slider(ui, "amp_sustain", "Sustain", 0.0, 1.0, false);
@@ -685,7 +1204,7 @@ impl App {
         ui.add_space(6.0);
 
         // Filter Envelope
-        ui.label("Filter Envelope");
+        ui.strong("Filter Envelope");
         changed |= self.param_slider(ui, "filter_attack", "Attack", 0.001, 5.0, true);
         changed |= self.param_slider(ui, "filter_decay", "Decay", 0.0, 5.0, false);
         changed |= self.param_slider(ui, "filter_sustain", "Sustain", 0.0, 1.0, false);
@@ -693,14 +1212,109 @@ impl App {
 
         ui.add_space(6.0);
 
-        // Volume (per-preset master_volume stored in params)
-        changed |= self.param_slider(ui, "master_volume", "Volume", 0.0, 1.0, false);
+        // Dynamics
+        ui.strong("Dynamics");
+        ui.horizontal(|ui| {
+            let mut vc = self.layers[layer].edited_params.get("velocity_curve").copied().unwrap_or(0.0) as usize;
+            ui.label("Vel Curve:");
+            egui::ComboBox::from_id_salt(format!("vel_curve_{layer}"))
+                .selected_text(*VELOCITY_CURVE_NAMES.get(vc).unwrap_or(&"Linear"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in VELOCITY_CURVE_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut vc, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("velocity_curve".into(), vc as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        changed |= self.param_slider(ui, "vel_to_filter", "Vel->Filter", 0.0, 1.0, false);
+
+        ui.add_space(6.0);
+
+        // LFO
+        ui.strong("LFO");
+        ui.horizontal(|ui| {
+            let mut lw = self.layers[layer].edited_params.get("lfo_waveform").copied().unwrap_or(0.0) as usize;
+            ui.label("Waveform:");
+            egui::ComboBox::from_id_salt(format!("lfo_wf_{layer}"))
+                .selected_text(*LFO_WAVEFORM_NAMES.get(lw).unwrap_or(&"Sine"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut lw, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("lfo_waveform".into(), lw as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        changed |= self.param_slider(ui, "lfo_rate", "Rate", 0.1, 20.0, true);
+        changed |= self.param_slider(ui, "lfo_pitch_depth", "Pitch Depth", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "lfo_filter_depth", "Filter Depth", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "lfo_amp_depth", "Amp Depth", 0.0, 1.0, false);
+
+        ui.add_space(6.0);
+
+        // Portamento
+        ui.strong("Portamento");
+        ui.horizontal(|ui| {
+            let mut pm = self.layers[layer].edited_params.get("portamento_mode").copied().unwrap_or(0.0) as usize;
+            ui.label("Mode:");
+            egui::ComboBox::from_id_salt(format!("porta_mode_{layer}"))
+                .selected_text(*PORTAMENTO_MODE_NAMES.get(pm).unwrap_or(&"Off"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in PORTAMENTO_MODE_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut pm, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("portamento_mode".into(), pm as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        changed |= self.param_slider(ui, "portamento_time", "Time", 0.0, 2.0, false);
+
+        ui.add_space(6.0);
+
+        // Unison
+        ui.strong("Unison");
+        {
+            let mut uv = self.layers[layer].edited_params.get("unison_voices").copied().unwrap_or(1.0) as u32;
+            if ui.add(egui::Slider::new(&mut uv, 1..=8).text("Voices")).changed() {
+                self.layers[layer].edited_params.insert("unison_voices".into(), uv as f32);
+                changed = true;
+            }
+        }
+        changed |= self.param_slider(ui, "unison_detune", "Detune (cents)", 0.0, 50.0, false);
+        changed |= self.param_slider(ui, "unison_spread", "Spread", 0.0, 1.0, false);
 
         ui.add_space(6.0);
 
         // Effects
-        ui.label("Effects");
+        ui.strong("Effects");
         changed |= self.param_slider(ui, "chorus_mix", "Chorus", 0.0, 1.0, false);
+
+        ui.add_space(4.0);
+        ui.strong("Delay");
+        changed |= self.param_slider(ui, "delay_mix", "Mix", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "delay_time_l", "Time L", 0.01, 2.0, false);
+        changed |= self.param_slider(ui, "delay_time_r", "Time R", 0.01, 2.0, false);
+        changed |= self.param_slider(ui, "delay_feedback", "Feedback", 0.0, 0.95, false);
+        changed |= self.param_slider(ui, "delay_filter", "Filter", 0.0, 0.95, false);
+        {
+            let mut pp = self.layers[layer].edited_params.get("delay_ping_pong").copied().unwrap_or(0.0) > 0.5;
+            if ui.checkbox(&mut pp, "Ping-Pong").changed() {
+                self.layers[layer].edited_params.insert("delay_ping_pong".into(), if pp { 1.0 } else { 0.0 });
+                changed = true;
+            }
+        }
+
+        ui.add_space(4.0);
+        ui.strong("Reverb");
+        changed |= self.param_slider(ui, "reverb_mix", "Mix", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "reverb_room_size", "Room Size", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "reverb_damping", "Damping", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "reverb_width", "Width", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "reverb_pre_delay", "Pre-Delay", 0.0, 0.1, false);
 
         if changed {
             self.layers[layer].params_dirty = true;
@@ -726,14 +1340,773 @@ impl App {
         });
     }
 
-    /// Draw a parameter slider, returns true if changed
+    fn draw_drum_sequencer(&mut self, ui: &mut egui::Ui) {
+        let current_step = self.drum_step_atom.load(Ordering::Relaxed);
+        let pat_idx = self.drum_current_pattern as usize;
+
+        // Spacebar = play/pause
+        if self.show_drums && ui.input(|i| i.key_pressed(egui::Key::Space)) {
+            self.drum_playing = !self.drum_playing;
+            let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPlay { playing: self.drum_playing });
+        }
+
+        // Transport controls — same layout as looper
+        ui.horizontal(|ui| {
+            // Play/Stop
+            let play_label = if self.drum_playing { "\u{23F9} Stop" } else { "\u{25B6} Play" };
+            if ui.button(play_label).clicked() {
+                self.drum_playing = !self.drum_playing;
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPlay { playing: self.drum_playing });
+            }
+
+            // Rec
+            let rec_label = if self.drum_recording { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
+            let rec_color = if self.drum_recording { egui::Color32::RED } else { egui::Color32::GRAY };
+            if ui.button(egui::RichText::new(rec_label).color(rec_color)).clicked() {
+                self.drum_recording = !self.drum_recording;
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqRecord { recording: self.drum_recording });
+            }
+
+            // Undo / Clear
+            if ui.button("Undo").clicked() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqUndo);
+            }
+            if ui.button("Clear").clicked() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
+            }
+
+            ui.separator();
+
+            // BPM
+            ui.label("BPM:");
+            if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_bpm });
+            }
+
+            ui.separator();
+
+            // Swing + Vol
+            ui.label("Swing:");
+            if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).show_value(false)).changed() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqSwing { swing: self.drum_swing });
+            }
+
+            ui.separator();
+            ui.label("Vol:");
+            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=1.0).show_value(false)).changed() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
+            }
+        });
+
+        // Pattern selector + length
+        ui.horizontal(|ui| {
+            ui.label("Pattern:");
+            for p in 0..8u8 {
+                let selected = p == self.drum_current_pattern;
+                let label = format!("{}", p + 1);
+                if ui.selectable_label(selected, label).clicked() && !selected {
+                    self.drum_current_pattern = p;
+                    let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPattern { pattern: p });
+                }
+            }
+            ui.separator();
+            let mut length = self.drum_patterns[pat_idx].length as i32;
+            ui.label("Steps:");
+            if ui.add(egui::DragValue::new(&mut length).range(1..=16).speed(0.2)).changed() {
+                self.drum_patterns[pat_idx].length = length as u8;
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqLength { length: length as u8 });
+            }
+        });
+
+        // Save / Load drum kit
+        ui.horizontal(|ui| {
+            ui.label("Kit:");
+            ui.add(egui::TextEdit::singleline(&mut self.drum_kit_name).desired_width(120.0).hint_text("name"));
+            if ui.button("Save").clicked() && !self.drum_kit_name.trim().is_empty() {
+                let kit = DrumKit {
+                    name: self.drum_kit_name.trim().to_string(),
+                    patterns: self.drum_patterns.to_vec(),
+                    params: self.drum_params.to_vec(),
+                    bpm: self.drum_bpm,
+                    swing: self.drum_swing,
+                    volume: self.drum_volume,
+                };
+                match preset::save_drum_kit(&kit) {
+                    Ok(path) => {
+                        self.drum_kit_status = format!("Saved: {}", path.display());
+                        self.drum_kit_list = preset::list_drum_kits();
+                    }
+                    Err(e) => { self.drum_kit_status = format!("Error: {e}"); }
+                }
+            }
+            ui.separator();
+            let mut load_kit: Option<std::path::PathBuf> = None;
+            egui::ComboBox::from_id_salt("drum_kit_load")
+                .selected_text(if self.drum_kit_list.is_empty() { "No kits" } else { "Load..." })
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for (name, path) in &self.drum_kit_list {
+                        if ui.selectable_label(false, name).clicked() {
+                            load_kit = Some(path.clone());
+                        }
+                    }
+                });
+            if let Some(path) = load_kit {
+                match preset::load_drum_kit(&path) {
+                    Ok(kit) => {
+                        self.drum_kit_name = kit.name.clone();
+                        let mut patterns = [DrumPattern::default(); 8];
+                        for i in 0..kit.patterns.len().min(8) {
+                            patterns[i] = kit.patterns[i];
+                        }
+                        let mut params = [DrumSlotParams::default(); NUM_DRUM_SLOTS];
+                        for i in 0..kit.params.len().min(NUM_DRUM_SLOTS) {
+                            params[i] = kit.params[i];
+                        }
+                        self.drum_patterns = patterns;
+                        self.drum_params = params;
+                        self.drum_bpm = kit.bpm;
+                        self.drum_swing = kit.swing;
+                        self.drum_volume = kit.volume;
+                        self.drum_kit_status = format!("Loaded: {}", kit.name);
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
+                            patterns: Box::new(patterns),
+                            params: Box::new(params),
+                            bpm: kit.bpm,
+                            swing: kit.swing,
+                            volume: kit.volume,
+                        });
+                    }
+                    Err(e) => { self.drum_kit_status = format!("Error: {e}"); }
+                }
+            }
+            if !self.drum_kit_status.is_empty() {
+                ui.separator();
+                ui.label(egui::RichText::new(&self.drum_kit_status).small().weak());
+            }
+        });
+
+        ui.add_space(4.0);
+
+        // Step grid
+        let cell_w = 28.0;
+        let cell_h = 22.0;
+        let label_width = 80.0;
+        let pattern_length = self.drum_patterns[pat_idx].length as usize;
+
+        // Colors per instrument type
+        let colors: [egui::Color32; NUM_DRUM_SLOTS] = [
+            egui::Color32::from_rgb(220, 60, 60),   // Kick
+            egui::Color32::from_rgb(180, 140, 80),   // Side Stick
+            egui::Color32::from_rgb(220, 140, 40),   // Snare
+            egui::Color32::from_rgb(200, 100, 200),  // Clap
+            egui::Color32::from_rgb(220, 160, 40),   // E-Snare
+            egui::Color32::from_rgb(120, 200, 80),   // Lo Floor Tom
+            egui::Color32::from_rgb(60, 180, 220),   // Closed HH
+            egui::Color32::from_rgb(100, 180, 60),   // Hi Floor Tom
+            egui::Color32::from_rgb(80, 160, 200),   // Pedal HH
+            egui::Color32::from_rgb(80, 160, 60),    // Low Tom
+            egui::Color32::from_rgb(60, 200, 240),   // Open HH
+            egui::Color32::from_rgb(60, 140, 60),    // Lo-Mid Tom
+            egui::Color32::from_rgb(60, 120, 60),    // Hi-Mid Tom
+            egui::Color32::from_rgb(200, 200, 60),   // Crash
+            egui::Color32::from_rgb(60, 100, 60),    // High Tom
+            egui::Color32::from_rgb(180, 180, 60),   // Ride
+        ];
+
+        for slot in 0..NUM_DRUM_SLOTS {
+            ui.horizontal(|ui| {
+                // Instrument label
+                let name = DRUM_NAMES[slot];
+                ui.allocate_ui(egui::vec2(label_width, cell_h), |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(egui::RichText::new(name).small());
+                    });
+                });
+
+                // Step buttons
+                let spacing = ui.spacing().item_spacing;
+                ui.spacing_mut().item_spacing = egui::vec2(1.0, 1.0);
+
+                for step in 0..pattern_length {
+                    let vel = self.drum_patterns[pat_idx].steps[slot][step].velocity;
+                    let is_current = self.drum_playing && step == current_step as usize;
+
+                    // click_and_drag: click to place/remove, drag vertically to adjust velocity
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(cell_w, cell_h),
+                        egui::Sense::click_and_drag(),
+                    );
+
+                    // Beat grouping: highlight beat 1 of each group of 4
+                    let bg = if step % 4 == 0 {
+                        egui::Color32::from_gray(50)
+                    } else if step % 2 == 0 {
+                        egui::Color32::from_gray(40)
+                    } else {
+                        egui::Color32::from_gray(32)
+                    };
+
+                    let painter = ui.painter();
+                    painter.rect_filled(rect, 2.0, bg);
+
+                    if vel > 0 {
+                        let fill_frac = vel as f32 / 127.0;
+                        let fill_height = fill_frac * rect.height();
+                        let fill_rect = egui::Rect::from_min_max(
+                            egui::pos2(rect.min.x, rect.max.y - fill_height),
+                            rect.max,
+                        );
+                        // Brighter color for higher velocity
+                        let base = colors[slot];
+                        let r = (base.r() as f32 * (0.4 + 0.6 * fill_frac)) as u8;
+                        let g = (base.g() as f32 * (0.4 + 0.6 * fill_frac)) as u8;
+                        let b = (base.b() as f32 * (0.4 + 0.6 * fill_frac)) as u8;
+                        painter.rect_filled(fill_rect, 2.0, egui::Color32::from_rgb(r, g, b));
+                    }
+
+                    // Current step playhead
+                    if is_current {
+                        painter.rect_stroke(
+                            rect.shrink(0.5),
+                            2.0,
+                            egui::Stroke::new(2.0, egui::Color32::WHITE),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+
+                    // Border (subtle)
+                    if !is_current {
+                        painter.rect_stroke(rect, 2.0, egui::Stroke::new(0.5, egui::Color32::from_gray(55)), egui::StrokeKind::Outside);
+                    }
+
+                    // Click: toggle step on/off. Place with default vel 100.
+                    if response.clicked() {
+                        let new_vel = if vel > 0 { 0 } else { 100u8 };
+                        self.drum_patterns[pat_idx].steps[slot][step].velocity = new_vel;
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetStep {
+                            slot: slot as u8, step: step as u8, velocity: new_vel,
+                        });
+                    }
+
+                    // Drag vertically: adjust velocity (up = louder)
+                    if response.dragged() && vel > 0 {
+                        let dy = response.drag_delta().y;
+                        let current = vel as f32;
+                        // -dy because up = increase
+                        let new_val = (current - dy * 2.0).clamp(1.0, 127.0) as u8;
+                        if new_val != vel {
+                            self.drum_patterns[pat_idx].steps[slot][step].velocity = new_val;
+                            let _ = self.ctrl_tx.push(ControlEvent::DrumSetStep {
+                                slot: slot as u8, step: step as u8, velocity: new_val,
+                            });
+                        }
+                    }
+
+                    // Right-click: delete
+                    if response.secondary_clicked() {
+                        self.drum_patterns[pat_idx].steps[slot][step].velocity = 0;
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetStep {
+                            slot: slot as u8, step: step as u8, velocity: 0,
+                        });
+                    }
+
+                    // Tooltip with velocity
+                    if vel > 0 && response.hovered() {
+                        response.on_hover_text(format!("vel: {vel}"));
+                    }
+                }
+
+                ui.spacing_mut().item_spacing = spacing;
+                ui.add_space(8.0);
+
+                // Per-instrument controls
+                ui.horizontal(|ui| {
+                    let mut level = self.drum_params[slot].level;
+                    let mut tune = self.drum_params[slot].tune;
+                    let mut decay = self.drum_params[slot].decay;
+
+                    ui.style_mut().spacing.slider_width = 40.0;
+                    if ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).changed() {
+                        self.drum_params[slot].level = level;
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
+                    }
+                    if ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).changed() {
+                        self.drum_params[slot].tune = tune;
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
+                    }
+                    if ui.add(egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).changed() {
+                        self.drum_params[slot].decay = decay;
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
+                    }
+                });
+            });
+        }
+    }
+
+    fn draw_looper(&mut self, ui: &mut egui::Ui) {
+        use crate::synth::looper::LooperState;
+
+        let state_u8 = self.looper_atoms.state.load(Ordering::Relaxed);
+        let position = self.looper_atoms.position.load(Ordering::Relaxed);
+        let event_count = self.looper_atoms.event_count.load(Ordering::Relaxed);
+        let layer_count = self.looper_atoms.layer_count.load(Ordering::Relaxed);
+        let state = LooperState::from_u8(state_u8);
+
+        ui.horizontal(|ui| {
+            // Play/Stop — same style as drum sequencer
+            let play_label = match state {
+                LooperState::Playing | LooperState::Overdubbing => "\u{23F9} Stop",
+                _ => "\u{25B6} Play",
+            };
+            if ui.button(play_label).clicked() {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperTogglePlay);
+            }
+
+            // Record button — same style as drum sequencer
+            let is_rec = matches!(state, LooperState::Recording | LooperState::Overdubbing);
+            let rec_label = if is_rec { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
+            let rec_color = if is_rec { egui::Color32::RED } else { egui::Color32::GRAY };
+            if ui.button(egui::RichText::new(rec_label).color(rec_color)).clicked() {
+                match state {
+                    LooperState::Idle | LooperState::Playing => {
+                        let _ = self.ctrl_tx.push(ControlEvent::LooperRecord);
+                    }
+                    LooperState::Recording | LooperState::Overdubbing => {
+                        let _ = self.ctrl_tx.push(ControlEvent::LooperStopRecord);
+                    }
+                }
+            }
+
+            if ui.button("Undo").clicked() {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
+            }
+            if ui.button("Clear").clicked() {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
+            }
+
+            ui.separator();
+
+            // Bars
+            for &b in &[1u8, 2, 4, 8] {
+                if ui.selectable_label(self.looper_bars == b, format!("{b}")).clicked() {
+                    self.looper_bars = b;
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: b });
+                }
+            }
+
+            ui.separator();
+
+            // Status
+            let status_color = match state {
+                LooperState::Recording => egui::Color32::RED,
+                LooperState::Overdubbing => egui::Color32::from_rgb(255, 140, 0),
+                LooperState::Playing => egui::Color32::GREEN,
+                LooperState::Idle => egui::Color32::GRAY,
+            };
+            let state_label = match state {
+                LooperState::Idle => "Idle",
+                LooperState::Recording => "REC",
+                LooperState::Playing => "Play",
+                LooperState::Overdubbing => "OVR",
+            };
+            ui.colored_label(status_color, state_label);
+
+            if event_count > 0 {
+                ui.label(egui::RichText::new(format!("{event_count}ev L{layer_count}")).small().weak());
+            }
+
+            // Progress bar
+            if state != LooperState::Idle {
+                let frac = position as f32 / 255.0;
+                ui.add(egui::ProgressBar::new(frac).desired_width(80.0));
+            }
+        });
+    }
+
+    fn draw_setlist_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Set List:");
+
+            // Load / activate a setlist
+            let mut load_sl: Option<std::path::PathBuf> = None;
+            let current_name = self.setlist.as_ref().map(|s| s.name.as_str()).unwrap_or("None");
+            egui::ComboBox::from_id_salt("setlist_select")
+                .selected_text(current_name)
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(self.setlist.is_none(), "None").clicked() {
+                        self.setlist = None;
+                        self.setlist_index = 0;
+                        self.setlist_status.clear();
+                    }
+                    for (name, path) in &self.setlist_list {
+                        let active = self.setlist.as_ref().is_some_and(|s| &s.name == name);
+                        if ui.selectable_label(active, name).clicked() {
+                            load_sl = Some(path.clone());
+                        }
+                    }
+                });
+            if let Some(path) = load_sl {
+                match preset::load_setlist(&path) {
+                    Ok(sl) => {
+                        self.setlist_status = format!("1/{}: {}", sl.entries.len(),
+                            sl.entries.first().map(|s| s.as_str()).unwrap_or("(empty)"));
+                        self.setlist_index = 0;
+                        // Load first performance
+                        if let Some(first) = sl.entries.first() {
+                            self.load_performance_by_name(first);
+                        }
+                        self.setlist = Some(sl);
+                    }
+                    Err(e) => { self.setlist_status = format!("Error: {e}"); }
+                }
+            }
+
+            // Position display + nav buttons when active
+            let sl_info = self.setlist.as_ref().map(|sl| {
+                let len = sl.entries.len();
+                let next_name = if self.setlist_index + 1 < len {
+                    Some(sl.entries[self.setlist_index + 1].clone())
+                } else { None };
+                (len, next_name)
+            });
+            let mut nav_delta: Option<i32> = None;
+            if let Some((len, next_name)) = &sl_info {
+                if *len > 0 {
+                    ui.separator();
+                    if ui.button("\u{25C0}").on_hover_text("Prev (or long press nav)").clicked() {
+                        nav_delta = Some(-1);
+                    }
+                    ui.strong(format!("{}/{}", self.setlist_index + 1, len));
+                    if ui.button("\u{25B6}").on_hover_text("Next (or short press nav)").clicked() {
+                        nav_delta = Some(1);
+                    }
+                    if let Some(next) = next_name {
+                        ui.separator();
+                        ui.label(egui::RichText::new(format!("Next: {next}")).small().weak());
+                    }
+                }
+            }
+            if let Some(d) = nav_delta {
+                self.setlist_navigate(d);
+            }
+
+            ui.separator();
+            if ui.button("Edit").clicked() {
+                self.show_setlist_editor = !self.show_setlist_editor;
+                if self.show_setlist_editor {
+                    // Pre-fill editor from current setlist if any
+                    if let Some(sl) = &self.setlist {
+                        self.setlist_editor_name = sl.name.clone();
+                        self.setlist_editor_entries = sl.entries.clone();
+                    } else {
+                        self.setlist_editor_name.clear();
+                        self.setlist_editor_entries.clear();
+                    }
+                }
+            }
+
+            if !self.setlist_status.is_empty() {
+                ui.separator();
+                ui.label(egui::RichText::new(&self.setlist_status).small().weak());
+            }
+        });
+    }
+
+    fn draw_setlist_editor(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_setlist_editor;
+        egui::Window::new("Set List Editor")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(350.0)
+            .default_height(400.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.add(egui::TextEdit::singleline(&mut self.setlist_editor_name).desired_width(200.0));
+                });
+
+                ui.add_space(4.0);
+
+                // Add from available performances
+                ui.horizontal(|ui| {
+                    let mut add_perf: Option<String> = None;
+                    egui::ComboBox::from_id_salt("setlist_add_perf")
+                        .selected_text("Add performance...")
+                        .width(200.0)
+                        .show_ui(ui, |ui| {
+                            for (name, _) in &self.perf_list {
+                                if ui.selectable_label(false, name).clicked() {
+                                    add_perf = Some(name.clone());
+                                }
+                            }
+                        });
+                    if let Some(name) = add_perf {
+                        self.setlist_editor_entries.push(name);
+                    }
+                });
+
+                ui.add_space(4.0);
+                ui.separator();
+
+                // Entries list with move up/down/remove
+                let mut remove_idx: Option<usize> = None;
+                let mut swap: Option<(usize, usize)> = None;
+                let len = self.setlist_editor_entries.len();
+
+                egui::ScrollArea::vertical().auto_shrink(false).max_height(280.0).show(ui, |ui| {
+                    for i in 0..len {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{}.", i + 1));
+                            ui.label(&self.setlist_editor_entries[i]);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.small_button("\u{2716}").on_hover_text("Remove").clicked() {
+                                    remove_idx = Some(i);
+                                }
+                                if i + 1 < len {
+                                    if ui.small_button("\u{25BC}").on_hover_text("Move down").clicked() {
+                                        swap = Some((i, i + 1));
+                                    }
+                                }
+                                if i > 0 {
+                                    if ui.small_button("\u{25B2}").on_hover_text("Move up").clicked() {
+                                        swap = Some((i, i - 1));
+                                    }
+                                }
+                            });
+                        });
+                    }
+                });
+
+                if let Some(idx) = remove_idx {
+                    self.setlist_editor_entries.remove(idx);
+                }
+                if let Some((a, b)) = swap {
+                    self.setlist_editor_entries.swap(a, b);
+                }
+
+                ui.add_space(4.0);
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() && !self.setlist_editor_name.trim().is_empty() {
+                        let sl = SetList {
+                            name: self.setlist_editor_name.trim().to_string(),
+                            entries: self.setlist_editor_entries.clone(),
+                        };
+                        match preset::save_setlist(&sl) {
+                            Ok(_) => {
+                                self.setlist_list = preset::list_setlists();
+                                self.setlist_status = format!("Saved: {}", sl.name);
+                            }
+                            Err(e) => { self.setlist_status = format!("Error: {e}"); }
+                        }
+                    }
+                    if ui.button("Clear").clicked() {
+                        self.setlist_editor_entries.clear();
+                    }
+                });
+            });
+        self.show_setlist_editor = open;
+    }
+
+    fn draw_help(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_help;
+        egui::Window::new("MIDI CC Mapping")
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .default_width(420.0)
+            .show(ctx, |ui| {
+                ui.heading("SMK-37 Pro Controller Map");
+                ui.add_space(8.0);
+
+                // Preset-scoped bindings
+                ui.strong("Preset (reset on preset change, pickup mode)");
+                egui::Grid::new("cc_help_preset")
+                    .num_columns(3)
+                    .spacing([16.0, 2.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.strong("Control"); ui.strong("CC"); ui.strong("Parameter"); ui.end_row();
+                        for (cc, binding) in self.cc_map.bindings.iter().enumerate().filter_map(|(i, b)| b.map(|b| (i as u8, b))) {
+                            if binding.scope == crate::cc_map::ParamScope::Preset {
+                                let ctrl = crate::cc_map::cc_to_control_name(cc);
+                                let label = crate::cc_map::find_param_meta(binding.param_key)
+                                    .map(|m| m.label).unwrap_or("?");
+                                ui.label(format!("{ctrl} (CC{cc})")); ui.label(""); ui.label(label); ui.end_row();
+                            }
+                        }
+                    });
+
+                ui.add_space(8.0);
+
+                // Global bindings
+                ui.strong("Global (persist across preset changes)");
+                egui::Grid::new("cc_help_global")
+                    .num_columns(3)
+                    .spacing([16.0, 2.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.strong("Control"); ui.strong("CC"); ui.strong("Parameter"); ui.end_row();
+                        for (cc, binding) in self.cc_map.bindings.iter().enumerate().filter_map(|(i, b)| b.map(|b| (i as u8, b))) {
+                            if binding.scope == crate::cc_map::ParamScope::Global {
+                                let ctrl = crate::cc_map::cc_to_control_name(cc);
+                                let label = crate::cc_map::find_param_meta(binding.param_key)
+                                    .map(|m| m.label).unwrap_or("?");
+                                ui.label(format!("{ctrl} (CC{cc})")); ui.label(""); ui.label(label); ui.end_row();
+                            }
+                        }
+                    });
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.label("Preset knobs use pickup mode: after switching presets,");
+                ui.label("move the knob past the current value to start controlling.");
+            });
+        self.show_help = open;
+    }
+
+    fn drain_feedback(&mut self) {
+        let mut param_changes: Vec<(&str, f32)> = Vec::new();
+        let mut learned_cc: Option<(u8, String)> = None;
+        let mut program: Option<u8> = None;
+        let mut nav_delta: Option<i32> = None;
+
+        if let Some(rx) = &mut self.feedback_rx {
+            while let Ok(fb) = rx.pop() {
+                match fb {
+                    ParamFeedback::ParamChanged { key, value } => {
+                        param_changes.push((key, value));
+                    }
+                    ParamFeedback::CcReceived { cc } => {
+                        if let Some(target) = self.midi_learn_target.take() {
+                            learned_cc = Some((cc, target));
+                        }
+                    }
+                    ParamFeedback::ProgramChanged { program: prog } => {
+                        program = Some(prog);
+                    }
+                    ParamFeedback::DrumStepRecorded { pattern, slot, step, velocity } => {
+                        if (pattern as usize) < self.drum_patterns.len() {
+                            self.drum_patterns[pattern as usize].steps[slot as usize][step as usize].velocity = velocity;
+                        }
+                    }
+                    ParamFeedback::PickupPending { key, cc_position } => {
+                        self.pickup_indicators.insert(key.to_string(), cc_position);
+                    }
+                    ParamFeedback::PickupDone { key } => {
+                        self.pickup_indicators.remove(key);
+                    }
+                    ParamFeedback::NavigatePress => {
+                        self.nav_press_time = Some(std::time::Instant::now());
+                    }
+                    ParamFeedback::NavigateRelease => {
+                        if let Some(press_time) = self.nav_press_time.take() {
+                            let held = press_time.elapsed();
+                            if self.setlist.is_some() {
+                                // Setlist mode: short = next, long = prev
+                                if held < std::time::Duration::from_millis(400) {
+                                    nav_delta = Some(1);
+                                } else {
+                                    nav_delta = Some(-1);
+                                }
+                            } else {
+                                if held < std::time::Duration::from_millis(400) {
+                                    // Short press: cycle layers (A ↔ B)
+                                    if self.show_drums || self.show_looper {
+                                        self.show_drums = false;
+                                        self.show_looper = false;
+                                    } else if self.layers[1].enabled {
+                                        self.active_layer = 1 - self.active_layer;
+                                    }
+                                } else {
+                                    // Long press: toggle drums
+                                    if self.show_drums {
+                                        self.show_drums = false;
+                                        self.show_looper = false;
+                                    } else {
+                                        self.show_drums = true;
+                                        self.show_looper = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for (key, value) in param_changes {
+            if crate::cc_map::is_global_param(key) {
+                // Global params (volume, tone) — don't put in preset
+                self.global_params.insert(key.to_string(), value);
+                self.global_dirty = true;
+            } else {
+                // Preset params — update all layers
+                for layer_state in &mut self.layers {
+                    layer_state.edited_params.insert(key.to_string(), value);
+                    layer_state.params_dirty = true;
+                }
+            }
+        }
+
+        if let Some((cc, target)) = learned_cc {
+            if let Some(meta) = crate::cc_map::find_param_meta(&target) {
+                self.cc_map.bindings[cc as usize] = Some(crate::cc_map::CcBinding {
+                    param_key: meta.key,
+                    min_val: meta.min,
+                    max_val: meta.max,
+                    logarithmic: meta.logarithmic,
+                    scope: meta.scope,
+                });
+                self.save_cc_map();
+            }
+        }
+
+        if let Some(prog) = program {
+            if self.presets.get(prog as usize).is_some() {
+                self.layers[0].preset_idx = prog as usize;
+                self.load_edited_params(0);
+            }
+        }
+
+        if let Some(d) = nav_delta {
+            self.setlist_navigate(d);
+        }
+    }
+
+    fn save_cc_map(&mut self) {
+        self.config.cc_map = Some(crate::cc_map::CcMapRaw::from_cc_map(&self.cc_map));
+        let _ = self.config.save();
+        let _ = self.ctrl_tx.push(ControlEvent::SetCcMap { map: self.cc_map });
+    }
+
     fn param_slider(&mut self, ui: &mut egui::Ui, key: &str, label: &str, min: f32, max: f32, logarithmic: bool) -> bool {
         let layer = self.active_layer;
         let mut val = self.layers[layer].edited_params.get(key).copied().unwrap_or(min);
+
+        // Build label with CC number and pickup indicator
+        let cc_info = self.cc_map.bindings.iter().enumerate()
+            .find_map(|(cc, b)| b.filter(|b| b.param_key == key).map(|_| cc));
+        let pickup = self.pickup_indicators.get(key).copied();
+        let display_label = match (cc_info, pickup) {
+            (Some(cc), Some(knob_pos)) => {
+                let arrow = if knob_pos < val { "\u{2193}" } else { "\u{2191}" }; // ↓ or ↑
+                format!("{label} [CC{cc} {arrow}]")
+            }
+            (Some(cc), None) => format!("{label} [CC{cc}]"),
+            _ => label.to_string(),
+        };
+
         let slider = egui::Slider::new(&mut val, min..=max)
-            .text(label)
+            .text(&display_label)
             .logarithmic(logarithmic);
         let resp = ui.add(slider);
+        if resp.secondary_clicked() {
+            self.midi_learn_target = Some(key.to_string());
+        }
         if resp.changed() {
             self.layers[layer].edited_params.insert(key.into(), val);
             return true;
@@ -911,9 +2284,7 @@ impl App {
             .filter_map(|i| {
                 let vel = self.note_state[i as usize].load(Ordering::Relaxed);
                 if vel > 0 {
-                    let name = NOTE_NAMES[(i % 12) as usize];
-                    let oct = i / 12 - 1;
-                    Some(format!("{name}{oct}"))
+                    Some(note_name(i))
                 } else {
                     None
                 }
@@ -926,61 +2297,124 @@ impl App {
             ui.label(active.join("  "));
         }
 
-        let start_note: u8 = 36;
-        let end_note: u8 = 96;
+        ui.horizontal(|ui| {
+            // --- Piano keys ---
+            let start_note: u8 = 36;
+            let end_note: u8 = 96;
 
-        let total_white = (start_note..end_note)
-            .filter(|n| !is_black_key(*n))
-            .count() as f32;
+            let total_white = (start_note..end_note)
+                .filter(|n| !is_black_key(*n))
+                .count() as f32;
 
-        let available_w = ui.available_width();
-        let key_w = (available_w / total_white).min(18.0).max(6.0);
-        let key_h = (key_w * 3.5).min(70.0);
-        let black_h = key_h * 0.62;
+            // Reserve space for pads on the right: 8 pads * pad_size + gap
+            let pad_size = 32.0_f32;
+            let pad_gap = 2.0_f32;
+            let pad_block_w = 8.0 * (pad_size + pad_gap) + 12.0; // 12px margin
 
-        let (response, painter) = ui.allocate_painter(
-            egui::vec2(total_white * key_w, key_h),
-            egui::Sense::hover(),
-        );
-        let rect = response.rect;
+            let available_w = ui.available_width() - pad_block_w;
+            let key_w = (available_w / total_white).min(18.0).max(6.0);
+            let key_h = (key_w * 3.5).min(70.0);
+            let black_h = key_h * 0.62;
 
-        let mut wx = 0.0_f32;
-        for note in start_note..end_note {
-            if is_black_key(note) { continue; }
-            let vel = self.note_state[note as usize].load(Ordering::Relaxed);
-            let key_rect = egui::Rect::from_min_size(
-                rect.min + egui::vec2(wx, 0.0),
-                egui::vec2(key_w - 1.0, key_h),
+            let (response, painter) = ui.allocate_painter(
+                egui::vec2(total_white * key_w, key_h),
+                egui::Sense::hover(),
             );
-            let color = if vel > 0 {
-                egui::Color32::from_rgb(80, 180, 255)
-            } else {
-                egui::Color32::from_rgb(220, 220, 220)
-            };
-            painter.rect_filled(key_rect, 1.0, color);
-            painter.rect_stroke(key_rect, 1.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(120, 120, 120)), egui::StrokeKind::Outside);
-            wx += key_w;
-        }
+            let rect = response.rect;
 
-        wx = 0.0;
-        for note in start_note..end_note {
-            if is_black_key(note) {
+            // White keys
+            let mut wx = 0.0_f32;
+            for note in start_note..end_note {
+                if is_black_key(note) { continue; }
                 let vel = self.note_state[note as usize].load(Ordering::Relaxed);
-                let bw = key_w * 0.65;
                 let key_rect = egui::Rect::from_min_size(
-                    rect.min + egui::vec2(wx - bw * 0.5, 0.0),
-                    egui::vec2(bw, black_h),
+                    rect.min + egui::vec2(wx, 0.0),
+                    egui::vec2(key_w - 1.0, key_h),
                 );
                 let color = if vel > 0 {
-                    egui::Color32::from_rgb(60, 140, 220)
+                    egui::Color32::from_rgb(80, 180, 255)
                 } else {
-                    egui::Color32::from_rgb(30, 30, 30)
+                    egui::Color32::from_rgb(220, 220, 220)
                 };
                 painter.rect_filled(key_rect, 1.0, color);
-            } else {
+                painter.rect_stroke(key_rect, 1.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(120, 120, 120)), egui::StrokeKind::Outside);
                 wx += key_w;
             }
-        }
+
+            // Black keys
+            wx = 0.0;
+            for note in start_note..end_note {
+                if is_black_key(note) {
+                    let vel = self.note_state[note as usize].load(Ordering::Relaxed);
+                    let bw = key_w * 0.65;
+                    let key_rect = egui::Rect::from_min_size(
+                        rect.min + egui::vec2(wx - bw * 0.5, 0.0),
+                        egui::vec2(bw, black_h),
+                    );
+                    let color = if vel > 0 {
+                        egui::Color32::from_rgb(60, 140, 220)
+                    } else {
+                        egui::Color32::from_rgb(30, 30, 30)
+                    };
+                    painter.rect_filled(key_rect, 1.0, color);
+                } else {
+                    wx += key_w;
+                }
+            }
+
+            ui.add_space(12.0);
+
+            // --- Pads (C1–D#2 = MIDI 36–51, MPC layout as 2×8) ---
+            // Top row: E1,F1,F#1,G1, C2,C#2,D2,D#2 — cyan
+            // Bottom row: C1,C#1,D1,D#1, G#1,A1,A#1,B1 — pink
+            const PAD_TOP: [u8; 8] = [40, 41, 42, 43, 48, 49, 50, 51];
+            const PAD_BOT: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
+
+            let pad_h = (key_h - pad_gap) / 2.0;
+            let pad_w = pad_size;
+            let total_pad_w = 8.0 * (pad_w + pad_gap);
+            let total_pad_h = key_h;
+
+            let (pad_resp, pad_painter) = ui.allocate_painter(
+                egui::vec2(total_pad_w, total_pad_h),
+                egui::Sense::hover(),
+            );
+            let pad_origin = pad_resp.rect.min;
+
+            // Top row (cyan)
+            for col in 0..8u8 {
+                let note = PAD_TOP[col as usize];
+                let vel = self.pad_state[note as usize].load(Ordering::Relaxed);
+                let pr = egui::Rect::from_min_size(
+                    pad_origin + egui::vec2(col as f32 * (pad_w + pad_gap), 0.0),
+                    egui::vec2(pad_w, pad_h),
+                );
+                let color = if vel > 0 {
+                    egui::Color32::WHITE
+                } else {
+                    egui::Color32::from_rgb(0, 200, 210)
+                };
+                pad_painter.rect_filled(pr, 3.0, color);
+                pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)), egui::StrokeKind::Outside);
+            }
+
+            // Bottom row (pink)
+            for col in 0..8u8 {
+                let note = PAD_BOT[col as usize];
+                let vel = self.pad_state[note as usize].load(Ordering::Relaxed);
+                let pr = egui::Rect::from_min_size(
+                    pad_origin + egui::vec2(col as f32 * (pad_w + pad_gap), pad_h + pad_gap),
+                    egui::vec2(pad_w, pad_h),
+                );
+                let color = if vel > 0 {
+                    egui::Color32::WHITE
+                } else {
+                    egui::Color32::from_rgb(220, 60, 150)
+                };
+                pad_painter.rect_filled(pr, 3.0, color);
+                pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)), egui::StrokeKind::Outside);
+            }
+        });
     }
 }
 

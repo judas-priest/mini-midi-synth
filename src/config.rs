@@ -10,6 +10,8 @@ pub struct Config {
     pub audio: AudioSettings,
     pub midi: MidiSettings,
     pub ui: UiSettings,
+    #[serde(default)]
+    pub cc_map: Option<crate::cc_map::CcMapRaw>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,7 +35,14 @@ pub struct UiSettings {
     pub last_preset: Option<String>,
     #[serde(default)]
     pub collapsed_categories: Vec<String>,
+    #[serde(default = "default_master_volume")]
+    pub master_volume: f32,
+    #[serde(default = "default_master_tone")]
+    pub master_tone: f32,
 }
+
+fn default_master_volume() -> f32 { 0.8 }
+fn default_master_tone() -> f32 { 20000.0 }
 
 impl Default for Config {
     fn default() -> Self {
@@ -44,12 +53,15 @@ impl Default for Config {
                 buffer_size: 256,
             },
             midi: MidiSettings { port_name: None },
+            cc_map: None,
             ui: UiSettings {
                 window_width: 720.0,
                 window_height: 400.0,
                 maximized: false,
                 last_preset: None,
                 collapsed_categories: Vec::new(),
+                master_volume: 0.8,
+                master_tone: 20000.0,
             },
         }
     }

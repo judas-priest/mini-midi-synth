@@ -1,0 +1,27 @@
+{
+  "name": "Snare Drum",
+  "params": {
+    "osc_type": 12.0,
+    "osc_detune": 0.0,
+    "drum_pitch_amount": 24.0,
+    "drum_pitch_decay": 100.0,
+    "drum_noise_level": 0.65,
+    "drum_noise_decay": 18.0,
+    "drum_noise_color": 0.6,
+    "noise_level": 0.0,
+    "filter_cutoff": 1000.0,
+    "filter_resonance": 0.05,
+    "filter_type": 0.0,
+    "filter_key_track": 0.0,
+    "filter_env_amount": 4000.0,
+    "amp_attack": 0.001,
+    "amp_decay": 0.25,
+    "amp_sustain": 0.0,
+    "amp_release": 0.1,
+    "filter_attack": 0.001,
+    "filter_decay": 0.05,
+    "filter_sustain": 0.0,
+    "filter_release": 0.08,
+    "master_volume": 0.9
+  }
+}

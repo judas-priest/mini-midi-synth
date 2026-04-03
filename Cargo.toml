@@ -19,4 +19,12 @@ libc = "0.2"
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-strip = true
+panic = "abort"
+strip = "symbols"
+
+# Dev builds: optimize deps so audio doesn't glitch during development
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

@@ -4,6 +4,7 @@ use super::envelope::Envelope;
 use super::filter::{Filter, FilterType};
 use super::formant::{FormantFilter, VoiceType, Vowel};
 use super::oscillator::{OscType, Oscillator};
+use super::ModulationState;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum FilterRouting {
@@ -19,6 +20,15 @@ impl FilterRouting {
             2 => Self::Parallel,
             _ => Self::Single,
         }
+    }
+}
+
+fn apply_velocity_curve(v: f32, curve: u8) -> f32 {
+    match curve {
+        1 => v * v,
+        2 => v.sqrt(),
+        3 => 1.0,
+        _ => v,
     }
 }
 
@@ -39,7 +49,10 @@ pub struct Voice {
     amp_env: Envelope,
     filter_env: Envelope,
     freq: f32,
+    target_freq: f32,
+    porta_coeff: f32,
     velocity: f32,
+    vel_to_filter: f32,
     filter_base_cutoff: f32,
     filter_env_amount: f32,
     filter_key_track: f32,
@@ -47,8 +60,15 @@ pub struct Voice {
     filter2_base_cutoff: f32,
     fm_base_index: f32,
     fm_env_amount: f32,
+    pd_base_depth: f32,
+    pd_env_amount: f32,
     noise_level: f32,
     noise_state: u32,
+    sample_rate: f32,
+    // Unison
+    unison_count: u8,
+    unison_detunes: [f32; 8],
+    unison_pans: [f32; 8],
 }
 
 impl Voice {
@@ -72,7 +92,10 @@ impl Voice {
             amp_env: Envelope::new(sample_rate),
             filter_env: Envelope::new(sample_rate),
             freq: 440.0,
+            target_freq: 440.0,
+            porta_coeff: 1.0,
             velocity: 0.0,
+            vel_to_filter: 0.0,
             filter_base_cutoff: 8000.0,
             filter_env_amount: 0.0,
             filter_key_track: 0.0,
@@ -80,8 +103,14 @@ impl Voice {
             filter2_base_cutoff: 8000.0,
             fm_base_index: 5.0,
             fm_env_amount: 0.0,
+            pd_base_depth: 0.0,
+            pd_env_amount: 0.0,
             noise_level: 0.0,
             noise_state: 0xDEADBEEF,
+            sample_rate,
+            unison_count: 1,
+            unison_detunes: [0.0; 8],
+            unison_pans: [0.0; 8],
         }
     }
 
@@ -96,15 +125,43 @@ impl Voice {
         self.formant_filter = FormantFilter::new(sample_rate);
         self.amp_env = Envelope::new(sample_rate);
         self.filter_env = Envelope::new(sample_rate);
+        self.sample_rate = sample_rate;
         self.active = false;
     }
 
-    pub fn note_on(&mut self, note: u8, velocity: u8, age: u64, params: &VoiceParams) {
+    pub fn note_on(
+        &mut self,
+        note: u8,
+        velocity: u8,
+        age: u64,
+        params: &VoiceParams,
+        prev_freq: Option<f32>,
+    ) {
         self.note = note;
         self.active = true;
         self.age = age;
-        self.freq = midi_to_freq(note);
-        self.velocity = velocity as f32 / 127.0;
+        let new_freq = midi_to_freq(note);
+        self.target_freq = new_freq;
+
+        // Portamento
+        if let Some(pf) = prev_freq {
+            if params.portamento_time > 0.001 {
+                self.freq = pf;
+                let samples = params.portamento_time * self.sample_rate;
+                self.porta_coeff = 1.0 - (-4.0 / samples).exp();
+            } else {
+                self.freq = new_freq;
+                self.porta_coeff = 1.0;
+            }
+        } else {
+            self.freq = new_freq;
+            self.porta_coeff = 1.0;
+        }
+
+        // Velocity curve
+        let raw_vel = velocity as f32 / 127.0;
+        self.velocity = apply_velocity_curve(raw_vel, params.velocity_curve as u8);
+        self.vel_to_filter = params.vel_to_filter;
 
         // Osc 1 (primary — all types allowed)
         self.oscs[0].osc_type = OscType::from_param(params.osc_type);
@@ -113,18 +170,76 @@ impl Voice {
         self.oscs[0].fm_index = params.fm_index;
         self.oscs[0].ks_brightness = params.ks_brightness;
         self.oscs[0].ks_feedback = params.ks_feedback;
+        self.oscs[0].pulse_width = params.pulse_width;
         self.oscs[0].organ_drawbars = params.organ_drawbars;
         self.fm_base_index = params.fm_index;
         self.fm_env_amount = params.fm_env_amount;
+        self.pd_base_depth = params.pd_depth;
+        self.pd_env_amount = params.pd_env_amount;
 
         self.oscs[0].reset();
 
-        // Initialize physical model delay lines for osc 1
+        // Initialize physical model delay lines / special osc types for osc 1
         match self.oscs[0].osc_type {
             OscType::KarplusStrong => self.oscs[0].init_ks(self.freq),
-            OscType::CommutedPiano => self.oscs[0].init_commuted_piano(self.freq),
+            OscType::CommutedPiano => self.oscs[0].init_commuted_piano(self.freq, self.velocity),
             OscType::BandedWG => self.oscs[0].init_banded_wg(self.freq),
             OscType::AdditivePiano => self.oscs[0].init_additive_piano(self.freq),
+            OscType::DrumSynth => self.oscs[0].init_drum_synth(
+                self.freq,
+                params.drum_pitch_amount,
+                params.drum_pitch_decay,
+                params.drum_noise_level,
+                params.drum_noise_decay,
+                params.drum_noise_color,
+            ),
+            OscType::BassGuitar => self.oscs[0].init_bass_guitar(
+                self.freq,
+                self.velocity,
+                params.bass_style,
+                params.bass_tone,
+                params.bass_body,
+                params.bass_pickup,
+            ),
+            OscType::BowedString => self.oscs[0].init_bowed_string(
+                self.freq,
+                self.velocity,
+                params.bow_pressure,
+                params.bow_position,
+                params.body_type,
+            ),
+            OscType::Brass => self.oscs[0].init_brass(
+                self.freq,
+                self.velocity,
+                params.lip_tension,
+                params.blowing_pressure,
+                params.bell_type,
+            ),
+            OscType::PhaseDistortion => self.oscs[0].init_phase_distortion(
+                params.pd_shape as u8,
+                params.pd_depth,
+            ),
+            OscType::Wavefolder => self.oscs[0].init_wavefolder(
+                params.fold_source as u8,
+                params.fold_amount,
+                params.fold_symmetry,
+            ),
+            OscType::ModalResonator => self.oscs[0].init_modal_resonator(
+                self.freq,
+                params.modal_material as u8,
+                params.modal_brightness,
+                params.modal_damping,
+                params.modal_strike_pos,
+            ),
+            OscType::HardSync => self.oscs[0].init_hard_sync(
+                params.sync_ratio,
+                params.sync_shape as u8,
+            ),
+            OscType::Supersaw => self.oscs[0].init_supersaw(
+                params.supersaw_detune,
+                params.supersaw_mix,
+            ),
+            OscType::PianoModel => self.oscs[0].init_piano_model(self.freq),
             _ => {}
         }
 
@@ -143,6 +258,7 @@ impl Voice {
             self.oscs[1].set_detune(params.osc2_detune);
             self.oscs[1].fm_ratio = params.fm_ratio;
             self.oscs[1].fm_index = params.fm_index;
+            self.oscs[1].pulse_width = params.pulse_width;
             self.oscs[1].reset();
             self.osc_levels[1] = params.osc2_level;
         } else {
@@ -160,6 +276,7 @@ impl Voice {
             self.oscs[2].set_detune(params.osc3_detune);
             self.oscs[2].fm_ratio = params.fm_ratio;
             self.oscs[2].fm_index = params.fm_index;
+            self.oscs[2].pulse_width = params.pulse_width;
             self.oscs[2].reset();
             self.osc_levels[2] = params.osc3_level;
         } else {
@@ -186,7 +303,6 @@ impl Voice {
             if self.filter_routing != FilterRouting::Single {
                 let f2_type = FilterType::from_param(params.filter2_type);
                 if f2_type == FilterType::Formant {
-                    // Filter 2 doesn't support formant, fall back to single
                     self.filter_routing = FilterRouting::Single;
                 } else {
                     self.filter2.set_type(f2_type);
@@ -206,6 +322,34 @@ impl Voice {
             1.0
         };
         self.noise_level = params.noise_level;
+
+        // Unison
+        let is_physical = !self.oscs[0].osc_type.is_simple()
+            && self.oscs[0].osc_type != OscType::Fm
+            && self.oscs[0].osc_type != OscType::Noise;
+        self.unison_count = if is_physical {
+            1
+        } else {
+            (params.unison_voices as u8).clamp(1, 8)
+        };
+
+        if self.unison_count > 1 {
+            let detune_cents = params.unison_detune;
+            let spread = params.unison_spread;
+            let n = self.unison_count as f32;
+            for i in 0..self.unison_count as usize {
+                let t = if n > 1.0 {
+                    (i as f32 / (n - 1.0)) * 2.0 - 1.0
+                } else {
+                    0.0
+                };
+                self.unison_detunes[i] = 2.0_f32.powf(t * detune_cents / 1200.0);
+                self.unison_pans[i] = t * spread;
+            }
+        } else {
+            self.unison_detunes[0] = 1.0;
+            self.unison_pans[0] = 0.0;
+        }
 
         self.amp_env.set_adsr(
             params.amp_attack,
@@ -229,6 +373,10 @@ impl Voice {
         self.filter_env.note_off();
     }
 
+    pub fn is_releasing(&self) -> bool {
+        self.amp_env.is_releasing()
+    }
+
     #[inline]
     fn next_noise(&mut self) -> f32 {
         self.noise_state ^= self.noise_state << 13;
@@ -237,28 +385,96 @@ impl Voice {
         (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0
     }
 
-    pub fn tick(&mut self, pitch_mult: f32) -> f32 {
+    /// Returns (left, right) stereo pair.
+    pub fn tick(&mut self, mods: &ModulationState) -> (f32, f32) {
         if !self.active {
-            return 0.0;
+            return (0.0, 0.0);
         }
 
         let amp = self.amp_env.tick();
         if self.amp_env.is_idle() {
             self.active = false;
-            return 0.0;
+            return (0.0, 0.0);
         }
 
         let filter_mod = self.filter_env.tick();
 
-        // FM index envelope: index decays with filter envelope (osc 1 only)
+        // FM index envelope
         if self.fm_env_amount > 0.001 {
             self.oscs[0].fm_index =
                 self.fm_base_index * (1.0 - self.fm_env_amount + self.fm_env_amount * filter_mod);
         }
 
-        let freq = self.freq * pitch_mult;
+        // Phase Distortion DCW envelope
+        if self.pd_env_amount > 0.001 {
+            let depth = self.pd_base_depth * (1.0 - self.pd_env_amount + self.pd_env_amount * filter_mod);
+            self.oscs[0].set_pd_depth(depth);
+        }
 
-        // Mix oscillators
+        // Portamento
+        if self.porta_coeff < 0.999 {
+            self.freq += (self.target_freq - self.freq) * self.porta_coeff;
+        } else {
+            self.freq = self.target_freq;
+        }
+
+        let base_freq = self.freq * mods.pitch_mult;
+
+        // Velocity → filter
+        let vel_factor = 1.0 + self.vel_to_filter * self.velocity * 4.0;
+        let cutoff1 = (self.filter_base_cutoff * vel_factor
+            + self.filter_env_amount * filter_mod
+            + mods.filter_offset)
+            * self.filter_key_mult;
+
+        if self.unison_count <= 1 {
+            let mix = self.render_oscs(base_freq);
+            let filtered = self.apply_filter(mix, cutoff1, filter_mod);
+            let out = filtered * amp * self.velocity * mods.amp_mod;
+            return (out, out);
+        }
+
+        // Unison path
+        let mut sum_l = 0.0_f32;
+        let mut sum_r = 0.0_f32;
+        let gain = 1.0 / (self.unison_count as f32).sqrt();
+
+        for u in 0..self.unison_count as usize {
+            let detuned_freq = base_freq * self.unison_detunes[u];
+            let pan = self.unison_pans[u];
+
+            let sample = if u == 0 {
+                self.render_oscs(detuned_freq)
+            } else {
+                self.oscs[0].tick(detuned_freq)
+            };
+
+            let l_gain = (0.5 - pan * 0.5).sqrt();
+            let r_gain = (0.5 + pan * 0.5).sqrt();
+            sum_l += sample * l_gain;
+            sum_r += sample * r_gain;
+        }
+
+        sum_l *= gain;
+        sum_r *= gain;
+
+        // Filter the mono sum, restore L/R ratio
+        let mono = (sum_l + sum_r) * 0.5;
+        let filtered = self.apply_filter(mono, cutoff1, filter_mod);
+
+        let (out_l, out_r) = if mono.abs() > 0.0001 {
+            let ratio = filtered / mono;
+            (sum_l * ratio, sum_r * ratio)
+        } else {
+            (filtered, filtered)
+        };
+
+        let final_amp = amp * self.velocity * mods.amp_mod;
+        (out_l * final_amp, out_r * final_amp)
+    }
+
+    #[inline]
+    fn render_oscs(&mut self, freq: f32) -> f32 {
         let mut mix = self.oscs[0].tick(freq) * self.osc_levels[0];
         if self.num_oscs >= 2 {
             mix += self.oscs[1].tick(freq) * self.osc_levels[1];
@@ -267,17 +483,21 @@ impl Voice {
             mix += self.oscs[2].tick(freq) * self.osc_levels[2];
         }
 
-        // Mix noise pre-filter (additive, for breathiness/texture)
-        if self.noise_level > 0.001 && self.oscs[0].osc_type != OscType::Noise {
+        if self.noise_level > 0.001
+            && self.oscs[0].osc_type != OscType::Noise
+            && self.oscs[0].osc_type != OscType::DrumSynth
+        {
             mix += self.next_noise() * self.noise_level;
         }
 
-        // Filter routing
-        let filtered = if self.use_formant {
+        mix
+    }
+
+    #[inline]
+    fn apply_filter(&mut self, mix: f32, cutoff1: f32, filter_mod: f32) -> f32 {
+        if self.use_formant {
             self.formant_filter.tick(mix)
         } else {
-            let cutoff1 =
-                (self.filter_base_cutoff + self.filter_env_amount * filter_mod) * self.filter_key_mult;
             self.filter.set_cutoff(cutoff1);
 
             match self.filter_routing {
@@ -298,9 +518,7 @@ impl Voice {
                     (f1 + f2) * 0.5
                 }
             }
-        };
-
-        filtered * amp * self.velocity
+        }
     }
 }
 
@@ -350,6 +568,56 @@ pub struct VoiceParams {
     // Formant
     pub formant_voice: f32,
     pub formant_vowel: f32,
+    // Drum synth
+    pub drum_pitch_amount: f32,
+    pub drum_pitch_decay: f32,
+    pub drum_noise_level: f32,
+    pub drum_noise_decay: f32,
+    pub drum_noise_color: f32,
+    // Bass guitar
+    pub bass_style: f32,
+    pub bass_tone: f32,
+    pub bass_body: f32,
+    pub bass_pickup: f32,
+    // Bowed string
+    pub bow_pressure: f32,
+    pub bow_position: f32,
+    pub body_type: f32,
+    // Brass
+    pub lip_tension: f32,
+    pub blowing_pressure: f32,
+    pub bell_type: f32,
+    // Phase Distortion
+    pub pd_shape: f32,
+    pub pd_depth: f32,
+    pub pd_env_amount: f32,
+    // Wavefolder
+    pub fold_amount: f32,
+    pub fold_symmetry: f32,
+    pub fold_source: f32,
+    // Modal Resonator
+    pub modal_material: f32,
+    pub modal_brightness: f32,
+    pub modal_damping: f32,
+    pub modal_strike_pos: f32,
+    // Hard Sync
+    pub sync_ratio: f32,
+    pub sync_shape: f32,
+    // Supersaw
+    pub supersaw_detune: f32,
+    pub supersaw_mix: f32,
+    // Pulse width
+    pub pulse_width: f32,
+    // Dynamics
+    pub velocity_curve: f32,
+    pub vel_to_filter: f32,
+    // Portamento
+    pub portamento_time: f32,
+    pub _portamento_mode: f32,
+    // Unison
+    pub unison_voices: f32,
+    pub unison_detune: f32,
+    pub unison_spread: f32,
 }
 
 fn midi_to_freq(note: u8) -> f32 {

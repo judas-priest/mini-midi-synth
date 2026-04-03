@@ -1,0 +1,17 @@
+{
+    "name": "Vibraphone (Modal)",
+    "category": "Modal",
+    "params": {
+        "osc_type": 18,
+        "modal_material": 5,
+        "modal_brightness": 0.7,
+        "modal_damping": 0.2,
+        "modal_strike_pos": 0.5,
+        "filter_cutoff": 12000.0,
+        "filter_type": 0,
+        "amp_attack": 0.001,
+        "amp_decay": 1.5,
+        "amp_sustain": 0.0,
+        "amp_release": 0.5
+    }
+}

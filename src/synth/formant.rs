@@ -9,6 +9,7 @@ const NUM_FORMANTS: usize = 5;
 
 /// Formant parameters for one resonance.
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 struct Formant {
     freq: f32,
     gain_db: f32,
@@ -175,6 +176,7 @@ impl FormantFilter {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
     }

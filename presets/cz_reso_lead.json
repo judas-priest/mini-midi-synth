@@ -1,0 +1,22 @@
+{
+    "name": "CZ Reso Lead",
+    "category": "Phase Distortion",
+    "params": {
+        "osc_type": 16,
+        "pd_shape": 5,
+        "pd_depth": 0.8,
+        "pd_env_amount": 0.4,
+        "filter_cutoff": 6000.0,
+        "filter_resonance": 0.2,
+        "filter_type": 0,
+        "filter_env_amount": 3000.0,
+        "amp_attack": 0.01,
+        "amp_decay": 0.15,
+        "amp_sustain": 0.8,
+        "amp_release": 0.2,
+        "filter_attack": 0.01,
+        "filter_decay": 0.3,
+        "filter_sustain": 0.3,
+        "filter_release": 0.2
+    }
+}
