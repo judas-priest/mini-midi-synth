@@ -74,6 +74,9 @@ pub struct UiSettings {
     pub master_volume: f32,
     #[serde(default = "default_master_tone")]
     pub master_tone: f32,
+    /// Pad performance map: 16 slots (notes 36-51) → performance name.
+    #[serde(default)]
+    pub pad_perf_map: Vec<Option<String>>,
 }
 
 fn default_master_volume() -> f32 { 0.8 }
@@ -98,6 +101,7 @@ impl Default for Config {
                 collapsed_categories: Vec::new(),
                 master_volume: 0.8,
                 master_tone: 20000.0,
+                pad_perf_map: Vec::new(),
             },
         }
     }

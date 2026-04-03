@@ -11,7 +11,7 @@ use rtrb::Producer;
 use crate::cc_map::CcMap;
 use crate::config::Config;
 use crate::midi::{self, NoteState};
-use crate::preset::{self, Preset, DrumKit, Performance, PartConfig, SetList};
+use crate::preset::{self, Preset, DrumKit, Performance, PartConfig};
 use crate::synth::{ControlEvent, DrumParam, ParamFeedback, MAX_LAYERS};
 use crate::synth::drum::{NUM_DRUM_SLOTS, DRUM_NAMES, DrumSlotParams, DrumPattern};
 use crate::synth::looper::LooperAtoms;
@@ -182,14 +182,11 @@ pub struct App {
     pub perf_status: String,
     // Navigate button timing
     pub nav_press_time: Option<std::time::Instant>,
-    // Set list
-    pub setlist: Option<SetList>,
-    pub setlist_index: usize,
-    pub setlist_list: Vec<(String, std::path::PathBuf)>,
-    pub setlist_status: String,
-    pub show_setlist_editor: bool,
-    pub setlist_editor_name: String,
-    pub setlist_editor_entries: Vec<String>,
+    // Pad performance map: 16 pads (notes 36-51) → performance names
+    pub show_pad_perf: bool,
+    pub pad_perf_map: [Option<String>; 16],
+    pub pad_perf_status: String,
+    pub pad_prev_state: [u8; 16],
     pub last_config_save: std::time::Instant,
     pub global_dirty: bool,
     // SF2 sampler
@@ -203,6 +200,14 @@ pub struct App {
     pub sf2_keys_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
     pub sf2_drums_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
     pub sf2_block_size: usize,
+    // Pitch step sequencer
+    pub pitch_seq_step_atoms: Vec<std::sync::Arc<std::sync::atomic::AtomicU8>>,
+    pub pitch_seq_enabled: [bool; 2],
+    pub pitch_seq_steps: [[crate::synth::step_seq::PitchStep; 16]; 2],
+    pub pitch_seq_length: [u8; 2],
+    pub pitch_seq_rate: [u8; 2],
+    pub pitch_seq_scale: [u8; 2],
+    pub pitch_seq_swing: [f32; 2],
 }
 
 impl eframe::App for App {
@@ -233,6 +238,28 @@ impl eframe::App for App {
 
         // Drain feedback from audio thread
         self.drain_feedback();
+
+        // Pad performance switching (only when pad perf panel is open)
+        if self.show_pad_perf {
+            for i in 0..16u8 {
+                let note = 36 + i;
+                let vel = self.pad_state[note as usize].load(Ordering::Relaxed);
+                let prev = self.pad_prev_state[i as usize];
+                if vel > 0 && prev == 0 {
+                    // New pad press — switch performance if mapped
+                    if let Some(ref name) = self.pad_perf_map[i as usize] {
+                        let name = name.clone();
+                        let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                        if self.load_performance_by_name(&name) {
+                            self.pad_perf_status = format!("Loaded: {name}");
+                        } else {
+                            self.pad_perf_status = format!("Not found: {name}");
+                        }
+                    }
+                }
+                self.pad_prev_state[i as usize] = vel;
+            }
+        }
 
         // Autosave global params (vol/tone) 2 seconds after last change
         if self.global_dirty && self.last_config_save.elapsed() > Duration::from_secs(2) {
@@ -326,10 +353,20 @@ impl eframe::App for App {
             ui.add_space(4.0);
         });
 
-        // Setlist bar (above keyboard)
-        egui::TopBottomPanel::bottom("setlist_bar").show(ctx, |ui| {
-            self.draw_setlist_bar(ui);
-        });
+        // Pad perf status (above keyboard)
+        if !self.pad_perf_status.is_empty() || self.show_pad_perf {
+            egui::TopBottomPanel::bottom("pad_perf_bar").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if self.show_pad_perf {
+                        ui.colored_label(egui::Color32::YELLOW, "PAD PERF: tap a pad to switch performance");
+                    }
+                    if !self.pad_perf_status.is_empty() {
+                        ui.separator();
+                        ui.label(egui::RichText::new(&self.pad_perf_status).small().weak());
+                    }
+                });
+            });
+        }
 
         // Right: preset list (for active layer) or GM instrument list (SF2 mode)
         egui::SidePanel::right("preset_panel")
@@ -477,9 +514,9 @@ impl eframe::App for App {
         if self.show_help {
             self.draw_help(ctx);
         }
-        // Setlist editor window
-        if self.show_setlist_editor {
-            self.draw_setlist_editor(ctx);
+        // Pad performance map window
+        if self.show_pad_perf {
+            self.draw_pad_perf_window(ctx);
         }
 
         // Central: layer tabs + parameters / drum sequencer
@@ -496,6 +533,7 @@ impl eframe::App for App {
             } else {
                 self.draw_looper(ui);
                 ui.add_space(2.0);
+                self.draw_pitch_sequencer(ui);
                 ui.separator();
                 ui.add_space(6.0);
                 let layer = self.active_layer;
@@ -592,6 +630,7 @@ impl App {
     fn save_global_to_config(&mut self) {
         self.config.ui.master_volume = self.global_params.get("master_volume").copied().unwrap_or(0.8);
         self.config.ui.master_tone = self.global_params.get("master_tone").copied().unwrap_or(20000.0);
+        self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
         let _ = self.config.save();
         self.last_config_save = std::time::Instant::now();
     }
@@ -742,7 +781,7 @@ impl App {
         let _ = self.config.save();
     }
 
-    /// Load a performance by name (for setlist navigation).
+    /// Load a performance by name (for pad perf switching).
     /// Returns true if found and loaded.
     fn load_performance_by_name(&mut self, name: &str) -> bool {
         let path = self.perf_list.iter()
@@ -779,25 +818,6 @@ impl App {
             }
         }
         true
-    }
-
-    /// Navigate setlist: delta = 1 (next) or -1 (prev).
-    fn setlist_navigate(&mut self, delta: i32) {
-        let (entries_len, name) = {
-            let Some(sl) = &self.setlist else { return; };
-            if sl.entries.is_empty() { return; }
-            let new_idx = (self.setlist_index as i32 + delta)
-                .clamp(0, sl.entries.len() as i32 - 1) as usize;
-            if new_idx == self.setlist_index { return; }
-            self.setlist_index = new_idx;
-            (sl.entries.len(), sl.entries[new_idx].clone())
-        };
-        let new_idx = self.setlist_index;
-        if self.load_performance_by_name(&name) {
-            self.setlist_status = format!("{}/{}: {}", new_idx + 1, entries_len, name);
-        } else {
-            self.setlist_status = format!("{}/{}: {} (not found!)", new_idx + 1, entries_len, name);
-        }
     }
 
     fn save_collapsed_categories(&mut self) {
@@ -2052,6 +2072,223 @@ impl App {
         }
     }
 
+    fn draw_pitch_sequencer(&mut self, ui: &mut egui::Ui) {
+        use crate::synth::step_seq::{StepRate, ScaleType};
+        let layer = self.active_layer;
+        if layer >= 2 { return; }
+
+        let enabled = self.pitch_seq_enabled[layer];
+
+        egui::CollapsingHeader::new("Step Sequencer")
+            .default_open(enabled)
+            .show(ui, |ui| {
+                // Controls row
+                ui.horizontal(|ui| {
+                    let mut en = enabled;
+                    if ui.checkbox(&mut en, "Enable").changed() {
+                        self.pitch_seq_enabled[layer] = en;
+                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetEnabled { layer, enabled: en });
+                    }
+
+                    ui.separator();
+
+                    // Rate
+                    let rate = StepRate::from_index(self.pitch_seq_rate[layer]);
+                    let rate_name = rate.name();
+                    egui::ComboBox::from_id_salt(format!("seq_rate_{layer}"))
+                        .selected_text(rate_name)
+                        .width(50.0)
+                        .show_ui(ui, |ui| {
+                            for i in 0..6u8 {
+                                let r = StepRate::from_index(i);
+                                if ui.selectable_label(i == self.pitch_seq_rate[layer], r.name()).clicked() {
+                                    self.pitch_seq_rate[layer] = i;
+                                    let _ = self.ctrl_tx.push(ControlEvent::SeqSetRate { layer, rate: i });
+                                }
+                            }
+                        });
+
+                    // Scale
+                    let scale = ScaleType::from_index(self.pitch_seq_scale[layer]);
+                    egui::ComboBox::from_id_salt(format!("seq_scale_{layer}"))
+                        .selected_text(scale.name())
+                        .width(80.0)
+                        .show_ui(ui, |ui| {
+                            for i in 0..7u8 {
+                                let s = ScaleType::from_index(i);
+                                if ui.selectable_label(i == self.pitch_seq_scale[layer], s.name()).clicked() {
+                                    self.pitch_seq_scale[layer] = i;
+                                    let _ = self.ctrl_tx.push(ControlEvent::SeqSetScale { layer, scale: i });
+                                }
+                            }
+                        });
+
+                    // Length
+                    ui.label("Len:");
+                    let mut len = self.pitch_seq_length[layer] as i32;
+                    let len_resp = ui.add(egui::DragValue::new(&mut len).range(1..=16).speed(0.1));
+                    if len_resp.changed() {
+                        self.pitch_seq_length[layer] = len as u8;
+                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetLength { layer, length: len as u8 });
+                    }
+
+                    // Swing
+                    ui.label("Swing:");
+                    let mut sw = self.pitch_seq_swing[layer];
+                    if ui.add(egui::DragValue::new(&mut sw).range(0.0..=0.66).speed(0.005).fixed_decimals(2)).changed() {
+                        self.pitch_seq_swing[layer] = sw;
+                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetSwing { layer, swing: sw });
+                    }
+                });
+
+                if !enabled { return; }
+
+                // Current step from audio thread
+                let current_step = if layer < self.pitch_seq_step_atoms.len() {
+                    self.pitch_seq_step_atoms[layer].load(std::sync::atomic::Ordering::Relaxed)
+                } else { 0 };
+
+                let length = self.pitch_seq_length[layer] as usize;
+
+                // Step grid: pitch bars + gate toggles
+                let avail_w = ui.available_width();
+                let step_w = (avail_w / length as f32).min(40.0).max(20.0);
+                let bar_h = 80.0;
+
+                // Pitch bars
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(step_w * length as f32, bar_h + 20.0),
+                    egui::Sense::click_and_drag(),
+                );
+
+                let painter = ui.painter_at(rect);
+
+                // Background
+                painter.rect_filled(rect, 2.0, egui::Color32::from_gray(30));
+
+                // Center line (pitch = 0)
+                let center_y = rect.top() + bar_h * 0.5;
+                painter.line_segment(
+                    [egui::pos2(rect.left(), center_y), egui::pos2(rect.left() + step_w * length as f32, center_y)],
+                    egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+                );
+
+                for i in 0..length {
+                    let x = rect.left() + i as f32 * step_w;
+                    let step = &self.pitch_seq_steps[layer][i];
+                    let is_current = i == current_step as usize && enabled;
+
+                    // Step separator
+                    if i > 0 {
+                        painter.line_segment(
+                            [egui::pos2(x, rect.top()), egui::pos2(x, rect.top() + bar_h)],
+                            egui::Stroke::new(0.5, egui::Color32::from_gray(50)),
+                        );
+                    }
+
+                    // Pitch bar
+                    let pitch = step.pitch as f32;
+                    let max_pitch = 24.0;
+                    let bar_frac = (pitch / max_pitch).clamp(-1.0, 1.0);
+                    let bar_top;
+                    let bar_bottom;
+                    if pitch >= 0.0 {
+                        bar_bottom = center_y;
+                        bar_top = center_y - bar_frac * bar_h * 0.5;
+                    } else {
+                        bar_top = center_y;
+                        bar_bottom = center_y - bar_frac * bar_h * 0.5;
+                    }
+
+                    let bar_color = if !step.gate {
+                        egui::Color32::from_gray(60)
+                    } else if is_current {
+                        egui::Color32::from_rgb(0, 220, 180)
+                    } else {
+                        egui::Color32::from_rgb(0, 160, 220)
+                    };
+
+                    let bar_rect = egui::Rect::from_min_max(
+                        egui::pos2(x + 2.0, bar_top),
+                        egui::pos2(x + step_w - 2.0, bar_bottom),
+                    );
+                    painter.rect_filled(bar_rect, 1.0, bar_color);
+
+                    // Pitch label
+                    if pitch != 0.0 {
+                        let label = format!("{:+}", step.pitch);
+                        painter.text(
+                            egui::pos2(x + step_w * 0.5, if pitch > 0.0 { bar_top - 8.0 } else { bar_bottom + 8.0 }),
+                            egui::Align2::CENTER_CENTER,
+                            &label,
+                            egui::FontId::proportional(9.0),
+                            egui::Color32::from_gray(180),
+                        );
+                    }
+
+                    // Current step highlight
+                    if is_current {
+                        painter.rect_stroke(
+                            egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(step_w, bar_h)),
+                            0.0,
+                            egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 200)),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
+
+                    // Gate toggle (below bars)
+                    let gate_y = rect.top() + bar_h + 4.0;
+                    let gate_rect = egui::Rect::from_min_size(
+                        egui::pos2(x + 4.0, gate_y),
+                        egui::vec2(step_w - 8.0, 12.0),
+                    );
+                    let gate_color = if step.gate {
+                        egui::Color32::from_rgb(0, 200, 120)
+                    } else {
+                        egui::Color32::from_gray(50)
+                    };
+                    painter.rect_filled(gate_rect, 2.0, gate_color);
+                }
+
+                // Handle mouse interaction
+                if response.dragged() || response.clicked() {
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        let rel_x = pos.x - rect.left();
+                        let step_idx = (rel_x / step_w) as usize;
+                        if step_idx < length {
+                            let rel_y = pos.y - rect.top();
+                            if rel_y < bar_h {
+                                // Dragging pitch bar
+                                let normalized = 1.0 - (rel_y / bar_h); // 0 = bottom, 1 = top
+                                let pitch = ((normalized - 0.5) * 2.0 * 24.0).round() as i8;
+                                let pitch = pitch.clamp(-24, 24);
+                                self.pitch_seq_steps[layer][step_idx].pitch = pitch;
+                                let step = &self.pitch_seq_steps[layer][step_idx];
+                                let _ = self.ctrl_tx.push(ControlEvent::SeqSetStep {
+                                    layer, step: step_idx as u8,
+                                    pitch, gate: step.gate, velocity: step.velocity,
+                                });
+                            } else if response.clicked() {
+                                // Clicking gate area
+                                let gate = !self.pitch_seq_steps[layer][step_idx].gate;
+                                self.pitch_seq_steps[layer][step_idx].gate = gate;
+                                let step = &self.pitch_seq_steps[layer][step_idx];
+                                let _ = self.ctrl_tx.push(ControlEvent::SeqSetStep {
+                                    layer, step: step_idx as u8,
+                                    pitch: step.pitch, gate, velocity: step.velocity,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Request repaint while playing for playhead animation
+                if enabled {
+                    ui.ctx().request_repaint();
+                }
+            });
+    }
+
     fn draw_looper(&mut self, ui: &mut egui::Ui) {
         use crate::synth::looper::LooperState;
 
@@ -2132,191 +2369,114 @@ impl App {
         });
     }
 
-    fn draw_setlist_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Set List:");
+    fn draw_pad_perf_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_pad_perf;
+        // Same layout as keyboard pads: 2 rows x 8 columns
+        // Top (cyan):  E1(40) F1(41) F#1(42) G1(43)  C2(48) C#2(49) D2(50) D#2(51)
+        // Bot (pink):  C1(36) C#1(37) D1(38) D#1(39) G#1(44) A1(45) A#1(46) B1(47)
+        const PAD_TOP: [u8; 8] = [40, 41, 42, 43, 48, 49, 50, 51];
+        const PAD_BOT: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
+        const TOP_COLOR: egui::Color32 = egui::Color32::from_rgb(0, 160, 180);
+        const BOT_COLOR: egui::Color32 = egui::Color32::from_rgb(180, 50, 120);
+        const EMPTY_COLOR: egui::Color32 = egui::Color32::from_rgb(50, 50, 58);
 
-            // Load / activate a setlist
-            let mut load_sl: Option<std::path::PathBuf> = None;
-            let current_name = self.setlist.as_ref().map(|s| s.name.as_str()).unwrap_or("None");
-            egui::ComboBox::from_id_salt("setlist_select")
-                .selected_text(current_name)
-                .width(140.0)
-                .show_ui(ui, |ui| {
-                    if ui.selectable_label(self.setlist.is_none(), "None").clicked() {
-                        self.setlist = None;
-                        self.setlist_index = 0;
-                        self.setlist_status.clear();
-                    }
-                    for (name, path) in &self.setlist_list {
-                        let active = self.setlist.as_ref().is_some_and(|s| &s.name == name);
-                        if ui.selectable_label(active, name).clicked() {
-                            load_sl = Some(path.clone());
-                        }
-                    }
-                });
-            if let Some(path) = load_sl {
-                match preset::load_setlist(&path) {
-                    Ok(sl) => {
-                        self.setlist_status = format!("1/{}: {}", sl.entries.len(),
-                            sl.entries.first().map(|s| s.as_str()).unwrap_or("(empty)"));
-                        self.setlist_index = 0;
-                        // Load first performance
-                        if let Some(first) = sl.entries.first() {
-                            self.load_performance_by_name(first);
-                        }
-                        self.setlist = Some(sl);
-                    }
-                    Err(e) => { self.setlist_status = format!("Error: {e}"); }
-                }
-            }
-
-            // Position display + nav buttons when active
-            let sl_info = self.setlist.as_ref().map(|sl| {
-                let len = sl.entries.len();
-                let next_name = if self.setlist_index + 1 < len {
-                    Some(sl.entries[self.setlist_index + 1].clone())
-                } else { None };
-                (len, next_name)
-            });
-            let mut nav_delta: Option<i32> = None;
-            if let Some((len, next_name)) = &sl_info {
-                if *len > 0 {
-                    ui.separator();
-                    if ui.button("\u{25C0}").on_hover_text("Prev (or long press nav)").clicked() {
-                        nav_delta = Some(-1);
-                    }
-                    ui.strong(format!("{}/{}", self.setlist_index + 1, len));
-                    if ui.button("\u{25B6}").on_hover_text("Next (or short press nav)").clicked() {
-                        nav_delta = Some(1);
-                    }
-                    if let Some(next) = next_name {
-                        ui.separator();
-                        ui.label(egui::RichText::new(format!("Next: {next}")).small().weak());
-                    }
-                }
-            }
-            if let Some(d) = nav_delta {
-                self.setlist_navigate(d);
-            }
-
-            ui.separator();
-            if ui.button("Edit").clicked() {
-                self.show_setlist_editor = !self.show_setlist_editor;
-                if self.show_setlist_editor {
-                    // Pre-fill editor from current setlist if any
-                    if let Some(sl) = &self.setlist {
-                        self.setlist_editor_name = sl.name.clone();
-                        self.setlist_editor_entries = sl.entries.clone();
-                    } else {
-                        self.setlist_editor_name.clear();
-                        self.setlist_editor_entries.clear();
-                    }
-                }
-            }
-
-            if !self.setlist_status.is_empty() {
-                ui.separator();
-                ui.label(egui::RichText::new(&self.setlist_status).small().weak());
-            }
-        });
-    }
-
-    fn draw_setlist_editor(&mut self, ctx: &egui::Context) {
-        let mut open = self.show_setlist_editor;
-        egui::Window::new("Set List Editor")
+        egui::Window::new("Pad Performances")
             .open(&mut open)
-            .resizable(true)
-            .default_width(350.0)
-            .default_height(400.0)
+            .resizable(false)
+            .default_width(700.0)
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Name:");
-                    ui.add(egui::TextEdit::singleline(&mut self.setlist_editor_name).desired_width(200.0));
-                });
-
+                ui.label(egui::RichText::new("Tap pad to switch perf. Click cell to assign. Right-click to clear.")
+                    .small().weak());
                 ui.add_space(4.0);
 
-                // Add from available performances
-                ui.horizontal(|ui| {
-                    let mut add_perf: Option<String> = None;
-                    egui::ComboBox::from_id_salt("setlist_add_perf")
-                        .selected_text("Add performance...")
-                        .width(200.0)
-                        .show_ui(ui, |ui| {
-                            for (name, _) in &self.perf_list {
-                                if ui.selectable_label(false, name).clicked() {
-                                    add_perf = Some(name.clone());
+                let pad_w = 80.0_f32;
+                let pad_h = 52.0_f32;
+                let gap = 3.0_f32;
+
+                for (row_notes, row_color) in [(&PAD_TOP[..], TOP_COLOR), (&PAD_BOT[..], BOT_COLOR)] {
+                    ui.horizontal(|ui| {
+                        for &note in row_notes {
+                            let idx = (note - 36) as usize;
+                            let vel = self.pad_state[note as usize].load(std::sync::atomic::Ordering::Relaxed);
+                            let pressed = vel > 0;
+                            let has_perf = self.pad_perf_map[idx].is_some();
+
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(pad_w, pad_h), egui::Sense::click(),
+                            );
+                            let painter = ui.painter_at(rect);
+
+                            // Background
+                            let bg = if has_perf {
+                                if pressed {
+                                    egui::Color32::from_rgb(
+                                        (row_color.r() as u16 + 70).min(255) as u8,
+                                        (row_color.g() as u16 + 70).min(255) as u8,
+                                        (row_color.b() as u16 + 70).min(255) as u8,
+                                    )
+                                } else {
+                                    row_color
                                 }
+                            } else if pressed {
+                                egui::Color32::from_rgb(90, 90, 100)
+                            } else {
+                                EMPTY_COLOR
+                            };
+
+                            painter.rect_filled(rect, 4.0, bg);
+                            if pressed {
+                                painter.rect_stroke(rect, 4.0, egui::Stroke::new(2.0, egui::Color32::WHITE), egui::StrokeKind::Outside);
                             }
-                        });
-                    if let Some(name) = add_perf {
-                        self.setlist_editor_entries.push(name);
-                    }
-                });
 
-                ui.add_space(4.0);
-                ui.separator();
+                            // Performance name inside
+                            if let Some(ref name) = self.pad_perf_map[idx] {
+                                let display = if name.len() > 10 { &name[..10] } else { name };
+                                painter.text(
+                                    rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    display,
+                                    egui::FontId::proportional(11.0),
+                                    egui::Color32::WHITE,
+                                );
+                            }
 
-                // Entries list with move up/down/remove
-                let mut remove_idx: Option<usize> = None;
-                let mut swap: Option<(usize, usize)> = None;
-                let len = self.setlist_editor_entries.len();
+                            // Left click: combo popup to pick perf
+                            let popup_id = ui.id().with(format!("pad_popup_{note}"));
+                            if response.clicked() {
+                                ui.memory_mut(|m| m.toggle_popup(popup_id));
+                            }
+                            // Right click: clear
+                            if response.secondary_clicked() {
+                                self.pad_perf_map[idx] = None;
+                            }
 
-                egui::ScrollArea::vertical().auto_shrink(false).max_height(280.0).show(ui, |ui| {
-                    for i in 0..len {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{}.", i + 1));
-                            ui.label(&self.setlist_editor_entries[i]);
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.small_button("\u{2716}").on_hover_text("Remove").clicked() {
-                                    remove_idx = Some(i);
+                            egui::popup_below_widget(ui, popup_id, &response, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+                                ui.set_min_width(140.0);
+                                if ui.selectable_label(self.pad_perf_map[idx].is_none(), "--- (clear)").clicked() {
+                                    self.pad_perf_map[idx] = None;
                                 }
-                                if i + 1 < len {
-                                    if ui.small_button("\u{25BC}").on_hover_text("Move down").clicked() {
-                                        swap = Some((i, i + 1));
-                                    }
-                                }
-                                if i > 0 {
-                                    if ui.small_button("\u{25B2}").on_hover_text("Move up").clicked() {
-                                        swap = Some((i, i - 1));
+                                for (name, _) in &self.perf_list {
+                                    let active = self.pad_perf_map[idx].as_deref() == Some(name.as_str());
+                                    if ui.selectable_label(active, name).clicked() {
+                                        self.pad_perf_map[idx] = Some(name.clone());
                                     }
                                 }
                             });
-                        });
-                    }
-                });
-
-                if let Some(idx) = remove_idx {
-                    self.setlist_editor_entries.remove(idx);
-                }
-                if let Some((a, b)) = swap {
-                    self.setlist_editor_entries.swap(a, b);
-                }
-
-                ui.add_space(4.0);
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() && !self.setlist_editor_name.trim().is_empty() {
-                        let sl = SetList {
-                            name: self.setlist_editor_name.trim().to_string(),
-                            entries: self.setlist_editor_entries.clone(),
-                        };
-                        match preset::save_setlist(&sl) {
-                            Ok(_) => {
-                                self.setlist_list = preset::list_setlists();
-                                self.setlist_status = format!("Saved: {}", sl.name);
-                            }
-                            Err(e) => { self.setlist_status = format!("Error: {e}"); }
                         }
-                    }
-                    if ui.button("Clear").clicked() {
-                        self.setlist_editor_entries.clear();
-                    }
-                });
+                    });
+                    ui.add_space(gap);
+                }
+
+                ui.add_space(2.0);
+                if !self.pad_perf_status.is_empty() {
+                    ui.label(egui::RichText::new(&self.pad_perf_status).small().weak());
+                }
             });
-        self.show_setlist_editor = open;
+        if self.show_pad_perf && !open {
+            // Window closing — save pad map
+            self.save_global_to_config();
+        }
+        self.show_pad_perf = open;
     }
 
     fn draw_help(&mut self, ctx: &egui::Context) {
@@ -2413,31 +2573,20 @@ impl App {
                     ParamFeedback::NavigateRelease => {
                         if let Some(press_time) = self.nav_press_time.take() {
                             let held = press_time.elapsed();
-                            if self.setlist.is_some() {
-                                // Setlist mode: short = next, long = prev
-                                if held < std::time::Duration::from_millis(400) {
-                                    nav_delta = Some(1);
+                            if held < std::time::Duration::from_millis(400) {
+                                // Short press: toggle keys ↔ drums
+                                self.show_drums = !self.show_drums;
+                                self.show_looper = false;
+                                if !self.show_drums {
+                                    self.seq_target_atom.store(1, std::sync::atomic::Ordering::Relaxed);
                                 } else {
-                                    nav_delta = Some(-1);
+                                    self.seq_target_atom.store(0, std::sync::atomic::Ordering::Relaxed);
                                 }
                             } else {
-                                if held < std::time::Duration::from_millis(400) {
-                                    // Short press: cycle layers (A ↔ B)
-                                    if self.show_drums || self.show_looper {
-                                        self.show_drums = false;
-                                        self.show_looper = false;
-                                    } else if self.layers[1].enabled {
-                                        self.active_layer = 1 - self.active_layer;
-                                    }
-                                } else {
-                                    // Long press: toggle drums
-                                    if self.show_drums {
-                                        self.show_drums = false;
-                                        self.show_looper = false;
-                                    } else {
-                                        self.show_drums = true;
-                                        self.show_looper = false;
-                                    }
+                                // Long press: toggle pad performance panel
+                                self.show_pad_perf = !self.show_pad_perf;
+                                if !self.show_pad_perf {
+                                    self.pad_perf_status.clear();
                                 }
                             }
                         }
@@ -2480,9 +2629,7 @@ impl App {
             }
         }
 
-        if let Some(d) = nav_delta {
-            self.setlist_navigate(d);
-        }
+        let _ = nav_delta; // no longer used (setlist removed)
     }
 
     fn save_cc_map(&mut self) {

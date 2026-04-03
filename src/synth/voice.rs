@@ -388,6 +388,13 @@ impl Voice {
         self.filter_env.note_off();
     }
 
+    /// Re-trigger envelopes without resetting oscillator state.
+    /// Used by step sequencer for per-step articulation.
+    pub fn retrigger_envelope(&mut self) {
+        self.amp_env.note_on();  // starts attack from current value (no click)
+        self.filter_env.note_on();
+    }
+
     pub fn is_releasing(&self) -> bool {
         self.amp_env.is_releasing()
     }

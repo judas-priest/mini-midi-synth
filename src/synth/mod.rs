@@ -20,6 +20,7 @@ pub mod overdrive;
 pub mod piano;
 pub mod phaser;
 pub mod reverb;
+pub mod step_seq;
 pub mod tremolo;
 pub mod voice;
 
@@ -95,6 +96,13 @@ pub enum ControlEvent {
     SetLayerSf2Program { layer: usize, program: u8, bank: u8 },
     SetDrumsSf2Mode { enabled: bool },
     SetSf2BlockSize { size: usize },
+    // Pitch step sequencer
+    SeqSetEnabled { layer: usize, enabled: bool },
+    SeqSetStep { layer: usize, step: u8, pitch: i8, gate: bool, velocity: u8 },
+    SeqSetLength { layer: usize, length: u8 },
+    SeqSetRate { layer: usize, rate: u8 },
+    SeqSetScale { layer: usize, scale: u8 },
+    SeqSetSwing { layer: usize, swing: f32 },
 }
 
 #[derive(Clone, Copy)]
@@ -197,6 +205,7 @@ struct Layer {
     lfo: Lfo,
     last_note_freq: Option<f32>,
     sf2_mode: bool,
+    pitch_seq: step_seq::PitchSequencer,
 }
 
 impl Layer {
@@ -206,7 +215,7 @@ impl Layer {
             voices, age_counter: 0, volume: 0.8, enabled: true,
             min_note: 0, max_note: 127, params: PresetParams::default(),
             lfo: Lfo::new(sample_rate), last_note_freq: None,
-            sf2_mode: false,
+            sf2_mode: false, pitch_seq: step_seq::PitchSequencer::new(),
         }
     }
 
@@ -558,6 +567,10 @@ impl SynthEngine {
         self.seq_target.clone()
     }
 
+    pub fn pitch_seq_step_atoms(&self) -> Vec<std::sync::Arc<std::sync::atomic::AtomicU8>> {
+        self.layers.iter().map(|l| l.pitch_seq.step_atom()).collect()
+    }
+
     pub fn set_presets(&mut self, presets: Vec<Preset>) {
         self.preset_params_cache = presets.iter().map(|p| PresetParams::from_map(&p.params)).collect();
         self.presets = presets;
@@ -902,6 +915,39 @@ impl SynthEngine {
             ControlEvent::SetSf2BlockSize { size } => {
                 self.sampler.set_block_size(size);
             }
+            ControlEvent::SeqSetEnabled { layer, enabled } => {
+                if let Some(l) = self.layers.get_mut(layer) {
+                    l.pitch_seq.enabled = enabled;
+                    if enabled { l.pitch_seq.reset(); }
+                }
+            }
+            ControlEvent::SeqSetStep { layer, step, pitch, gate, velocity } => {
+                if let Some(l) = self.layers.get_mut(layer) {
+                    if (step as usize) < step_seq::MAX_STEPS {
+                        l.pitch_seq.steps[step as usize] = step_seq::PitchStep { pitch, gate, velocity };
+                    }
+                }
+            }
+            ControlEvent::SeqSetLength { layer, length } => {
+                if let Some(l) = self.layers.get_mut(layer) {
+                    l.pitch_seq.length = length.clamp(1, 16);
+                }
+            }
+            ControlEvent::SeqSetRate { layer, rate } => {
+                if let Some(l) = self.layers.get_mut(layer) {
+                    l.pitch_seq.rate = step_seq::StepRate::from_index(rate);
+                }
+            }
+            ControlEvent::SeqSetScale { layer, scale } => {
+                if let Some(l) = self.layers.get_mut(layer) {
+                    l.pitch_seq.scale = step_seq::ScaleType::from_index(scale);
+                }
+            }
+            ControlEvent::SeqSetSwing { layer, swing } => {
+                if let Some(l) = self.layers.get_mut(layer) {
+                    l.pitch_seq.swing = swing;
+                }
+            }
         }
     }
 
@@ -965,8 +1011,32 @@ impl SynthEngine {
             0.0
         };
 
+        let seq_bpm = self.drum_engine.sequencer.bpm;
+
         for layer in &mut self.layers {
             if !layer.enabled { continue; }
+
+            // Step sequencer
+            let seq_evt = layer.pitch_seq.tick(self.sample_rate, seq_bpm);
+            if seq_evt.stepped && seq_evt.gate {
+                // Retrigger envelopes on gated steps
+                for voice in &mut layer.voices {
+                    if voice.active && !voice.is_releasing() {
+                        voice.retrigger_envelope();
+                    }
+                }
+            }
+            // Gate off: push active voices into release
+            if seq_evt.stepped && !seq_evt.gate {
+                for voice in &mut layer.voices {
+                    if voice.active && !voice.is_releasing() {
+                        voice.note_off();
+                    }
+                }
+            }
+            let seq_pitch = if layer.pitch_seq.enabled { seq_evt.pitch_offset } else { 0.0 };
+            let seq_amp = if layer.pitch_seq.enabled && !seq_evt.gate { 0.0 } else { 1.0 };
+
             let lfo_active = layer.params.lfo_pitch_depth > 0.001
                 || layer.params.lfo_filter_depth > 0.001
                 || layer.params.lfo_amp_depth > 0.001
@@ -980,10 +1050,11 @@ impl SynthEngine {
             let pitch_offset = self.pitch_bend_semitones
                 + lfo_val * layer.params.lfo_pitch_depth * 2.0
                 + self.mod_wheel * 0.5 * vibrato_val
-                + self.aftertouch_smooth * 0.3 * lfo_val;
+                + self.aftertouch_smooth * 0.3 * lfo_val
+                + seq_pitch;
             let pitch_mult = if pitch_offset.abs() < 0.001 { 1.0 } else { (pitch_offset / 12.0).exp2() };
             let filter_offset = lfo_val * layer.params.lfo_filter_depth * 4000.0 + self.aftertouch_smooth * 2000.0;
-            let amp_mod = 1.0 - layer.params.lfo_amp_depth * 0.5 * (1.0 - lfo_val);
+            let amp_mod = (1.0 - layer.params.lfo_amp_depth * 0.5 * (1.0 - lfo_val)) * seq_amp;
             let mods = ModulationState { pitch_mult, filter_offset, amp_mod };
             let (l, r) = layer.tick(&mods);
             out_l += l; out_r += r;

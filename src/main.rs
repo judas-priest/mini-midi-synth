@@ -105,6 +105,7 @@ fn main() -> Result<()> {
     let drum_rec_atom = engine.drum_engine.rec_atom();
     let looper_atoms = engine.looper.atoms();
     let seq_target_atom = engine.seq_target_atom();
+    let pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
 
     let audio_config = audio::AudioConfig {
         host_id,
@@ -239,13 +240,13 @@ fn main() -> Result<()> {
         perf_list: preset::list_performances(),
         perf_status: String::new(),
         nav_press_time: None,
-        setlist: None,
-        setlist_index: 0,
-        setlist_list: preset::list_setlists(),
-        setlist_status: String::new(),
-        show_setlist_editor: false,
-        setlist_editor_name: String::new(),
-        setlist_editor_entries: Vec::new(),
+        show_pad_perf: false,
+        pad_perf_map: {
+            let saved = &config.ui.pad_perf_map;
+            std::array::from_fn(|i| saved.get(i).cloned().flatten())
+        },
+        pad_perf_status: String::new(),
+        pad_prev_state: [0u8; 16],
         last_config_save: std::time::Instant::now(),
         global_dirty: false,
         sf2_file_list: gui::scan_sf2_files(),
@@ -258,6 +259,13 @@ fn main() -> Result<()> {
         sf2_keys_soundfont: None,
         sf2_drums_soundfont: None,
         sf2_block_size: config.sf2.block_size,
+        pitch_seq_step_atoms: pitch_seq_step_atoms,
+        pitch_seq_enabled: [false; 2],
+        pitch_seq_steps: [[synth::step_seq::PitchStep::default(); 16]; 2],
+        pitch_seq_length: [16; 2],
+        pitch_seq_rate: [2; 2], // 1/16
+        pitch_seq_scale: [0; 2], // chromatic
+        pitch_seq_swing: [0.0; 2],
     };
 
     app.load_edited_params(0);
