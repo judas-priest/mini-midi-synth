@@ -61,7 +61,7 @@ pub const PARAM_REGISTRY: &[ParamMeta] = &[
 
 /// List of global param keys for quick lookup.
 pub const GLOBAL_PARAM_KEYS: &[&str] = &[
-    "master_volume", "master_tone",
+    "master_volume", "master_tone", "reverb_mix", "delay_mix",
 ];
 
 pub fn is_global_param(key: &str) -> bool {
@@ -122,35 +122,35 @@ impl CcMap {
             param_key: "filter_resonance", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Preset,
         });
         bindings[50] = Some(CcBinding {
-            param_key: "amp_attack", min_val: 0.001, max_val: 5.0, logarithmic: true, scope: ParamScope::Preset,
+            param_key: "filter_env_amount", min_val: 0.0, max_val: 15000.0, logarithmic: false, scope: ParamScope::Preset,
         });
         bindings[51] = Some(CcBinding {
             param_key: "amp_release", min_val: 0.001, max_val: 5.0, logarithmic: true, scope: ParamScope::Preset,
         });
         bindings[52] = Some(CcBinding {
-            param_key: "chorus_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Preset,
+            param_key: "amp_attack", min_val: 0.001, max_val: 5.0, logarithmic: true, scope: ParamScope::Preset,
         });
         bindings[53] = Some(CcBinding {
-            param_key: "delay_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Preset,
+            param_key: "portamento_time", min_val: 0.0, max_val: 2.0, logarithmic: false, scope: ParamScope::Preset,
         });
         bindings[54] = Some(CcBinding {
-            param_key: "reverb_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Preset,
-        });
-        bindings[55] = Some(CcBinding {
             param_key: "lfo_filter_depth", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Preset,
         });
-        // SMK-37 Pro: Faders F1-F4 = CC 64-67
+        bindings[55] = Some(CcBinding {
+            param_key: "chorus_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Preset,
+        });
+        // SMK-37 Pro: Faders F1-F4 = CC 64-67 (all global — persist across presets)
         bindings[64] = Some(CcBinding {
             param_key: "master_volume", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Global,
         });
         bindings[65] = Some(CcBinding {
-            param_key: "filter_env_amount", min_val: 0.0, max_val: 15000.0, logarithmic: false, scope: ParamScope::Preset,
+            param_key: "master_tone", min_val: 200.0, max_val: 20000.0, logarithmic: true, scope: ParamScope::Global,
         });
         bindings[66] = Some(CcBinding {
-            param_key: "portamento_time", min_val: 0.0, max_val: 2.0, logarithmic: false, scope: ParamScope::Preset,
+            param_key: "reverb_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Global,
         });
         bindings[67] = Some(CcBinding {
-            param_key: "master_tone", min_val: 200.0, max_val: 20000.0, logarithmic: true, scope: ParamScope::Global,
+            param_key: "delay_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Global,
         });
         Self { bindings }
     }

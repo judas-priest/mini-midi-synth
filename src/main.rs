@@ -213,6 +213,8 @@ fn main() -> Result<()> {
             let mut gp = std::collections::BTreeMap::new();
             gp.insert("master_volume".to_string(), config.ui.master_volume);
             gp.insert("master_tone".to_string(), config.ui.master_tone);
+            gp.insert("reverb_mix".to_string(), config.ui.fader_reverb);
+            gp.insert("delay_mix".to_string(), config.ui.fader_delay);
             gp
         },
         pickup_indicators: std::collections::BTreeMap::new(),

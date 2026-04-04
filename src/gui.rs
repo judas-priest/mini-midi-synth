@@ -630,6 +630,8 @@ impl App {
     fn save_global_to_config(&mut self) {
         self.config.ui.master_volume = self.global_params.get("master_volume").copied().unwrap_or(0.8);
         self.config.ui.master_tone = self.global_params.get("master_tone").copied().unwrap_or(20000.0);
+        self.config.ui.fader_reverb = self.global_params.get("reverb_mix").copied().unwrap_or(0.0);
+        self.config.ui.fader_delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
         let _ = self.config.save();
         self.last_config_save = std::time::Instant::now();

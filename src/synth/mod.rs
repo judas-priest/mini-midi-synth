@@ -144,6 +144,9 @@ const VOICES_PER_LAYER: usize = 12;
 struct GlobalParams {
     master_volume: f32,
     master_tone: f32, // simple LP cutoff (20-20000 Hz), post-effects
+    // Fader-controlled global (persist across preset changes)
+    reverb_mix: Option<f32>,       // None = use preset value
+    delay_mix: Option<f32>,        // None = use preset value
     // One-pole LP state for master tone
     tone_lp_l: f32,
     tone_lp_r: f32,
@@ -154,6 +157,8 @@ impl Default for GlobalParams {
         Self {
             master_volume: 0.8,
             master_tone: 20000.0,
+            reverb_mix: None,
+            delay_mix: None,
             tone_lp_l: 0.0,
             tone_lp_r: 0.0,
         }
@@ -165,6 +170,8 @@ impl GlobalParams {
         match key {
             "master_volume" => self.master_volume = value,
             "master_tone" => self.master_tone = value,
+            "reverb_mix" => self.reverb_mix = Some(value),
+            "delay_mix" => self.delay_mix = Some(value),
             _ => {}
         }
     }
@@ -1062,8 +1069,10 @@ impl SynthEngine {
 
         // Mix in SF2 sampler
         let (sf2_l, sf2_r) = self.sampler.tick();
-        out_l += sf2_l;
-        out_r += sf2_r;
+        {
+            out_l += sf2_l;
+            out_r += sf2_r;
+        }
 
         // Mix in drum engine + route SF2 drum triggers
         let ((drum_l, drum_r), drum_triggers) = self.drum_engine.tick();
@@ -1096,7 +1105,8 @@ impl SynthEngine {
         let delay_feedback = ep.map(|p| p.delay_feedback).unwrap_or(0.4);
         let delay_filter = ep.map(|p| p.delay_filter).unwrap_or(0.3);
         let delay_ping_pong = ep.map(|p| p.delay_ping_pong).unwrap_or(0.0);
-        let delay_mix = ep.map(|p| p.delay_mix).unwrap_or(0.0);
+        let delay_mix = self.global_params.delay_mix
+            .unwrap_or_else(|| ep.map(|p| p.delay_mix).unwrap_or(0.0));
 
         let (dl, dr) = self.delay.tick(
             cl + diff, cr - diff,
@@ -1108,7 +1118,8 @@ impl SynthEngine {
         let reverb_damp = ep.map(|p| p.reverb_damping).unwrap_or(0.5);
         let reverb_width = ep.map(|p| p.reverb_width).unwrap_or(1.0);
         let reverb_pre = ep.map(|p| p.reverb_pre_delay).unwrap_or(0.02);
-        let reverb_mix = ep.map(|p| p.reverb_mix).unwrap_or(0.0);
+        let reverb_mix = self.global_params.reverb_mix
+            .unwrap_or_else(|| ep.map(|p| p.reverb_mix).unwrap_or(0.0));
 
         let (rl, rr) = self.reverb.tick(dl, dr, reverb_room, reverb_damp, reverb_width, reverb_pre, reverb_mix);
 
