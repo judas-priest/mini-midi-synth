@@ -1,0 +1,24 @@
+{
+  "name": "Treemonster Lead",
+  "params": {
+    "osc_type": 2.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 6000.0,
+    "filter_resonance": 0.15,
+    "amp_attack": 0.005,
+    "amp_decay": 0.3,
+    "amp_sustain": 0.7,
+    "amp_release": 0.3,
+    "lfo_pitch_depth": 0.03,
+    "lfo_rate": 5.5,
+    "treemonster_threshold": 0.05,
+    "treemonster_shift": 7.0,
+    "treemonster_ring_mix": 0.4,
+    "treemonster_mix": 0.55,
+    "reverb2_decay": 1.8,
+    "reverb2_damping": 0.35,
+    "reverb2_size": 0.5,
+    "reverb2_mix": 0.15,
+    "master_volume": 0.72
+  }
+}

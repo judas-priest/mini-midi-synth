@@ -1,0 +1,30 @@
+{
+  "name": "ResWarp Melody",
+  "params": {
+    "osc_type": 1.0,
+    "filter_type": 30.0,
+    "filter_cutoff": 2800.0,
+    "filter_resonance": 0.65,
+    "filter_env_amount": 4000.0,
+    "filter_key_track": 0.5,
+    "amp_attack": 0.006,
+    "amp_decay": 0.32,
+    "amp_sustain": 0.68,
+    "amp_release": 0.28,
+    "filter_attack": 0.005,
+    "filter_decay": 0.38,
+    "filter_sustain": 0.28,
+    "filter_release": 0.22,
+    "lfo_pitch_depth": 0.03,
+    "lfo_rate": 5.3,
+    "exciter_drive": 0.2,
+    "exciter_freq": 3500.0,
+    "exciter_presence": 0.55,
+    "exciter_mix": 0.18,
+    "reverb2_decay": 2.2,
+    "reverb2_damping": 0.35,
+    "reverb2_size": 0.55,
+    "reverb2_mix": 0.18,
+    "master_volume": 0.73
+  }
+}

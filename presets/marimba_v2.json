@@ -1,0 +1,27 @@
+{
+  "name": "Marimba v2",
+  "category": "Modal",
+  "params": {
+    "osc_type": 18,
+    "modal_material": 4,
+    "modal_brightness": 0.4,
+    "modal_damping": 0.4,
+    "modal_strike_pos": 0.45,
+    "filter_cutoff": 10000.0,
+    "filter_type": 0,
+    "amp_attack": 0.001,
+    "amp_decay": 0.8,
+    "amp_sustain": 0.0,
+    "amp_release": 0.3,
+    "combulator_freq": 330.0,
+    "combulator_offset2": 3.9,
+    "combulator_offset3": 9.3,
+    "combulator_feedback": 0.15,
+    "combulator_tone": 0.8,
+    "combulator_mix": 0.2,
+    "reverb2_decay": 1.8,
+    "reverb2_damping": 0.4,
+    "reverb2_size": 0.45,
+    "reverb2_mix": 0.18
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "Church Bell v3",
+  "category": "Modal",
+  "params": {
+    "osc_type": 18,
+    "modal_material": 7,
+    "modal_brightness": 0.6,
+    "modal_damping": 0.15,
+    "modal_strike_pos": 0.35,
+    "filter_cutoff": 12000.0,
+    "filter_type": 0,
+    "amp_attack": 0.001,
+    "amp_decay": 6.0,
+    "amp_sustain": 0.0,
+    "amp_release": 2.0,
+    "master_volume": 0.70,
+    "reverb_mix": 0.0,
+    "conv_reverb_room": 0.9,
+    "conv_reverb_damping": 0.1,
+    "conv_reverb_predelay": 0.04,
+    "conv_reverb_mix": 0.3,
+    "combulator_freq": 220.0,
+    "combulator_offset2": 11.5,
+    "combulator_offset3": 19.0,
+    "combulator_feedback": 0.45,
+    "combulator_tone": 0.5,
+    "combulator_mix": 0.25
+  }
+}

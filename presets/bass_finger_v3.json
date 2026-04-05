@@ -1,0 +1,28 @@
+{
+  "name": "Bass Finger v3",
+  "params": {
+    "osc_type": 13.0,
+    "bass_style": 0.0,
+    "bass_tone": 0.4,
+    "bass_body": 0.35,
+    "bass_pickup": 0.0,
+    "filter_cutoff": 2000.0,
+    "filter_resonance": 0.1,
+    "filter_type": 0.0,
+    "filter_key_track": 0.3,
+    "filter_env_amount": 1500.0,
+    "amp_attack": 0.003,
+    "amp_decay": 0.8,
+    "amp_sustain": 0.6,
+    "amp_release": 0.15,
+    "filter_attack": 0.001,
+    "filter_decay": 0.15,
+    "filter_sustain": 0.3,
+    "filter_release": 0.1,
+    "vel_to_filter": 0.3,
+    "master_volume": 0.8,
+    "wave_shaper_drive": 0.18,
+    "wave_shaper_mode": 1.0,
+    "wave_shaper_mix": 0.3
+  }
+}

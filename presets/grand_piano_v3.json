@@ -1,0 +1,32 @@
+{
+  "name": "Concert Grand",
+  "params": {
+    "osc_type": 21.0,
+    "ks_brightness": 0.65,
+    "ks_feedback": 0.444,
+    "amp_attack": 0.001,
+    "amp_decay": 9.0,
+    "amp_sustain": 0.0,
+    "amp_release": 1.5,
+    "filter_cutoff": 20000.0,
+    "filter_resonance": 0.0,
+    "filter_type": 0.0,
+    "filter_key_track": 0.0,
+    "filter_attack": 0.001,
+    "filter_decay": 4.0,
+    "filter_sustain": 0.0,
+    "filter_release": 1.0,
+    "filter_env_amount": 0.0,
+    "chorus_mix": 0.0,
+    "reverb_mix": 0.0,
+    "reverb_room_size": 0.55,
+    "reverb_damping": 0.45,
+    "reverb_width": 1.0,
+    "reverb_pre_delay": 0.015,
+    "master_volume": 0.75,
+    "conv_reverb_room": 0.6,
+    "conv_reverb_damping": 0.45,
+    "conv_reverb_predelay": 0.015,
+    "conv_reverb_mix": 0.18
+  }
+}

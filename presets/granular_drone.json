@@ -1,0 +1,31 @@
+{
+  "name": "Granular Drone",
+  "params": {
+    "osc_type": 11.0,
+    "supersaw_detune": 0.3,
+    "supersaw_mix": 0.6,
+    "filter_type": 0.0,
+    "filter_cutoff": 3000.0,
+    "filter_resonance": 0.1,
+    "amp_attack": 1.5,
+    "amp_decay": 0.5,
+    "amp_sustain": 0.9,
+    "amp_release": 3.0,
+    "nimbus_position": 0.55,
+    "nimbus_size": 0.9,
+    "nimbus_pitch": 0.0,
+    "nimbus_density": 0.7,
+    "nimbus_spread": 0.6,
+    "nimbus_texture": 0.75,
+    "nimbus_mix": 0.6,
+    "reverb2_decay": 5.0,
+    "reverb2_damping": 0.3,
+    "reverb2_size": 0.9,
+    "reverb2_mix": 0.35,
+    "ms_mid_gain": 0.85,
+    "ms_side_gain": 1.5,
+    "ms_rotation": 0.0,
+    "ms_mix": 0.9,
+    "master_volume": 0.65
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "Robot Choir",
+  "params": {
+    "osc_type": 1.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 8000.0,
+    "filter_resonance": 0.0,
+    "amp_attack": 0.02,
+    "amp_decay": 0.1,
+    "amp_sustain": 0.9,
+    "amp_release": 0.3,
+    "vocoder_env_follow": 0.6,
+    "vocoder_gate": 0.02,
+    "vocoder_mix": 0.85,
+    "reverb2_decay": 2.5,
+    "reverb2_damping": 0.3,
+    "reverb2_size": 0.7,
+    "reverb2_mix": 0.25,
+    "master_volume": 0.72
+  }
+}
