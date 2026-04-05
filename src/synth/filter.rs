@@ -1,5 +1,6 @@
 /// State-variable filter (SVF) — lowpass, highpass, bandpass.
 /// Plus Moog ladder filter (Huovilainen 2004 improved model with 2x oversampling).
+/// Plus K35 (Korg MS-20 Sallen-Key), Notch, LP24, HP24.
 
 use std::f32::consts::PI;
 
@@ -16,6 +17,11 @@ pub enum FilterType {
     Allpass,   // 8 — Allpass filter (phase shifting)
     CombPos,   // 9 — Comb+ (positive feedback)
     CombNeg,   // 10 — Comb- (negative feedback)
+    Notch,     // 11 — SVF Notch (band-reject)
+    LP24,      // 12 — SVF 24dB/oct lowpass (2 cascaded SVF stages)
+    HP24,      // 13 — SVF 24dB/oct highpass (2 cascaded SVF stages)
+    K35LP,     // 14 — Korg MS-20 Sallen-Key lowpass (ZDF, self-oscillating)
+    K35HP,     // 15 — Korg MS-20 Sallen-Key highpass (ZDF, self-oscillating)
 }
 
 impl FilterType {
@@ -32,6 +38,11 @@ impl FilterType {
             8 => Self::Allpass,
             9 => Self::CombPos,
             10 => Self::CombNeg,
+            11 => Self::Notch,
+            12 => Self::LP24,
+            13 => Self::HP24,
+            14 => Self::K35LP,
+            15 => Self::K35HP,
             _ => Self::LowPass,
         }
     }
@@ -50,6 +61,11 @@ impl FilterType {
 
     pub fn is_allpass(self) -> bool {
         matches!(self, Self::Allpass)
+    }
+
+    #[allow(dead_code)]
+    pub fn is_k35(self) -> bool {
+        matches!(self, Self::K35LP | Self::K35HP)
     }
 }
 
@@ -98,6 +114,12 @@ pub struct Filter {
     allpass_x1: f32,            // x[n-1]
     allpass_y1: f32,            // y[n-1]
     allpass_coeff: f32,         // allpass coefficient
+    // LP24/HP24 second SVF stage state
+    ic1eq2: f32,
+    ic2eq2: f32,
+    // K35 (Korg MS-20 Sallen-Key) one-pole stage states
+    k35_s1: f32,
+    k35_s2: f32,
     // Control-rate coefficient update
     coeff_counter: u8,          // wrapping counter, update every 32 samples
 }
@@ -139,6 +161,12 @@ impl Filter {
             allpass_x1: 0.0,
             allpass_y1: 0.0,
             allpass_coeff: 0.0,
+            // LP24/HP24 second SVF stage
+            ic1eq2: 0.0,
+            ic2eq2: 0.0,
+            // K35 Sallen-Key stage states
+            k35_s1: 0.0,
+            k35_s2: 0.0,
             coeff_counter: 31, // so first tick after set_cutoff/set_resonance triggers update
         };
         f.update_coefficients();
@@ -168,6 +196,10 @@ impl Filter {
     pub fn reset(&mut self) {
         self.ic1eq = 0.0;
         self.ic2eq = 0.0;
+        self.ic1eq2 = 0.0;
+        self.ic2eq2 = 0.0;
+        self.k35_s1 = 0.0;
+        self.k35_s2 = 0.0;
         self.moog_stage = [0.0; 4];
         self.moog_tanh = [0.0; 4];
         self.moog_delay4 = 0.0;
@@ -189,6 +221,7 @@ impl Filter {
         } else if self.filter_type.is_allpass() {
             self.update_allpass_coefficients();
         } else {
+            // SVF, Notch, LP24, HP24, K35 all use SVF g/k/a1/a2/a3 coefficients
             self.update_svf_coefficients();
         }
         self.dirty = false;
@@ -247,6 +280,10 @@ impl Filter {
             FilterType::DiodeLP => self.tick_diode(input),
             FilterType::Comb | FilterType::CombPos | FilterType::CombNeg => self.tick_comb(input),
             FilterType::Allpass => self.tick_allpass(input),
+            FilterType::LP24 => self.tick_lp24(input),
+            FilterType::HP24 => self.tick_hp24(input),
+            FilterType::K35LP => self.tick_k35lp(input),
+            FilterType::K35HP => self.tick_k35hp(input),
             _ => self.tick_svf(input),
         }
     }
@@ -263,6 +300,7 @@ impl Filter {
             FilterType::LowPass => v2,
             FilterType::HighPass => input - self.k * v1 - v2,
             FilterType::BandPass | FilterType::Formant => v1,
+            FilterType::Notch => input - self.k * v1,
             _ => v2,
         }
     }
@@ -372,6 +410,86 @@ impl Filter {
 
         // Gain compensation
         self.diode_gain_comp = 1.0 + self.resonance * 2.0;
+    }
+
+    /// LP24 — 24dB/oct lowpass: two cascaded SVF stages.
+    fn tick_lp24(&mut self, input: f32) -> f32 {
+        // First SVF stage (LP output feeds second stage)
+        let v3 = input - self.ic2eq;
+        let v1 = self.a1 * self.ic1eq + self.a2 * v3;
+        let v2 = self.ic2eq + self.a2 * self.ic1eq + self.a3 * v3;
+        self.ic1eq = 2.0 * v1 - self.ic1eq;
+        self.ic2eq = 2.0 * v2 - self.ic2eq;
+        let lp1 = v2;
+
+        // Second SVF stage
+        let v3b = lp1 - self.ic2eq2;
+        let v1b = self.a1 * self.ic1eq2 + self.a2 * v3b;
+        let v2b = self.ic2eq2 + self.a2 * self.ic1eq2 + self.a3 * v3b;
+        self.ic1eq2 = 2.0 * v1b - self.ic1eq2;
+        self.ic2eq2 = 2.0 * v2b - self.ic2eq2;
+        v2b
+    }
+
+    /// HP24 — 24dB/oct highpass: two cascaded SVF stages.
+    fn tick_hp24(&mut self, input: f32) -> f32 {
+        // First SVF stage (HP output feeds second stage)
+        let v3 = input - self.ic2eq;
+        let v1 = self.a1 * self.ic1eq + self.a2 * v3;
+        let v2 = self.ic2eq + self.a2 * self.ic1eq + self.a3 * v3;
+        self.ic1eq = 2.0 * v1 - self.ic1eq;
+        self.ic2eq = 2.0 * v2 - self.ic2eq;
+        let hp1 = input - self.k * v1 - v2;
+
+        // Second SVF stage
+        let v3b = hp1 - self.ic2eq2;
+        let v1b = self.a1 * self.ic1eq2 + self.a2 * v3b;
+        let v2b = self.ic2eq2 + self.a2 * self.ic1eq2 + self.a3 * v3b;
+        self.ic1eq2 = 2.0 * v1b - self.ic1eq2;
+        self.ic2eq2 = 2.0 * v2b - self.ic2eq2;
+        hp1 - self.k * v1b - v2b
+    }
+
+    /// K35LP — Korg MS-20 Sallen-Key lowpass (ZDF, self-oscillating at high resonance).
+    /// Uses two one-pole LP stages with resonance feedback from output.
+    fn tick_k35lp(&mut self, input: f32) -> f32 {
+        let g = self.g;
+        let k = self.resonance * 3.5; // 0..3.5 feedback (approaches self-oscillation)
+        let g1 = 1.0 + g;
+
+        // ZDF: solve for lp2 algebraically then compute lp1
+        let denom = g1 * g1 + g * g * k;
+        let lp2 = (g * g * input + g * self.k35_s1 + self.k35_s2 * g1) / denom;
+        let lp1 = (g * (input - k * lp2) + self.k35_s1) / g1;
+
+        self.k35_s1 = 2.0 * lp1 - self.k35_s1;
+        self.k35_s2 = 2.0 * lp2 - self.k35_s2;
+
+        // Gain compensation (k=3.5 → div by 1+1.75=2.75)
+        (lp2 / (1.0 + k * 0.5)).clamp(-2.0, 2.0)
+    }
+
+    /// K35HP — Korg MS-20 Sallen-Key highpass (ZDF, self-oscillating at high resonance).
+    /// Uses two one-pole HP stages with resonance feedback from output.
+    fn tick_k35hp(&mut self, input: f32) -> f32 {
+        let g = self.g;
+        let k = self.resonance * 3.5;
+        let g1 = 1.0 + g;
+
+        // ZDF: solve for hp2 algebraically
+        // hp1 = (x1 - s1) / (1+g),  where x1 = input - k*hp2
+        // hp2 = (hp1 - s2) / (1+g)
+        // → hp2*((1+g)^2 + k) = input - s1 - s2*(1+g)
+        let denom = g1 * g1 + k;
+        let hp2 = (input - self.k35_s1 - self.k35_s2 * g1) / denom;
+        let lp1 = (g * (input - k * hp2) + self.k35_s1) / g1;
+        let hp1 = (input - k * hp2) - lp1;
+        let lp2 = (g * hp1 + self.k35_s2) / g1;
+
+        self.k35_s1 = 2.0 * lp1 - self.k35_s1;
+        self.k35_s2 = 2.0 * lp2 - self.k35_s2;
+
+        (hp2 / (1.0 + k * 0.5)).clamp(-2.0, 2.0)
     }
 
     /// Diode ladder filter — 18dB/oct (effectively 3-pole) lowpass.

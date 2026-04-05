@@ -290,6 +290,8 @@ impl Voice {
             OscType::ElectricPiano => self.oscs[0].init_electric_piano(self.freq, params.epiano_type as u8),
             OscType::Alias => self.oscs[0].init_alias(params.alias_wave_type as u8, params.alias_crush),
             OscType::Window => self.oscs[0].init_window(params.window_type as u8, params.window_morph, params.window_formant),
+            OscType::Wavetable => self.oscs[0].init_wavetable(params.window_morph),
+            OscType::Fm3 => { /* state initialized in reset() */ }
             _ => {}
         }
 

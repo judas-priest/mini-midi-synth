@@ -54,6 +54,8 @@ pub enum OscType {
     ElectricPiano,    // 24 — Rhodes/Wurlitzer physical model (tine + pickup)
     Alias,            // 25 — intentionally aliasing 8-bit oscillator
     Window,           // 26 — windowed oscillator with formant control
+    Wavetable,        // 27 — morphing wavetable (8 waveforms, sine→saw)
+    Fm3,              // 28 — 3-operator FM (stacked: op3→op2→op1)
 }
 
 impl OscType {
@@ -86,6 +88,8 @@ impl OscType {
             24 => Self::ElectricPiano,
             25 => Self::Alias,
             26 => Self::Window,
+            27 => Self::Wavetable,
+            28 => Self::Fm3,
             _ => Self::Sine,
         }
     }
@@ -291,6 +295,15 @@ pub enum OscState {
         morph: f32,       // blend between adjacent windows (0-1)
         formant: f32,     // formant shift in semitones
     },
+    Wavetable {
+        phase: f32,       // 0..1 oscillator phase
+        table: Vec<f32>,  // WT_COUNT * WT_SIZE pre-computed samples
+    },
+    Fm3 {
+        carrier_phase: f32,  // op1 (output) phase
+        mod1_phase: f32,     // op2 (modulates carrier) phase
+        mod2_phase: f32,     // op3 (modulates op2) phase
+    },
 }
 
 /// Maximum delay line length: covers MIDI note 21 (A0 ≈ 27.5 Hz) at 192 kHz.
@@ -307,6 +320,7 @@ pub struct Oscillator {
     pub ks_feedback: f32,
     pub organ_drawbars: [f32; 9],
     pub pulse_width: f32,
+    pub wavetable_morph: f32,
     noise_state: u32,
     state: OscState,
     /// Pre-allocated delay line buffers — reused across note-ons to avoid RT allocation.
@@ -328,6 +342,7 @@ impl Oscillator {
             ks_feedback: 0.996,
             organ_drawbars: [0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             pulse_width: 0.5,
+            wavetable_morph: 0.0,
             noise_state: 0x12345678,
             state: OscState::Simple { phase: 0.0 },
             pool_a: Vec::with_capacity(MAX_DELAY),
@@ -392,6 +407,9 @@ impl Oscillator {
             }
             OscState::Saxophone { delay, .. } => {
                 Self::return_buf(&mut self.pool_a, delay);
+            }
+            OscState::Wavetable { table, .. } => {
+                Self::return_buf(&mut self.pool_a, table);
             }
             _ => {}
         }
@@ -558,6 +576,13 @@ impl Oscillator {
             },
             OscType::Window => OscState::Window {
                 phase: 0.0, window_type: 0, morph: 0.0, formant: 0.0,
+            },
+            OscType::Wavetable => OscState::Wavetable {
+                phase: 0.0,
+                table: Vec::new(),
+            },
+            OscType::Fm3 => OscState::Fm3 {
+                carrier_phase: 0.0, mod1_phase: 0.0, mod2_phase: 0.0,
             },
         };
     }
@@ -927,6 +952,8 @@ impl Oscillator {
             OscType::Saxophone => self.tick_saxophone(),
             OscType::Alias => self.tick_alias(freq),
             OscType::Window => self.tick_window(freq),
+            OscType::Wavetable => self.tick_wavetable(freq),
+            OscType::Fm3 => self.tick_fm3(freq),
             _ => self.tick_standard(freq),
         }
     }
@@ -2433,6 +2460,109 @@ impl Oscillator {
             let crushed = (sample * quant).round() / quant;
 
             crushed.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    // ─── Wavetable oscillator ────────────────────────────────────────
+
+    /// Number of single-cycle waveforms in the wavetable bank.
+    const WT_COUNT: usize = 8;
+    /// Samples per waveform.
+    const WT_SIZE: usize = 256;
+
+    /// Initialize (or re-init) the wavetable — generates WT_COUNT waveforms.
+    pub fn init_wavetable(&mut self, morph: f32) {
+        self.wavetable_morph = morph.clamp(0.0, 1.0);
+        self.reclaim_buffers();
+
+        let total = Self::WT_COUNT * Self::WT_SIZE;
+        let mut table = Self::take_buf(&mut self.pool_a, total);
+
+        // Number of harmonics per waveform (sine→saw progression)
+        let harmonics: [usize; 8] = [1, 2, 3, 4, 6, 8, 12, 16];
+        for (wt, &n_harm) in harmonics.iter().enumerate() {
+            let offset = wt * Self::WT_SIZE;
+            let mut peak = 0.0_f32;
+            for i in 0..Self::WT_SIZE {
+                let p = i as f32 / Self::WT_SIZE as f32;
+                let mut s = 0.0f32;
+                for h in 1..=n_harm {
+                    // Sawtooth series: sin(h*2π*p) / h
+                    s += (p * h as f32 * TAU).sin() / h as f32;
+                }
+                table[offset + i] = s;
+                peak = peak.max(s.abs());
+            }
+            // Normalize
+            if peak > 0.001 {
+                for x in &mut table[offset..offset + Self::WT_SIZE] {
+                    *x /= peak;
+                }
+            }
+        }
+
+        self.state = OscState::Wavetable { phase: 0.0, table };
+    }
+
+    fn tick_wavetable(&mut self, freq: f32) -> f32 {
+        if let OscState::Wavetable { phase, table } = &mut self.state {
+            let dt = freq * (1.0 + self.detune) / self.sample_rate;
+            let morph = self.wavetable_morph;
+
+            let wt_count = Self::WT_COUNT;
+            let wt_size = Self::WT_SIZE;
+
+            // Which two tables to blend
+            let pos = morph * (wt_count - 1) as f32;
+            let t0 = (pos.floor() as usize).min(wt_count - 1);
+            let t1 = (t0 + 1).min(wt_count - 1);
+            let tf = pos.fract();
+
+            // Interpolate within each table
+            let p = *phase * wt_size as f32;
+            let i0 = p as usize % wt_size;
+            let i1 = (i0 + 1) % wt_size;
+            let frac = p.fract();
+
+            let s0 = table[t0 * wt_size + i0] * (1.0 - frac) + table[t0 * wt_size + i1] * frac;
+            let s1 = table[t1 * wt_size + i0] * (1.0 - frac) + table[t1 * wt_size + i1] * frac;
+
+            *phase += dt;
+            *phase -= phase.floor();
+
+            s0 * (1.0 - tf) + s1 * tf
+        } else {
+            0.0
+        }
+    }
+
+    // ─── FM3 (3-operator stacked FM) ─────────────────────────────────
+
+    fn tick_fm3(&mut self, freq: f32) -> f32 {
+        if let OscState::Fm3 { carrier_phase, mod1_phase, mod2_phase } = &mut self.state {
+            let sr = self.sample_rate;
+            let dt = freq / sr;
+            let fm_ratio = self.fm_ratio;   // mod1 frequency ratio
+            let fm_index = self.fm_index;   // modulation index (mod1→carrier)
+
+            // op3: secondary modulator at fm_ratio * 1.5 (harmonic)
+            let mod2_ratio = fm_ratio * 1.5;
+            let mod2_index = fm_index * 0.4; // secondary modulation depth
+
+            let mod2 = (*mod2_phase * TAU).sin();
+            let mod1 = ((*mod1_phase + mod2_index * mod2) * TAU).sin();
+            let out = ((*carrier_phase + fm_index * mod1) * TAU).sin();
+
+            *mod2_phase += freq * mod2_ratio / sr;
+            *mod2_phase -= mod2_phase.floor();
+            *mod1_phase += freq * fm_ratio / sr;
+            *mod1_phase -= mod1_phase.floor();
+            *carrier_phase += dt;
+            *carrier_phase -= carrier_phase.floor();
+
+            out
         } else {
             0.0
         }

@@ -1,7 +1,9 @@
 /// Synth engine: layered polyphonic voice pools + MIDI event dispatch.
 
 pub mod bass;
+pub mod bbd_ensemble;
 pub mod bitcrusher;
+pub mod bonsai;
 pub mod chorus;
 pub mod compressor;
 pub mod delay;
@@ -16,6 +18,8 @@ pub mod lfo;
 pub mod looper;
 pub mod mod_matrix;
 pub mod mseg;
+pub mod resonator;
+pub mod rotary;
 pub mod sampler;
 pub mod epiano;
 pub mod neuron;
@@ -33,10 +37,14 @@ pub mod voice;
 
 use crate::cc_map::{CcMap, ParamScope};
 use crate::preset::Preset;
+use bbd_ensemble::BbdEnsemble;
 use bitcrusher::Bitcrusher;
+use bonsai::Bonsai;
 use chorus::Chorus;
 use compressor::Compressor;
 use delay::StereoDelay;
+use resonator::Resonator;
+use rotary::RotarySpeaker;
 use drum::{DrumEngine, DrumPattern, DrumSlotParams, NUM_DRUM_SLOTS};
 use eq::ParametricEq;
 use flanger::Flanger;
@@ -542,6 +550,15 @@ pub struct PresetParams {
     pub max_note: f32,
     // Filter env amount in semitones (Surge-style, applied exponentially)
     pub filter_env_semitones: f32,
+    // Rotary Speaker / Leslie
+    rotary_speed: f32, rotary_mix: f32,
+    // BBD Ensemble chorus
+    ensemble_depth: f32, ensemble_rate: f32, ensemble_mix: f32,
+    // Resonator bank
+    resonator_freq: f32, resonator_decay: f32, resonator_mix: f32,
+    // Bonsai saturation
+    bonsai_drive: f32, bonsai_tone: f32, bonsai_asym: f32,
+    bonsai_mode: f32, bonsai_mix: f32,
 }
 
 impl Default for PresetParams {
@@ -608,6 +625,11 @@ impl Default for PresetParams {
             min_note: 0.0,
             max_note: 127.0,
             filter_env_semitones: 0.0,
+            rotary_speed: 0.0, rotary_mix: 0.0,
+            ensemble_depth: 0.5, ensemble_rate: 0.5, ensemble_mix: 0.0,
+            resonator_freq: 440.0, resonator_decay: 0.7, resonator_mix: 0.0,
+            bonsai_drive: 0.5, bonsai_tone: 0.5, bonsai_asym: 0.0,
+            bonsai_mode: 0.0, bonsai_mix: 0.0,
         }
     }
 }
@@ -703,6 +725,14 @@ impl PresetParams {
             min_note: p("min_note", 0.0),
             max_note: p("max_note", 127.0),
             filter_env_semitones: p("filter_env_semitones", 0.0),
+            rotary_speed: p("rotary_speed", 0.0), rotary_mix: p("rotary_mix", 0.0),
+            ensemble_depth: p("ensemble_depth", 0.5), ensemble_rate: p("ensemble_rate", 0.5),
+            ensemble_mix: p("ensemble_mix", 0.0),
+            resonator_freq: p("resonator_freq", 440.0), resonator_decay: p("resonator_decay", 0.7),
+            resonator_mix: p("resonator_mix", 0.0),
+            bonsai_drive: p("bonsai_drive", 0.5), bonsai_tone: p("bonsai_tone", 0.5),
+            bonsai_asym: p("bonsai_asym", 0.0), bonsai_mode: p("bonsai_mode", 0.0),
+            bonsai_mix: p("bonsai_mix", 0.0),
         }
     }
 }
@@ -730,6 +760,10 @@ pub struct SynthEngine {
     pub ring_mod: RingMod,
     pub freq_shift: FreqShift,
     chorus: Chorus,
+    rotary: RotarySpeaker,
+    bbd_ensemble: BbdEnsemble,
+    resonator: Resonator,
+    bonsai: Bonsai,
     delay: StereoDelay,
     reverb: Reverb,
     pub spring_reverb: SpringReverb,
@@ -774,6 +808,15 @@ struct CachedFxParams {
     spring_size: f32, spring_decay: f32, spring_reflections: f32,
     spring_damping: f32, spring_spin: f32, spring_chaos: f32,
     spring_mix: f32,
+    // Rotary Speaker
+    rotary_speed: f32, rotary_mix: f32,
+    // BBD Ensemble
+    ensemble_depth: f32, ensemble_rate: f32, ensemble_mix: f32,
+    // Resonator
+    resonator_freq: f32, resonator_decay: f32, resonator_mix: f32,
+    // Bonsai
+    bonsai_drive: f32, bonsai_tone: f32, bonsai_asym: f32,
+    bonsai_mode: f32, bonsai_mix: f32,
 }
 
 impl CachedFxParams {
@@ -824,6 +867,19 @@ impl CachedFxParams {
             spring_spin: p.map(|p| p.spring_spin).unwrap_or(0.3),
             spring_chaos: p.map(|p| p.spring_chaos).unwrap_or(0.0),
             spring_mix: p.map(|p| p.spring_mix).unwrap_or(0.0),
+            rotary_speed: p.map(|p| p.rotary_speed).unwrap_or(0.0),
+            rotary_mix: p.map(|p| p.rotary_mix).unwrap_or(0.0),
+            ensemble_depth: p.map(|p| p.ensemble_depth).unwrap_or(0.5),
+            ensemble_rate: p.map(|p| p.ensemble_rate).unwrap_or(0.5),
+            ensemble_mix: p.map(|p| p.ensemble_mix).unwrap_or(0.0),
+            resonator_freq: p.map(|p| p.resonator_freq).unwrap_or(440.0),
+            resonator_decay: p.map(|p| p.resonator_decay).unwrap_or(0.7),
+            resonator_mix: p.map(|p| p.resonator_mix).unwrap_or(0.0),
+            bonsai_drive: p.map(|p| p.bonsai_drive).unwrap_or(0.5),
+            bonsai_tone: p.map(|p| p.bonsai_tone).unwrap_or(0.5),
+            bonsai_asym: p.map(|p| p.bonsai_asym).unwrap_or(0.0),
+            bonsai_mode: p.map(|p| p.bonsai_mode).unwrap_or(0.0),
+            bonsai_mix: p.map(|p| p.bonsai_mix).unwrap_or(0.0),
         }
     }
 }
@@ -849,7 +905,12 @@ impl SynthEngine {
             ring_mod: RingMod::new(sample_rate),
             freq_shift: FreqShift::new(sample_rate),
             looper: MidiLooper::new(sample_rate),
-            chorus: Chorus::new(sample_rate), delay: StereoDelay::new(sample_rate),
+            chorus: Chorus::new(sample_rate),
+            rotary: RotarySpeaker::new(sample_rate),
+            bbd_ensemble: BbdEnsemble::new(sample_rate),
+            resonator: Resonator::new(sample_rate),
+            bonsai: Bonsai::new(sample_rate),
+            delay: StereoDelay::new(sample_rate),
             reverb: Reverb::new(sample_rate),
             spring_reverb: SpringReverb::new(sample_rate),
             cc_map: CcMap::default(),
@@ -1280,6 +1341,10 @@ impl SynthEngine {
         self.ring_mod.set_sample_rate(sample_rate);
         self.freq_shift.set_sample_rate(sample_rate);
         self.chorus.set_sample_rate(sample_rate);
+        self.rotary.set_sample_rate(sample_rate);
+        self.bbd_ensemble.set_sample_rate(sample_rate);
+        self.resonator.set_sample_rate(sample_rate);
+        self.bonsai.set_sample_rate(sample_rate);
         self.delay.set_sample_rate(sample_rate);
         self.reverb.set_sample_rate(sample_rate);
         self.spring_reverb.set_sample_rate(sample_rate);
@@ -1490,10 +1555,33 @@ impl SynthEngine {
             let (out_l, out_r) = if fx.freq_shift_mix > 0.001 {
                 self.freq_shift.tick(out_l, out_r, fx.freq_shift_hz, fx.freq_shift_feedback, fx.freq_shift_delay, fx.freq_shift_mix)
             } else { (out_l, out_r) };
+            // Bonsai saturation (after neuron, before chorus)
+            let (out_l, out_r) = if fx.bonsai_mix > 0.001 {
+                let mode = bonsai::BonsaiMode::from_param(fx.bonsai_mode);
+                self.bonsai.tick(out_l, out_r, fx.bonsai_drive, fx.bonsai_tone, fx.bonsai_asym, mode, fx.bonsai_mix)
+            } else { (out_l, out_r) };
+            // Resonator (pitched comb bank)
+            let (out_l, out_r) = if fx.resonator_mix > 0.001 {
+                // Set 4 voices to harmonic series of resonator_freq
+                let rf = fx.resonator_freq;
+                let rd = fx.resonator_decay;
+                self.resonator.set_freq(0, rf);
+                self.resonator.set_freq(1, rf * 1.5);
+                self.resonator.set_freq(2, rf * 2.0);
+                self.resonator.set_freq(3, rf * 3.0);
+                for i in 0..4 { self.resonator.set_decay(i, rd); }
+                let mono = (out_l + out_r) * 0.5;
+                self.resonator.tick(mono, fx.resonator_mix)
+            } else { (out_l, out_r) };
             let mono = (out_l + out_r) * 0.5;
             let (cl, cr) = if fx.chorus_mix > 0.001 {
                 self.chorus.tick(mono, fx.chorus_mix)
             } else { (mono, mono) };
+            // BBD Ensemble (separate from Juno chorus)
+            let (cl, cr) = if fx.ensemble_mix > 0.001 {
+                let mono2 = (cl + cr) * 0.5;
+                self.bbd_ensemble.tick(mono2, fx.ensemble_depth, fx.ensemble_rate, fx.ensemble_mix)
+            } else { (cl, cr) };
             let diff = (out_l - out_r) * 0.5;
             let (dl, dr) = if fx.delay_mix > 0.001 {
                 self.delay.tick(cl + diff, cr - diff, fx.delay_time_l, fx.delay_time_r, fx.delay_feedback, fx.delay_filter, fx.delay_ping_pong > 0.5, fx.delay_mix)
@@ -1507,6 +1595,10 @@ impl SynthEngine {
             } else if fx.reverb_mix > 0.001 {
                 self.reverb.tick(dl, dr, fx.reverb_room_size, fx.reverb_damping, fx.reverb_width, fx.reverb_pre_delay, fx.reverb_mix)
             } else { (dl, dr) };
+            // Rotary Speaker (after reverb, before master tone)
+            let (rl, rr) = if fx.rotary_mix > 0.001 {
+                self.rotary.tick(rl, rr, fx.rotary_speed, fx.rotary_mix)
+            } else { (rl, rr) };
 
             let sample_rate = self.sample_rate;
             let (tl, tr) = self.global_params.apply_tone(rl, rr, sample_rate);
