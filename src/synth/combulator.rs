@@ -60,7 +60,8 @@ impl CombFilter {
 
         // 1-pole LP filter in the feedback path (tone control)
         // High lp_coeff = brighter (more HF in feedback); low = darker
-        self.lp_state += lp_coeff * (delayed - self.lp_state);
+        let new_lp = self.lp_state + lp_coeff * (delayed - self.lp_state);
+        self.lp_state = new_lp + 1e-30;
         let filtered = self.lp_state;
 
         // Write: input + feedback * filtered delayed signal
@@ -141,8 +142,8 @@ impl Combulator {
         // comb1 (center): equal L+R
         // comb2 (left):   L only
         // comb3 (right):  R only
-        let wet_l = out1 * 0.7071 + out2;
-        let wet_r = out1 * 0.7071 + out3;
+        let wet_l = (out1 * 0.7071 + out2).clamp(-2.0, 2.0);
+        let wet_r = (out1 * 0.7071 + out3).clamp(-2.0, 2.0);
 
         // Wet/dry mix
         let out_l = in_l * (1.0 - mix) + wet_l * mix;

@@ -10,14 +10,7 @@
 
 use std::f32::consts::PI;
 
-/// Number of samples in the zero-crossing ring buffer.
-const ZC_BUF_SIZE: usize = 96;
-
 pub struct Treemonster {
-    /// Ring buffer of recent input samples (L channel) for ZC detection.
-    zc_buf: Box<[f32; ZC_BUF_SIZE]>,
-    /// Write position in the ZC ring buffer.
-    zc_write: usize,
     /// Sample index of the last detected zero crossing.
     last_zc_sample: i64,
     /// Running sample counter (monotonically increasing).
@@ -34,8 +27,6 @@ pub struct Treemonster {
 impl Treemonster {
     pub fn new(sr: f32) -> Self {
         Self {
-            zc_buf: Box::new([0.0f32; ZC_BUF_SIZE]),
-            zc_write: 0,
             last_zc_sample: 0,
             sample_count: 0,
             prev_sample: 0.0,
@@ -47,8 +38,6 @@ impl Treemonster {
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
-        self.zc_buf.fill(0.0);
-        self.zc_write = 0;
         self.last_zc_sample = 0;
         self.sample_count = 0;
         self.prev_sample = 0.0;
@@ -80,10 +69,6 @@ impl Treemonster {
 
         // --- Pitch detection on L channel ---
 
-        // Write L sample into ZC ring buffer
-        self.zc_buf[self.zc_write] = in_l;
-        self.zc_write = (self.zc_write + 1) % ZC_BUF_SIZE;
-
         // Detect positive-going zero crossing: prev < 0, current >= 0
         let curr = in_l;
         let prev = self.prev_sample;
@@ -96,9 +81,9 @@ impl Treemonster {
                 let detected_freq = sr / period_samples as f32;
                 // Clamp to a musically sensible range (20Hz..4kHz)
                 let detected_clamped = detected_freq.clamp(20.0, 4000.0);
-                // Smooth with a slow 1-pole IIR to prevent pitch glitches
-                // Smoothing constant: ~1000 samples time constant
-                self.freq_smooth = 0.999 * self.freq_smooth + 0.001 * detected_clamped;
+                // Smooth with a 1-pole IIR to prevent pitch glitches
+                // Smoothing constant: ~0.45s time constant
+                self.freq_smooth = 0.95 * self.freq_smooth + 0.05 * detected_clamped;
             }
             self.last_zc_sample = self.sample_count;
         }

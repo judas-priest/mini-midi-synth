@@ -109,10 +109,12 @@ impl FloatyDelay {
 
         // Apply 1-pole LP damping filter in the feedback path
         // y[n] = y[n-1] + coeff * (x[n] - y[n-1])
-        self.damp_l += damp_coeff * (delayed_l - self.damp_l);
-        self.damp_r += damp_coeff * (delayed_r - self.damp_r);
-        let damp_out_l = self.damp_l;
-        let damp_out_r = self.damp_r;
+        let new_damp_l = self.damp_l + damp_coeff * (delayed_l - self.damp_l);
+        let new_damp_r = self.damp_r + damp_coeff * (delayed_r - self.damp_r);
+        self.damp_l = new_damp_l + 1e-30;
+        self.damp_r = new_damp_r + 1e-30;
+        let damp_out_l = new_damp_l;
+        let damp_out_r = new_damp_r;
 
         // Stereo cross-feedback: L feeds a little into R and vice versa
         // Cross-feed at 10% for stereo spreading
@@ -132,8 +134,8 @@ impl FloatyDelay {
         self.lfo_phase_r = (self.lfo_phase_r + lfo_inc) % 1.0;
 
         // Wet/dry mix
-        let out_l = in_l * (1.0 - mix) + delayed_l * mix;
-        let out_r = in_r * (1.0 - mix) + delayed_r * mix;
+        let out_l = in_l * (1.0 - mix) + damp_out_l * mix;
+        let out_r = in_r * (1.0 - mix) + damp_out_r * mix;
 
         (out_l, out_r)
     }

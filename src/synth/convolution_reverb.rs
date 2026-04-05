@@ -21,6 +21,12 @@ pub struct ConvolutionReverb {
     sample_rate: f32,
     /// Built-in impulse response (generated procedurally)
     ir: [f32; IR_LEN],
+    /// Damped IR cache — rebuilt only when damping or ir_len changes
+    damped_ir: Box<[f32; IR_LEN]>,
+    /// Damping value used when `damped_ir` was last built (sentinel -1.0 = never built)
+    cached_damping: f32,
+    /// IR length used when `damped_ir` was last built
+    cached_ir_len: usize,
     /// Left channel input history ring buffer (length = IR_LEN)
     hist_l: [f32; IR_LEN],
     /// Right channel input history ring buffer
@@ -42,6 +48,9 @@ impl ConvolutionReverb {
         let mut cr = ConvolutionReverb {
             sample_rate: sr,
             ir: [0.0f32; IR_LEN],
+            damped_ir: Box::new([0.0f32; IR_LEN]),
+            cached_damping: -1.0,
+            cached_ir_len: 0,
             hist_l: [0.0f32; IR_LEN],
             hist_r: [0.0f32; IR_LEN],
             hist_pos: 0,
@@ -51,6 +60,8 @@ impl ConvolutionReverb {
             rng_state: 0xDEADBEEFCAFEBABEu64,
         };
         cr.generate_ir();
+        // Copy the raw IR into damped_ir as the initial state
+        cr.damped_ir.copy_from_slice(&cr.ir);
         cr
     }
 
@@ -140,18 +151,19 @@ impl ConvolutionReverb {
         }
     }
 
-    /// Direct convolution of the history buffer with the IR.
-    /// History is a ring buffer; `hist_pos` is the index just written (newest sample).
-    #[allow(dead_code)]
-    #[inline]
-    fn convolve(ir: &[f32; IR_LEN], hist: &[f32; IR_LEN], hist_pos: usize, ir_len: usize) -> f32 {
-        let mut acc = 0.0_f32;
-        for k in 0..ir_len {
-            // hist[(hist_pos - k + IR_LEN) % IR_LEN] is the sample k steps in the past
-            let idx = (hist_pos + IR_LEN - k) % IR_LEN;
-            acc += ir[k] * hist[idx];
+    /// Rebuild `damped_ir` for the given damping and IR length.
+    /// Called lazily in `tick()` only when parameters change.
+    fn rebuild_damped_ir(&mut self, damping: f32, ir_len: usize) {
+        for k in 0..IR_LEN {
+            let damp_factor = if damping > 1e-6 && k < ir_len {
+                (-damping * 5.0 * k as f32 / ir_len as f32).exp()
+            } else {
+                1.0
+            };
+            self.damped_ir[k] = self.ir[k] * damp_factor;
         }
-        acc
+        self.cached_damping = damping;
+        self.cached_ir_len = ir_len;
     }
 
     /// Process one stereo sample through the convolution reverb.
@@ -186,26 +198,24 @@ impl ConvolutionReverb {
         self.hist_l[self.hist_pos] = pre_out_l;
         self.hist_r[self.hist_pos] = pre_out_r;
 
-        // --- Build damped IR view ---
+        // --- Determine IR length from room_size ---
         // room_size: map 0..1 → 64..512 samples
         let ir_len = (64 + (room_size * (IR_LEN - 64) as f32) as usize).min(IR_LEN);
 
-        // Apply damping: build a temporary damped IR for this block.
-        // Damping attenuates the tail: ir_effective[k] = ir[k] * exp(-damping * k / ir_len)
-        // Rather than allocating, we inline the damping factor into the convolution loop.
+        // Rebuild damped IR cache only when damping or ir_len changes
+        if (damping - self.cached_damping).abs() > 1e-6 || ir_len != self.cached_ir_len {
+            self.rebuild_damped_ir(damping, ir_len);
+        }
+
+        // --- Convolution using the precomputed damped IR ---
         let mut acc_l = 0.0_f32;
         let mut acc_r = 0.0_f32;
         let hist_pos = self.hist_pos;
         for k in 0..ir_len {
             let idx = (hist_pos + IR_LEN - k) % IR_LEN;
-            let damp_factor = if damping > 1e-6 {
-                (-damping * 5.0 * k as f32 / ir_len as f32).exp()
-            } else {
-                1.0
-            };
-            let ir_k = self.ir[k] * damp_factor;
-            acc_l += ir_k * self.hist_l[idx];
-            acc_r += ir_k * self.hist_r[idx];
+            let damp_factor = self.damped_ir[k]; // precomputed
+            acc_l += damp_factor * self.hist_l[idx];
+            acc_r += damp_factor * self.hist_r[idx];
         }
 
         self.hist_pos = (self.hist_pos + 1) % IR_LEN;

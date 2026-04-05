@@ -4,7 +4,7 @@
 /// Creates the classic "robot voice" / "talking synth" effect.
 ///
 /// Architecture:
-/// - 16 bandpass filter channels, logarithmically spaced from 50 Hz to 8 kHz
+/// - 16 bandpass filter channels, logarithmically spaced from 100 Hz to 8 kHz
 /// - Modulator path: input → band BPF → envelope follower (1-pole LP)
 /// - Carrier path: input → same band BPF → multiply by modulator envelope
 /// - Sum all channels for output
@@ -24,9 +24,12 @@ struct VocoderBand {
     // Modulator BPF state (SVF integrator states)
     mod_ic1: f32,
     mod_ic2: f32,
-    // Carrier BPF state (SVF integrator states)
+    // Carrier BPF state — left channel (SVF integrator states)
     car_ic1: f32,
     car_ic2: f32,
+    // Carrier BPF state — right channel
+    car_ic1_r: f32,
+    car_ic2_r: f32,
     // SVF coefficients (shared between modulator and carrier — same centre frequency)
     g: f32,   // integrator gain = tan(π * fc / sr)
     k: f32,   // damping = 1/Q
@@ -44,6 +47,8 @@ impl Default for VocoderBand {
             mod_ic2: 0.0,
             car_ic1: 0.0,
             car_ic2: 0.0,
+            car_ic1_r: 0.0,
+            car_ic2_r: 0.0,
             g: 0.0,
             k: 0.0,
             a1: 0.0,
@@ -79,20 +84,31 @@ impl VocoderBand {
         let v3 = v0 - self.mod_ic2;
         let v1 = self.a1 * self.mod_ic1 + self.a2 * v3;
         let v2 = self.mod_ic2 + self.a2 * self.mod_ic1 + self.a3 * v3;
-        self.mod_ic1 = 2.0 * v1 - self.mod_ic1;
-        self.mod_ic2 = 2.0 * v2 - self.mod_ic2;
+        self.mod_ic1 = 2.0 * v1 - self.mod_ic1 + 1e-30;
+        self.mod_ic2 = 2.0 * v2 - self.mod_ic2 + 1e-30;
         // Bandpass output
         v1
     }
 
-    /// Process one sample through the carrier BPF. Returns bandpass output.
+    /// Process one sample through the carrier BPF (left channel). Returns bandpass output.
     #[inline(always)]
-    fn process_car_svf(&mut self, v0: f32) -> f32 {
+    fn process_car_svf_l(&mut self, v0: f32) -> f32 {
         let v3 = v0 - self.car_ic2;
         let v1 = self.a1 * self.car_ic1 + self.a2 * v3;
         let v2 = self.car_ic2 + self.a2 * self.car_ic1 + self.a3 * v3;
-        self.car_ic1 = 2.0 * v1 - self.car_ic1;
-        self.car_ic2 = 2.0 * v2 - self.car_ic2;
+        self.car_ic1 = 2.0 * v1 - self.car_ic1 + 1e-30;
+        self.car_ic2 = 2.0 * v2 - self.car_ic2 + 1e-30;
+        v1
+    }
+
+    /// Process one sample through the carrier BPF (right channel). Returns bandpass output.
+    #[inline(always)]
+    fn process_car_svf_r(&mut self, v0: f32) -> f32 {
+        let v3 = v0 - self.car_ic2_r;
+        let v1 = self.a1 * self.car_ic1_r + self.a2 * v3;
+        let v2 = self.car_ic2_r + self.a2 * self.car_ic1_r + self.a3 * v3;
+        self.car_ic1_r = 2.0 * v1 - self.car_ic1_r + 1e-30;
+        self.car_ic2_r = 2.0 * v2 - self.car_ic2_r + 1e-30;
         v1
     }
 }
@@ -121,9 +137,9 @@ impl Vocoder {
         self.recompute_coefficients();
     }
 
-    /// Compute logarithmically spaced band centre frequencies: 50 Hz to 8 kHz.
+    /// Compute logarithmically spaced band centre frequencies: 100 Hz to 8 kHz.
     fn compute_band_freqs(&mut self) {
-        let f_low = 50.0_f32;
+        let f_low = 100.0_f32;
         let f_high = 8000.0_f32;
         let ratio = f_high / f_low;
         for n in 0..NUM_BANDS {
@@ -161,6 +177,8 @@ impl Vocoder {
         // Envelope follower time constant: 10ms..200ms
         let follow_ms = 10.0 + env_follow * 190.0;
         let follow_coeff = (-1.0 / (follow_ms * 0.001 * sr)).exp();
+        // Precompute attack coefficient (1/4 of follow time) — same for all bands
+        let att = (-1.0 / (follow_ms * 0.001 * sr * 0.25)).exp();
 
         // Process each band
         let mut band_env = [0.0_f32; NUM_BANDS];
@@ -177,7 +195,6 @@ impl Vocoder {
             let env_prev = band.envelope;
             band.envelope = if mod_rectified > env_prev {
                 // Attack: faster (use 1/4 of follow time)
-                let att = (-1.0 / (follow_ms * 0.001 * sr * 0.25)).exp();
                 att * env_prev + (1.0 - att) * mod_rectified
             } else {
                 // Release: full follow time
@@ -185,13 +202,9 @@ impl Vocoder {
             };
             band_env[i] = band.envelope;
 
-            // Carrier BPF (L and R share the same filter state — use mono average)
-            let car_mono = (car_l + car_r) * 0.5;
-            let car_bp_mono = band.process_car_svf(car_mono);
-            // Reconstruct stereo by maintaining the L/R difference
-            let car_diff = (car_l - car_r) * 0.5;
-            band_car_l[i] = car_bp_mono + car_diff;
-            band_car_r[i] = car_bp_mono - car_diff;
+            // Carrier BPF — process L and R independently through separate SVF states
+            band_car_l[i] = band.process_car_svf_l(car_l);
+            band_car_r[i] = band.process_car_svf_r(car_r);
         }
 
         // Energy gate: find the peak envelope across all bands

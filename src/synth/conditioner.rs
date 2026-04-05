@@ -98,12 +98,12 @@ impl Conditioner {
         let y_l = self.hp_b0 * x_l + self.hp_b1 * self.hp_x1_l + self.hp_b2 * self.hp_x2_l
                 - self.hp_a1 * self.hp_y1_l - self.hp_a2 * self.hp_y2_l;
         self.hp_x2_l = self.hp_x1_l; self.hp_x1_l = x_l;
-        self.hp_y2_l = self.hp_y1_l; self.hp_y1_l = y_l;
+        self.hp_y2_l = self.hp_y1_l; self.hp_y1_l = y_l + 1e-30;
 
         let y_r = self.hp_b0 * x_r + self.hp_b1 * self.hp_x1_r + self.hp_b2 * self.hp_x2_r
                 - self.hp_a1 * self.hp_y1_r - self.hp_a2 * self.hp_y2_r;
         self.hp_x2_r = self.hp_x1_r; self.hp_x1_r = x_r;
-        self.hp_y2_r = self.hp_y1_r; self.hp_y1_r = y_r;
+        self.hp_y2_r = self.hp_y1_r; self.hp_y1_r = y_r + 1e-30;
 
         (y_l, y_r)
     }

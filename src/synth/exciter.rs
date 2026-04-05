@@ -82,7 +82,7 @@ impl Exciter {
         let a = self.hp_coeff;
         let y = a * (self.hp1_l_y1 + x - self.hp1_l_x1);
         self.hp1_l_x1 = x;
-        self.hp1_l_y1 = y;
+        self.hp1_l_y1 = y + 1e-30;
         y
     }
 
@@ -91,7 +91,7 @@ impl Exciter {
         let a = self.hp_coeff;
         let y = a * (self.hp1_r_y1 + x - self.hp1_r_x1);
         self.hp1_r_x1 = x;
-        self.hp1_r_y1 = y;
+        self.hp1_r_y1 = y + 1e-30;
         y
     }
 
@@ -100,7 +100,7 @@ impl Exciter {
         let a = self.hp_coeff;
         let y = a * (self.hp2_l_y1 + x - self.hp2_l_x1);
         self.hp2_l_x1 = x;
-        self.hp2_l_y1 = y;
+        self.hp2_l_y1 = y + 1e-30;
         y
     }
 
@@ -109,7 +109,7 @@ impl Exciter {
         let a = self.hp_coeff;
         let y = a * (self.hp2_r_y1 + x - self.hp2_r_x1);
         self.hp2_r_x1 = x;
-        self.hp2_r_y1 = y;
+        self.hp2_r_y1 = y + 1e-30;
         y
     }
 
@@ -118,7 +118,7 @@ impl Exciter {
     #[inline(always)]
     fn presence_l(&mut self, x: f32, coeff: f32) -> f32 {
         let y = self.ps_l_y1 + coeff * (x - self.ps_l_y1);
-        self.ps_l_y1 = y;
+        self.ps_l_y1 = y + 1e-30;
         // presence shelf = original + boost*(x - lp) = boosted mid shelf
         y
     }
@@ -126,7 +126,7 @@ impl Exciter {
     #[inline(always)]
     fn presence_r(&mut self, x: f32, coeff: f32) -> f32 {
         let y = self.ps_r_y1 + coeff * (x - self.ps_r_y1);
-        self.ps_r_y1 = y;
+        self.ps_r_y1 = y + 1e-30;
         y
     }
 

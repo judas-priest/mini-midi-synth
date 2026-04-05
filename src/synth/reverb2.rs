@@ -22,6 +22,7 @@ pub struct Reverb2 {
     /// Write positions for each delay line.
     write_pos: [usize; 8],
     /// Actual (scaled) delay lengths in samples for each line.
+    #[allow(dead_code)]
     delay_len: [usize; 8],
     /// 1-pole LP state per delay line (damping).
     lp_state: [f32; 8],
@@ -149,7 +150,8 @@ impl Reverb2 {
             let raw = self.delays[i][read_pos];
 
             // 1-pole LP damping in feedback path
-            self.lp_state[i] += damp_coeff * (raw - self.lp_state[i]);
+            let new_lp_val = self.lp_state[i] + damp_coeff * (raw - self.lp_state[i]);
+            self.lp_state[i] = new_lp_val + 1e-30;
             let damped = self.lp_state[i];
 
             outs[i] = damped * fb;

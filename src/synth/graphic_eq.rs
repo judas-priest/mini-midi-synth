@@ -67,7 +67,7 @@ impl BandState {
         let a = (10.0_f32).powf(gain_db / 40.0);
         let w0 = 2.0 * PI * freq / sample_rate;
         let (sin_w0, cos_w0) = w0.sin_cos();
-        let alpha = sin_w0 / 2.0 * (a + 1.0 / a).sqrt();
+        let alpha = sin_w0 / 2.0 * 2.0_f32.sqrt();
 
         let b0 =         a * ((a + 1.0) - (a - 1.0) * cos_w0 + 2.0 * a.sqrt() * alpha);
         let b1 =   2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0);
@@ -91,7 +91,7 @@ impl BandState {
         let a = (10.0_f32).powf(gain_db / 40.0);
         let w0 = 2.0 * PI * freq / sample_rate;
         let (sin_w0, cos_w0) = w0.sin_cos();
-        let alpha = sin_w0 / 2.0 * (a + 1.0 / a).sqrt();
+        let alpha = sin_w0 / 2.0 * 2.0_f32.sqrt();
 
         let b0 =         a * ((a + 1.0) + (a - 1.0) * cos_w0 + 2.0 * a.sqrt() * alpha);
         let b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0);
@@ -117,7 +117,7 @@ impl BandState {
         self.x2_l = self.x1_l;
         self.x1_l = x;
         self.y2_l = self.y1_l;
-        self.y1_l = y;
+        self.y1_l = y + 1e-30;
         y
     }
 
@@ -128,7 +128,7 @@ impl BandState {
         self.x2_r = self.x1_r;
         self.x1_r = x;
         self.y2_r = self.y1_r;
-        self.y1_r = y;
+        self.y1_r = y + 1e-30;
         y
     }
 }

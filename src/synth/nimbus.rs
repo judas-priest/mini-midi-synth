@@ -72,6 +72,14 @@ impl Nimbus {
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        // Clear all state — buffer contents are at wrong pitch after SR change
+        self.buf_l.fill(0.0);
+        self.buf_r.fill(0.0);
+        self.write_pos = 0;
+        self.spawn_accumulator = 0.0;
+        for grain in &mut self.grains {
+            grain.active = false;
+        }
     }
 
     fn next_rand(&mut self) -> f32 {
