@@ -3,7 +3,7 @@
 
 use std::f32::consts::PI;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FilterType {
     LowPass,   // 0 — SVF 12dB/oct
     HighPass,  // 1 — SVF 12dB/oct
@@ -12,6 +12,10 @@ pub enum FilterType {
     MoogLP24,  // 4 — Moog ladder 24dB/oct lowpass
     MoogLP12,  // 5 — Moog ladder 12dB/oct (2-pole tap)
     DiodeLP,   // 6 — Diode ladder 18dB/oct (TB-303 style)
+    Comb,      // 7 — Comb filter (delay-line based)
+    Allpass,   // 8 — Allpass filter (phase shifting)
+    CombPos,   // 9 — Comb+ (positive feedback)
+    CombNeg,   // 10 — Comb- (negative feedback)
 }
 
 impl FilterType {
@@ -24,6 +28,10 @@ impl FilterType {
             4 => Self::MoogLP24,
             5 => Self::MoogLP12,
             6 => Self::DiodeLP,
+            7 => Self::Comb,
+            8 => Self::Allpass,
+            9 => Self::CombPos,
+            10 => Self::CombNeg,
             _ => Self::LowPass,
         }
     }
@@ -34,6 +42,14 @@ impl FilterType {
 
     pub fn is_diode(self) -> bool {
         matches!(self, Self::DiodeLP)
+    }
+
+    pub fn is_comb(self) -> bool {
+        matches!(self, Self::Comb | Self::CombPos | Self::CombNeg)
+    }
+
+    pub fn is_allpass(self) -> bool {
+        matches!(self, Self::Allpass)
     }
 }
 
@@ -73,6 +89,17 @@ pub struct Filter {
     diode_tune: f32,           // frequency coefficient
     diode_res: f32,            // resonance coefficient
     diode_gain_comp: f32,      // gain compensation
+    // Comb filter state
+    comb_buf: Box<[f32; 512]>,  // circular buffer (max ~11.6ms @ 44.1k)
+    comb_write: usize,          // write position
+    comb_delay: usize,          // delay in samples (from cutoff)
+    comb_feedback: f32,         // feedback amount (from resonance)
+    // Allpass filter state
+    allpass_x1: f32,            // x[n-1]
+    allpass_y1: f32,            // y[n-1]
+    allpass_coeff: f32,         // allpass coefficient
+    // Control-rate coefficient update
+    coeff_counter: u8,          // wrapping counter, update every 32 samples
 }
 
 impl Filter {
@@ -103,6 +130,16 @@ impl Filter {
             diode_tune: 0.0,
             diode_res: 0.0,
             diode_gain_comp: 1.0,
+            // Comb filter state
+            comb_buf: Box::new([0.0; 512]),
+            comb_write: 0,
+            comb_delay: 100,
+            comb_feedback: 0.0,
+            // Allpass filter state
+            allpass_x1: 0.0,
+            allpass_y1: 0.0,
+            allpass_coeff: 0.0,
+            coeff_counter: 31, // so first tick after set_cutoff/set_resonance triggers update
         };
         f.update_coefficients();
         f
@@ -136,6 +173,10 @@ impl Filter {
         self.moog_delay4 = 0.0;
         self.diode_stage = [0.0; 4];
         self.diode_feedback = 0.0;
+        self.comb_buf.fill(0.0);
+        self.comb_write = 0;
+        self.allpass_x1 = 0.0;
+        self.allpass_y1 = 0.0;
     }
 
     fn update_coefficients(&mut self) {
@@ -143,6 +184,10 @@ impl Filter {
             self.update_moog_coefficients();
         } else if self.filter_type.is_diode() {
             self.update_diode_coefficients();
+        } else if self.filter_type.is_comb() {
+            self.update_comb_coefficients();
+        } else if self.filter_type.is_allpass() {
+            self.update_allpass_coefficients();
         } else {
             self.update_svf_coefficients();
         }
@@ -185,8 +230,14 @@ impl Filter {
         self.moog_gain_comp = 1.0 + self.resonance * 1.5;
     }
 
+    pub fn force_update(&mut self) {
+        self.update_coefficients();
+        self.coeff_counter = 31; // next tick will update again with latest cutoff from envelope
+    }
+
     pub fn tick(&mut self, input: f32) -> f32 {
-        if self.dirty {
+        self.coeff_counter = self.coeff_counter.wrapping_add(1);
+        if self.dirty && (self.coeff_counter & 31 == 0) {
             self.update_coefficients();
         }
 
@@ -194,6 +245,8 @@ impl Filter {
             FilterType::MoogLP24 => self.tick_moog(input, true),
             FilterType::MoogLP12 => self.tick_moog(input, false),
             FilterType::DiodeLP => self.tick_diode(input),
+            FilterType::Comb | FilterType::CombPos | FilterType::CombNeg => self.tick_comb(input),
+            FilterType::Allpass => self.tick_allpass(input),
             _ => self.tick_svf(input),
         }
     }
@@ -262,6 +315,46 @@ impl Filter {
 
         // Apply gain compensation
         raw * gain_comp
+    }
+
+    fn update_comb_coefficients(&mut self) {
+        // Delay from cutoff: delay_samples = sample_rate / cutoff_hz
+        let delay = (self.sample_rate / self.cutoff.max(20.0)) as usize;
+        self.comb_delay = delay.clamp(1, 511);
+        // Feedback from resonance: 0..0.99 for standard comb, negative for CombNeg
+        let fb = self.resonance * 0.99;
+        self.comb_feedback = match self.filter_type {
+            FilterType::CombNeg => -fb,
+            _ => fb,
+        };
+    }
+
+    fn update_allpass_coefficients(&mut self) {
+        // First-order allpass: coeff = (tan(π*fc/fs) - 1) / (tan(π*fc/fs) + 1)
+        let w = PI * self.cutoff / self.sample_rate;
+        let t = fast_tan(w);
+        self.allpass_coeff = (t - 1.0) / (t + 1.0);
+    }
+
+    fn tick_comb(&mut self, input: f32) -> f32 {
+        let delay = self.comb_delay;
+        let buf_len = self.comb_buf.len();
+        let mask = buf_len - 1; // buf_len == 512 == 2^9
+        let read_pos = (self.comb_write + buf_len - delay) & mask;
+        let delayed = self.comb_buf[read_pos];
+        let output = input + self.comb_feedback * delayed;
+        self.comb_buf[self.comb_write] = output;
+        self.comb_write = (self.comb_write + 1) & mask;
+        output
+    }
+
+    fn tick_allpass(&mut self, input: f32) -> f32 {
+        // y[n] = coeff * x[n] + x[n-1] - coeff * y[n-1]
+        let coeff = self.allpass_coeff;
+        let output = coeff * input + self.allpass_x1 - coeff * self.allpass_y1;
+        self.allpass_x1 = input;
+        self.allpass_y1 = output;
+        output
     }
 
     fn update_diode_coefficients(&mut self) {

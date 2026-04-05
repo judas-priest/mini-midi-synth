@@ -202,9 +202,9 @@ impl PitchSequencer {
         self.prev_gate = true;
     }
 
-    /// Advance by one sample. Returns step event info.
+    /// Advance by `block_len` samples. Returns step event info.
     #[inline]
-    pub fn tick(&mut self, sample_rate: f32, bpm: f32) -> StepEvent {
+    pub fn tick(&mut self, sample_rate: f32, bpm: f32, block_len: usize) -> StepEvent {
         if !self.enabled {
             return StepEvent {
                 stepped: false, gate: true, pitch_offset: 0.0,
@@ -222,7 +222,7 @@ impl PitchSequencer {
             0.0
         };
 
-        self.phase_acc += 1.0;
+        self.phase_acc += block_len as f64;
         let mut stepped = false;
 
         if self.phase_acc >= samples_per_step + swing_offset {

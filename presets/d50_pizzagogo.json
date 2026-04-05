@@ -2,7 +2,7 @@
   "name": "D-50 Pizzagogo (Approx)",
   "params": {
     "osc_type": 6.0,
-    "ks_brightness": 0.85,
+    "ks_brightness": 0.98,
     "ks_feedback": 0.97,
     "osc_count": 2.0,
     "osc1_level": 0.7,

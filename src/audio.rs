@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{HostId, Stream};
 use rtrb::Consumer;
+use std::sync::{Arc, atomic::{AtomicU32, Ordering}};
 
 use crate::synth::{ControlEvent, MidiEvent, SynthEngine};
 
@@ -96,7 +97,6 @@ impl AudioBackend {
         let channels = supported.channels() as usize;
         let device_sr = supported.sample_rate().0;
 
-        // Try requested config first, fall back to device defaults
         let (actual_sr, actual_buf) = Self::negotiate_config(
             &device,
             supported.channels(),
@@ -117,9 +117,24 @@ impl AudioBackend {
 
         synth.set_sample_rate(actual_sr as f32);
 
+        // JACK/PipeWire reports its initial SR via "sample rate changed to: X"
+        // error callbacks after stream start.  We track this so we can update
+        // the synth and return the real SR to the GUI.
+        let jack_sr = Arc::new(AtomicU32::new(actual_sr));
+        let jack_sr_err = jack_sr.clone();
+        let jack_sr_cb  = jack_sr.clone();
+        let mut synth_sr = actual_sr;
+
         let stream = device.build_output_stream(
             &stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                // If JACK changed the sample rate, update the synth immediately.
+                let new_sr = jack_sr_cb.load(Ordering::Relaxed);
+                if new_sr != synth_sr {
+                    synth_sr = new_sr;
+                    synth.set_sample_rate(new_sr as f32);
+                }
+
                 // Flush denormals to zero (DAZ+FTZ) — prevents CPU spikes
                 // when filter/reverb tails decay to subnormal floats.
                 #[cfg(target_arch = "x86_64")]
@@ -135,23 +150,39 @@ impl AudioBackend {
                     synth.handle_control(event);
                 }
 
-                for frame in data.chunks_mut(channels) {
+                let total_frames = data.len() / channels;
+                let mut frame_offset = 0;
+
+                while frame_offset < total_frames {
+                    let block_len = (total_frames - frame_offset).min(crate::synth::BLOCK_SIZE);
+
+                    // Collect MIDI events for this block
                     while let Ok(event) = midi_rx.pop() {
                         synth.handle_event(event);
                     }
-                    let (left, right) = synth.tick();
-                    // Soft limiter: transparent below 0.8, tanh-shaped above
-                    let left = soft_limit(left);
-                    let right = soft_limit(right);
-                    if channels >= 2 {
-                        frame[0] = left;
-                        frame[1] = right;
-                        for s in frame.iter_mut().skip(2) {
-                            *s = 0.0;
+
+                    // Process block
+                    let mut bl = [0.0f32; crate::synth::BLOCK_SIZE];
+                    let mut br = [0.0f32; crate::synth::BLOCK_SIZE];
+                    synth.tick_block(&mut bl[..block_len], &mut br[..block_len]);
+
+                    // Write to output with soft limiting
+                    for i in 0..block_len {
+                        let left = soft_limit(bl[i]);
+                        let right = soft_limit(br[i]);
+                        let base = (frame_offset + i) * channels;
+                        if channels >= 2 {
+                            data[base] = left;
+                            data[base + 1] = right;
+                            for s in data[base + 2..base + channels].iter_mut() {
+                                *s = 0.0;
+                            }
+                        } else {
+                            data[base] = (left + right) * 0.5;
                         }
-                    } else {
-                        frame[0] = (left + right) * 0.5;
                     }
+
+                    frame_offset += block_len;
                 }
 
                 // Restore MXCSR
@@ -160,7 +191,13 @@ impl AudioBackend {
                     std::arch::asm!("ldmxcsr [{}]", in(reg) &_old_mxcsr, options(nostack));
                 }
             },
-            |err| {
+            move |err| {
+                let msg = err.to_string();
+                if let Some(sr_str) = msg.strip_prefix("A backend-specific error has occurred: sample rate changed to: ") {
+                    if let Ok(sr) = sr_str.trim().parse::<u32>() {
+                        jack_sr_err.store(sr, Ordering::Relaxed);
+                    }
+                }
                 eprintln!("Audio stream error: {err}");
             },
             None,
@@ -168,7 +205,12 @@ impl AudioBackend {
 
         stream.play()?;
 
-        Ok((Self { stream }, actual_sr))
+        // Give JACK time to fire the "sample rate changed" callbacks so we
+        // return the real SR to the GUI rather than the initial cpal value.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let final_sr = jack_sr.load(Ordering::Relaxed);
+
+        Ok((Self { stream }, final_sr))
     }
 
     /// Try requested SR + buffer, fall back step by step to device defaults.

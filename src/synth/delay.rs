@@ -65,14 +65,14 @@ impl StereoDelay {
         let target_delay_r = (time_r * self.sample_rate).clamp(1.0, (MAX_DELAY_SAMPLES - 2) as f32);
 
         // Smooth delay time with one-pole filter to prevent clicks on time changes
-        // Coefficient ~0.001 gives a gentle slew (~1ms at 48kHz)
-        const SMOOTH_COEFF: f32 = 0.001;
+        // τ=20ms, normalized by sample rate
+        let smooth_coeff = 1.0 - (-1.0_f32 / (0.020 * self.sample_rate)).exp();
         if self.smooth_delay_l == 0.0 {
             self.smooth_delay_l = target_delay_l;
             self.smooth_delay_r = target_delay_r;
         }
-        self.smooth_delay_l += SMOOTH_COEFF * (target_delay_l - self.smooth_delay_l);
-        self.smooth_delay_r += SMOOTH_COEFF * (target_delay_r - self.smooth_delay_r);
+        self.smooth_delay_l += smooth_coeff * (target_delay_l - self.smooth_delay_l);
+        self.smooth_delay_r += smooth_coeff * (target_delay_r - self.smooth_delay_r);
 
         let delay_l = self.smooth_delay_l;
         let delay_r = self.smooth_delay_r;

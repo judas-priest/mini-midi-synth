@@ -25,7 +25,7 @@ fn poly_blep(t: f32, dt: f32) -> f32 {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum OscType {
     Sine,          // 0
     Saw,           // 1
@@ -52,6 +52,8 @@ pub enum OscType {
     Accordion,        // 22 — free reed physical model
     Saxophone,        // 23 — single reed waveguide
     ElectricPiano,    // 24 — Rhodes/Wurlitzer physical model (tine + pickup)
+    Alias,            // 25 — intentionally aliasing 8-bit oscillator
+    Window,           // 26 — windowed oscillator with formant control
 }
 
 impl OscType {
@@ -82,6 +84,8 @@ impl OscType {
             22 => Self::Accordion,
             23 => Self::Saxophone,
             24 => Self::ElectricPiano,
+            25 => Self::Alias,
+            26 => Self::Window,
             _ => Self::Sine,
         }
     }
@@ -273,6 +277,19 @@ pub enum OscState {
         // DC blocker
         dc_x: f32,
         dc_y: f32,
+    },
+    Alias {
+        phase: u32,       // 8.24 fixed-point phase accumulator
+        crush_bits: f32,  // bit depth (1-8)
+        wave_type: u8,    // 0=sine, 1=ramp, 2=pulse, 3=noise, 4=additive
+        noise_state: u8,
+        table: [u8; 256], // precomputed wavetable
+    },
+    Window {
+        phase: f32,
+        window_type: u8,  // 0=triangle, 1=cosine, 2=half-sine, 3=hann
+        morph: f32,       // blend between adjacent windows (0-1)
+        formant: f32,     // formant shift in semitones
     },
 }
 
@@ -534,6 +551,13 @@ impl Oscillator {
                 reed_stiffness: 0.0, reed_table_offset: 0.0, blowing_pressure: 0.0,
                 bell_lp: 0.0, bell_coeff: 0.0,
                 dc_x: 0.0, dc_y: 0.0,
+            },
+            OscType::Alias => OscState::Alias {
+                phase: 0, crush_bits: 8.0, wave_type: 0, noise_state: 0x42,
+                table: [0; 256],
+            },
+            OscType::Window => OscState::Window {
+                phase: 0.0, window_type: 0, morph: 0.0, formant: 0.0,
             },
         };
     }
@@ -901,6 +925,8 @@ impl Oscillator {
             OscType::ElectricPiano => self.tick_electric_piano(),
             OscType::Accordion => self.tick_accordion(),
             OscType::Saxophone => self.tick_saxophone(),
+            OscType::Alias => self.tick_alias(freq),
+            OscType::Window => self.tick_window(freq),
             _ => self.tick_standard(freq),
         }
     }
@@ -2330,6 +2356,123 @@ impl Oscillator {
             *dc_y = dc_out;
 
             dc_out.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    pub fn init_alias(&mut self, wave_type: u8, crush_bits: f32) {
+        if let OscState::Alias { wave_type: wt, crush_bits: cb, .. } = &mut self.state {
+            *wt = wave_type;
+            *cb = crush_bits;
+        }
+    }
+
+    pub fn init_window(&mut self, wtype: u8, morph: f32, formant: f32) {
+        if let OscState::Window { window_type, morph: m, formant: f, .. } = &mut self.state {
+            *window_type = wtype;
+            *m = morph;
+            *f = formant;
+        }
+    }
+
+    // ─── Alias oscillator ──────────────────────────────────────────────
+
+    fn tick_alias(&mut self, freq: f32) -> f32 {
+        if let OscState::Alias { phase, crush_bits, wave_type, noise_state, table } = &mut self.state {
+            // 8.24 fixed-point phase increment
+            let inc = ((freq / self.sample_rate) * (1u64 << 24) as f32) as u32;
+            *phase = phase.wrapping_add(inc);
+            let index = (*phase >> 24) as u8; // top 8 bits = table index
+
+            // Generate raw 8-bit sample based on wave type
+            let raw_byte = match *wave_type {
+                0 => { // Sine table lookup
+                    let s = (index as f32 / 256.0 * TAU).sin();
+                    ((s * 127.0) + 128.0) as u8
+                }
+                1 => index, // Ramp (naturally aliasing)
+                2 => if index < 128 { 255 } else { 0 }, // Pulse
+                3 => { // 8-bit XOR noise
+                    *noise_state ^= noise_state.wrapping_shl(7);
+                    *noise_state ^= noise_state.wrapping_shr(5);
+                    *noise_state ^= noise_state.wrapping_shl(3);
+                    *noise_state
+                }
+                4 => { // Additive: 16 partials
+                    let mut sum: f32 = 0.0;
+                    let base_phase = index as f32 / 256.0;
+                    for h in 1..=16u32 {
+                        let amp = 1.0 / h as f32;
+                        sum += amp * (base_phase * h as f32 * TAU).sin();
+                    }
+                    let norm = sum * 0.25; // rough normalization
+                    ((norm.clamp(-1.0, 1.0) * 127.0) + 128.0) as u8
+                }
+                _ => index,
+            };
+
+            // Store in table for potential visualization
+            table[index as usize] = raw_byte;
+
+            // Bit-crushing: reduce bit depth
+            let bits = crush_bits.clamp(1.0, 8.0);
+            let quant = 2.0_f32.powf(bits);
+            let sample = raw_byte as f32 / 255.0 * 2.0 - 1.0; // normalize to -1..1
+            let crushed = (sample * quant).round() / quant;
+
+            crushed.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    // ─── Window oscillator ────────────────────────────────────────────
+
+    fn tick_window(&mut self, freq: f32) -> f32 {
+        if let OscState::Window { phase, window_type, morph, formant } = &mut self.state {
+            let dt = freq / self.sample_rate;
+            *phase += dt;
+            if *phase >= 1.0 { *phase -= 1.0; }
+
+            // Formant control: scale the inner waveform independently
+            let formant_mult = 2.0_f32.powf(*formant / 12.0);
+            let inner_phase = (*phase * formant_mult).fract();
+
+            // Base waveform: saw
+            let base = 2.0 * inner_phase - 1.0;
+
+            // Window function (applied to the outer phase)
+            let wp = *phase;
+            let w0 = match *window_type {
+                0 => { // Triangle
+                    if wp < 0.5 { wp * 2.0 } else { 2.0 - wp * 2.0 }
+                }
+                1 => { // Cosine
+                    0.5 - 0.5 * (wp * TAU).cos()
+                }
+                2 => { // Half-sine
+                    (wp * PI).sin()
+                }
+                3 => { // Hann
+                    0.5 * (1.0 - (wp * TAU).cos())
+                }
+                _ => 1.0,
+            };
+
+            // Morphing: blend between current and next window
+            let next_type = (*window_type + 1) % 4;
+            let w1 = match next_type {
+                0 => { if wp < 0.5 { wp * 2.0 } else { 2.0 - wp * 2.0 } }
+                1 => { 0.5 - 0.5 * (wp * TAU).cos() }
+                2 => { (wp * PI).sin() }
+                3 => { 0.5 * (1.0 - (wp * TAU).cos()) }
+                _ => 1.0,
+            };
+
+            let window = w0 * (1.0 - *morph) + w1 * *morph;
+
+            (base * window).clamp(-1.0, 1.0)
         } else {
             0.0
         }

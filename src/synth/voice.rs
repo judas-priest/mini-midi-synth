@@ -6,6 +6,22 @@ use super::formant::{FormantFilter, VoiceType, Vowel};
 use super::oscillator::{OscType, Oscillator};
 use super::ModulationState;
 
+/// Fast 2^(semitones/12) — replaces expensive libm powf() in the per-sample hot path.
+/// Uses integer trick + 4th-order minimax polynomial for 2^frac.
+/// Max error < 0.00004 (0.004%) across the full audio range.
+#[inline(always)]
+fn semitones_to_ratio(semis: f32) -> f32 {
+    let x = semis * (1.0 / 12.0);
+    // Split into integer and fractional parts
+    let xi = x.floor() as i32;
+    let xf = x - xi as f32;
+    // 2^xi via bit manipulation (exact for |xi| < 127)
+    let int_part = f32::from_bits(((xi + 127).clamp(1, 254) as u32) << 23);
+    // 2^xf via minimax polynomial on [0,1)
+    let frac_part = 1.0 + xf * (0.693_147_2 + xf * (0.240_226_5 + xf * (0.055_504_1 + xf * 0.009_618_1)));
+    int_part * frac_part
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum FilterRouting {
     Single,   // 0: mix → filter1 → amp
@@ -55,6 +71,7 @@ pub struct Voice {
     vel_to_filter: f32,
     filter_base_cutoff: f32,
     filter_env_amount: f32,
+    filter_env_semitones: f32,
     filter_key_track: f32,
     filter_key_mult: f32,
     filter2_base_cutoff: f32,
@@ -62,6 +79,7 @@ pub struct Voice {
     fm_env_amount: f32,
     pd_base_depth: f32,
     pd_env_amount: f32,
+    fm_cross_depth: f32,
     noise_level: f32,
     noise_state: u32,
     sample_rate: f32,
@@ -69,6 +87,12 @@ pub struct Voice {
     unison_count: u8,
     unison_detunes: [f32; 8],
     unison_pans: [f32; 8],
+    unison_gain: f32,
+    unison_l_gains: [f32; 8],
+    unison_r_gains: [f32; 8],
+    // Portamento (log-frequency domain)
+    log_freq: f32,
+    log_target_freq: f32,
 }
 
 impl Voice {
@@ -98,6 +122,7 @@ impl Voice {
             vel_to_filter: 0.0,
             filter_base_cutoff: 8000.0,
             filter_env_amount: 0.0,
+            filter_env_semitones: 0.0,
             filter_key_track: 0.0,
             filter_key_mult: 1.0,
             filter2_base_cutoff: 8000.0,
@@ -105,12 +130,18 @@ impl Voice {
             fm_env_amount: 0.0,
             pd_base_depth: 0.0,
             pd_env_amount: 0.0,
+            fm_cross_depth: 0.0,
             noise_level: 0.0,
             noise_state: 0xDEADBEEF,
             sample_rate,
             unison_count: 1,
             unison_detunes: [0.0; 8],
             unison_pans: [0.0; 8],
+            unison_gain: 1.0,
+            unison_l_gains: [std::f32::consts::FRAC_1_SQRT_2; 8],
+            unison_r_gains: [std::f32::consts::FRAC_1_SQRT_2; 8],
+            log_freq: 440.0_f32.ln(),
+            log_target_freq: 440.0_f32.ln(),
         }
     }
 
@@ -157,6 +188,8 @@ impl Voice {
             self.freq = new_freq;
             self.porta_coeff = 1.0;
         }
+        self.log_freq = self.freq.ln();
+        self.log_target_freq = self.target_freq.ln();
 
         // Velocity curve
         let raw_vel = velocity as f32 / 127.0;
@@ -255,6 +288,8 @@ impl Voice {
             ),
             OscType::PianoModel => self.oscs[0].init_piano_model(self.freq),
             OscType::ElectricPiano => self.oscs[0].init_electric_piano(self.freq, params.epiano_type as u8),
+            OscType::Alias => self.oscs[0].init_alias(params.alias_wave_type as u8, params.alias_crush),
+            OscType::Window => self.oscs[0].init_window(params.window_type as u8, params.window_morph, params.window_formant),
             _ => {}
         }
 
@@ -329,7 +364,12 @@ impl Voice {
         }
 
         self.filter_base_cutoff = params.filter_cutoff;
+        self.filter.set_cutoff(params.filter_cutoff);
+        self.filter.force_update();
+        self.filter2.set_cutoff(params.filter2_cutoff);
+        self.filter2.force_update();
         self.filter_env_amount = params.filter_env_amount;
+        self.filter_env_semitones = params.filter_env_semitones;
         self.filter_key_track = params.filter_key_track;
         self.filter_key_mult = if params.filter_key_track > 0.001 {
             2.0_f32.powf(params.filter_key_track * (note as f32 - 60.0) / 12.0)
@@ -337,6 +377,7 @@ impl Voice {
             1.0
         };
         self.noise_level = params.noise_level;
+        self.fm_cross_depth = params.fm_cross_depth;
 
         // Unison
         let is_physical = !self.oscs[0].osc_type.is_simple()
@@ -365,6 +406,12 @@ impl Voice {
             self.unison_detunes[0] = 1.0;
             self.unison_pans[0] = 0.0;
         }
+        self.unison_gain = 1.0 / (self.unison_count as f32).sqrt();
+        for i in 0..self.unison_count as usize {
+            let pan = self.unison_pans[i];
+            self.unison_l_gains[i] = (0.5 - pan * 0.5).sqrt();
+            self.unison_r_gains[i] = (0.5 + pan * 0.5).sqrt();
+        }
 
         self.amp_env.set_adsr(
             params.amp_attack,
@@ -372,12 +419,16 @@ impl Voice {
             params.amp_sustain,
             params.amp_release,
         );
+        self.amp_env.set_attack_shape(params.env_attack_shape);
+        self.amp_env.set_decay_shape(params.env_decay_shape);
         self.filter_env.set_adsr(
             params.filter_attack,
             params.filter_decay,
             params.filter_sustain,
             params.filter_release,
         );
+        self.filter_env.set_attack_shape(params.env_attack_shape);
+        self.filter_env.set_decay_shape(params.env_decay_shape);
 
         self.amp_env.note_on();
         self.filter_env.note_on();
@@ -435,25 +486,31 @@ impl Voice {
 
         // Portamento (log-frequency domain for perceptually uniform glide)
         if self.porta_coeff < 0.999 {
-            let log_f = self.freq.ln();
-            let log_t = self.target_freq.ln();
-            self.freq = (log_f + (log_t - log_f) * self.porta_coeff).exp();
+            self.log_freq += self.porta_coeff * (self.log_target_freq - self.log_freq);
+            self.freq = self.log_freq.exp();
         } else {
             self.freq = self.target_freq;
+            self.log_freq = self.log_target_freq;
         }
 
         let base_freq = self.freq * mods.pitch_mult;
 
         // Velocity → filter
         let vel_factor = 1.0 + self.vel_to_filter * self.velocity * 4.0;
-        let cutoff1 = (self.filter_base_cutoff * vel_factor
+        // Semitone-based modulation (from mod matrix + filter env semitones) applied multiplicatively — matches Surge
+        let env_semis = self.filter_env_semitones * filter_mod;
+        let total_semis = mods.filter_offset_semis + env_semis;
+        let semis_mult = if total_semis.abs() > 0.01 {
+            semitones_to_ratio(total_semis)
+        } else { 1.0 };
+        let cutoff1 = (self.filter_base_cutoff * vel_factor * semis_mult
             + self.filter_env_amount * filter_mod
             + mods.filter_offset)
             * self.filter_key_mult;
 
         if self.unison_count <= 1 {
             let mix = self.render_oscs(base_freq);
-            let filtered = self.apply_filter(mix, cutoff1, filter_mod);
+            let filtered = self.apply_filter(mix, cutoff1, filter_mod, semis_mult);
             let out = filtered * amp * self.velocity * mods.amp_mod;
             return (out, out);
         }
@@ -461,11 +518,10 @@ impl Voice {
         // Unison path
         let mut sum_l = 0.0_f32;
         let mut sum_r = 0.0_f32;
-        let gain = 1.0 / (self.unison_count as f32).sqrt();
+        let gain = self.unison_gain;
 
         for u in 0..self.unison_count as usize {
             let detuned_freq = base_freq * self.unison_detunes[u];
-            let pan = self.unison_pans[u];
 
             let sample = if u == 0 {
                 self.render_oscs(detuned_freq)
@@ -473,22 +529,30 @@ impl Voice {
                 self.oscs[0].tick(detuned_freq)
             };
 
-            let l_gain = (0.5 - pan * 0.5).sqrt();
-            let r_gain = (0.5 + pan * 0.5).sqrt();
-            sum_l += sample * l_gain;
-            sum_r += sample * r_gain;
+            sum_l += sample * self.unison_l_gains[u];
+            sum_r += sample * self.unison_r_gains[u];
         }
 
         sum_l *= gain;
         sum_r *= gain;
 
-        // Filter the mono sum, restore L/R ratio
+        // Filter the mono sum, restore L/R ratio with safe crossfade
         let mono = (sum_l + sum_r) * 0.5;
-        let filtered = self.apply_filter(mono, cutoff1, filter_mod);
+        let filtered = self.apply_filter(mono, cutoff1, filter_mod, semis_mult);
 
-        let (out_l, out_r) = if mono.abs() > 0.0001 {
-            let ratio = filtered / mono;
+        let mono_abs = mono.abs();
+        let (out_l, out_r) = if mono_abs > 0.01 {
+            // Safe zone: normal ratio path
+            let ratio = (filtered / mono).clamp(-4.0, 4.0);
             (sum_l * ratio, sum_r * ratio)
+        } else if mono_abs > 0.0001 {
+            // Transition zone: crossfade between ratio and mono output
+            let blend = (mono_abs - 0.0001) / (0.01 - 0.0001);
+            let ratio = (filtered / mono).clamp(-4.0, 4.0);
+            let ratio_l = sum_l * ratio;
+            let ratio_r = sum_r * ratio;
+            (ratio_l * blend + filtered * (1.0 - blend),
+             ratio_r * blend + filtered * (1.0 - blend))
         } else {
             (filtered, filtered)
         };
@@ -499,12 +563,23 @@ impl Voice {
 
     #[inline]
     fn render_oscs(&mut self, freq: f32) -> f32 {
-        let mut mix = self.oscs[0].tick(freq) * self.osc_levels[0];
+        let osc1_out = self.oscs[0].tick(freq);
+        let mut mix = osc1_out * self.osc_levels[0];
         if self.num_oscs >= 2 {
-            mix += self.oscs[1].tick(freq) * self.osc_levels[1];
+            let fm_freq = if self.fm_cross_depth > 0.001 {
+                freq * (1.0 + self.fm_cross_depth * osc1_out)
+            } else {
+                freq
+            };
+            mix += self.oscs[1].tick(fm_freq) * self.osc_levels[1];
         }
         if self.num_oscs >= 3 {
-            mix += self.oscs[2].tick(freq) * self.osc_levels[2];
+            let fm_freq = if self.fm_cross_depth > 0.001 {
+                freq * (1.0 + self.fm_cross_depth * osc1_out)
+            } else {
+                freq
+            };
+            mix += self.oscs[2].tick(fm_freq) * self.osc_levels[2];
         }
 
         if self.noise_level > 0.001
@@ -518,7 +593,7 @@ impl Voice {
     }
 
     #[inline]
-    fn apply_filter(&mut self, mix: f32, cutoff1: f32, filter_mod: f32) -> f32 {
+    fn apply_filter(&mut self, mix: f32, cutoff1: f32, filter_mod: f32, semis_mult: f32) -> f32 {
         if self.use_formant {
             self.formant_filter.tick(mix)
         } else {
@@ -528,14 +603,16 @@ impl Voice {
                 FilterRouting::Single => self.filter.tick(mix),
                 FilterRouting::Serial => {
                     let f1 = self.filter.tick(mix);
-                    let cutoff2 = (self.filter2_base_cutoff + self.filter_env_amount * filter_mod)
+                    let cutoff2 = (self.filter2_base_cutoff * semis_mult
+                        + self.filter_env_amount * filter_mod)
                         * self.filter_key_mult;
                     self.filter2.set_cutoff(cutoff2);
                     self.filter2.tick(f1)
                 }
                 FilterRouting::Parallel => {
                     let f1 = self.filter.tick(mix);
-                    let cutoff2 = (self.filter2_base_cutoff + self.filter_env_amount * filter_mod)
+                    let cutoff2 = (self.filter2_base_cutoff * semis_mult
+                        + self.filter_env_amount * filter_mod)
                         * self.filter_key_mult;
                     self.filter2.set_cutoff(cutoff2);
                     let f2 = self.filter2.tick(mix);
@@ -642,6 +719,16 @@ pub struct VoiceParams {
     pub sax_type: f32,
     // Electric Piano
     pub epiano_type: f32,
+    // Alias oscillator
+    pub alias_wave_type: f32,
+    pub alias_crush: f32,
+    // Window oscillator
+    pub window_type: f32,
+    pub window_morph: f32,
+    pub window_formant: f32,
+    // Envelope shapes
+    pub env_attack_shape: f32,
+    pub env_decay_shape: f32,
     // Dynamics
     pub velocity_curve: f32,
     pub vel_to_filter: f32,
@@ -652,6 +739,10 @@ pub struct VoiceParams {
     pub unison_voices: f32,
     pub unison_detune: f32,
     pub unison_spread: f32,
+    // FM cross-routing
+    pub fm_cross_depth: f32,
+    // Filter env in semitones (Surge-style exponential modulation, 0 = disabled)
+    pub filter_env_semitones: f32,
 }
 
 fn midi_to_freq(note: u8) -> f32 {

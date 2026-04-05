@@ -17,12 +17,12 @@ impl Compressor {
         Self {
             envelope: 0.0,
             sample_rate,
-            threshold: -12.0,
-            ratio: 4.0,
-            attack: 0.005,
-            release: 0.1,
+            threshold: -6.0,
+            ratio: 20.0,
+            attack: 0.001,
+            release: 0.08,
             makeup: 0.0,
-            mix: 0.0,
+            mix: 1.0,
         }
     }
 

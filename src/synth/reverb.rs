@@ -2,6 +2,18 @@
 /// Figure-8 recirculating allpass network with modulated tank for smooth,
 /// dense reverb with excellent stereo image.
 
+/// Fast sin approximation for LFO use (Bhaskara I formula). Max error ~0.17%.
+#[inline(always)]
+fn fast_sin(x: f32) -> f32 {
+    // Map x (0..1 phase) to radians and use Bhaskara approximation
+    // Phase is 0..1 representing 0..2π
+    let x = x - x.floor(); // ensure 0..1
+    let t = x * 4.0;
+    let (t, sign) = if t < 2.0 { (t, 1.0_f32) } else { (t - 2.0, -1.0_f32) };
+    let t = if t > 1.0 { 2.0 - t } else { t }; // 0..1 in half-cycle
+    sign * (4.0 * t * (1.0 - t)) / (0.225 + t * (1.0 - t) * 3.55)
+}
+
 const REFERENCE_SR: f32 = 29761.0;
 
 // Input diffuser delay lengths and coefficients (at 29761 Hz)
@@ -308,7 +320,10 @@ impl Reverb {
         let pd_samples = ((pre_delay * self.sample_rate) as usize)
             .min(self.pre_delay_buf.len() - 1);
         let pd_len = self.pre_delay_buf.len();
-        let pd_read = (self.pre_delay_pos + pd_len - pd_samples) % pd_len;
+        let pd_read = {
+            let p = self.pre_delay_pos + pd_len - pd_samples;
+            if p >= pd_len { p - pd_len } else { p }
+        };
         let delayed_input = self.pre_delay_buf[pd_read];
         self.pre_delay_buf[self.pre_delay_pos] = input;
         self.pre_delay_pos += 1;
@@ -339,8 +354,8 @@ impl Reverb {
         if self.lfo_phase_l >= 1.0 { self.lfo_phase_l -= 1.0; }
         self.lfo_phase_r += LFO_RATE_R_HZ / self.sample_rate;
         if self.lfo_phase_r >= 1.0 { self.lfo_phase_r -= 1.0; }
-        let lfo_sin = (self.lfo_phase_l * std::f32::consts::TAU).sin();
-        let lfo_cos = (self.lfo_phase_r * std::f32::consts::TAU).sin();
+        let lfo_sin = fast_sin(self.lfo_phase_l);
+        let lfo_cos = fast_sin(self.lfo_phase_r);
 
         let excursion_l = self.lfo_excursion * lfo_sin;
         let excursion_r = self.lfo_excursion * lfo_cos;

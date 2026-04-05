@@ -89,7 +89,7 @@ fn main() -> Result<()> {
     let pad_state = midi::new_pad_state();
 
     let (midi_tx, midi_rx) = rtrb::RingBuffer::<synth::MidiEvent>::new(256);
-    let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(32);
+    let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(256);
     let (feedback_tx, feedback_rx) = rtrb::RingBuffer::<synth::ParamFeedback>::new(64);
 
     let midi_tx_shared: midi::SharedMidiTx = Arc::new(Mutex::new(midi_tx));
@@ -268,6 +268,7 @@ fn main() -> Result<()> {
         pitch_seq_rate: [2; 2], // 1/16
         pitch_seq_scale: [0; 2], // chromatic
         pitch_seq_swing: [0.0; 2],
+        preset_search: String::new(),
     };
 
     app.load_edited_params(0);

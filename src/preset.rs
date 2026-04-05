@@ -168,6 +168,8 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Iconic", "d50_pizzagogo", include_str!("../presets/d50_pizzagogo.json")),
     ("Iconic", "minimoog_lead", include_str!("../presets/minimoog_lead.json")),
     ("Iconic", "dx7_epiano", include_str!("../presets/dx7_epiano.json")),
+    ("Iconic", "trevor_horn_is_my_mother_110bpm", include_str!("../presets/trevor_horn_is_my_mother_110bpm.json")),
+    ("Iconic", "trevor_horn_is_my_mother_melody", include_str!("../presets/trevor_horn_is_my_mother_melody.json")),
     // Scooter style
     ("Scooter", "scooter_hyper_lead", include_str!("../presets/scooter_hyper_lead.json")),
     ("Scooter", "scooter_hoover", include_str!("../presets/scooter_hoover.json")),
@@ -476,16 +478,19 @@ pub fn list_performances() -> Vec<(String, PathBuf)> {
 // Set lists (ordered performance sequences)
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SetList {
     pub name: String,
     pub entries: Vec<String>, // performance names, in order
 }
 
+#[allow(dead_code)]
 fn setlist_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("mini_midi_synth").join("setlists"))
 }
 
+#[allow(dead_code)]
 pub fn save_setlist(setlist: &SetList) -> Result<PathBuf> {
     let dir = setlist_dir().context("Could not determine config directory")?;
     fs::create_dir_all(&dir)?;
@@ -496,12 +501,14 @@ pub fn save_setlist(setlist: &SetList) -> Result<PathBuf> {
     Ok(path)
 }
 
+#[allow(dead_code)]
 pub fn load_setlist(path: &std::path::Path) -> Result<SetList> {
     let contents = fs::read_to_string(path).context("Failed to read setlist file")?;
     let sl: SetList = serde_json::from_str(&contents).context("Failed to parse setlist JSON")?;
     Ok(sl)
 }
 
+#[allow(dead_code)]
 pub fn list_setlists() -> Vec<(String, PathBuf)> {
     let mut lists = Vec::new();
     if let Some(dir) = setlist_dir() {
