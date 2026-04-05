@@ -25,6 +25,7 @@ use crate::synth::looper::LooperAtoms;
 const VELOCITY_CURVE_NAMES: &[&str] = &["Linear", "Exponential", "Logarithmic", "Fixed"];
 const LFO_WAVEFORM_NAMES: &[&str] = &["Sine", "Triangle", "Square", "Sample & Hold", "Sawtooth", "Envelope", "Noise", "Smooth Noise"];
 const PORTAMENTO_MODE_NAMES: &[&str] = &["Off", "Always", "Legato"];
+const PLAY_MODE_NAMES: &[&str] = &["Poly", "Mono", "Mono-ST", "Latch", "Poly-High", "Poly-Low", "Piano"];
 
 const NOTE_NAMES: &[&str] = &[
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",

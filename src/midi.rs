@@ -105,6 +105,13 @@ pub fn connect(
                         MidiMessage::ChannelPressure(ch, pressure) => {
                             Some(MidiEvent::Aftertouch { channel: ch.index(), value: u8::from(pressure) as f32 / 127.0 })
                         }
+                        MidiMessage::PolyphonicKeyPressure(ch, note, pressure) => {
+                            Some(MidiEvent::PolyAftertouch {
+                                channel: ch.index(),
+                                note: u8::from(note),
+                                pressure: u8::from(pressure) as f32 / 127.0,
+                            })
+                        }
                         MidiMessage::SysEx(payload) => {
                             // SMK-37 Pro: F0 35 59 10 00 [7F|00] F7
                             // 7F = press, 00 = release

@@ -37,6 +37,7 @@ pub enum ModSource {
     LowestKey = 27,       // lowest held note, -1..+1 centered on C4
     HighestKey = 28,      // highest held note, -1..+1 centered on C4
     LatestKey = 29,       // most recent note, -1..+1 centered on C4
+    PolyAftertouch = 30,  // per-note pressure, 0..1
 }
 
 impl ModSource {
@@ -71,6 +72,7 @@ impl ModSource {
             27 => Self::LowestKey,
             28 => Self::HighestKey,
             29 => Self::LatestKey,
+            30 => Self::PolyAftertouch,
             _ => Self::None,
         }
     }
@@ -107,6 +109,7 @@ impl ModSource {
             Self::LowestKey => "Lowest Key",
             Self::HighestKey => "Highest Key",
             Self::LatestKey => "Latest Key",
+            Self::PolyAftertouch => "Poly AT",
         }
     }
 
@@ -121,6 +124,7 @@ impl ModSource {
         Self::Cc1, Self::Cc2, Self::Cc3, Self::Cc4,
         Self::Breath, Self::Expression, Self::SustainPedal,
         Self::LowestKey, Self::HighestKey, Self::LatestKey,
+        Self::PolyAftertouch,
     ];
 }
 
@@ -319,6 +323,7 @@ pub struct ModOffsets {
 }
 
 /// Sources snapshot — gathered once per tick, consumed by matrix evaluation.
+#[derive(Clone, Copy)]
 pub struct ModSources {
     pub lfo_outputs: [f32; 4],
     pub amp_env: f32,
@@ -339,9 +344,10 @@ pub struct ModSources {
     pub breath: f32,          // CC2, 0..1
     pub expression: f32,      // CC11, 0..1
     pub sustain_pedal: f32,   // CC64: 0.0 or 1.0
-    pub lowest_key: f32,      // lowest held note -1..+1 centered on C4
-    pub highest_key: f32,     // highest held note -1..+1 centered on C4
-    pub latest_key: f32,      // most recent note -1..+1 centered on C4
+    pub lowest_key: f32,       // lowest held note -1..+1 centered on C4
+    pub highest_key: f32,      // highest held note -1..+1 centered on C4
+    pub latest_key: f32,       // most recent note -1..+1 centered on C4
+    pub poly_aftertouch: f32,  // current voice's poly AT value, 0..1
 }
 
 const MOD_SOURCE_KEYS: [&str; MOD_SLOTS] = [
@@ -377,8 +383,8 @@ impl Default for ModMatrix {
 impl ModMatrix {
     /// Evaluate all active slots. Returns accumulated offsets.
     pub fn evaluate(&self, sources: &ModSources) -> ModOffsets {
-        // Precompute all source values indexed by ModSource discriminant (0..29)
-        let src_vals: [f32; 30] = [
+        // Precompute all source values indexed by ModSource discriminant (0..30)
+        let src_vals: [f32; 31] = [
             0.0,                        // None = 0
             sources.lfo_outputs[0],     // Lfo1 = 1
             sources.lfo_outputs[1],     // Lfo2 = 2
@@ -409,6 +415,7 @@ impl ModMatrix {
             sources.lowest_key,         // LowestKey = 27
             sources.highest_key,        // HighestKey = 28
             sources.latest_key,         // LatestKey = 29
+            sources.poly_aftertouch,    // PolyAftertouch = 30
         ];
 
         let mut offsets = ModOffsets::default();

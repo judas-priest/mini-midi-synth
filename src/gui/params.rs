@@ -9,7 +9,7 @@ use super::{
     BASS_STYLE_NAMES, BASS_PICKUP_NAMES, BOWED_BODY_NAMES, BRASS_BELL_NAMES,
     ACCORDION_REGISTER_NAMES, SAX_TYPE_NAMES, ALIAS_WAVE_NAMES, WINDOW_TYPE_NAMES,
     ENV_SHAPE_NAMES, FORMANT_VOICE_NAMES, FORMANT_VOWEL_NAMES, LFO_WAVEFORM_NAMES,
-    VELOCITY_CURVE_NAMES, PORTAMENTO_MODE_NAMES, REVERB_TYPE_NAMES, RING_MOD_SHAPE_NAMES,
+    VELOCITY_CURVE_NAMES, PORTAMENTO_MODE_NAMES, PLAY_MODE_NAMES, REVERB_TYPE_NAMES, RING_MOD_SHAPE_NAMES,
     WAVE_SHAPER_MODE_NAMES, LAYER_NAMES,
 };
 
@@ -908,6 +908,41 @@ impl App {
                 });
             }
         }
+
+        ui.add_space(6.0);
+
+        // Play Mode
+        ui.strong("Play Mode");
+        ui.horizontal(|ui| {
+            let mut pmode = self.layers[layer].edited_params.get("play_mode").copied().unwrap_or(0.0) as usize;
+            egui::ComboBox::from_id_salt(format!("play_mode_{layer}"))
+                .selected_text(*PLAY_MODE_NAMES.get(pmode).unwrap_or(&"Poly"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in PLAY_MODE_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut pmode, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("play_mode".into(), pmode as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+
+        // Sustain Mode
+        ui.horizontal(|ui| {
+            ui.label("Sustain:");
+            let mut smode = self.layers[layer].edited_params.get("sustain_mode").copied().unwrap_or(0.0) as usize;
+            let sustain_names = ["Hold All", "Release Others"];
+            egui::ComboBox::from_id_salt(format!("sustain_mode_{layer}"))
+                .selected_text(*sustain_names.get(smode).unwrap_or(&"Hold All"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in sustain_names.iter().enumerate() {
+                        if ui.selectable_value(&mut smode, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("sustain_mode".into(), smode as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
 
         ui.add_space(6.0);
 

@@ -99,6 +99,7 @@ pub enum MidiEvent {
     ModWheel { channel: u8, value: f32 },
     ProgramChange { channel: u8, program: u8 },
     Aftertouch { channel: u8, value: f32 },
+    PolyAftertouch { channel: u8, note: u8, pressure: f32 },
     ControlChange { channel: u8, cc: u8, value: u8 },
     /// SMK-37 Pro left/right button (SysEx F0 35 59 10 00 xx F7)
     Navigate { pressed: bool }, // true = press, false = release
@@ -286,6 +287,13 @@ struct Layer {
     sustain_pedal: f32,     // CC64: 0.0 or 1.0
     lowest_held: u8,        // lowest active note (default 60)
     highest_held: u8,       // highest active note (default 60)
+    // Cached mod sources (control-rate, with poly_aftertouch=0) for per-voice re-evaluation
+    cached_mod_sources: mod_matrix::ModSources,
+    poly_at_in_matrix: bool,  // true if any mod slot uses PolyAftertouch
+    // Cached control-rate base values for per-voice ModulationState reconstruction
+    cached_lfo_pitch_offset: f32,  // pitch_offset minus mod_offsets.pitch
+    cached_filter_offset: f32,
+    cached_lfo_amp_base: f32,      // (1 - lfo1_amp) * (1 - lfo2_amp) * seq_amp
 }
 
 impl Layer {
@@ -306,6 +314,20 @@ impl Layer {
             alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
+            cached_mod_sources: mod_matrix::ModSources {
+                lfo_outputs: [0.0; 4], amp_env: 0.0, filter_env: 0.0,
+                mseg_outputs: [0.0; 2], mod_wheel: 0.0, aftertouch: 0.0,
+                velocity: 1.0, key_track: 0.0, step_seq: 0.0,
+                random_bipolar: 0.0, random_unipolar: 0.5,
+                alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
+                pitch_bend: 0.0, cc: [0.0; 4], breath: 0.0, expression: 1.0,
+                sustain_pedal: 0.0, lowest_key: 0.0, highest_key: 0.0,
+                latest_key: 0.0, poly_aftertouch: 0.0,
+            },
+            poly_at_in_matrix: false,
+            cached_lfo_pitch_offset: 0.0,
+            cached_filter_offset: 0.0,
+            cached_lfo_amp_base: 1.0,
         }
     }
 
@@ -400,10 +422,41 @@ impl Layer {
             return;
         }
 
+        // Piano mode: if same key is already playing, don't retrigger — let it continue
+        if play_mode == 6 {
+            if self.voices.iter().any(|v| v.active && v.note == note) {
+                return;
+            }
+        }
+
         self.age_counter += 1;
         let age = self.age_counter;
         let idx = self.voices.iter().position(|v| !v.active).unwrap_or_else(|| {
-            self.voices.iter().enumerate().min_by_key(|(_, v)| v.age).map(|(i, _)| i).unwrap_or(0)
+            match play_mode {
+                4 => {
+                    // Poly-High: steal lowest note (highest note wins)
+                    self.voices.iter().enumerate()
+                        .filter(|(_, v)| v.active)
+                        .min_by_key(|(_, v)| v.note)
+                        .map(|(i, _)| i)
+                        .unwrap_or(0)
+                }
+                5 => {
+                    // Poly-Low: steal highest note (lowest note wins)
+                    self.voices.iter().enumerate()
+                        .filter(|(_, v)| v.active)
+                        .max_by_key(|(_, v)| v.note)
+                        .map(|(i, _)| i)
+                        .unwrap_or(0)
+                }
+                _ => {
+                    // Default (Poly / Piano / Latch): steal oldest voice
+                    self.voices.iter().enumerate()
+                        .min_by_key(|(_, v)| v.age)
+                        .map(|(i, _)| i)
+                        .unwrap_or(0)
+                }
+            }
         });
         let porta_mode = self.params.portamento_mode as u8;
         let prev_freq = match porta_mode {
@@ -516,9 +569,33 @@ impl Layer {
         }
 
         self.release_vel = 0.5; // default; would need MIDI note-off velocity from caller
-        for voice in &mut self.voices {
-            if voice.active && voice.note == note { voice.note_off(); }
+
+        if self.sustain_pedal > 0.5 {
+            match self.params.sustain_mode as u32 {
+                0 => {
+                    // Hold all notes — don't release while pedal is down
+                }
+                1 => {
+                    // Release note only if other active non-releasing notes are held
+                    let other_active = self.voices.iter()
+                        .any(|v| v.note != note && v.active && !v.is_releasing());
+                    if other_active {
+                        for voice in &mut self.voices {
+                            if voice.active && voice.note == note { voice.note_off(); }
+                        }
+                    }
+                    // else hold the note
+                }
+                _ => {
+                    // Default: hold all
+                }
+            }
+        } else {
+            for voice in &mut self.voices {
+                if voice.active && voice.note == note { voice.note_off(); }
+            }
         }
+
         // Release MSEGs when no active held notes remain
         if !self.has_active_notes() {
             self.mseg1_state.release();
@@ -559,7 +636,24 @@ impl Layer {
         if !self.enabled { return (0.0, 0.0); }
         let (mut out_l, mut out_r) = (0.0, 0.0);
         for voice in &mut self.voices {
-            let (l, r) = voice.tick(mods);
+            // Per-voice mod matrix re-evaluation when PolyAftertouch is used
+            let voice_mods = if self.poly_at_in_matrix && voice.active {
+                let mut src = self.cached_mod_sources;
+                src.poly_aftertouch = voice.poly_aftertouch;
+                let offsets = self.mod_matrix.evaluate(&src);
+                let pitch_offset = self.cached_lfo_pitch_offset + offsets.pitch;
+                let pitch_mult = if pitch_offset.abs() < 0.001 { 1.0 } else { (pitch_offset / 12.0).exp2() };
+                let amp_mod = self.cached_lfo_amp_base * (1.0 + offsets.amplitude).max(0.0);
+                ModulationState {
+                    pitch_mult,
+                    filter_offset: self.cached_filter_offset,
+                    filter_offset_semis: offsets.filter_cutoff,
+                    amp_mod: amp_mod.max(0.0),
+                }
+            } else {
+                *mods
+            };
+            let (l, r) = voice.tick(&voice_mods);
             out_l += l; out_r += r;
         }
         let vol = self.volume * self.volume; // perceptual curve (quadratic)
@@ -703,7 +797,8 @@ pub struct PresetParams {
     lfo3_waveform: f32, lfo3_rate: f32, lfo3_deform: f32,
     lfo4_waveform: f32, lfo4_rate: f32, lfo4_deform: f32,
     portamento_time: f32, portamento_mode: f32,
-    pub play_mode: f32,  // 0=poly, 1=mono, 2=mono-st, 3=latch
+    pub play_mode: f32,     // 0=poly, 1=mono, 2=mono-st, 3=latch
+    pub sustain_mode: f32,  // 0=hold all notes, 1=release if others held, 4=poly-high, 5=poly-low, 6=piano
     unison_voices: f32, unison_detune: f32, unison_spread: f32,
     // Envelope shapes
     env_attack_shape: f32, env_decay_shape: f32,
@@ -840,7 +935,7 @@ impl Default for PresetParams {
             lfo4_waveform: 0.0, lfo4_rate: 1.0, lfo4_deform: 0.0,
             alias_wave_type: 0.0, alias_crush: 8.0,
             window_type: 0.0, window_morph: 0.0, window_formant: 0.0,
-            portamento_time: 0.0, portamento_mode: 0.0, play_mode: 0.0,
+            portamento_time: 0.0, portamento_mode: 0.0, play_mode: 0.0, sustain_mode: 0.0,
             unison_voices: 1.0, unison_detune: 0.0, unison_spread: 0.0,
             chorus_mix: 0.0,
             delay_mix: 0.0, delay_time_l: 0.3, delay_time_r: 0.4,
@@ -958,7 +1053,7 @@ impl PresetParams {
             window_type: p("window_type", 0.0), window_morph: p("window_morph", 0.0),
             window_formant: p("window_formant", 0.0),
             portamento_time: p("portamento_time", 0.0), portamento_mode: p("portamento_mode", 0.0),
-            play_mode: p("play_mode", 0.0),
+            play_mode: p("play_mode", 0.0), sustain_mode: p("sustain_mode", 0.0),
             unison_voices: p("unison_voices", 1.0), unison_detune: p("unison_detune", 0.0),
             unison_spread: p("unison_spread", 0.0),
             chorus_mix: p("chorus_mix", 0.0),
@@ -1558,6 +1653,17 @@ impl SynthEngine {
             MidiEvent::Aftertouch { channel, value } => {
                 if channel != 9 { self.aftertouch = value; }
             }
+            MidiEvent::PolyAftertouch { channel, note, pressure } => {
+                if channel != 9 {
+                    for layer in &mut self.layers {
+                        for voice in &mut layer.voices {
+                            if voice.note == note && voice.active {
+                                voice.poly_aftertouch = pressure;
+                            }
+                        }
+                    }
+                }
+            }
             MidiEvent::ControlChange { cc, value, .. } => {
                 // Check assignable mod sources (CC1..CC4)
                 for i in 0..4 {
@@ -1570,7 +1676,19 @@ impl SynthEngine {
                     match cc {
                         2  => layer.breath = value as f32 / 127.0,
                         11 => layer.expression = value as f32 / 127.0,
-                        64 => layer.sustain_pedal = if value >= 64 { 1.0 } else { 0.0 },
+                        64 => {
+                            let was_held = layer.sustain_pedal > 0.5;
+                            layer.sustain_pedal = if value >= 64 { 1.0 } else { 0.0 };
+                            // When pedal is released, release any voices that were held by sustain
+                            if was_held && layer.sustain_pedal < 0.5 {
+                                for voice in &mut layer.voices {
+                                    // Release voices that are still active (held by sustain, not re-pressed)
+                                    if voice.active && !voice.is_releasing() {
+                                        voice.note_off();
+                                    }
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -1920,26 +2038,35 @@ impl SynthEngine {
                 lowest_key: (layer.lowest_held as f32 - 60.0) / 48.0,
                 highest_key: (layer.highest_held as f32 - 60.0) / 48.0,
                 latest_key: (layer.last_note as f32 - 60.0) / 48.0,
+                poly_aftertouch: 0.0, // per-voice; 0 for layer-level evaluation
             };
             let mod_offsets = layer.mod_matrix.evaluate(&mod_sources);
 
-            let pitch_offset = self.pitch_bend_semitones
+            let lfo_pitch_offset_base = self.pitch_bend_semitones
                 + lfo1_val * layer.params.lfo_pitch_depth * 2.0
                 + lfo2_val * layer.params.lfo2_pitch_depth * 2.0
                 + self.mod_wheel * 0.5 * vibrato_val
                 + self.aftertouch_smooth * 0.3 * lfo1_val
-                + seq_pitch
-                + mod_offsets.pitch;
+                + seq_pitch;
+            let pitch_offset = lfo_pitch_offset_base + mod_offsets.pitch;
             let pitch_mult = if pitch_offset.abs() < 0.001 { 1.0 } else { (pitch_offset / 12.0).exp2() };
             // filter_offset is Hz-only (LFO direct routing, aftertouch)
             // filter_offset_semis is exponential (mod matrix)
             let filter_offset = lfo1_val * layer.params.lfo_filter_depth * 4000.0
                 + lfo2_val * layer.params.lfo2_filter_depth * 4000.0
                 + self.aftertouch_smooth * 2000.0;
-            let amp_mod = (1.0 - layer.params.lfo_amp_depth * 0.5 * (1.0 - lfo1_val))
+            let lfo_amp_base = (1.0 - layer.params.lfo_amp_depth * 0.5 * (1.0 - lfo1_val))
                 * (1.0 - layer.params.lfo2_amp_depth * 0.5 * (1.0 - lfo2_val))
-                * seq_amp
-                * (1.0 + mod_offsets.amplitude).max(0.0);
+                * seq_amp;
+            let amp_mod = lfo_amp_base * (1.0 + mod_offsets.amplitude).max(0.0);
+
+            // Cache mod sources and base values for per-voice poly AT re-evaluation
+            layer.poly_at_in_matrix = layer.mod_matrix.slots.iter()
+                .any(|s| s.source == mod_matrix::ModSource::PolyAftertouch && s.depth.abs() > 0.001);
+            layer.cached_mod_sources = mod_sources;
+            layer.cached_lfo_pitch_offset = lfo_pitch_offset_base;
+            layer.cached_filter_offset = filter_offset;
+            layer.cached_lfo_amp_base = lfo_amp_base;
 
             layer_mods[li] = ModulationState {
                 pitch_mult, filter_offset, filter_offset_semis: mod_offsets.filter_cutoff, amp_mod,

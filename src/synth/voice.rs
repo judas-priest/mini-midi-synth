@@ -55,6 +55,7 @@ pub struct Voice {
     pub active: bool,
     /// Monotonic counter set at note-on for voice-stealing (oldest first).
     pub age: u64,
+    pub poly_aftertouch: f32,  // 0..1, updated per-note via MIDI 0xA0
     oscs: [Oscillator; 3],
     num_oscs: u8,
     osc_levels: [f32; 3],
@@ -108,6 +109,7 @@ impl Voice {
             note: 0,
             active: false,
             age: 0,
+            poly_aftertouch: 0.0,
             oscs: [
                 Oscillator::new(sample_rate),
                 Oscillator::new(sample_rate),
