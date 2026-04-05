@@ -1,0 +1,25 @@
+{
+  "name": "SVF Morph Sweep",
+  "params": {
+    "osc_type": 3.0,
+    "filter_type": 36.0,
+    "filter_cutoff": 2000.0,
+    "filter_resonance": 0.35,
+    "svf_morph": 0.0,
+    "filter_key_track": 0.4,
+    "amp_attack": 1.2,
+    "amp_decay": 0.3,
+    "amp_sustain": 0.9,
+    "amp_release": 2.0,
+    "lfo2_rate": 0.15,
+    "lfo2_filter_depth": 0.9,
+    "lfo2_waveform": 0.0,
+    "lfo2_retrigger": 0.0,
+    "detune": 0.15,
+    "reverb2_decay": 4.0,
+    "reverb2_damping": 0.3,
+    "reverb2_size": 0.7,
+    "reverb2_mix": 0.3,
+    "master_volume": 0.7
+  }
+}

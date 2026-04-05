@@ -77,6 +77,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Strings", "kalimba", include_str!("../presets/kalimba.json")),
     ("Strings", "clavinet", include_str!("../presets/clavinet.json")),
     ("Strings", "clavinet_v2",   include_str!("../presets/clavinet_v2.json")),
+    ("Strings", "vinyl_strings", include_str!("../presets/vinyl_strings.json")),
     // Woodwind
     ("Wind", "flute", include_str!("../presets/flute.json")),
     ("Wind", "flute_v2",     include_str!("../presets/flute_v2.json")),
@@ -110,6 +111,8 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Bass", "reese_bass_v3",    include_str!("../presets/reese_bass_v3.json")),
     ("Bass", "fm_bass", include_str!("../presets/fm_bass.json")),
     ("Bass", "wobble_bass", include_str!("../presets/wobble_bass.json")),
+    ("Bass", "fuzz_bass", include_str!("../presets/fuzz_bass.json")),
+    ("Bass", "pressure_bass", include_str!("../presets/pressure_bass.json")),
     // Bass Guitar
     ("Bass Guitar", "bass_finger", include_str!("../presets/bass_finger.json")),
     ("Bass Guitar", "bass_finger_v2",  include_str!("../presets/bass_finger_v2.json")),
@@ -127,6 +130,8 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Lead", "hoover_lead", include_str!("../presets/hoover_lead.json")),
     ("Lead", "hoover_lead_v2",   include_str!("../presets/hoover_lead_v2.json")),
     ("Lead", "treemonster_lead", include_str!("../presets/treemonster_lead.json")),
+    ("Lead", "vintage_ladder_lead", include_str!("../presets/vintage_ladder_lead.json")),
+    ("Lead", "westcoast_lead", include_str!("../presets/westcoast_lead.json")),
     // Pad
     ("Pad", "warm_pad", include_str!("../presets/warm_pad.json")),
     ("Pad", "warm_pad_v2",       include_str!("../presets/warm_pad_v2.json")),
@@ -143,6 +148,9 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Pad", "ethereal_pad_v2",   include_str!("../presets/ethereal_pad_v2.json")),
     ("Pad", "granular_drone",    include_str!("../presets/granular_drone.json")),
     ("Pad", "lofi_digital_pad",  include_str!("../presets/lofi_digital_pad.json")),
+    ("Pad", "lofi_tape_pad",     include_str!("../presets/lofi_tape_pad.json")),
+    ("Pad", "svf_morph_sweep",   include_str!("../presets/svf_morph_sweep.json")),
+    ("Pad", "harmonic_shimmer_pad", include_str!("../presets/harmonic_shimmer_pad.json")),
     // FX / Stab
     ("FX", "synth_stab", include_str!("../presets/synth_stab.json")),
     ("FX", "noise_sweep", include_str!("../presets/noise_sweep.json")),
