@@ -1,0 +1,31 @@
+{
+  "name": "Male Choir v2 (Ensemble)",
+  "params": {
+    "osc_type": 1.0,
+    "osc_count": 3.0,
+    "osc1_level": 0.45,
+    "osc2_type": 1.0,
+    "osc2_detune": 0.015,
+    "osc2_level": 0.35,
+    "osc3_type": 1.0,
+    "osc3_detune": -0.015,
+    "osc3_level": 0.35,
+    "filter_type": 3.0,
+    "formant_voice": 0.0,
+    "formant_vowel": 0.0,
+    "noise_level": 0.06,
+    "amp_attack": 0.5,
+    "amp_decay": 0.4,
+    "amp_sustain": 0.85,
+    "amp_release": 1.2,
+    "filter_attack": 0.4,
+    "filter_decay": 0.8,
+    "filter_sustain": 0.3,
+    "filter_release": 1.0,
+    "chorus_mix": 0.20,
+    "ensemble_depth": 0.5,
+    "ensemble_rate": 0.25,
+    "ensemble_mix": 0.30,
+    "master_volume": 0.55
+  }
+}
