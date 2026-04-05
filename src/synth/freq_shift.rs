@@ -42,6 +42,10 @@ pub struct FreqShift {
     // Quadrature oscillator state
     osc_re: f32,
     osc_im: f32,
+    // Cached phasor rotation coefficients
+    phasor_cos: f32,
+    phasor_sin: f32,
+    prev_shift_hz: f32,
     // Hilbert approximation allpass
     allpass_l: QuadAllpass,
     allpass_r: QuadAllpass,
@@ -54,6 +58,7 @@ pub struct FreqShift {
     dc_r: f32,
     dc_prev_l: f32,
     dc_prev_r: f32,
+    dc_coeff: f32,
 }
 
 impl FreqShift {
@@ -61,12 +66,15 @@ impl FreqShift {
         Self {
             sample_rate,
             osc_re: 1.0, osc_im: 0.0,
+            phasor_cos: 1.0, phasor_sin: 0.0,
+            prev_shift_hz: f32::NAN,
             allpass_l: QuadAllpass::new(),
             allpass_r: QuadAllpass::new(),
             delay_buf_l: [0.0; 256],
             delay_buf_r: [0.0; 256],
             delay_pos: 0,
             dc_l: 0.0, dc_r: 0.0, dc_prev_l: 0.0, dc_prev_r: 0.0,
+            dc_coeff: 1.0 - (PI * 35.0 / sample_rate),
         }
     }
 
@@ -80,6 +88,8 @@ impl FreqShift {
         self.delay_buf_r = [0.0; 256];
         self.dc_l = 0.0; self.dc_r = 0.0;
         self.dc_prev_l = 0.0; self.dc_prev_r = 0.0;
+        self.dc_coeff = 1.0 - (PI * 35.0 / sr);
+        self.prev_shift_hz = f32::NAN;
     }
 
     #[inline]
@@ -103,9 +113,14 @@ impl FreqShift {
         let sig_r = in_r + sat(fb_r);
 
         // Quadrature oscillator: complex rotation
-        let omega = TAU * shift_hz / self.sample_rate;
-        let cos_w = omega.cos();
-        let sin_w = omega.sin();
+        if shift_hz != self.prev_shift_hz {
+            let omega = TAU * shift_hz / self.sample_rate;
+            self.phasor_cos = omega.cos();
+            self.phasor_sin = omega.sin();
+            self.prev_shift_hz = shift_hz;
+        }
+        let cos_w = self.phasor_cos;
+        let sin_w = self.phasor_sin;
         let new_re = self.osc_re * cos_w - self.osc_im * sin_w;
         let new_im = self.osc_re * sin_w + self.osc_im * cos_w;
         self.osc_re = new_re;
@@ -134,7 +149,7 @@ impl FreqShift {
         self.delay_pos = (self.delay_pos + 1) & 255;
 
         // DC blocker (35 Hz HP)
-        let dc_coeff = 1.0 - (PI * 35.0 / self.sample_rate);
+        let dc_coeff = self.dc_coeff;
         let out_l = wet_l - self.dc_prev_l + dc_coeff * self.dc_l;
         self.dc_prev_l = wet_l;
         self.dc_l = out_l;

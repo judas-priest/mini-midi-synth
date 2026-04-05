@@ -237,7 +237,7 @@ impl Filter {
 
     pub fn tick(&mut self, input: f32) -> f32 {
         self.coeff_counter = self.coeff_counter.wrapping_add(1);
-        if self.dirty && (self.coeff_counter & 31 == 0) {
+        if (self.coeff_counter & 31 == 0) && self.dirty {
             self.update_coefficients();
         }
 
@@ -382,6 +382,7 @@ impl Filter {
         let tune = self.diode_tune;
         let res = self.diode_res;
         let gain_comp = self.diode_gain_comp;
+        let g = tune / (1.0 + tune); // pre-computed integrator gain
 
         // 2x oversampling for the nonlinearities
         for _ in 0..2 {
@@ -396,7 +397,6 @@ impl Filter {
 
             // 4 cascaded stages with diode nonlinearity between each
             // Each stage: one-pole lowpass with saturation
-            let g = tune / (1.0 + tune); // pre-computed integrator gain
 
             self.diode_stage[0] += g * (diode_clip(x - self.diode_stage[0]));
             self.diode_stage[1] += g * (diode_clip(self.diode_stage[0] - self.diode_stage[1]));

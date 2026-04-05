@@ -176,6 +176,25 @@ pub struct PitchSequencer {
     step_atom: Arc<AtomicU8>,
 }
 
+const SEQ_PITCH_KEYS: [&str; 16] = [
+    "seq_0_pitch","seq_1_pitch","seq_2_pitch","seq_3_pitch",
+    "seq_4_pitch","seq_5_pitch","seq_6_pitch","seq_7_pitch",
+    "seq_8_pitch","seq_9_pitch","seq_10_pitch","seq_11_pitch",
+    "seq_12_pitch","seq_13_pitch","seq_14_pitch","seq_15_pitch",
+];
+const SEQ_GATE_KEYS: [&str; 16] = [
+    "seq_0_gate","seq_1_gate","seq_2_gate","seq_3_gate",
+    "seq_4_gate","seq_5_gate","seq_6_gate","seq_7_gate",
+    "seq_8_gate","seq_9_gate","seq_10_gate","seq_11_gate",
+    "seq_12_gate","seq_13_gate","seq_14_gate","seq_15_gate",
+];
+const SEQ_VEL_KEYS: [&str; 16] = [
+    "seq_0_vel","seq_1_vel","seq_2_vel","seq_3_vel",
+    "seq_4_vel","seq_5_vel","seq_6_vel","seq_7_vel",
+    "seq_8_vel","seq_9_vel","seq_10_vel","seq_11_vel",
+    "seq_12_vel","seq_13_vel","seq_14_vel","seq_15_vel",
+];
+
 impl PitchSequencer {
     pub fn new() -> Self {
         Self {
@@ -282,12 +301,11 @@ impl PitchSequencer {
         );
         self.swing = params.get("seq_swing").copied().unwrap_or(0.0);
         for i in 0..MAX_STEPS {
-            let prefix = format!("seq_{}_", i);
-            self.steps[i].pitch = params.get(&format!("{prefix}pitch"))
+            self.steps[i].pitch = params.get(SEQ_PITCH_KEYS[i])
                 .copied().unwrap_or(0.0) as i8;
-            self.steps[i].gate = params.get(&format!("{prefix}gate"))
+            self.steps[i].gate = params.get(SEQ_GATE_KEYS[i])
                 .copied().unwrap_or(1.0) > 0.5;
-            self.steps[i].velocity = params.get(&format!("{prefix}vel"))
+            self.steps[i].velocity = params.get(SEQ_VEL_KEYS[i])
                 .copied().unwrap_or(0.0) as u8;
         }
     }
@@ -301,10 +319,9 @@ impl PitchSequencer {
         params.insert("seq_scale".into(), self.scale.index() as f32);
         params.insert("seq_swing".into(), self.swing);
         for i in 0..MAX_STEPS {
-            let prefix = format!("seq_{}_", i);
-            params.insert(format!("{prefix}pitch"), self.steps[i].pitch as f32);
-            params.insert(format!("{prefix}gate"), if self.steps[i].gate { 1.0 } else { 0.0 });
-            params.insert(format!("{prefix}vel"), self.steps[i].velocity as f32);
+            params.insert(SEQ_PITCH_KEYS[i].to_string(), self.steps[i].pitch as f32);
+            params.insert(SEQ_GATE_KEYS[i].to_string(), if self.steps[i].gate { 1.0 } else { 0.0 });
+            params.insert(SEQ_VEL_KEYS[i].to_string(), self.steps[i].velocity as f32);
         }
     }
 }

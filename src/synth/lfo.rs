@@ -1,5 +1,21 @@
 /// LFO oscillator with multiple waveforms and deform parameter.
 
+use std::sync::OnceLock;
+
+static SINE_TABLE: OnceLock<Box<[f32; 2048]>> = OnceLock::new();
+
+fn sine_lut(phase: f32) -> f32 {
+    let table = SINE_TABLE.get_or_init(|| {
+        let mut t = Box::new([0.0f32; 2048]);
+        for i in 0..2048 {
+            t[i] = (i as f32 / 2048.0 * std::f32::consts::TAU).sin();
+        }
+        t
+    });
+    let idx = (phase * 2048.0) as usize & 2047;
+    table[idx]
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LfoWaveform {
     Sine,
@@ -84,7 +100,7 @@ impl Lfo {
         } else {
             // bend2: x += 4.5*a*sin(2π*x) / (2π) (sine modulation)
             let tau = std::f32::consts::TAU;
-            (x + 4.5 * a * (tau * x).sin() / tau).clamp(-1.0, 1.0)
+            (x + 4.5 * a * sine_lut(x.rem_euclid(1.0)) / tau).clamp(-1.0, 1.0)
         }
     }
 
@@ -103,7 +119,7 @@ impl Lfo {
         }
 
         let raw = match waveform {
-            LfoWaveform::Sine => (self.phase * std::f32::consts::TAU).sin(),
+            LfoWaveform::Sine => sine_lut(self.phase),
             LfoWaveform::Triangle => {
                 if self.phase < 0.5 {
                     4.0 * self.phase - 1.0

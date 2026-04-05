@@ -14,6 +14,7 @@ pub struct StereoDelay {
     /// Smoothed delay times to prevent clicks on time changes
     smooth_delay_l: f32,
     smooth_delay_r: f32,
+    smooth_coeff: f32,
 }
 
 impl StereoDelay {
@@ -27,6 +28,7 @@ impl StereoDelay {
             lp_state_r: 0.0,
             smooth_delay_l: 0.0,
             smooth_delay_r: 0.0,
+            smooth_coeff: 1.0 - (-1.0_f32 / (0.020 * sample_rate)).exp(),
         }
     }
 
@@ -39,6 +41,7 @@ impl StereoDelay {
         self.lp_state_r = 0.0;
         self.smooth_delay_l = 0.0;
         self.smooth_delay_r = 0.0;
+        self.smooth_coeff = 1.0 - (-1.0_f32 / (0.020 * sr)).exp();
     }
 
     /// Process one stereo sample.
@@ -66,7 +69,7 @@ impl StereoDelay {
 
         // Smooth delay time with one-pole filter to prevent clicks on time changes
         // τ=20ms, normalized by sample rate
-        let smooth_coeff = 1.0 - (-1.0_f32 / (0.020 * self.sample_rate)).exp();
+        let smooth_coeff = self.smooth_coeff;
         if self.smooth_delay_l == 0.0 {
             self.smooth_delay_l = target_delay_l;
             self.smooth_delay_r = target_delay_r;

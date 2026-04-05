@@ -241,6 +241,25 @@ pub struct ModSources {
     pub step_seq: f32,    // -1..+1 normalized step value
 }
 
+const MOD_SOURCE_KEYS: [&str; MOD_SLOTS] = [
+    "mod_0_source","mod_1_source","mod_2_source","mod_3_source",
+    "mod_4_source","mod_5_source","mod_6_source","mod_7_source",
+    "mod_8_source","mod_9_source","mod_10_source","mod_11_source",
+    "mod_12_source","mod_13_source","mod_14_source","mod_15_source",
+];
+const MOD_DEST_KEYS: [&str; MOD_SLOTS] = [
+    "mod_0_dest","mod_1_dest","mod_2_dest","mod_3_dest",
+    "mod_4_dest","mod_5_dest","mod_6_dest","mod_7_dest",
+    "mod_8_dest","mod_9_dest","mod_10_dest","mod_11_dest",
+    "mod_12_dest","mod_13_dest","mod_14_dest","mod_15_dest",
+];
+const MOD_DEPTH_KEYS: [&str; MOD_SLOTS] = [
+    "mod_0_depth","mod_1_depth","mod_2_depth","mod_3_depth",
+    "mod_4_depth","mod_5_depth","mod_6_depth","mod_7_depth",
+    "mod_8_depth","mod_9_depth","mod_10_depth","mod_11_depth",
+    "mod_12_depth","mod_13_depth","mod_14_depth","mod_15_depth",
+];
+
 #[derive(Clone)]
 pub struct ModMatrix {
     pub slots: [ModSlot; MOD_SLOTS],
@@ -255,6 +274,24 @@ impl Default for ModMatrix {
 impl ModMatrix {
     /// Evaluate all active slots. Returns accumulated offsets.
     pub fn evaluate(&self, sources: &ModSources) -> ModOffsets {
+        // Precompute all source values indexed by ModSource discriminant (0..13)
+        let src_vals: [f32; 14] = [
+            0.0,                      // None = 0
+            sources.lfo_outputs[0],   // Lfo1 = 1
+            sources.lfo_outputs[1],   // Lfo2 = 2
+            sources.lfo_outputs[2],   // Lfo3 = 3
+            sources.lfo_outputs[3],   // Lfo4 = 4
+            sources.amp_env,          // AmpEnv = 5
+            sources.filter_env,       // FilterEnv = 6
+            sources.mseg_outputs[0],  // Mseg1 = 7
+            sources.mseg_outputs[1],  // Mseg2 = 8
+            sources.mod_wheel,        // ModWheel = 9
+            sources.aftertouch,       // Aftertouch = 10
+            sources.velocity,         // Velocity = 11
+            sources.key_track,        // KeyTrack = 12
+            sources.step_seq,         // StepSeq = 13
+        ];
+
         let mut offsets = ModOffsets::default();
 
         for slot in &self.slots {
@@ -262,22 +299,7 @@ impl ModMatrix {
                 continue;
             }
 
-            let source_val = match slot.source {
-                ModSource::None => 0.0,
-                ModSource::Lfo1 => sources.lfo_outputs[0],
-                ModSource::Lfo2 => sources.lfo_outputs[1],
-                ModSource::Lfo3 => sources.lfo_outputs[2],
-                ModSource::Lfo4 => sources.lfo_outputs[3],
-                ModSource::AmpEnv => sources.amp_env,
-                ModSource::FilterEnv => sources.filter_env,
-                ModSource::Mseg1 => sources.mseg_outputs[0],
-                ModSource::Mseg2 => sources.mseg_outputs[1],
-                ModSource::ModWheel => sources.mod_wheel,
-                ModSource::Aftertouch => sources.aftertouch,
-                ModSource::Velocity => sources.velocity,
-                ModSource::KeyTrack => sources.key_track,
-                ModSource::StepSeq => sources.step_seq,
-            };
+            let source_val = src_vals[slot.source as usize];
 
             let offset = source_val * slot.depth * slot.dest.range();
 
@@ -314,10 +336,9 @@ impl ModMatrix {
     /// Load from flat param map (preset serialization).
     pub fn load_from_params(&mut self, params: &std::collections::BTreeMap<String, f32>) {
         for i in 0..MOD_SLOTS {
-            let prefix = format!("mod_{i}_");
-            let src = params.get(&format!("{prefix}source")).copied().unwrap_or(0.0);
-            let dst = params.get(&format!("{prefix}dest")).copied().unwrap_or(0.0);
-            let depth = params.get(&format!("{prefix}depth")).copied().unwrap_or(0.0);
+            let src = params.get(MOD_SOURCE_KEYS[i]).copied().unwrap_or(0.0);
+            let dst = params.get(MOD_DEST_KEYS[i]).copied().unwrap_or(0.0);
+            let depth = params.get(MOD_DEPTH_KEYS[i]).copied().unwrap_or(0.0);
             self.slots[i] = ModSlot {
                 source: ModSource::from_param(src),
                 dest: ModDest::from_param(dst),
@@ -330,11 +351,10 @@ impl ModMatrix {
     #[allow(dead_code)]
     pub fn save_to_params(&self, params: &mut std::collections::BTreeMap<String, f32>) {
         for (i, slot) in self.slots.iter().enumerate() {
-            let prefix = format!("mod_{i}_");
             if slot.source != ModSource::None && slot.dest != ModDest::None {
-                params.insert(format!("{prefix}source"), slot.source as u8 as f32);
-                params.insert(format!("{prefix}dest"), slot.dest as u8 as f32);
-                params.insert(format!("{prefix}depth"), slot.depth);
+                params.insert(MOD_SOURCE_KEYS[i].to_string(), slot.source as u8 as f32);
+                params.insert(MOD_DEST_KEYS[i].to_string(), slot.dest as u8 as f32);
+                params.insert(MOD_DEPTH_KEYS[i].to_string(), slot.depth);
             }
         }
     }

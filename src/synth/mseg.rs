@@ -98,6 +98,8 @@ pub struct MsegState {
     gated: bool,
     noise_state: u32,    // for Brownian mode
     sample_rate: f32,
+    cached_exp_denom: f32, // (a.exp() - 1.0) for current segment's cpv
+    cached_cpv: f32,       // cpv at time of last cache update
 }
 
 impl MsegState {
@@ -106,6 +108,15 @@ impl MsegState {
             phase: 0.0, current_seg: 0, output: 0.0,
             playing: false, gated: false,
             noise_state: 0xDEADBEEF, sample_rate,
+            cached_exp_denom: 1.0, cached_cpv: f32::NAN,
+        }
+    }
+
+    fn update_curve_cache(&mut self, seg: &MsegSegment) {
+        if seg.cpv != self.cached_cpv || self.cached_cpv.is_nan() {
+            self.cached_cpv = seg.cpv;
+            let a = seg.cpv * 4.0;
+            self.cached_exp_denom = if a.abs() > 0.04 { a.exp() - 1.0 } else { 1.0 };
         }
     }
 
@@ -125,7 +136,7 @@ impl MsegState {
     }
 
     /// Evaluate the curve at a fractional position within a segment.
-    fn eval_curve(frac: f32, seg: &MsegSegment, noise: &mut u32) -> f32 {
+    fn eval_curve(frac: f32, seg: &MsegSegment, noise: &mut u32, exp_denom: f32) -> f32 {
         let v0 = seg.v0;
         let v1 = seg.v1;
         let cpv = seg.cpv;
@@ -137,7 +148,7 @@ impl MsegState {
                 // Linear with deform: exponential warp
                 let t = if cpv.abs() > 0.01 {
                     let a = cpv * 4.0;
-                    ((a * t).exp() - 1.0) / (a.exp() - 1.0)
+                    ((a * t).exp() - 1.0) / exp_denom
                 } else {
                     t
                 };
@@ -189,7 +200,9 @@ impl MsegState {
         let dur = seg.duration.max(0.001) as f64;
         let frac = (self.phase / dur) as f32;
 
-        self.output = Self::eval_curve(frac.min(1.0), seg, &mut self.noise_state).clamp(-1.0, 1.0);
+        self.update_curve_cache(seg);
+        let exp_denom = self.cached_exp_denom;
+        self.output = Self::eval_curve(frac.min(1.0), seg, &mut self.noise_state, exp_denom).clamp(-1.0, 1.0);
 
         // Advance time
         self.phase += 1.0 / self.sample_rate as f64;
