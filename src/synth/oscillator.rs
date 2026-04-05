@@ -1503,7 +1503,23 @@ impl Oscillator {
     }
 
     /// Initialize brass lip reed + bore waveguide.
+    ///
+    /// Algorithm: Perry Cook STK Brass.cpp (1995-2023).
+    /// Key: BiQuad resonator at playing frequency (r=0.997), output SQUARED → rich harmonics.
+    /// Bore = 2*period delay (lips lock onto 2nd harmonic of bore, like real brass).
+    ///
     /// bell_type: 0=Trumpet, 1=French Horn, 2=Trombone, 3=Tuba
+    ///
+    /// Field repurposing:
+    ///   lip_x        → bq_y1      BiQuad output y[n-1]
+    ///   lip_v        → bq_y2      BiQuad output y[n-2]
+    ///   lip_freq     → bq_a1      -2*r*cos(2π*f/sr)
+    ///   lip_damping  → bq_a2      r² = 0.994009
+    ///   lip_mass_inv → bq_b0      gain (0.03, STK default)
+    ///   bell_lp_state→ dc_x1      DC blocker: prev input
+    ///   bell_hp_state→ dc_y1      DC blocker: prev output
+    ///   bell_cutoff  → bell_a1    bell post-LP coefficient (shapes timbre per instrument)
+    ///   bore_lp_state→ bell_state bell post-LP filter state
     pub fn init_brass(
         &mut self,
         freq: f32,
@@ -1513,125 +1529,120 @@ impl Oscillator {
         bell_type: f32,
     ) {
         self.reclaim_buffers();
-        let sample_rate = self.sample_rate;
-        let delay_total = sample_rate / freq;
-        let n = (delay_total as usize).max(2);
+        let sr = self.sample_rate;
 
+        // Bore: 2-period delay line (STK formula: sr/f * 2.0 + 3.0)
+        let n = ((sr / freq) * 2.0 + 3.0).round() as usize;
+        let n = n.max(8);
+
+        // Lip BiQuad resonator: 2 poles at lip frequency with r=0.997 (very high Q)
+        // Tuned slightly above fundamental; lip_tension shifts it.
+        let lip_freq_hz = freq * (0.95 + lip_tension * 0.10);
+        let r = 0.997_f32;
+        let bq_a1 = -2.0 * r * (TAU * lip_freq_hz / sr).cos();
+        let bq_a2 = r * r;
+        let bq_b0 = 0.03_f32;  // STK: lipFilter_.setGain(0.03)
+
+        // Blowing pressure → STK maxPressure
+        let max_pressure = (0.55 + blowing_pressure * 0.40) * velocity.clamp(0.0, 1.0);
+
+        // Bell post-LP: one-pole LP that shapes radiated timbre per instrument
         let bell_i = bell_type as u32;
-
-        // Lip resonance frequency: slightly above playing frequency, modulated by tension
-        let lip_freq = freq * (0.8 + lip_tension * 0.4);
-        let lip_damping = 0.02 + (1.0 - lip_tension) * 0.08;
-
-        // Bell cutoff: smaller bell = higher cutoff (brighter)
-        let bell_cutoff = match bell_i {
-            0 => 2500.0, // Trumpet
-            1 => 1500.0, // French Horn
-            2 => 2000.0, // Trombone
-            _ => 1000.0, // Tuba
+        let bell_fc: f32 = match bell_i {
+            0 => 7000.0, // Trumpet — bright, cutting
+            1 => 3500.0, // French Horn — warm, dark
+            2 => 5000.0, // Trombone — broad, mid-bright
+            _ => 2200.0, // Tuba — very dark, tubby
         };
+        let bell_a1 = 1.0 - (-TAU * bell_fc / sr).exp();
 
-        // Pressure must be scaled to compete with spring force (omega²).
-        // For a lip reed, the driving force is pressure * lip_opening.
-        // At small lip_x, spring = omega² * x, driving = pressure * x,
-        // so pressure > omega² is needed for instability.
-        let omega = lip_freq * TAU;
-        let pressure = omega * omega * (0.5 + blowing_pressure * 0.8) * velocity;
-
+        // Seed bore with tiny noise burst to kickstart self-oscillation
         let mut bore = Self::take_buf(&mut self.pool_a, n);
-        // Seed with small impulse to kickstart
-        if !bore.is_empty() {
-            bore[0] = 0.02 * velocity;
+        let mut rng = 0xDEADBEEFu32;
+        for s in bore.iter_mut() {
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            *s = (rng as f32 / u32::MAX as f32 - 0.5) * 0.002 * velocity;
         }
 
         self.state = OscState::Brass {
             bore_delay: bore,
             bore_pos: 0,
-            lip_x: 0.01, // initial opening
-            lip_v: omega * 0.005, // initial velocity kick
-            lip_freq,
-            lip_damping,
-            lip_mass_inv: 1.0,
-            bell_lp_state: 0.0,
-            bell_hp_state: 0.0,
-            bell_cutoff,
-            bore_lp_state: 0.0,
-            blowing_pressure: pressure,
+            lip_x: 0.0,           // bq_y1
+            lip_v: 0.0,           // bq_y2
+            lip_freq: bq_a1,      // BiQuad a1 coefficient
+            lip_damping: bq_a2,   // BiQuad a2 coefficient
+            lip_mass_inv: bq_b0,  // BiQuad b0 gain
+            bell_lp_state: 0.0,   // dc_x1
+            bell_hp_state: 0.0,   // dc_y1
+            bell_cutoff: bell_a1, // bell post-LP a1
+            bore_lp_state: 0.0,   // bell post-LP state
+            blowing_pressure: max_pressure,
             _bore_length_ratio: 1.0,
         };
     }
 
-    /// Brass tick: lip reed oscillator + bore waveguide + bell radiation.
+    /// Brass tick: STK Brass.cpp algorithm (Cook 1995).
+    ///
+    /// Signal flow (per-sample):
+    ///   bore_out * 0.85 → p_bore
+    ///   dp = p_mouth*0.3 − p_bore
+    ///   bq_y = b0*dp − a1*y1 − a2*y2   ← 2nd-order resonator
+    ///   delta = clamp(bq_y², 0, 1)       ← squaring = harmonic generation
+    ///   sig = delta*p_mouth + (1−delta)*p_bore  ← scattering junction
+    ///   bore_in = DC_block(sig)
+    ///   output = bell_LP(bore_out)        ← radiated: shapes timbre
     fn tick_brass(&mut self) -> f32 {
-        let sample_rate = self.sample_rate;
-
         if let OscState::Brass {
             bore_delay, bore_pos,
-            lip_x, lip_v, lip_freq, lip_damping, lip_mass_inv,
-            bell_lp_state, bell_hp_state, bell_cutoff,
-            bore_lp_state, blowing_pressure, ..
+            lip_x,          // bq_y1
+            lip_v,          // bq_y2
+            lip_freq,       // bq_a1
+            lip_damping,    // bq_a2
+            lip_mass_inv,   // bq_b0 gain
+            bell_lp_state,  // dc_x1 (DC blocker prev input)
+            bell_hp_state,  // dc_y1 (DC blocker prev output)
+            bell_cutoff,    // bell post-LP a1
+            bore_lp_state,  // bell post-LP state
+            blowing_pressure,
+            ..
         } = &mut self.state
         {
             let n = bore_delay.len();
-            if n == 0 {
-                return 0.0;
-            }
+            if n == 0 { return 0.0; }
 
-            let dt = 1.0 / sample_rate;
-            let bp = *blowing_pressure;
-            let omega = *lip_freq * TAU;
+            // 1. Read bore return (oldest sample = signal from 2 periods ago)
+            let bore_out = bore_delay[*bore_pos];
 
-            // Read reflected wave from bell end
-            let bell_idx = (*bore_pos + n / 2) % n;
-            let p_at_bell = bore_delay[bell_idx];
+            // 2. Pressures
+            let p_bore  = bore_out * 0.85;
+            let p_mouth = *blowing_pressure * 0.3;
+            let dp = p_mouth - p_bore;
 
-            // Bell reflection: LP splits into reflected (stays) and radiated (output)
-            let bell_alpha = (TAU * *bell_cutoff * dt).min(0.95);
-            *bell_lp_state += bell_alpha * (p_at_bell - *bell_lp_state);
-            let bell_reflected = *bell_lp_state * -0.7;
-            let radiated = p_at_bell - *bell_lp_state;
+            // 3. Lip BiQuad resonator (high-Q bandpass at playing frequency)
+            //    y[n] = b0*x - a1*y[n-1] - a2*y[n-2]
+            let bq_y = *lip_mass_inv * dp - *lip_freq * *lip_x - *lip_damping * *lip_v;
+            *lip_v = *lip_x;
+            *lip_x = bq_y;
 
-            // Read feedback from bore at lip position
-            let p_back = bore_delay[*bore_pos];
+            // 4. Nonlinear: square + hard saturate  → harmonic generation
+            let delta = (bq_y * bq_y).min(1.0);
 
-            // Lip reed: driven oscillator with nonlinear coupling to bore
-            // Aero force: pressure * opening (positive feedback when lip opens)
-            let x = *lip_x;
-            let opening = x.max(0.0);
-            let f_aero = bp * (opening + opening * opening * 30.0);
-            let spring = -omega * omega * x;
-            let damp = -*lip_damping * omega * *lip_v;
-            // Bore feedback modulates the driving force
-            let feedback = -p_back * omega * omega * 0.3;
-            let accel = (spring + damp + f_aero + feedback) * *lip_mass_inv;
-            *lip_v += accel * dt;
-            *lip_x += *lip_v * dt;
+            // 5. Scattering junction (STK formula)
+            let sig = delta * p_mouth + (1.0 - delta) * p_bore;
 
-            // Soft limiter
-            let lim = 0.5;
-            if lip_x.abs() > lim {
-                *lip_x = lip_x.signum() * lim;
-                *lip_v *= -0.1;
-            }
+            // 6. DC blocker: y[n] = x[n] - x[n-1] + 0.995*y[n-1]
+            let dc_out = sig - *bell_lp_state + 0.995 * *bell_hp_state;
+            *bell_lp_state = sig;
+            *bell_hp_state = dc_out;
 
-            // Flow into bore: proportional to lip opening
-            let flow = *lip_x * 2.0;
-
-            // Mild bore loss
-            *bore_lp_state += 0.3 * (flow - *bore_lp_state);
-            let bore_input = flow * 0.97 + *bore_lp_state * 0.03 + bell_reflected;
-
-            bore_delay[*bore_pos] = bore_input;
+            // 7. Write DC-blocked signal into bore, advance pointer
+            bore_delay[*bore_pos] = dc_out;
             *bore_pos = (*bore_pos + 1) % n;
 
-            // DC blocker on output
-            let prev_hp = *bell_hp_state;
-            *bell_hp_state = radiated;
-            let _output = radiated - prev_hp + *bell_hp_state * 0.995;
-            // Actually simpler: just use radiated scaled up
-            let out = radiated * 3.0;
+            // 8. Bell post-LP: radiate bore_out through bell filter (shapes timbre)
+            *bore_lp_state += *bell_cutoff * (bore_out - *bore_lp_state);
 
-            out.clamp(-1.0, 1.0)
+            (*bore_lp_state * 3.5).clamp(-1.0, 1.0)
         } else {
             0.0
         }

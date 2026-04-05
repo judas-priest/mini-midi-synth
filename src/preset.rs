@@ -36,6 +36,10 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Piano", "rhodes_piano", include_str!("../presets/rhodes_piano.json")),
     ("Piano", "wurlitzer", include_str!("../presets/wurlitzer.json")),
     ("Piano", "stage73", include_str!("../presets/stage73.json")),
+    ("Piano", "rhodes_piano_v2", include_str!("../presets/rhodes_piano_v2.json")),
+    ("Piano", "stage73_v2",      include_str!("../presets/stage73_v2.json")),
+    ("Piano", "wurlitzer_v2",    include_str!("../presets/wurlitzer_v2.json")),
+    ("Piano", "soft_piano_v2",   include_str!("../presets/soft_piano_v2.json")),
     // Organ
     ("Organ", "organ_classic", include_str!("../presets/organ_classic.json")),
     ("Organ", "hammond_b3", include_str!("../presets/hammond_b3.json")),
@@ -49,8 +53,10 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Mallet", "bell_chime", include_str!("../presets/bell_chime.json")),
     ("Mallet", "music_box", include_str!("../presets/music_box.json")),
     ("Mallet", "steel_drum", include_str!("../presets/steel_drum.json")),
+    ("Mallet", "steel_drum_v2",   include_str!("../presets/steel_drum_v2.json")),
     // Plucked / Strings
     ("Strings", "nylon_guitar", include_str!("../presets/nylon_guitar.json")),
+    ("Strings", "nylon_guitar_v2", include_str!("../presets/nylon_guitar_v2.json")),
     ("Strings", "clean_guitar", include_str!("../presets/clean_guitar.json")),
     ("Strings", "harp", include_str!("../presets/harp.json")),
     ("Strings", "kalimba", include_str!("../presets/kalimba.json")),
@@ -64,12 +70,15 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Strings (Bowed)", "viola", include_str!("../presets/viola.json")),
     ("Strings (Bowed)", "cello", include_str!("../presets/cello.json")),
     ("Strings (Bowed)", "double_bass", include_str!("../presets/double_bass.json")),
+    ("Strings (Bowed)", "double_bass_v2",  include_str!("../presets/double_bass_v2.json")),
     // Brass
     ("Brass", "synth_brass", include_str!("../presets/synth_brass.json")),
     ("Brass", "trumpet", include_str!("../presets/trumpet.json")),
     ("Brass", "french_horn", include_str!("../presets/french_horn.json")),
     ("Brass", "trombone", include_str!("../presets/trombone.json")),
     ("Brass", "tuba", include_str!("../presets/tuba.json")),
+    ("Brass", "tuba_v2",         include_str!("../presets/tuba_v2.json")),
+    ("Brass", "french_horn_v2",  include_str!("../presets/french_horn_v2.json")),
     // Bass
     ("Bass", "sub_bass", include_str!("../presets/sub_bass.json")),
     ("Bass", "acid_bass", include_str!("../presets/acid_bass.json")),
@@ -79,6 +88,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Bass", "wobble_bass", include_str!("../presets/wobble_bass.json")),
     // Bass Guitar
     ("Bass Guitar", "bass_finger", include_str!("../presets/bass_finger.json")),
+    ("Bass Guitar", "bass_finger_v2",  include_str!("../presets/bass_finger_v2.json")),
     ("Bass Guitar", "bass_pick", include_str!("../presets/bass_pick.json")),
     ("Bass Guitar", "bass_slap", include_str!("../presets/bass_slap.json")),
     // Lead
@@ -106,6 +116,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Drums", "taiko", include_str!("../presets/taiko.json")),
     ("Drums", "timpani", include_str!("../presets/timpani.json")),
     ("Drums", "bass_drum", include_str!("../presets/bass_drum.json")),
+    ("Drums", "bass_drum_v2",    include_str!("../presets/bass_drum_v2.json")),
     ("Drums", "gong_crash", include_str!("../presets/gong_crash.json")),
     ("Drums", "snare", include_str!("../presets/snare.json")),
     ("Drums", "metal_kick", include_str!("../presets/metal_kick.json")),
@@ -134,11 +145,13 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     // Modal
     ("Modal", "vibraphone_modal", include_str!("../presets/vibraphone_modal.json")),
     ("Modal", "church_bell_modal", include_str!("../presets/church_bell_modal.json")),
+    ("Modal", "church_bell_modal_v2",  include_str!("../presets/church_bell_modal_v2.json")),
     ("Modal", "marimba_modal", include_str!("../presets/marimba_modal.json")),
     ("Modal", "glass_modal", include_str!("../presets/glass_modal.json")),
     // Moog
     ("Moog", "moog_bass", include_str!("../presets/moog_bass.json")),
     ("Moog", "moog_lead", include_str!("../presets/moog_lead.json")),
+    ("Moog", "moog_lead_v2",          include_str!("../presets/moog_lead_v2.json")),
     ("Moog", "moog_squelch", include_str!("../presets/moog_squelch.json")),
     // Hard Sync
     ("Hard Sync", "sync_lead", include_str!("../presets/sync_lead.json")),
@@ -190,6 +203,10 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Saxophone", "alto_sax", include_str!("../presets/alto_sax.json")),
     ("Saxophone", "tenor_sax", include_str!("../presets/tenor_sax.json")),
     ("Saxophone", "bari_sax", include_str!("../presets/bari_sax.json")),
+    ("Saxophone", "soprano_sax_v2", include_str!("../presets/soprano_sax_v2.json")),
+    ("Saxophone", "alto_sax_v2",    include_str!("../presets/alto_sax_v2.json")),
+    ("Saxophone", "tenor_sax_v2",   include_str!("../presets/tenor_sax_v2.json")),
+    ("Saxophone", "bari_sax_v2",    include_str!("../presets/bari_sax_v2.json")),
 ];
 
 /// Return user preset directory (~/.config/mini_midi_synth/presets/).
