@@ -448,6 +448,22 @@ impl Voice {
         self.filter_env.note_on();
     }
 
+    /// Mono Single Trigger: change pitch without retriggering envelopes.
+    /// Used when a new note arrives while another is held (legato slide).
+    pub fn retrigger_note(&mut self, note: u8, params: &VoiceParams) {
+        self.note = note;
+        let new_freq = midi_to_freq(note);
+        self.target_freq = new_freq;
+        self.log_target_freq = new_freq.ln();
+        // Apply portamento glide (uses existing portamento_time from params)
+        if params.portamento_time > 0.001 {
+            // log_freq will glide toward log_target_freq in tick() naturally
+        } else {
+            self.freq = new_freq;
+            self.log_freq = new_freq.ln();
+        }
+    }
+
     pub fn is_releasing(&self) -> bool {
         self.amp_env.is_releasing()
     }

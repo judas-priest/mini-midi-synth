@@ -6,17 +6,21 @@ pub mod bitcrusher;
 pub mod bonsai;
 pub mod chorus;
 pub mod compressor;
+pub mod conditioner;
 pub mod delay;
 pub mod drum;
 pub mod envelope;
 pub mod eq;
+pub mod exciter;
 pub mod filter;
 pub mod flanger;
 pub mod formant;
 pub mod freq_shift;
+pub mod graphic_eq;
 pub mod lfo;
 pub mod looper;
 pub mod mod_matrix;
+pub mod ms_tool;
 pub mod mseg;
 pub mod resonator;
 pub mod rotary;
@@ -27,19 +31,39 @@ pub mod oscillator;
 pub mod overdrive;
 pub mod piano;
 pub mod phaser;
+pub mod combulator;
+pub mod convolution_reverb;
+pub mod floaty_delay;
+pub mod nimbus;
 pub mod reverb;
+pub mod reverb2;
 pub mod ring_mod;
+pub mod treemonster;
 pub mod spring_reverb;
+pub mod vocoder;
 pub mod step_seq;
 pub mod tape;
 pub mod tremolo;
 pub mod voice;
+pub mod wave_shaper;
 
 use crate::cc_map::{CcMap, ParamScope};
 use crate::preset::Preset;
 use bbd_ensemble::BbdEnsemble;
 use bitcrusher::Bitcrusher;
 use bonsai::Bonsai;
+use wave_shaper::WaveShaper;
+use ms_tool::MsTool;
+use graphic_eq::GraphicEq;
+use conditioner::Conditioner;
+use exciter::Exciter;
+use floaty_delay::FloatyDelay;
+use reverb2::Reverb2;
+use combulator::Combulator;
+use treemonster::Treemonster;
+use nimbus::Nimbus;
+use vocoder::Vocoder;
+use convolution_reverb::ConvolutionReverb;
 use chorus::Chorus;
 use compressor::Compressor;
 use delay::StereoDelay;
@@ -244,6 +268,17 @@ struct Layer {
     last_note: u8,
     sf2_mode: bool,
     pitch_seq: step_seq::PitchSequencer,
+    // Mono / Latch voice mode state
+    note_stack: Vec<u8>,   // held notes for mono mode (newest last)
+    latch_held: Vec<u8>,   // latched notes (toggle mode)
+    // Random/Alternate mod source state
+    rng_state: u64,         // LCG PRNG state
+    alt_counter: u32,       // alternation counter (even=+, odd=-)
+    rand_bipolar: f32,      // current random bipolar value
+    rand_unipolar: f32,     // current random unipolar value
+    alt_bipolar: f32,       // current alternate bipolar value
+    alt_unipolar: f32,      // current alternate unipolar value
+    release_vel: f32,       // last note-off velocity
 }
 
 impl Layer {
@@ -258,6 +293,10 @@ impl Layer {
             mseg2: Mseg::default(), mseg2_state: MsegState::new(sample_rate),
             last_note_freq: None, last_velocity: 1.0, last_note: 60,
             sf2_mode: false, pitch_seq: step_seq::PitchSequencer::new(),
+            note_stack: Vec::new(), latch_held: Vec::new(),
+            rng_state: 0x5851f42d4c957f2d, alt_counter: 0,
+            rand_bipolar: 0.0, rand_unipolar: 0.5,
+            alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
         }
     }
 
@@ -270,11 +309,76 @@ impl Layer {
         self.mod_matrix.load_from_params(&preset.params);
     }
 
+    /// LCG random float 0..1
+    fn next_rand(&mut self) -> f32 {
+        self.rng_state = self.rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((self.rng_state >> 33) as f32) / (u32::MAX as f32)
+    }
+
     fn note_on(&mut self, note: u8, velocity: u8) {
         if !self.enabled { return; }
         if note < self.min_note || note > self.max_note { return; }
         self.last_velocity = velocity as f32 / 127.0;
         self.last_note = note;
+
+        // Update random/alternate mod sources on each note-on
+        let r = self.next_rand();
+        self.rand_bipolar = r * 2.0 - 1.0;
+        self.rand_unipolar = r;
+        self.alt_counter = self.alt_counter.wrapping_add(1);
+        self.alt_bipolar = if self.alt_counter % 2 == 0 { 1.0 } else { -1.0 };
+        self.alt_unipolar = if self.alt_counter % 2 == 0 { 1.0 } else { 0.0 };
+
+        let play_mode = self.params.play_mode as u8;
+
+        // Latch mode: toggle note on/off
+        if play_mode == 3 {
+            if let Some(pos) = self.latch_held.iter().position(|&n| n == note) {
+                self.latch_held.remove(pos);
+                for v in &mut self.voices { if v.active && v.note == note { v.note_off(); } }
+            } else {
+                self.latch_held.push(note);
+                // fall through to start voice below
+            }
+            if self.latch_held.contains(&note) {
+                // Start voice for new latch note
+                self.age_counter += 1;
+                let age = self.age_counter;
+                let idx = self.voices.iter().position(|v| !v.active).unwrap_or_else(|| {
+                    self.voices.iter().enumerate().min_by_key(|(_, v)| v.age).map(|(i, _)| i).unwrap_or(0)
+                });
+                let prev_freq = self.last_note_freq;
+                let voice_params = self.build_voice_params();
+                self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
+                self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
+                if self.params.mseg_enabled > 0.5 { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
+            }
+            return;
+        }
+
+        // Mono modes (1=mono, 2=mono-st single trigger, 3 handled above)
+        if play_mode == 1 || play_mode == 2 {
+            self.note_stack.retain(|&n| n != note);
+            self.note_stack.push(note);
+            self.age_counter += 1;
+            let age = self.age_counter;
+            // Retrigger the single mono voice
+            let idx = self.voices.iter().position(|v| v.active).unwrap_or_else(|| {
+                self.voices.iter().position(|v| !v.active).unwrap_or(0)
+            });
+            let prev_freq = self.last_note_freq;
+            let voice_params = self.build_voice_params();
+            let retrigger = play_mode == 2 && self.note_stack.len() > 1; // ST: don't retrigger env
+            if retrigger {
+                self.voices[idx].retrigger_note(note, &voice_params);
+            } else {
+                self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
+            }
+            self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
+            if self.params.mseg_enabled > 0.5 && !retrigger { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
+            return;
+        }
+
         self.age_counter += 1;
         let age = self.age_counter;
         let idx = self.voices.iter().position(|v| !v.active).unwrap_or_else(|| {
@@ -286,7 +390,18 @@ impl Layer {
             2 => if self.has_active_notes() { self.last_note_freq } else { None },
             _ => None,
         };
-        let voice_params = VoiceParams {
+        let voice_params = self.build_voice_params();
+        self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
+        self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
+        // Trigger MSEGs on note-on (per-layer, not per-voice)
+        if self.params.mseg_enabled > 0.5 {
+            self.mseg1_state.trigger();
+            self.mseg2_state.trigger();
+        }
+    }
+
+    fn build_voice_params(&self) -> VoiceParams {
+        VoiceParams {
             osc_type: self.params.osc_type, osc_detune: self.params.osc_detune,
             fm_ratio: self.params.fm_ratio, fm_index: self.params.fm_index,
             fm_env_amount: self.params.fm_env_amount,
@@ -333,17 +448,38 @@ impl Layer {
             unison_spread: self.params.unison_spread,
             fm_cross_depth: self.params.fm_cross_depth,
             filter_env_semitones: self.params.filter_env_semitones,
-        };
-        self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
-        self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
-        // Trigger MSEGs on note-on (per-layer, not per-voice)
-        if self.params.mseg_enabled > 0.5 {
-            self.mseg1_state.trigger();
-            self.mseg2_state.trigger();
         }
     }
 
     fn note_off(&mut self, note: u8) {
+        let play_mode = self.params.play_mode as u8;
+
+        // Latch mode: notes released by toggling via note_on, not note_off
+        if play_mode == 3 { return; }
+
+        // Mono modes: manage note stack
+        if play_mode == 1 || play_mode == 2 {
+            self.note_stack.retain(|&n| n != note);
+            if let Some(&prev_note) = self.note_stack.last() {
+                // Retrigger with the previous held note
+                let vp = self.build_voice_params();
+                if let Some(v) = self.voices.iter_mut().find(|v| v.active) {
+                    v.retrigger_note(prev_note, &vp);
+                    if play_mode == 1 { v.retrigger_envelope(); }
+                }
+            } else {
+                for voice in &mut self.voices {
+                    if voice.active && voice.note == note { voice.note_off(); }
+                }
+                if !self.has_active_notes() {
+                    self.mseg1_state.release();
+                    self.mseg2_state.release();
+                }
+            }
+            return;
+        }
+
+        self.release_vel = 0.5; // default; would need MIDI note-off velocity from caller
         for voice in &mut self.voices {
             if voice.active && voice.note == note { voice.note_off(); }
         }
@@ -505,6 +641,7 @@ pub struct PresetParams {
     lfo3_waveform: f32, lfo3_rate: f32, lfo3_deform: f32,
     lfo4_waveform: f32, lfo4_rate: f32, lfo4_deform: f32,
     portamento_time: f32, portamento_mode: f32,
+    pub play_mode: f32,  // 0=poly, 1=mono, 2=mono-st, 3=latch
     unison_voices: f32, unison_detune: f32, unison_spread: f32,
     // Envelope shapes
     env_attack_shape: f32, env_decay_shape: f32,
@@ -559,6 +696,32 @@ pub struct PresetParams {
     // Bonsai saturation
     bonsai_drive: f32, bonsai_tone: f32, bonsai_asym: f32,
     bonsai_mode: f32, bonsai_mix: f32,
+    // WaveShaper
+    wave_shaper_drive: f32, wave_shaper_mode: f32, wave_shaper_bias: f32, wave_shaper_mix: f32,
+    // MS Tool
+    ms_mid_gain: f32, ms_side_gain: f32, ms_rotation: f32, ms_mix: f32,
+    // Graphic EQ
+    graphic_eq_gains: [f32; 11], graphic_eq_output: f32,
+    // Conditioner
+    conditioner_bass_cut: f32, conditioner_width: f32, conditioner_threshold: f32, conditioner_mix: f32,
+    // Exciter
+    exciter_drive: f32, exciter_freq: f32, exciter_presence: f32, exciter_mix: f32,
+    // Floaty Delay
+    floaty_time: f32, floaty_feedback: f32, floaty_wobble: f32, floaty_rate: f32, floaty_damp: f32, floaty_mix: f32,
+    // Reverb2 (FDN)
+    reverb2_decay: f32, reverb2_damping: f32, reverb2_size: f32, reverb2_mix: f32,
+    // Combulator
+    combulator_freq: f32, combulator_offset2: f32, combulator_offset3: f32,
+    combulator_feedback: f32, combulator_tone: f32, combulator_mix: f32,
+    // Treemonster
+    treemonster_threshold: f32, treemonster_shift: f32, treemonster_ring_mix: f32, treemonster_mix: f32,
+    // Nimbus
+    nimbus_position: f32, nimbus_size: f32, nimbus_pitch: f32, nimbus_density: f32,
+    nimbus_spread: f32, nimbus_texture: f32, nimbus_mix: f32,
+    // Vocoder
+    vocoder_env_follow: f32, vocoder_gate: f32, vocoder_mix: f32,
+    // Convolution Reverb
+    conv_reverb_room: f32, conv_reverb_damping: f32, conv_reverb_predelay: f32, conv_reverb_mix: f32,
 }
 
 impl Default for PresetParams {
@@ -600,7 +763,7 @@ impl Default for PresetParams {
             lfo4_waveform: 0.0, lfo4_rate: 1.0, lfo4_deform: 0.0,
             alias_wave_type: 0.0, alias_crush: 8.0,
             window_type: 0.0, window_morph: 0.0, window_formant: 0.0,
-            portamento_time: 0.0, portamento_mode: 0.0,
+            portamento_time: 0.0, portamento_mode: 0.0, play_mode: 0.0,
             unison_voices: 1.0, unison_detune: 0.0, unison_spread: 0.0,
             chorus_mix: 0.0,
             delay_mix: 0.0, delay_time_l: 0.3, delay_time_r: 0.4,
@@ -630,6 +793,20 @@ impl Default for PresetParams {
             resonator_freq: 440.0, resonator_decay: 0.7, resonator_mix: 0.0,
             bonsai_drive: 0.5, bonsai_tone: 0.5, bonsai_asym: 0.0,
             bonsai_mode: 0.0, bonsai_mix: 0.0,
+            wave_shaper_drive: 0.5, wave_shaper_mode: 0.0, wave_shaper_bias: 0.0, wave_shaper_mix: 0.0,
+            ms_mid_gain: 1.0, ms_side_gain: 1.0, ms_rotation: 0.0, ms_mix: 0.0,
+            graphic_eq_gains: [0.0; 11], graphic_eq_output: 1.0,
+            conditioner_bass_cut: 20.0, conditioner_width: 1.0, conditioner_threshold: 1.0, conditioner_mix: 0.0,
+            exciter_drive: 0.5, exciter_freq: 3000.0, exciter_presence: 0.5, exciter_mix: 0.0,
+            floaty_time: 0.3, floaty_feedback: 0.3, floaty_wobble: 0.3, floaty_rate: 0.5, floaty_damp: 0.5, floaty_mix: 0.0,
+            reverb2_decay: 0.5, reverb2_damping: 0.5, reverb2_size: 0.5, reverb2_mix: 0.0,
+            combulator_freq: 440.0, combulator_offset2: 5.0, combulator_offset3: -7.0,
+            combulator_feedback: 0.5, combulator_tone: 0.5, combulator_mix: 0.0,
+            treemonster_threshold: 0.5, treemonster_shift: 0.0, treemonster_ring_mix: 0.5, treemonster_mix: 0.0,
+            nimbus_position: 0.5, nimbus_size: 0.5, nimbus_pitch: 0.0, nimbus_density: 0.5,
+            nimbus_spread: 0.5, nimbus_texture: 0.5, nimbus_mix: 0.0,
+            vocoder_env_follow: 0.5, vocoder_gate: 0.0, vocoder_mix: 0.0,
+            conv_reverb_room: 0.5, conv_reverb_damping: 0.5, conv_reverb_predelay: 0.02, conv_reverb_mix: 0.0,
         }
     }
 }
@@ -695,6 +872,7 @@ impl PresetParams {
             window_type: p("window_type", 0.0), window_morph: p("window_morph", 0.0),
             window_formant: p("window_formant", 0.0),
             portamento_time: p("portamento_time", 0.0), portamento_mode: p("portamento_mode", 0.0),
+            play_mode: p("play_mode", 0.0),
             unison_voices: p("unison_voices", 1.0), unison_detune: p("unison_detune", 0.0),
             unison_spread: p("unison_spread", 0.0),
             chorus_mix: p("chorus_mix", 0.0),
@@ -733,6 +911,37 @@ impl PresetParams {
             bonsai_drive: p("bonsai_drive", 0.5), bonsai_tone: p("bonsai_tone", 0.5),
             bonsai_asym: p("bonsai_asym", 0.0), bonsai_mode: p("bonsai_mode", 0.0),
             bonsai_mix: p("bonsai_mix", 0.0),
+            wave_shaper_drive: p("wave_shaper_drive", 0.5), wave_shaper_mode: p("wave_shaper_mode", 0.0),
+            wave_shaper_bias: p("wave_shaper_bias", 0.0), wave_shaper_mix: p("wave_shaper_mix", 0.0),
+            ms_mid_gain: p("ms_mid_gain", 1.0), ms_side_gain: p("ms_side_gain", 1.0),
+            ms_rotation: p("ms_rotation", 0.0), ms_mix: p("ms_mix", 0.0),
+            graphic_eq_gains: [
+                p("geq_0", 0.0), p("geq_1", 0.0), p("geq_2", 0.0), p("geq_3", 0.0), p("geq_4", 0.0),
+                p("geq_5", 0.0), p("geq_6", 0.0), p("geq_7", 0.0), p("geq_8", 0.0), p("geq_9", 0.0), p("geq_10", 0.0),
+            ],
+            graphic_eq_output: p("graphic_eq_output", 1.0),
+            conditioner_bass_cut: p("conditioner_bass_cut", 20.0), conditioner_width: p("conditioner_width", 1.0),
+            conditioner_threshold: p("conditioner_threshold", 1.0), conditioner_mix: p("conditioner_mix", 0.0),
+            exciter_drive: p("exciter_drive", 0.5), exciter_freq: p("exciter_freq", 3000.0),
+            exciter_presence: p("exciter_presence", 0.5), exciter_mix: p("exciter_mix", 0.0),
+            floaty_time: p("floaty_time", 0.3), floaty_feedback: p("floaty_feedback", 0.3),
+            floaty_wobble: p("floaty_wobble", 0.3), floaty_rate: p("floaty_rate", 0.5),
+            floaty_damp: p("floaty_damp", 0.5), floaty_mix: p("floaty_mix", 0.0),
+            reverb2_decay: p("reverb2_decay", 0.5), reverb2_damping: p("reverb2_damping", 0.5),
+            reverb2_size: p("reverb2_size", 0.5), reverb2_mix: p("reverb2_mix", 0.0),
+            combulator_freq: p("combulator_freq", 440.0), combulator_offset2: p("combulator_offset2", 5.0),
+            combulator_offset3: p("combulator_offset3", -7.0), combulator_feedback: p("combulator_feedback", 0.5),
+            combulator_tone: p("combulator_tone", 0.5), combulator_mix: p("combulator_mix", 0.0),
+            treemonster_threshold: p("treemonster_threshold", 0.5), treemonster_shift: p("treemonster_shift", 0.0),
+            treemonster_ring_mix: p("treemonster_ring_mix", 0.5), treemonster_mix: p("treemonster_mix", 0.0),
+            nimbus_position: p("nimbus_position", 0.5), nimbus_size: p("nimbus_size", 0.5),
+            nimbus_pitch: p("nimbus_pitch", 0.0), nimbus_density: p("nimbus_density", 0.5),
+            nimbus_spread: p("nimbus_spread", 0.5), nimbus_texture: p("nimbus_texture", 0.5),
+            nimbus_mix: p("nimbus_mix", 0.0),
+            vocoder_env_follow: p("vocoder_env_follow", 0.5), vocoder_gate: p("vocoder_gate", 0.0),
+            vocoder_mix: p("vocoder_mix", 0.0),
+            conv_reverb_room: p("conv_reverb_room", 0.5), conv_reverb_damping: p("conv_reverb_damping", 0.5),
+            conv_reverb_predelay: p("conv_reverb_predelay", 0.02), conv_reverb_mix: p("conv_reverb_mix", 0.0),
         }
     }
 }
@@ -746,6 +955,8 @@ pub struct SynthEngine {
     vibrato_phase: f32,
     aftertouch: f32,
     aftertouch_smooth: f32,
+    cc_values: [f32; 4],   // assignable CC sources for mod matrix (CC1..CC4)
+    pub cc_numbers: [u8; 4],  // which MIDI CC numbers are assigned (default: 1,2,3,4)
     sample_rate: f32,
     // Effects chain (order: EQ → Compressor → Overdrive → Tape → Neuron → Phaser → Flanger → Tremolo → Bitcrusher → RingMod → FreqShift → Chorus → Delay → Reverb/Spring)
     pub eq: ParametricEq,
@@ -764,6 +975,18 @@ pub struct SynthEngine {
     bbd_ensemble: BbdEnsemble,
     resonator: Resonator,
     bonsai: Bonsai,
+    wave_shaper: WaveShaper,
+    ms_tool: MsTool,
+    graphic_eq_fx: GraphicEq,
+    conditioner: Conditioner,
+    exciter: Exciter,
+    floaty_delay: FloatyDelay,
+    reverb2: Reverb2,
+    combulator: Combulator,
+    treemonster: Treemonster,
+    nimbus: Nimbus,
+    vocoder: Vocoder,
+    conv_reverb: ConvolutionReverb,
     delay: StereoDelay,
     reverb: Reverb,
     pub spring_reverb: SpringReverb,
@@ -817,6 +1040,32 @@ struct CachedFxParams {
     // Bonsai
     bonsai_drive: f32, bonsai_tone: f32, bonsai_asym: f32,
     bonsai_mode: f32, bonsai_mix: f32,
+    // WaveShaper
+    wave_shaper_drive: f32, wave_shaper_mode: f32, wave_shaper_bias: f32, wave_shaper_mix: f32,
+    // MS Tool
+    ms_mid_gain: f32, ms_side_gain: f32, ms_rotation: f32, ms_mix: f32,
+    // Graphic EQ
+    graphic_eq_gains: [f32; 11], graphic_eq_output: f32,
+    // Conditioner
+    conditioner_bass_cut: f32, conditioner_width: f32, conditioner_threshold: f32, conditioner_mix: f32,
+    // Exciter
+    exciter_drive: f32, exciter_freq: f32, exciter_presence: f32, exciter_mix: f32,
+    // Floaty Delay
+    floaty_time: f32, floaty_feedback: f32, floaty_wobble: f32, floaty_rate: f32, floaty_damp: f32, floaty_mix: f32,
+    // Reverb2
+    reverb2_decay: f32, reverb2_damping: f32, reverb2_size: f32, reverb2_mix: f32,
+    // Combulator
+    combulator_freq: f32, combulator_offset2: f32, combulator_offset3: f32,
+    combulator_feedback: f32, combulator_tone: f32, combulator_mix: f32,
+    // Treemonster
+    treemonster_threshold: f32, treemonster_shift: f32, treemonster_ring_mix: f32, treemonster_mix: f32,
+    // Nimbus
+    nimbus_position: f32, nimbus_size: f32, nimbus_pitch: f32, nimbus_density: f32,
+    nimbus_spread: f32, nimbus_texture: f32, nimbus_mix: f32,
+    // Vocoder
+    vocoder_env_follow: f32, vocoder_gate: f32, vocoder_mix: f32,
+    // Convolution Reverb
+    conv_reverb_room: f32, conv_reverb_damping: f32, conv_reverb_predelay: f32, conv_reverb_mix: f32,
 }
 
 impl CachedFxParams {
@@ -880,6 +1129,58 @@ impl CachedFxParams {
             bonsai_asym: p.map(|p| p.bonsai_asym).unwrap_or(0.0),
             bonsai_mode: p.map(|p| p.bonsai_mode).unwrap_or(0.0),
             bonsai_mix: p.map(|p| p.bonsai_mix).unwrap_or(0.0),
+            wave_shaper_drive: p.map(|p| p.wave_shaper_drive).unwrap_or(0.5),
+            wave_shaper_mode: p.map(|p| p.wave_shaper_mode).unwrap_or(0.0),
+            wave_shaper_bias: p.map(|p| p.wave_shaper_bias).unwrap_or(0.0),
+            wave_shaper_mix: p.map(|p| p.wave_shaper_mix).unwrap_or(0.0),
+            ms_mid_gain: p.map(|p| p.ms_mid_gain).unwrap_or(1.0),
+            ms_side_gain: p.map(|p| p.ms_side_gain).unwrap_or(1.0),
+            ms_rotation: p.map(|p| p.ms_rotation).unwrap_or(0.0),
+            ms_mix: p.map(|p| p.ms_mix).unwrap_or(0.0),
+            graphic_eq_gains: p.map(|p| p.graphic_eq_gains).unwrap_or([0.0; 11]),
+            graphic_eq_output: p.map(|p| p.graphic_eq_output).unwrap_or(1.0),
+            conditioner_bass_cut: p.map(|p| p.conditioner_bass_cut).unwrap_or(20.0),
+            conditioner_width: p.map(|p| p.conditioner_width).unwrap_or(1.0),
+            conditioner_threshold: p.map(|p| p.conditioner_threshold).unwrap_or(1.0),
+            conditioner_mix: p.map(|p| p.conditioner_mix).unwrap_or(0.0),
+            exciter_drive: p.map(|p| p.exciter_drive).unwrap_or(0.5),
+            exciter_freq: p.map(|p| p.exciter_freq).unwrap_or(3000.0),
+            exciter_presence: p.map(|p| p.exciter_presence).unwrap_or(0.5),
+            exciter_mix: p.map(|p| p.exciter_mix).unwrap_or(0.0),
+            floaty_time: p.map(|p| p.floaty_time).unwrap_or(0.3),
+            floaty_feedback: p.map(|p| p.floaty_feedback).unwrap_or(0.3),
+            floaty_wobble: p.map(|p| p.floaty_wobble).unwrap_or(0.3),
+            floaty_rate: p.map(|p| p.floaty_rate).unwrap_or(0.5),
+            floaty_damp: p.map(|p| p.floaty_damp).unwrap_or(0.5),
+            floaty_mix: p.map(|p| p.floaty_mix).unwrap_or(0.0),
+            reverb2_decay: p.map(|p| p.reverb2_decay).unwrap_or(0.5),
+            reverb2_damping: p.map(|p| p.reverb2_damping).unwrap_or(0.5),
+            reverb2_size: p.map(|p| p.reverb2_size).unwrap_or(0.5),
+            reverb2_mix: p.map(|p| p.reverb2_mix).unwrap_or(0.0),
+            combulator_freq: p.map(|p| p.combulator_freq).unwrap_or(440.0),
+            combulator_offset2: p.map(|p| p.combulator_offset2).unwrap_or(5.0),
+            combulator_offset3: p.map(|p| p.combulator_offset3).unwrap_or(-7.0),
+            combulator_feedback: p.map(|p| p.combulator_feedback).unwrap_or(0.5),
+            combulator_tone: p.map(|p| p.combulator_tone).unwrap_or(0.5),
+            combulator_mix: p.map(|p| p.combulator_mix).unwrap_or(0.0),
+            treemonster_threshold: p.map(|p| p.treemonster_threshold).unwrap_or(0.5),
+            treemonster_shift: p.map(|p| p.treemonster_shift).unwrap_or(0.0),
+            treemonster_ring_mix: p.map(|p| p.treemonster_ring_mix).unwrap_or(0.5),
+            treemonster_mix: p.map(|p| p.treemonster_mix).unwrap_or(0.0),
+            nimbus_position: p.map(|p| p.nimbus_position).unwrap_or(0.5),
+            nimbus_size: p.map(|p| p.nimbus_size).unwrap_or(0.5),
+            nimbus_pitch: p.map(|p| p.nimbus_pitch).unwrap_or(0.0),
+            nimbus_density: p.map(|p| p.nimbus_density).unwrap_or(0.5),
+            nimbus_spread: p.map(|p| p.nimbus_spread).unwrap_or(0.5),
+            nimbus_texture: p.map(|p| p.nimbus_texture).unwrap_or(0.5),
+            nimbus_mix: p.map(|p| p.nimbus_mix).unwrap_or(0.0),
+            vocoder_env_follow: p.map(|p| p.vocoder_env_follow).unwrap_or(0.5),
+            vocoder_gate: p.map(|p| p.vocoder_gate).unwrap_or(0.0),
+            vocoder_mix: p.map(|p| p.vocoder_mix).unwrap_or(0.0),
+            conv_reverb_room: p.map(|p| p.conv_reverb_room).unwrap_or(0.5),
+            conv_reverb_damping: p.map(|p| p.conv_reverb_damping).unwrap_or(0.5),
+            conv_reverb_predelay: p.map(|p| p.conv_reverb_predelay).unwrap_or(0.02),
+            conv_reverb_mix: p.map(|p| p.conv_reverb_mix).unwrap_or(0.0),
         }
     }
 }
@@ -892,7 +1193,9 @@ impl SynthEngine {
             layers, drum_engine: DrumEngine::new(sample_rate),
             sampler: SamplerEngine::new(sample_rate),
             pitch_bend_semitones: 0.0, mod_wheel: 0.0, vibrato_phase: 0.0,
-            aftertouch: 0.0, aftertouch_smooth: 0.0, sample_rate,
+            aftertouch: 0.0, aftertouch_smooth: 0.0,
+            cc_values: [0.0; 4], cc_numbers: [1, 2, 3, 4],
+            sample_rate,
             eq: ParametricEq::new(sample_rate),
             compressor: Compressor::new(sample_rate),
             overdrive: Overdrive::new(sample_rate),
@@ -910,6 +1213,18 @@ impl SynthEngine {
             bbd_ensemble: BbdEnsemble::new(sample_rate),
             resonator: Resonator::new(sample_rate),
             bonsai: Bonsai::new(sample_rate),
+            wave_shaper: WaveShaper::new(sample_rate),
+            ms_tool: MsTool::new(sample_rate),
+            graphic_eq_fx: GraphicEq::new(sample_rate),
+            conditioner: Conditioner::new(sample_rate),
+            exciter: Exciter::new(sample_rate),
+            floaty_delay: FloatyDelay::new(sample_rate),
+            reverb2: Reverb2::new(sample_rate),
+            combulator: Combulator::new(sample_rate),
+            treemonster: Treemonster::new(sample_rate),
+            nimbus: Nimbus::new(sample_rate),
+            vocoder: Vocoder::new(sample_rate),
+            conv_reverb: ConvolutionReverb::new(sample_rate),
             delay: StereoDelay::new(sample_rate),
             reverb: Reverb::new(sample_rate),
             spring_reverb: SpringReverb::new(sample_rate),
@@ -1145,6 +1460,12 @@ impl SynthEngine {
                 if channel != 9 { self.aftertouch = value; }
             }
             MidiEvent::ControlChange { cc, value, .. } => {
+                // Check assignable mod sources (CC1..CC4)
+                for i in 0..4 {
+                    if cc == self.cc_numbers[i] {
+                        self.cc_values[i] = value as f32 / 127.0;
+                    }
+                }
                 // CcBinding is Copy — no heap allocation
                 if let Some(binding) = self.cc_map.bindings[cc as usize] {
                     if self.check_pickup(cc, value, binding) {
@@ -1348,6 +1669,18 @@ impl SynthEngine {
         self.delay.set_sample_rate(sample_rate);
         self.reverb.set_sample_rate(sample_rate);
         self.spring_reverb.set_sample_rate(sample_rate);
+        self.wave_shaper.set_sample_rate(sample_rate);
+        self.ms_tool.set_sample_rate(sample_rate);
+        self.graphic_eq_fx.set_sample_rate(sample_rate);
+        self.conditioner.set_sample_rate(sample_rate);
+        self.exciter.set_sample_rate(sample_rate);
+        self.floaty_delay.set_sample_rate(sample_rate);
+        self.reverb2.set_sample_rate(sample_rate);
+        self.combulator.set_sample_rate(sample_rate);
+        self.treemonster.set_sample_rate(sample_rate);
+        self.nimbus.set_sample_rate(sample_rate);
+        self.vocoder.set_sample_rate(sample_rate);
+        self.conv_reverb.set_sample_rate(sample_rate);
     }
 
     /// Process a block of audio samples. Control-rate computations (LFO, MSEG,
@@ -1460,7 +1793,14 @@ impl SynthEngine {
                 aftertouch: self.aftertouch_smooth,
                 velocity: layer.last_velocity,
                 key_track,
-                step_seq: seq_raw,  // normalized -1..+1 step value
+                step_seq: seq_raw,
+                random_bipolar: layer.rand_bipolar,
+                random_unipolar: layer.rand_unipolar,
+                alt_bipolar: layer.alt_bipolar,
+                alt_unipolar: layer.alt_unipolar,
+                release_vel: layer.release_vel,
+                pitch_bend: self.pitch_bend_semitones / 2.0, // normalize -1..+1
+                cc: self.cc_values,
             };
             let mod_offsets = layer.mod_matrix.evaluate(&mod_sources);
 
@@ -1598,6 +1938,56 @@ impl SynthEngine {
             // Rotary Speaker (after reverb, before master tone)
             let (rl, rr) = if fx.rotary_mix > 0.001 {
                 self.rotary.tick(rl, rr, fx.rotary_speed, fx.rotary_mix)
+            } else { (rl, rr) };
+            // WaveShaper
+            let (rl, rr) = if fx.wave_shaper_mix > 0.001 {
+                self.wave_shaper.tick(rl, rr, fx.wave_shaper_drive, fx.wave_shaper_mode as u32, fx.wave_shaper_bias, fx.wave_shaper_mix)
+            } else { (rl, rr) };
+            // MS Tool
+            let (rl, rr) = if fx.ms_mix > 0.001 {
+                self.ms_tool.tick(rl, rr, fx.ms_mid_gain, fx.ms_side_gain, fx.ms_rotation, fx.ms_mix)
+            } else { (rl, rr) };
+            // Graphic EQ (always runs if output_gain != 1.0 or any band != 0.0)
+            let any_geq = fx.graphic_eq_gains.iter().any(|&g| g.abs() > 0.001) || (fx.graphic_eq_output - 1.0).abs() > 0.001;
+            let (rl, rr) = if any_geq {
+                self.graphic_eq_fx.tick(rl, rr, &fx.graphic_eq_gains, fx.graphic_eq_output)
+            } else { (rl, rr) };
+            // Conditioner
+            let (rl, rr) = if fx.conditioner_mix > 0.001 {
+                self.conditioner.tick(rl, rr, fx.conditioner_bass_cut, fx.conditioner_width, fx.conditioner_threshold, fx.conditioner_mix)
+            } else { (rl, rr) };
+            // Exciter
+            let (rl, rr) = if fx.exciter_mix > 0.001 {
+                self.exciter.tick(rl, rr, fx.exciter_drive, fx.exciter_freq, fx.exciter_presence, fx.exciter_mix)
+            } else { (rl, rr) };
+            // Floaty Delay
+            let (rl, rr) = if fx.floaty_mix > 0.001 {
+                self.floaty_delay.tick(rl, rr, fx.floaty_time, fx.floaty_feedback, fx.floaty_wobble, fx.floaty_rate, fx.floaty_damp, fx.floaty_mix)
+            } else { (rl, rr) };
+            // Reverb2 (FDN)
+            let (rl, rr) = if fx.reverb2_mix > 0.001 {
+                self.reverb2.tick(rl, rr, fx.reverb2_decay, fx.reverb2_damping, fx.reverb2_size, fx.reverb2_mix)
+            } else { (rl, rr) };
+            // Combulator
+            let (rl, rr) = if fx.combulator_mix > 0.001 {
+                self.combulator.tick(rl, rr, fx.combulator_freq, fx.combulator_offset2, fx.combulator_offset3, fx.combulator_feedback, fx.combulator_tone, fx.combulator_mix)
+            } else { (rl, rr) };
+            // Treemonster
+            let (rl, rr) = if fx.treemonster_mix > 0.001 {
+                self.treemonster.tick(rl, rr, fx.treemonster_threshold, fx.treemonster_shift, fx.treemonster_ring_mix, fx.treemonster_mix)
+            } else { (rl, rr) };
+            // Nimbus granular
+            let (rl, rr) = if fx.nimbus_mix > 0.001 {
+                self.nimbus.tick(rl, rr, fx.nimbus_position, fx.nimbus_size, fx.nimbus_pitch, fx.nimbus_density, fx.nimbus_spread, fx.nimbus_texture, fx.nimbus_mix)
+            } else { (rl, rr) };
+            // Vocoder
+            let (rl, rr) = if fx.vocoder_mix > 0.001 {
+                let mod_in = (rl + rr) * 0.5;
+                self.vocoder.tick(rl, rr, mod_in, fx.vocoder_env_follow, fx.vocoder_gate, fx.vocoder_mix)
+            } else { (rl, rr) };
+            // Convolution Reverb
+            let (rl, rr) = if fx.conv_reverb_mix > 0.001 {
+                self.conv_reverb.tick(rl, rr, fx.conv_reverb_room, fx.conv_reverb_damping, fx.conv_reverb_predelay, fx.conv_reverb_mix)
             } else { (rl, rr) };
 
             let sample_rate = self.sample_rate;

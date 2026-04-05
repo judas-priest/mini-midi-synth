@@ -21,6 +21,16 @@ pub enum ModSource {
     Velocity = 11,
     KeyTrack = 12,
     StepSeq = 13,
+    RandomBipolar = 14,   // -1..+1 randomized per note-on
+    RandomUnipolar = 15,  // 0..1 randomized per note-on
+    AltBipolar = 16,      // alternates +1/-1 each note-on
+    AltUnipolar = 17,     // alternates 0/1 each note-on
+    ReleaseVel = 18,      // note-off velocity 0..1
+    PitchBend = 19,       // pitch bend wheel -1..+1
+    Cc1 = 20,             // MIDI CC assignable 1
+    Cc2 = 21,             // MIDI CC assignable 2
+    Cc3 = 22,             // MIDI CC assignable 3
+    Cc4 = 23,             // MIDI CC assignable 4
 }
 
 impl ModSource {
@@ -39,6 +49,16 @@ impl ModSource {
             11 => Self::Velocity,
             12 => Self::KeyTrack,
             13 => Self::StepSeq,
+            14 => Self::RandomBipolar,
+            15 => Self::RandomUnipolar,
+            16 => Self::AltBipolar,
+            17 => Self::AltUnipolar,
+            18 => Self::ReleaseVel,
+            19 => Self::PitchBend,
+            20 => Self::Cc1,
+            21 => Self::Cc2,
+            22 => Self::Cc3,
+            23 => Self::Cc4,
             _ => Self::None,
         }
     }
@@ -59,6 +79,16 @@ impl ModSource {
             Self::Velocity => "Velocity",
             Self::KeyTrack => "Key Track",
             Self::StepSeq => "Step Seq",
+            Self::RandomBipolar => "Random ±",
+            Self::RandomUnipolar => "Random +",
+            Self::AltBipolar => "Alternate ±",
+            Self::AltUnipolar => "Alternate +",
+            Self::ReleaseVel => "Release Vel",
+            Self::PitchBend => "Pitch Bend",
+            Self::Cc1 => "CC 1",
+            Self::Cc2 => "CC 2",
+            Self::Cc3 => "CC 3",
+            Self::Cc4 => "CC 4",
         }
     }
 
@@ -67,6 +97,10 @@ impl ModSource {
         Self::AmpEnv, Self::FilterEnv, Self::Mseg1, Self::Mseg2,
         Self::ModWheel, Self::Aftertouch, Self::Velocity, Self::KeyTrack,
         Self::StepSeq,
+        Self::RandomBipolar, Self::RandomUnipolar,
+        Self::AltBipolar, Self::AltUnipolar,
+        Self::ReleaseVel, Self::PitchBend,
+        Self::Cc1, Self::Cc2, Self::Cc3, Self::Cc4,
     ];
 }
 
@@ -96,6 +130,14 @@ pub enum ModDest {
     FreqShiftHz = 20,
     PhaserRate = 21,
     FlangerRate = 22,
+    Lfo3Rate = 23,
+    Lfo4Rate = 24,
+    WaveShaperDrive = 25,
+    WaveShaperMix = 26,
+    RotaryMix = 27,
+    EnsembleMix = 28,
+    ResonatorMix = 29,
+    BonsaiDrive = 30,
 }
 
 impl ModDest {
@@ -123,6 +165,14 @@ impl ModDest {
             20 => Self::FreqShiftHz,
             21 => Self::PhaserRate,
             22 => Self::FlangerRate,
+            23 => Self::Lfo3Rate,
+            24 => Self::Lfo4Rate,
+            25 => Self::WaveShaperDrive,
+            26 => Self::WaveShaperMix,
+            27 => Self::RotaryMix,
+            28 => Self::EnsembleMix,
+            29 => Self::ResonatorMix,
+            30 => Self::BonsaiDrive,
             _ => Self::None,
         }
     }
@@ -152,6 +202,14 @@ impl ModDest {
             Self::FreqShiftHz => "Freq Shift Hz",
             Self::PhaserRate => "Phaser Rate",
             Self::FlangerRate => "Flanger Rate",
+            Self::Lfo3Rate => "LFO 3 Rate",
+            Self::Lfo4Rate => "LFO 4 Rate",
+            Self::WaveShaperDrive => "WaveShaper Drive",
+            Self::WaveShaperMix => "WaveShaper Mix",
+            Self::RotaryMix => "Rotary Mix",
+            Self::EnsembleMix => "Ensemble Mix",
+            Self::ResonatorMix => "Resonator Mix",
+            Self::BonsaiDrive => "Bonsai Drive",
         }
     }
 
@@ -159,8 +217,8 @@ impl ModDest {
     pub fn range(self) -> f32 {
         match self {
             Self::None => 0.0,
-            Self::Pitch => 24.0,              // semitones
-            Self::FilterCutoff => 130.0,      // semitones (Surge-style: -60..+70 range)
+            Self::Pitch => 24.0,
+            Self::FilterCutoff => 130.0,
             Self::FilterResonance => 1.0,
             Self::Amplitude => 1.0,
             Self::Osc1Level | Self::Osc2Level | Self::Osc3Level => 1.0,
@@ -168,12 +226,14 @@ impl ModDest {
             Self::PulseWidth => 0.5,
             Self::NoiseLevel => 1.0,
             Self::Pan => 1.0,
-            Self::Lfo1Rate | Self::Lfo2Rate => 10.0, // Hz
+            Self::Lfo1Rate | Self::Lfo2Rate | Self::Lfo3Rate | Self::Lfo4Rate => 10.0,
             Self::ChorusMix | Self::DelayMix | Self::ReverbMix => 1.0,
             Self::TapeDrive | Self::NeuronDrive => 1.0,
             Self::RingModFreq => 1000.0,
             Self::FreqShiftHz => 500.0,
             Self::PhaserRate | Self::FlangerRate => 5.0,
+            Self::WaveShaperDrive | Self::WaveShaperMix => 1.0,
+            Self::RotaryMix | Self::EnsembleMix | Self::ResonatorMix | Self::BonsaiDrive => 1.0,
         }
     }
 
@@ -181,10 +241,12 @@ impl ModDest {
         Self::None, Self::Pitch, Self::FilterCutoff, Self::FilterResonance,
         Self::Amplitude, Self::Osc1Level, Self::Osc2Level, Self::Osc3Level,
         Self::FmCrossDepth, Self::PulseWidth, Self::NoiseLevel, Self::Pan,
-        Self::Lfo1Rate, Self::Lfo2Rate,
+        Self::Lfo1Rate, Self::Lfo2Rate, Self::Lfo3Rate, Self::Lfo4Rate,
         Self::ChorusMix, Self::DelayMix, Self::ReverbMix,
         Self::TapeDrive, Self::NeuronDrive, Self::RingModFreq, Self::FreqShiftHz,
         Self::PhaserRate, Self::FlangerRate,
+        Self::WaveShaperDrive, Self::WaveShaperMix,
+        Self::RotaryMix, Self::EnsembleMix, Self::ResonatorMix, Self::BonsaiDrive,
     ];
 }
 
@@ -217,6 +279,8 @@ pub struct ModOffsets {
     pub pan: f32,
     pub lfo1_rate: f32,
     pub lfo2_rate: f32,
+    pub lfo3_rate: f32,
+    pub lfo4_rate: f32,
     pub chorus_mix: f32,
     pub delay_mix: f32,
     pub reverb_mix: f32,
@@ -226,6 +290,12 @@ pub struct ModOffsets {
     pub freq_shift_hz: f32,
     pub phaser_rate: f32,
     pub flanger_rate: f32,
+    pub wave_shaper_drive: f32,
+    pub wave_shaper_mix: f32,
+    pub rotary_mix: f32,
+    pub ensemble_mix: f32,
+    pub resonator_mix: f32,
+    pub bonsai_drive: f32,
 }
 
 /// Sources snapshot — gathered once per tick, consumed by matrix evaluation.
@@ -237,8 +307,15 @@ pub struct ModSources {
     pub mod_wheel: f32,
     pub aftertouch: f32,
     pub velocity: f32,
-    pub key_track: f32,   // -1..+1 centered on C4
-    pub step_seq: f32,    // -1..+1 normalized step value
+    pub key_track: f32,       // -1..+1 centered on C4
+    pub step_seq: f32,        // -1..+1 normalized step value
+    pub random_bipolar: f32,  // -1..+1 randomized per note-on
+    pub random_unipolar: f32, // 0..1 randomized per note-on
+    pub alt_bipolar: f32,     // alternates +1/-1 per note-on
+    pub alt_unipolar: f32,    // alternates 0/1 per note-on
+    pub release_vel: f32,     // last note-off velocity 0..1
+    pub pitch_bend: f32,      // pitch bend -1..+1
+    pub cc: [f32; 4],         // MIDI CC assignable 1..4
 }
 
 const MOD_SOURCE_KEYS: [&str; MOD_SLOTS] = [
@@ -274,22 +351,32 @@ impl Default for ModMatrix {
 impl ModMatrix {
     /// Evaluate all active slots. Returns accumulated offsets.
     pub fn evaluate(&self, sources: &ModSources) -> ModOffsets {
-        // Precompute all source values indexed by ModSource discriminant (0..13)
-        let src_vals: [f32; 14] = [
-            0.0,                      // None = 0
-            sources.lfo_outputs[0],   // Lfo1 = 1
-            sources.lfo_outputs[1],   // Lfo2 = 2
-            sources.lfo_outputs[2],   // Lfo3 = 3
-            sources.lfo_outputs[3],   // Lfo4 = 4
-            sources.amp_env,          // AmpEnv = 5
-            sources.filter_env,       // FilterEnv = 6
-            sources.mseg_outputs[0],  // Mseg1 = 7
-            sources.mseg_outputs[1],  // Mseg2 = 8
-            sources.mod_wheel,        // ModWheel = 9
-            sources.aftertouch,       // Aftertouch = 10
-            sources.velocity,         // Velocity = 11
-            sources.key_track,        // KeyTrack = 12
-            sources.step_seq,         // StepSeq = 13
+        // Precompute all source values indexed by ModSource discriminant (0..23)
+        let src_vals: [f32; 24] = [
+            0.0,                        // None = 0
+            sources.lfo_outputs[0],     // Lfo1 = 1
+            sources.lfo_outputs[1],     // Lfo2 = 2
+            sources.lfo_outputs[2],     // Lfo3 = 3
+            sources.lfo_outputs[3],     // Lfo4 = 4
+            sources.amp_env,            // AmpEnv = 5
+            sources.filter_env,         // FilterEnv = 6
+            sources.mseg_outputs[0],    // Mseg1 = 7
+            sources.mseg_outputs[1],    // Mseg2 = 8
+            sources.mod_wheel,          // ModWheel = 9
+            sources.aftertouch,         // Aftertouch = 10
+            sources.velocity,           // Velocity = 11
+            sources.key_track,          // KeyTrack = 12
+            sources.step_seq,           // StepSeq = 13
+            sources.random_bipolar,     // RandomBipolar = 14
+            sources.random_unipolar,    // RandomUnipolar = 15
+            sources.alt_bipolar,        // AltBipolar = 16
+            sources.alt_unipolar,       // AltUnipolar = 17
+            sources.release_vel,        // ReleaseVel = 18
+            sources.pitch_bend,         // PitchBend = 19
+            sources.cc[0],              // Cc1 = 20
+            sources.cc[1],              // Cc2 = 21
+            sources.cc[2],              // Cc3 = 22
+            sources.cc[3],              // Cc4 = 23
         ];
 
         let mut offsets = ModOffsets::default();
@@ -327,6 +414,14 @@ impl ModMatrix {
                 ModDest::FreqShiftHz => offsets.freq_shift_hz += offset,
                 ModDest::PhaserRate => offsets.phaser_rate += offset,
                 ModDest::FlangerRate => offsets.flanger_rate += offset,
+                ModDest::Lfo3Rate => offsets.lfo3_rate += offset,
+                ModDest::Lfo4Rate => offsets.lfo4_rate += offset,
+                ModDest::WaveShaperDrive => offsets.wave_shaper_drive += offset,
+                ModDest::WaveShaperMix => offsets.wave_shaper_mix += offset,
+                ModDest::RotaryMix => offsets.rotary_mix += offset,
+                ModDest::EnsembleMix => offsets.ensemble_mix += offset,
+                ModDest::ResonatorMix => offsets.resonator_mix += offset,
+                ModDest::BonsaiDrive => offsets.bonsai_drive += offset,
             }
         }
 

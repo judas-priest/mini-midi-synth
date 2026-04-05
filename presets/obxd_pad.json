@@ -1,0 +1,25 @@
+{
+  "name": "OB-Xd Pad",
+  "params": {
+    "osc_type": 11.0,
+    "filter_type": 22.0,
+    "filter_cutoff": 1800.0,
+    "filter_resonance": 0.25,
+    "filter_env_amount": 800.0,
+    "filter_key_track": 0.3,
+    "amp_attack": 0.12,
+    "amp_decay": 0.4,
+    "amp_sustain": 0.75,
+    "amp_release": 1.2,
+    "filter_attack": 0.15,
+    "filter_decay": 0.5,
+    "filter_sustain": 0.4,
+    "filter_release": 0.8,
+    "supersaw_detune": 0.4,
+    "supersaw_mix": 0.7,
+    "chorus_mix": 0.35,
+    "reverb_mix": 0.25,
+    "reverb_room_size": 0.6,
+    "master_volume": 0.72
+  }
+}

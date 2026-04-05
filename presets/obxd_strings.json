@@ -1,0 +1,25 @@
+{
+  "name": "OB-Xd Strings",
+  "params": {
+    "osc_type": 1.0,
+    "osc2_type": 1.0,
+    "osc2_detune": 12.0,
+    "osc2_level": 0.5,
+    "filter_type": 22.0,
+    "filter_cutoff": 2500.0,
+    "filter_resonance": 0.15,
+    "filter_key_track": 0.4,
+    "amp_attack": 0.3,
+    "amp_decay": 0.3,
+    "amp_sustain": 0.85,
+    "amp_release": 1.5,
+    "filter_attack": 0.4,
+    "filter_decay": 0.3,
+    "filter_sustain": 0.7,
+    "filter_release": 1.0,
+    "chorus_mix": 0.4,
+    "reverb_mix": 0.2,
+    "reverb_room_size": 0.55,
+    "master_volume": 0.70
+  }
+}

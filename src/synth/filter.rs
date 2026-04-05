@@ -1,6 +1,8 @@
 /// State-variable filter (SVF) — lowpass, highpass, bandpass.
 /// Plus Moog ladder filter (Huovilainen 2004 improved model with 2x oversampling).
 /// Plus K35 (Korg MS-20 Sallen-Key), Notch, LP24, HP24.
+/// Plus OB-Xd 2-pole/4-pole (saturating SVF), Tripole 18dB/oct, Sample&Hold,
+/// Cutoff Warp and Resonance Warp variants.
 
 use std::f32::consts::PI;
 
@@ -20,8 +22,27 @@ pub enum FilterType {
     Notch,     // 11 — SVF Notch (band-reject)
     LP24,      // 12 — SVF 24dB/oct lowpass (2 cascaded SVF stages)
     HP24,      // 13 — SVF 24dB/oct highpass (2 cascaded SVF stages)
-    K35LP,     // 14 — Korg MS-20 Sallen-Key lowpass (ZDF, self-oscillating)
-    K35HP,     // 15 — Korg MS-20 Sallen-Key highpass (ZDF, self-oscillating)
+    K35LP,         // 14 — Korg MS-20 Sallen-Key lowpass (ZDF, self-oscillating)
+    K35HP,         // 15 — Korg MS-20 Sallen-Key highpass (ZDF, self-oscillating)
+    BP24,          // 16 — SVF 24dB/oct bandpass
+    Notch24,       // 17 — SVF 24dB/oct notch
+    OBXd2LP,       // 18 — OB-Xd 2-pole lowpass (saturating SVF)
+    OBXd2HP,       // 19 — OB-Xd 2-pole highpass
+    OBXd2BP,       // 20 — OB-Xd 2-pole bandpass
+    OBXd2Notch,    // 21 — OB-Xd 2-pole notch
+    OBXd4P,        // 22 — OB-Xd 4-pole lowpass
+    Tripole,       // 23 — 3-pole 18dB/oct lowpass
+    SampleHold,    // 24 — Sample & Hold (ZOH)
+    CutoffWarpLP,  // 25 — SVF with tanh on integrator input (LP)
+    CutoffWarpHP,  // 26 — SVF with tanh on integrator input (HP)
+    CutoffWarpBP,  // 27 — SVF with tanh on integrator input (BP)
+    CutoffWarpNotch, // 28 — SVF with tanh on integrator input (Notch)
+    CutoffWarpAP,  // 29 — SVF with tanh on integrator input (Allpass)
+    ResWarpLP,     // 30 — SVF with tanh on resonance feedback (LP)
+    ResWarpHP,     // 31 — SVF with tanh on resonance feedback (HP)
+    ResWarpBP,     // 32 — SVF with tanh on resonance feedback (BP)
+    ResWarpNotch,  // 33 — SVF with tanh on resonance feedback (Notch)
+    ResWarpAP,     // 34 — SVF with tanh on resonance feedback (Allpass)
 }
 
 impl FilterType {
@@ -43,6 +64,25 @@ impl FilterType {
             13 => Self::HP24,
             14 => Self::K35LP,
             15 => Self::K35HP,
+            16 => Self::BP24,
+            17 => Self::Notch24,
+            18 => Self::OBXd2LP,
+            19 => Self::OBXd2HP,
+            20 => Self::OBXd2BP,
+            21 => Self::OBXd2Notch,
+            22 => Self::OBXd4P,
+            23 => Self::Tripole,
+            24 => Self::SampleHold,
+            25 => Self::CutoffWarpLP,
+            26 => Self::CutoffWarpHP,
+            27 => Self::CutoffWarpBP,
+            28 => Self::CutoffWarpNotch,
+            29 => Self::CutoffWarpAP,
+            30 => Self::ResWarpLP,
+            31 => Self::ResWarpHP,
+            32 => Self::ResWarpBP,
+            33 => Self::ResWarpNotch,
+            34 => Self::ResWarpAP,
             _ => Self::LowPass,
         }
     }
@@ -120,6 +160,19 @@ pub struct Filter {
     // K35 (Korg MS-20 Sallen-Key) one-pole stage states
     k35_s1: f32,
     k35_s2: f32,
+    // OB-Xd 2-pole: separate integrator states (SVF with saturation on state updates)
+    obxd_s1: f32,   // OB-Xd integrator state 1
+    obxd_s2: f32,   // OB-Xd integrator state 2
+    // OB-Xd 4-pole: second cascaded stage
+    obxd4_s1: f32,
+    obxd4_s2: f32,
+    // Tripole: 3 one-pole integrator states
+    tri_s1: f32,
+    tri_s2: f32,
+    tri_s3: f32,
+    // Sample & Hold
+    snh_phase: f32,  // phase accumulator 0..1
+    snh_held: f32,   // held sample value
     // Control-rate coefficient update
     coeff_counter: u8,          // wrapping counter, update every 32 samples
 }
@@ -167,6 +220,19 @@ impl Filter {
             // K35 Sallen-Key stage states
             k35_s1: 0.0,
             k35_s2: 0.0,
+            // OB-Xd 2-pole
+            obxd_s1: 0.0,
+            obxd_s2: 0.0,
+            // OB-Xd 4-pole second stage
+            obxd4_s1: 0.0,
+            obxd4_s2: 0.0,
+            // Tripole
+            tri_s1: 0.0,
+            tri_s2: 0.0,
+            tri_s3: 0.0,
+            // Sample & Hold
+            snh_phase: 0.0,
+            snh_held: 0.0,
             coeff_counter: 31, // so first tick after set_cutoff/set_resonance triggers update
         };
         f.update_coefficients();
@@ -200,6 +266,15 @@ impl Filter {
         self.ic2eq2 = 0.0;
         self.k35_s1 = 0.0;
         self.k35_s2 = 0.0;
+        self.obxd_s1 = 0.0;
+        self.obxd_s2 = 0.0;
+        self.obxd4_s1 = 0.0;
+        self.obxd4_s2 = 0.0;
+        self.tri_s1 = 0.0;
+        self.tri_s2 = 0.0;
+        self.tri_s3 = 0.0;
+        self.snh_phase = 0.0;
+        self.snh_held = 0.0;
         self.moog_stage = [0.0; 4];
         self.moog_tanh = [0.0; 4];
         self.moog_delay4 = 0.0;
@@ -221,7 +296,10 @@ impl Filter {
         } else if self.filter_type.is_allpass() {
             self.update_allpass_coefficients();
         } else {
-            // SVF, Notch, LP24, HP24, K35 all use SVF g/k/a1/a2/a3 coefficients
+            // SVF, Notch, LP24/HP24/BP24/Notch24, K35, OBXd, Tripole, Warp filters
+            // all use SVF g/k/a1/a2/a3 coefficients.
+            // OBXd computes its own local k/a1/a2/a3 per tick; g is shared.
+            // SampleHold uses cutoff directly in tick, so g still warmed up here.
             self.update_svf_coefficients();
         }
         self.dirty = false;
@@ -284,6 +362,25 @@ impl Filter {
             FilterType::HP24 => self.tick_hp24(input),
             FilterType::K35LP => self.tick_k35lp(input),
             FilterType::K35HP => self.tick_k35hp(input),
+            FilterType::BP24 => self.tick_bp24(input),
+            FilterType::Notch24 => self.tick_notch24(input),
+            FilterType::OBXd2LP => self.tick_obxd2(input, 0),
+            FilterType::OBXd2HP => self.tick_obxd2(input, 1),
+            FilterType::OBXd2BP => self.tick_obxd2(input, 2),
+            FilterType::OBXd2Notch => self.tick_obxd2(input, 3),
+            FilterType::OBXd4P => self.tick_obxd4(input),
+            FilterType::Tripole => self.tick_tripole(input),
+            FilterType::SampleHold => self.tick_snh(input),
+            FilterType::CutoffWarpLP => self.tick_cutoff_warp(input, 0),
+            FilterType::CutoffWarpHP => self.tick_cutoff_warp(input, 1),
+            FilterType::CutoffWarpBP => self.tick_cutoff_warp(input, 2),
+            FilterType::CutoffWarpNotch => self.tick_cutoff_warp(input, 3),
+            FilterType::CutoffWarpAP => self.tick_cutoff_warp(input, 4),
+            FilterType::ResWarpLP => self.tick_resonance_warp(input, 0),
+            FilterType::ResWarpHP => self.tick_resonance_warp(input, 1),
+            FilterType::ResWarpBP => self.tick_resonance_warp(input, 2),
+            FilterType::ResWarpNotch => self.tick_resonance_warp(input, 3),
+            FilterType::ResWarpAP => self.tick_resonance_warp(input, 4),
             _ => self.tick_svf(input),
         }
     }
@@ -448,6 +545,186 @@ impl Filter {
         self.ic1eq2 = 2.0 * v1b - self.ic1eq2;
         self.ic2eq2 = 2.0 * v2b - self.ic2eq2;
         hp1 - self.k * v1b - v2b
+    }
+
+    /// BP24 — 24dB/oct bandpass: two cascaded SVF stages, bandpass output.
+    fn tick_bp24(&mut self, input: f32) -> f32 {
+        // First SVF stage → bandpass
+        let v3 = input - self.ic2eq;
+        let v1 = self.a1 * self.ic1eq + self.a2 * v3;
+        let v2 = self.ic2eq + self.a2 * self.ic1eq + self.a3 * v3;
+        self.ic1eq = 2.0 * v1 - self.ic1eq;
+        self.ic2eq = 2.0 * v2 - self.ic2eq;
+        let bp1 = v1;
+
+        // Second SVF stage → bandpass
+        let v3b = bp1 - self.ic2eq2;
+        let v1b = self.a1 * self.ic1eq2 + self.a2 * v3b;
+        let v2b = self.ic2eq2 + self.a2 * self.ic1eq2 + self.a3 * v3b;
+        self.ic1eq2 = 2.0 * v1b - self.ic1eq2;
+        self.ic2eq2 = 2.0 * v2b - self.ic2eq2;
+        v1b
+    }
+
+    /// Notch24 — 24dB/oct notch: two cascaded SVF stages, notch output from each.
+    fn tick_notch24(&mut self, input: f32) -> f32 {
+        let v3 = input - self.ic2eq;
+        let v1 = self.a1 * self.ic1eq + self.a2 * v3;
+        let v2 = self.ic2eq + self.a2 * self.ic1eq + self.a3 * v3;
+        self.ic1eq = 2.0 * v1 - self.ic1eq;
+        self.ic2eq = 2.0 * v2 - self.ic2eq;
+        let n1 = input - self.k * v1;
+
+        let v3b = n1 - self.ic2eq2;
+        let v1b = self.a1 * self.ic1eq2 + self.a2 * v3b;
+        let v2b = self.ic2eq2 + self.a2 * self.ic1eq2 + self.a3 * v3b;
+        self.ic1eq2 = 2.0 * v1b - self.ic1eq2;
+        self.ic2eq2 = 2.0 * v2b - self.ic2eq2;
+        n1 - self.k * v1b
+    }
+
+    /// OB-Xd 2-pole — State variable filter with tanh saturation on state updates.
+    /// Inspired by the OB-Xd open source plugin (GPL). The distinguishing feature:
+    /// state variables are updated through tanh, giving warmer self-oscillation and
+    /// a more musical resonance character than a clean SVF.
+    ///
+    /// Resonance k goes from 2.0 (no resonance) to near 0 (self-oscillation),
+    /// allowing the filter to ring freely at max resonance.
+    fn tick_obxd2(&mut self, input: f32, mode: u8) -> f32 {
+        let g = self.g;
+        // OB-Xd: k approaches 0 for self-oscillation (resonance 0..1 → k 2..0.02)
+        let k = (2.0 - self.resonance * 1.98).max(0.02);
+        let a1 = 1.0 / (1.0 + g * (g + k));
+        let a2 = g * a1;
+        let a3 = g * a2;
+
+        let v3 = input - self.obxd_s2;
+        let v1 = a1 * self.obxd_s1 + a2 * v3;
+        let v2 = self.obxd_s2 + a2 * self.obxd_s1 + a3 * v3;
+
+        // Saturate state updates — key OB character: prevents explosion, adds warmth
+        self.obxd_s1 = fast_tanh(2.0 * v1 - self.obxd_s1);
+        self.obxd_s2 = fast_tanh(2.0 * v2 - self.obxd_s2);
+
+        match mode {
+            0 => v2,                       // LP
+            1 => input - k * v1 - v2,     // HP
+            2 => v1 * k,                   // BP (gain-compensated)
+            _ => input - k * v1,           // Notch
+        }
+    }
+
+    /// OB-Xd 4-pole — Two cascaded OBXd2 stages for 24dB/oct lowpass.
+    /// First stage carries all the resonance; second stage is neutral (k=2).
+    fn tick_obxd4(&mut self, input: f32) -> f32 {
+        let g = self.g;
+        // First stage: resonance on this stage drives the character
+        let k = (2.0 - self.resonance * 1.9).max(0.02);
+        let a1 = 1.0 / (1.0 + g * (g + k));
+        let a2 = g * a1;
+        let a3 = g * a2;
+
+        let v3 = input - self.obxd_s2;
+        let v1 = a1 * self.obxd_s1 + a2 * v3;
+        let v2 = self.obxd_s2 + a2 * self.obxd_s1 + a3 * v3;
+        self.obxd_s1 = fast_tanh(2.0 * v1 - self.obxd_s1);
+        self.obxd_s2 = fast_tanh(2.0 * v2 - self.obxd_s2);
+        let lp1 = v2;
+
+        // Second stage: no resonance, just additional slope
+        let k2 = 2.0_f32;
+        let a1b = 1.0 / (1.0 + g * (g + k2));
+        let a2b = g * a1b;
+        let a3b = g * a2b;
+
+        let v3b = lp1 - self.obxd4_s2;
+        let v1b = a1b * self.obxd4_s1 + a2b * v3b;
+        let v2b = self.obxd4_s2 + a2b * self.obxd4_s1 + a3b * v3b;
+        self.obxd4_s1 = fast_tanh(2.0 * v1b - self.obxd4_s1);
+        self.obxd4_s2 = fast_tanh(2.0 * v2b - self.obxd4_s2);
+
+        // Gain compensation: recover passband level lost to resonance
+        (v2b * (1.0 + self.resonance)).clamp(-2.0, 2.0)
+    }
+
+    /// Tripole — 3-pole 18dB/oct lowpass with resonance feedback.
+    /// Three cascaded one-pole stages with global feedback from the output.
+    fn tick_tripole(&mut self, input: f32) -> f32 {
+        let g = self.g;
+        // Resonance feedback gain (approaches self-oscillation near 1.0)
+        let res = self.resonance * 3.5;
+
+        // Subtract resonance feedback from input
+        let x = input - res * self.tri_s3;
+
+        // One-pole integrator gain (bilinear transform: g / (1 + g))
+        let g1 = g / (1.0 + g);
+
+        // Stage 1
+        let lp1 = g1 * x + self.tri_s1;
+        self.tri_s1 = 2.0 * lp1 - self.tri_s1;
+
+        // Stage 2
+        let lp2 = g1 * lp1 + self.tri_s2;
+        self.tri_s2 = 2.0 * lp2 - self.tri_s2;
+
+        // Stage 3
+        let lp3 = g1 * lp2 + self.tri_s3;
+        self.tri_s3 = 2.0 * lp3 - self.tri_s3;
+
+        (lp3 * (1.0 + self.resonance * 0.5)).clamp(-2.0, 2.0)
+    }
+
+    /// Sample & Hold — Zero-order hold at the cutoff frequency.
+    /// Samples the input at rate = cutoff_hz; between samples the output is held constant.
+    fn tick_snh(&mut self, input: f32) -> f32 {
+        let inc = self.cutoff / self.sample_rate;
+        self.snh_phase += inc;
+        if self.snh_phase >= 1.0 {
+            self.snh_phase -= 1.0;
+            self.snh_held = input;
+        }
+        self.snh_held
+    }
+
+    /// Cutoff Warp filters — SVF with tanh saturation on v3 (the input to both integrators).
+    /// Effect: at high drive levels the effective cutoff "warps" toward a softer ceiling,
+    /// giving a rounded, warm character compared to a clean SVF.
+    fn tick_cutoff_warp(&mut self, input: f32, mode: u8) -> f32 {
+        let v3 = input - self.ic2eq;
+        let v3_sat = fast_tanh(v3); // saturate before integration
+        let v1 = self.a1 * self.ic1eq + self.a2 * v3_sat;
+        let v2 = self.ic2eq + self.a2 * self.ic1eq + self.a3 * v3_sat;
+        self.ic1eq = 2.0 * v1 - self.ic1eq;
+        self.ic2eq = 2.0 * v2 - self.ic2eq;
+        match mode {
+            0 => v2,                                    // LP
+            1 => input - self.k * v1 - v2,             // HP
+            2 => v1,                                    // BP
+            3 => input - self.k * v1,                   // Notch
+            _ => input - 2.0 * (v1 * self.k),          // AP
+        }
+    }
+
+    /// Resonance Warp filters — SVF with tanh saturation on the resonance feedback term.
+    /// The k*v1 term is run through tanh before being subtracted, which limits how
+    /// aggressively the resonance peak can grow — warm, musical resonance soft-limiting.
+    fn tick_resonance_warp(&mut self, input: f32, mode: u8) -> f32 {
+        let v3 = input - self.ic2eq;
+        let v1 = self.a1 * self.ic1eq + self.a2 * v3;
+        let v2 = self.ic2eq + self.a2 * self.ic1eq + self.a3 * v3;
+        self.ic1eq = 2.0 * v1 - self.ic1eq;
+        self.ic2eq = 2.0 * v2 - self.ic2eq;
+
+        // Saturate the resonance feedback — limits peak height musically
+        let k_sat = fast_tanh(self.k * v1);
+        match mode {
+            0 => v2,                       // LP
+            1 => input - k_sat - v2,       // HP
+            2 => v1,                       // BP
+            3 => input - k_sat,            // Notch
+            _ => input - 2.0 * k_sat,     // AP
+        }
     }
 
     /// K35LP — Korg MS-20 Sallen-Key lowpass (ZDF, self-oscillating at high resonance).

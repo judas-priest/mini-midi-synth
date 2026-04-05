@@ -173,6 +173,26 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Moog", "moog_lead", include_str!("../presets/moog_lead.json")),
     ("Moog", "moog_lead_v2",          include_str!("../presets/moog_lead_v2.json")),
     ("Moog", "moog_squelch", include_str!("../presets/moog_squelch.json")),
+    // OB-Xd filters
+    ("OB-Xd", "obxd_pad",     include_str!("../presets/obxd_pad.json")),
+    ("OB-Xd", "obxd_lead",    include_str!("../presets/obxd_lead.json")),
+    ("OB-Xd", "obxd_brass",   include_str!("../presets/obxd_brass.json")),
+    ("OB-Xd", "obxd_strings", include_str!("../presets/obxd_strings.json")),
+    // Tripole 18dB
+    ("Tripole", "tripole_bass", include_str!("../presets/tripole_bass.json")),
+    ("Tripole", "tripole_lead", include_str!("../presets/tripole_lead.json")),
+    // Sample & Hold filter
+    ("S&H", "snh_digital", include_str!("../presets/snh_digital.json")),
+    ("S&H", "snh_robot",   include_str!("../presets/snh_robot.json")),
+    // Warp filters (cutoff saturation)
+    ("Warp", "warp_acid",    include_str!("../presets/warp_acid.json")),
+    ("Warp", "warp_pad",     include_str!("../presets/warp_pad.json")),
+    ("Warp", "warpbp_wah",   include_str!("../presets/warpbp_wah.json")),
+    // ResWarp filters (resonance saturation)
+    ("ResWarp", "reswarp_lead", include_str!("../presets/reswarp_lead.json")),
+    ("ResWarp", "reswarp_bass", include_str!("../presets/reswarp_bass.json")),
+    // BP24 / Notch24 spectral
+    ("Spectral", "bp24_vocal", include_str!("../presets/bp24_vocal.json")),
     // Hard Sync
     ("Hard Sync", "sync_lead", include_str!("../presets/sync_lead.json")),
     ("Hard Sync", "sync_brass", include_str!("../presets/sync_brass.json")),
