@@ -10,7 +10,7 @@ use super::{
     ACCORDION_REGISTER_NAMES, SAX_TYPE_NAMES, ALIAS_WAVE_NAMES, WINDOW_TYPE_NAMES,
     ENV_SHAPE_NAMES, FORMANT_VOICE_NAMES, FORMANT_VOWEL_NAMES, LFO_WAVEFORM_NAMES,
     VELOCITY_CURVE_NAMES, PORTAMENTO_MODE_NAMES, REVERB_TYPE_NAMES, RING_MOD_SHAPE_NAMES,
-    LAYER_NAMES,
+    WAVE_SHAPER_MODE_NAMES, LAYER_NAMES,
 };
 
 impl App {
@@ -476,6 +476,26 @@ impl App {
             }
         }
 
+        // Osc Waveshaper (pre-filter, per-voice)
+        ui.add_space(4.0);
+        ui.strong("Osc Shaper");
+        ui.horizontal(|ui| {
+            let mut wsm = self.layers[layer].edited_params.get("osc_ws_mode").copied().unwrap_or(0.0) as usize;
+            ui.label("Mode:");
+            egui::ComboBox::from_id_salt(format!("osc_ws_mode_{layer}"))
+                .selected_text(*WAVE_SHAPER_MODE_NAMES.get(wsm).unwrap_or(&"?"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut wsm, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("osc_ws_mode".into(), wsm as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        changed |= self.param_slider(ui, "osc_ws_drive", "Drive", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "osc_ws_mix", "Mix", 0.0, 1.0, false);
+
         ui.add_space(6.0);
 
         // Filter 1
@@ -532,6 +552,10 @@ impl App {
             changed |= self.param_slider(ui, "filter_resonance", "Resonance", 0.0, 1.0, false);
             changed |= self.param_slider(ui, "filter_env_amount", "Env Amount", 0.0, 15000.0, false);
             changed |= self.param_slider(ui, "filter_key_track", "Key Track", 0.0, 1.0, false);
+            // SVF Morph slider: only shown when filter type is SVFMorph (type 36)
+            if filter_type == 36 {
+                changed |= self.param_slider(ui, "svf_morph", "LP\u{2194}HP", 0.0, 1.0, false);
+            }
         }
 
         // Filter routing (not available with formant filter)
@@ -615,7 +639,7 @@ impl App {
                     }
                 });
             let mut ds = self.layers[layer].edited_params.get("env_decay_shape").copied().unwrap_or(0.0) as usize;
-            ui.label("Dec/Rel:");
+            ui.label("Dec:");
             egui::ComboBox::from_id_salt(format!("env_dec_shape_{layer}"))
                 .selected_text(*ENV_SHAPE_NAMES.get(ds).unwrap_or(&"Sqrt"))
                 .width(90.0)
@@ -623,6 +647,61 @@ impl App {
                     for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut ds, i, *name).changed() {
                             self.layers[layer].edited_params.insert("env_decay_shape".into(), ds as f32);
+                            changed = true;
+                        }
+                    }
+                });
+            let mut rs = self.layers[layer].edited_params.get("env_release_shape").copied().unwrap_or(0.0) as usize;
+            ui.label("Rel:");
+            egui::ComboBox::from_id_salt(format!("env_rel_shape_{layer}"))
+                .selected_text(*ENV_SHAPE_NAMES.get(rs).unwrap_or(&"Sqrt"))
+                .width(90.0)
+                .show_ui(ui, |ui| {
+                    for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut rs, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("env_release_shape".into(), rs as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        // Filter envelope shapes
+        ui.horizontal(|ui| {
+            let mut fas = self.layers[layer].edited_params.get("filter_env_attack_shape").copied().unwrap_or(0.0) as usize;
+            ui.label("Flt Atk:");
+            egui::ComboBox::from_id_salt(format!("fenv_atk_shape_{layer}"))
+                .selected_text(*ENV_SHAPE_NAMES.get(fas).unwrap_or(&"Sqrt"))
+                .width(90.0)
+                .show_ui(ui, |ui| {
+                    for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut fas, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("filter_env_attack_shape".into(), fas as f32);
+                            changed = true;
+                        }
+                    }
+                });
+            let mut fds = self.layers[layer].edited_params.get("filter_env_decay_shape").copied().unwrap_or(0.0) as usize;
+            ui.label("Dec:");
+            egui::ComboBox::from_id_salt(format!("fenv_dec_shape_{layer}"))
+                .selected_text(*ENV_SHAPE_NAMES.get(fds).unwrap_or(&"Sqrt"))
+                .width(90.0)
+                .show_ui(ui, |ui| {
+                    for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut fds, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("filter_env_decay_shape".into(), fds as f32);
+                            changed = true;
+                        }
+                    }
+                });
+            let mut frs = self.layers[layer].edited_params.get("filter_env_release_shape").copied().unwrap_or(0.0) as usize;
+            ui.label("Rel:");
+            egui::ComboBox::from_id_salt(format!("fenv_rel_shape_{layer}"))
+                .selected_text(*ENV_SHAPE_NAMES.get(frs).unwrap_or(&"Sqrt"))
+                .width(90.0)
+                .show_ui(ui, |ui| {
+                    for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut frs, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("filter_env_release_shape".into(), frs as f32);
                             changed = true;
                         }
                     }
@@ -672,6 +751,13 @@ impl App {
         changed |= self.param_slider(ui, "lfo_filter_depth", "Filter Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_amp_depth", "Amp Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_deform", "Deform", -1.0, 1.0, false);
+        {
+            let mut retrig = *self.layers[layer].edited_params.get("lfo1_retrigger").unwrap_or(&1.0) > 0.5;
+            if ui.checkbox(&mut retrig, "Retrigger").changed() {
+                self.layers[layer].edited_params.insert("lfo1_retrigger".to_string(), if retrig { 1.0 } else { 0.0 });
+                changed = true;
+            }
+        }
 
         ui.add_space(6.0);
 
@@ -696,6 +782,13 @@ impl App {
         changed |= self.param_slider(ui, "lfo2_filter_depth", "Filter Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_amp_depth", "Amp Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_deform", "Deform", -1.0, 1.0, false);
+        {
+            let mut retrig = *self.layers[layer].edited_params.get("lfo2_retrigger").unwrap_or(&1.0) > 0.5;
+            if ui.checkbox(&mut retrig, "Retrigger").changed() {
+                self.layers[layer].edited_params.insert("lfo2_retrigger".to_string(), if retrig { 1.0 } else { 0.0 });
+                changed = true;
+            }
+        }
 
         ui.add_space(6.0);
 
@@ -717,6 +810,13 @@ impl App {
         });
         changed |= self.param_slider(ui, "lfo3_rate", "Rate", 0.1, 20.0, true);
         changed |= self.param_slider(ui, "lfo3_deform", "Deform", -1.0, 1.0, false);
+        {
+            let mut retrig = *self.layers[layer].edited_params.get("lfo3_retrigger").unwrap_or(&0.0) > 0.5;
+            if ui.checkbox(&mut retrig, "Retrigger").changed() {
+                self.layers[layer].edited_params.insert("lfo3_retrigger".to_string(), if retrig { 1.0 } else { 0.0 });
+                changed = true;
+            }
+        }
 
         ui.strong("LFO 4 (Mod Matrix)");
         ui.horizontal(|ui| {
@@ -735,6 +835,13 @@ impl App {
         });
         changed |= self.param_slider(ui, "lfo4_rate", "Rate", 0.1, 20.0, true);
         changed |= self.param_slider(ui, "lfo4_deform", "Deform", -1.0, 1.0, false);
+        {
+            let mut retrig = *self.layers[layer].edited_params.get("lfo4_retrigger").unwrap_or(&0.0) > 0.5;
+            if ui.checkbox(&mut retrig, "Retrigger").changed() {
+                self.layers[layer].edited_params.insert("lfo4_retrigger".to_string(), if retrig { 1.0 } else { 0.0 });
+                changed = true;
+            }
+        }
 
         ui.add_space(6.0);
 
@@ -938,6 +1045,46 @@ impl App {
             changed |= self.param_slider(ui, "spring_damping", "Damping", 0.0, 1.0, false);
             changed |= self.param_slider(ui, "spring_spin", "Spin", 0.0, 1.0, false);
         }
+
+        ui.add_space(4.0);
+        ui.strong("Wave Shaper");
+        changed |= self.param_slider(ui, "wave_shaper_mix", "Mix", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "wave_shaper_drive", "Drive", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "wave_shaper_bias", "Bias", -1.0, 1.0, false);
+        ui.horizontal(|ui| {
+            let mut wsm = self.layers[layer].edited_params.get("wave_shaper_mode").copied().unwrap_or(0.0) as usize;
+            ui.label("Mode:");
+            egui::ComboBox::from_id_salt(format!("ws_mode_{layer}"))
+                .selected_text(*WAVE_SHAPER_MODE_NAMES.get(wsm).unwrap_or(&"Tanh"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut wsm, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("wave_shaper_mode".into(), wsm as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+
+        ui.add_space(4.0);
+        ui.strong("Airwindows");
+        changed |= self.param_slider(ui, "airwindows_mix", "Mix", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "airwindows_drive", "Drive", 0.0, 1.0, false);
+        ui.horizontal(|ui| {
+            let airwindows_mode_names = &["Tape2", "Density", "Console", "ToVinyl4", "Atmosphere", "Pressure5"];
+            let mut awm = self.layers[layer].edited_params.get("airwindows_mode").copied().unwrap_or(0.0) as usize;
+            ui.label("Mode:");
+            egui::ComboBox::from_id_salt(format!("aw_mode_{layer}"))
+                .selected_text(*airwindows_mode_names.get(awm.min(5)).unwrap_or(&"Tape2"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in airwindows_mode_names.iter().enumerate() {
+                        if ui.selectable_value(&mut awm, i, *name).changed() {
+                            self.layers[layer].edited_params.insert("airwindows_mode".into(), awm as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
 
         if changed {
             self.layers[layer].params_dirty = true;

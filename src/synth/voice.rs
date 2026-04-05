@@ -4,6 +4,7 @@ use super::envelope::Envelope;
 use super::filter::{Filter, FilterType};
 use super::formant::{FormantFilter, VoiceType, Vowel};
 use super::oscillator::{OscType, Oscillator};
+use super::wave_shaper::shape_sample;
 use super::ModulationState;
 
 /// Fast 2^(semitones/12) — replaces expensive libm powf() in the per-sample hot path.
@@ -93,6 +94,12 @@ pub struct Voice {
     // Portamento (log-frequency domain)
     log_freq: f32,
     log_target_freq: f32,
+    // Osc waveshaper params + DC blocker state
+    osc_ws_mode: u32,
+    osc_ws_drive: f32,
+    osc_ws_mix: f32,
+    osc_ws_dc_x1: f32,
+    osc_ws_dc_y1: f32,
 }
 
 impl Voice {
@@ -142,6 +149,11 @@ impl Voice {
             unison_r_gains: [std::f32::consts::FRAC_1_SQRT_2; 8],
             log_freq: 440.0_f32.ln(),
             log_target_freq: 440.0_f32.ln(),
+            osc_ws_mode: 0,
+            osc_ws_drive: 1.0,
+            osc_ws_mix: 0.0,
+            osc_ws_dc_x1: 0.0,
+            osc_ws_dc_y1: 0.0,
         }
     }
 
@@ -348,6 +360,7 @@ impl Voice {
         } else {
             self.filter.set_type(filter_type);
             self.filter.set_resonance(params.filter_resonance);
+            self.filter.svf_morph = params.svf_morph;
             self.filter.reset();
 
             // Filter routing + filter 2
@@ -380,6 +393,13 @@ impl Voice {
         };
         self.noise_level = params.noise_level;
         self.fm_cross_depth = params.fm_cross_depth;
+
+        // Osc waveshaper
+        self.osc_ws_mode = params.osc_ws_mode;
+        self.osc_ws_drive = params.osc_ws_drive;
+        self.osc_ws_mix = params.osc_ws_mix;
+        self.osc_ws_dc_x1 = 0.0;
+        self.osc_ws_dc_y1 = 0.0;
 
         // Unison
         let is_physical = !self.oscs[0].osc_type.is_simple()
@@ -423,14 +443,16 @@ impl Voice {
         );
         self.amp_env.set_attack_shape(params.env_attack_shape);
         self.amp_env.set_decay_shape(params.env_decay_shape);
+        self.amp_env.set_release_shape(params.env_release_shape);
         self.filter_env.set_adsr(
             params.filter_attack,
             params.filter_decay,
             params.filter_sustain,
             params.filter_release,
         );
-        self.filter_env.set_attack_shape(params.env_attack_shape);
-        self.filter_env.set_decay_shape(params.env_decay_shape);
+        self.filter_env.set_attack_shape(params.filter_env_attack_shape);
+        self.filter_env.set_decay_shape(params.filter_env_decay_shape);
+        self.filter_env.set_release_shape(params.filter_env_release_shape);
 
         self.amp_env.note_on();
         self.filter_env.note_on();
@@ -607,6 +629,17 @@ impl Voice {
             mix += self.next_noise() * self.noise_level;
         }
 
+        // Per-voice osc waveshaper (pre-filter)
+        if self.osc_ws_mix > 0.001 {
+            let shaped = shape_sample(mix, self.osc_ws_mode, self.osc_ws_drive);
+            // DC blocker (~6 Hz pole at typical sample rates)
+            let r = 0.9997_f32;
+            let dc_out = shaped - self.osc_ws_dc_x1 + r * self.osc_ws_dc_y1;
+            self.osc_ws_dc_x1 = shaped;
+            self.osc_ws_dc_y1 = dc_out;
+            mix += self.osc_ws_mix * (dc_out - mix);
+        }
+
         mix
     }
 
@@ -747,6 +780,10 @@ pub struct VoiceParams {
     // Envelope shapes
     pub env_attack_shape: f32,
     pub env_decay_shape: f32,
+    pub env_release_shape: f32,
+    pub filter_env_attack_shape: f32,
+    pub filter_env_decay_shape: f32,
+    pub filter_env_release_shape: f32,
     // Dynamics
     pub velocity_curve: f32,
     pub vel_to_filter: f32,
@@ -761,6 +798,12 @@ pub struct VoiceParams {
     pub fm_cross_depth: f32,
     // Filter env in semitones (Surge-style exponential modulation, 0 = disabled)
     pub filter_env_semitones: f32,
+    // Osc Waveshaper (per-voice, pre-filter)
+    pub osc_ws_mode: u32,
+    pub osc_ws_drive: f32,
+    pub osc_ws_mix: f32,
+    // SVF Morph filter parameter
+    pub svf_morph: f32,
 }
 
 fn midi_to_freq(note: u8) -> f32 {

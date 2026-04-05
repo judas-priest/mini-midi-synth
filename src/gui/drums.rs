@@ -62,7 +62,7 @@ impl App {
 
             ui.separator();
             ui.label("Vol:");
-            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=1.0).show_value(false)).changed() {
+            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=2.0).show_value(false)).changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
             }
         });

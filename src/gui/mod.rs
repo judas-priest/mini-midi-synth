@@ -23,7 +23,7 @@ use crate::synth::drum::{NUM_DRUM_SLOTS, DrumSlotParams, DrumPattern};
 use crate::synth::looper::LooperAtoms;
 
 const VELOCITY_CURVE_NAMES: &[&str] = &["Linear", "Exponential", "Logarithmic", "Fixed"];
-const LFO_WAVEFORM_NAMES: &[&str] = &["Sine", "Triangle", "Square", "Sample & Hold", "Sawtooth", "Envelope"];
+const LFO_WAVEFORM_NAMES: &[&str] = &["Sine", "Triangle", "Square", "Sample & Hold", "Sawtooth", "Envelope", "Noise", "Smooth Noise"];
 const PORTAMENTO_MODE_NAMES: &[&str] = &["Off", "Always", "Legato"];
 
 const NOTE_NAMES: &[&str] = &[
@@ -55,11 +55,56 @@ const ACCORDION_REGISTER_NAMES: &[&str] = &["Fundamental", "Octave+", "Musette",
 const SAX_TYPE_NAMES: &[&str] = &["Soprano", "Alto", "Tenor", "Baritone"];
 const ALIAS_WAVE_NAMES: &[&str] = &["Sine", "Ramp", "Pulse", "Noise", "Additive"];
 const WINDOW_TYPE_NAMES: &[&str] = &["Triangle", "Cosine", "Half-Sine", "Hann"];
-const ENV_SHAPE_NAMES: &[&str] = &["Sqrt (Fast)", "Linear", "Quadratic (Slow)"];
+const ENV_SHAPE_NAMES: &[&str] = &["Sqrt (Fast)", "Linear", "Quadratic (Slow)", "Exponential"];
 const REVERB_TYPE_NAMES: &[&str] = &["Plate", "Spring"];
+const WAVE_SHAPER_MODE_NAMES: &[&str] = &[
+    "Tanh", "HardClip", "Asymmetric", "SinFold", "TriFold", "Digital", "Diode", "Rectify",
+    "Harm2", "Harm3", "Harm4", "Harm5",
+    "Softfold", "Singlefold", "Dualfold", "WestCoast",
+    "FuzzSoft", "FuzzHeavy", "FuzzCenter", "FuzzEdge", "FuzzSoft2", "FuzzRect",
+    "Sin+x", "Sin2x+x", "Atan",
+];
 const RING_MOD_SHAPE_NAMES: &[&str] = &["Sine", "Saw", "Square"];
 const SIMPLE_OSC_NAMES: &[&str] = &["Sine", "Saw", "Square", "Triangle", "FM"];
-const FILTER_NAMES: &[&str] = &["LowPass", "HighPass", "BandPass", "Formant", "Moog 24dB", "Moog 12dB", "Diode 18dB", "Comb", "Allpass", "Comb+", "Comb-"];
+const FILTER_NAMES: &[&str] = &[
+    "LowPass",       // 0
+    "HighPass",      // 1
+    "BandPass",      // 2
+    "Formant",       // 3
+    "Moog 24dB",     // 4
+    "Moog 12dB",     // 5
+    "Diode 18dB",    // 6
+    "Comb",          // 7
+    "Allpass",       // 8
+    "Comb+",         // 9
+    "Comb-",         // 10
+    "Notch",         // 11
+    "LP 24dB",       // 12
+    "HP 24dB",       // 13
+    "K35 LP",        // 14
+    "K35 HP",        // 15
+    "BP 24dB",       // 16
+    "Notch 24dB",    // 17
+    "OB-Xd 2P LP",   // 18
+    "OB-Xd 2P HP",   // 19
+    "OB-Xd 2P BP",   // 20
+    "OB-Xd 2P Notch",// 21
+    "OB-Xd 4P",      // 22
+    "Tripole 18dB",  // 23
+    "Sample & Hold", // 24
+    "CutWarp LP",    // 25
+    "CutWarp HP",    // 26
+    "CutWarp BP",    // 27
+    "CutWarp Notch", // 28
+    "CutWarp AP",    // 29
+    "ResWarp LP",    // 30
+    "ResWarp HP",    // 31
+    "ResWarp BP",    // 32
+    "ResWarp Notch", // 33
+    "ResWarp AP",    // 34
+    "Vintage Ladder",// 35
+    "SVF Morph",     // 36
+];
 const FILTER_ROUTING_NAMES: &[&str] = &["Single", "Serial", "Parallel"];
 const FORMANT_VOICE_NAMES: &[&str] = &["Bass", "Tenor", "Alto", "Soprano"];
 const FORMANT_VOWEL_NAMES: &[&str] = &["A (ah)", "E (eh)", "I (ee)", "O (oh)", "U (oo)"];
@@ -354,6 +399,28 @@ impl eframe::App for App {
                 if ui.add(egui::Slider::new(&mut tone, 200.0..=20000.0).logarithmic(true).show_value(false)).changed() {
                     self.global_params.insert("master_tone".into(), tone);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_tone", value: tone });
+                    self.global_dirty = true;
+                }
+
+                ui.separator();
+
+                // Reverb (global)
+                let mut reverb = self.global_params.get("reverb_mix").copied().unwrap_or(0.0);
+                ui.label("Reverb:");
+                if ui.add(egui::Slider::new(&mut reverb, 0.0..=1.0).show_value(false)).changed() {
+                    self.global_params.insert("reverb_mix".into(), reverb);
+                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "reverb_mix", value: reverb });
+                    self.global_dirty = true;
+                }
+
+                ui.separator();
+
+                // Delay (global)
+                let mut delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
+                ui.label("Delay:");
+                if ui.add(egui::Slider::new(&mut delay, 0.0..=1.0).show_value(false)).changed() {
+                    self.global_params.insert("delay_mix".into(), delay);
+                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "delay_mix", value: delay });
                     self.global_dirty = true;
                 }
             });
@@ -663,6 +730,11 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: static_key, value: *val });
             }
         }
+        // Send drum and layer volumes to engine
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
+        for i in 0..self.layers.len() {
+            self.send_layer_volume(i);
+        }
         // Ensure config has global params persisted (first run migration)
         self.save_global_to_config();
 
@@ -710,6 +782,9 @@ impl App {
         self.config.ui.master_tone = self.global_params.get("master_tone").copied().unwrap_or(20000.0);
         self.config.ui.fader_reverb = self.global_params.get("reverb_mix").copied().unwrap_or(0.0);
         self.config.ui.fader_delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
+        self.config.ui.drum_volume = self.drum_volume;
+        if let Some(l) = self.layers.get(0) { self.config.ui.layer_a_volume = l.volume; }
+        if let Some(l) = self.layers.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
         let _ = self.config.save();
         self.last_config_save = std::time::Instant::now();

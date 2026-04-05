@@ -1,6 +1,10 @@
 #![allow(dead_code)]
 /// Wave Shaper — multi-mode waveshaping distortion.
-/// Modes: Tanh, HardClip, Asymmetric, SinFold, TriFold, Digital, Diode, Rectify
+/// Modes: Tanh, HardClip, Asymmetric, SinFold, TriFold, Digital, Diode, Rectify,
+///        Harm2, Harm3, Harm4, Harm5,
+///        Softfold, Singlefold, Dualfold, WestCoast,
+///        FuzzSoft, FuzzHeavy, FuzzCenter, FuzzEdge, FuzzSoftEdge, FuzzRect,
+///        Sin+x, Sin2x+x, Atan
 ///
 /// Inspired by Surge XT's Wave Shaper effect.
 use std::f32::consts::PI;
@@ -18,8 +22,10 @@ pub struct WaveShaper {
 pub struct WaveShaperMode;
 
 impl WaveShaperMode {
+    pub const COUNT: u32 = 25;
+
     pub fn from_param(v: f32) -> u32 {
-        (v.clamp(0.0, 1.0) * 7.0).round() as u32
+        v.round().clamp(0.0, (Self::COUNT - 1) as f32) as u32
     }
 }
 
@@ -42,6 +48,14 @@ fn tri_fold(x: f32) -> f32 {
     } else {
         x
     }
+}
+
+/// Per-voice oscillator waveshaper — mono sample, no DC blocker (caller handles it).
+/// `mode` 0..24 selects waveshaping character (matches WaveShaper modes).
+/// `drive` is a linear pre-gain (e.g. 0.5..4.5 mapped from a 0..1 param).
+#[inline(always)]
+pub fn shape_sample(input: f32, mode: u32, drive: f32) -> f32 {
+    WaveShaper::shape(input, mode, drive)
 }
 
 impl WaveShaper {
@@ -79,7 +93,7 @@ impl WaveShaper {
     }
 
     #[inline(always)]
-    fn shape(x: f32, mode: u32, drive_lin: f32) -> f32 {
+    pub fn shape(x: f32, mode: u32, drive_lin: f32) -> f32 {
         let gained = x * drive_lin;
         match mode {
             // 0: Tanh — classic soft saturation
@@ -107,6 +121,89 @@ impl WaveShaper {
             6 => (1.0 - (-gained * 4.0).exp()).max(0.0),
             // 7: Rectify — full-wave rectification
             7 => gained.abs(),
+
+            // Mode 8-11: Chebyshev Harmonic Shapers
+            // 8: Harm2 — T2(x) = 2x²-1
+            8 => {
+                let x = gained.clamp(-1.0, 1.0);
+                2.0 * x * x - 1.0
+            }
+            // 9: Harm3 — T3(x) = 4x³-3x
+            9 => {
+                let x = gained.clamp(-1.0, 1.0);
+                4.0 * x * x * x - 3.0 * x
+            }
+            // 10: Harm4 — T4(x) = 8x⁴-8x²+1
+            10 => {
+                let x = gained.clamp(-1.0, 1.0);
+                let x2 = x * x;
+                8.0 * x2 * x2 - 8.0 * x2 + 1.0
+            }
+            // 11: Harm5 — T5(x) = 16x⁵-20x³+5x
+            11 => {
+                let x = gained.clamp(-1.0, 1.0);
+                let x2 = x * x;
+                16.0 * x2 * x2 * x - 20.0 * x2 * x + 5.0 * x
+            }
+
+            // Mode 12-15: Wavefolders
+            // 12: Softfold — fold with soft knee via tanh
+            12 => {
+                let folded = if gained.abs() < 1.0 { gained } else { 2.0 - gained.abs() };
+                fast_tanh(folded * 2.0)
+            }
+            // 13: Singlefold — fold once at ±1
+            13 => {
+                if gained > 1.0 { 2.0 - gained }
+                else if gained < -1.0 { -2.0 - gained }
+                else { gained }
+            }
+            // 14: Dualfold — fold at ±0.5 and ±1.5
+            14 => {
+                let y = (gained + 1.0).rem_euclid(4.0) - 2.0;
+                if y > 1.0 { 2.0 - y } else if y < -1.0 { -2.0 - y } else { y }
+            }
+            // 15: WestCoast — Buchla-style sine folder
+            15 => {
+                let x = gained * 0.5;
+                (x * PI).sin()
+            }
+
+            // Mode 16-21: Fuzz variants
+            // 16: FuzzSoft — gentle transistor fuzz
+            16 => gained / (1.0 + gained.abs()),
+            // 17: FuzzHeavy — hard transistor fuzz
+            17 => {
+                let x = gained * 2.0;
+                fast_tanh(x * 3.0)
+            }
+            // 18: FuzzCenter — symmetric hard clip with soft knee
+            18 => {
+                let thresh = 0.7_f32;
+                if gained.abs() < thresh {
+                    gained
+                } else {
+                    gained.signum() * (thresh + (gained.abs() - thresh) / (1.0 + (gained.abs() - thresh)))
+                }
+            }
+            // 19: FuzzEdge — asymmetric fuzz (positive harder)
+            19 => {
+                if gained >= 0.0 { fast_tanh(gained * 4.0) }
+                else { gained / (1.0 - gained * 0.5) }
+            }
+            // 20: FuzzSoftEdge — very gentle saturation
+            20 => gained * (1.0 + gained.abs()).recip().sqrt(),
+            // 21: FuzzRect — asymmetric rectifier fuzz
+            21 => fast_tanh(gained + gained.abs() * 0.5),
+
+            // Mode 22-24: Trigonometric
+            // 22: Sin+x — sin(x)+x normalized
+            22 => (gained.sin() + gained) * 0.5,
+            // 23: Sin2x+x
+            23 => ((2.0 * gained).sin() + gained) * 0.5,
+            // 24: Atan — smooth limiter
+            24 => gained.atan() * std::f32::consts::FRAC_2_PI,
+
             _ => gained.clamp(-1.0, 1.0),
         }
     }

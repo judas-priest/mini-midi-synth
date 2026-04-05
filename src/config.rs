@@ -78,6 +78,12 @@ pub struct UiSettings {
     pub fader_reverb: f32,
     #[serde(default = "default_fader_delay")]
     pub fader_delay: f32,
+    #[serde(default = "default_drum_volume")]
+    pub drum_volume: f32,
+    #[serde(default = "default_layer_a_volume")]
+    pub layer_a_volume: f32,
+    #[serde(default = "default_layer_b_volume")]
+    pub layer_b_volume: f32,
     /// Pad performance map: 16 slots (notes 36-51) → performance name.
     #[serde(default)]
     pub pad_perf_map: Vec<Option<String>>,
@@ -87,6 +93,9 @@ fn default_master_volume() -> f32 { 0.8 }
 fn default_master_tone() -> f32 { 20000.0 }
 fn default_fader_reverb() -> f32 { 0.0 }
 fn default_fader_delay() -> f32 { 0.0 }
+fn default_drum_volume() -> f32 { 0.8 }
+fn default_layer_a_volume() -> f32 { 0.8 }
+fn default_layer_b_volume() -> f32 { 0.5 }
 
 impl Default for Config {
     fn default() -> Self {
@@ -109,6 +118,9 @@ impl Default for Config {
                 master_tone: 20000.0,
                 fader_reverb: 0.0,
                 fader_delay: 0.0,
+                drum_volume: 0.8,
+                layer_a_volume: 0.8,
+                layer_b_volume: 0.5,
                 pad_perf_map: Vec::new(),
             },
         }

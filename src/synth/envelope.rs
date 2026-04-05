@@ -12,12 +12,13 @@ enum EnvStage {
 }
 
 /// Envelope shape: controls curvature of attack/decay/release.
-/// 0=sqrt (fast start), 1=linear, 2=quadratic (slow start)
+/// 0=sqrt (fast start), 1=linear, 2=quadratic (slow start), 3=exponential (pure RC)
 #[derive(Clone, Copy, PartialEq)]
 pub enum EnvShape {
-    Sqrt,      // 0 — concave (fast onset)
-    Linear,    // 1 — straight line
-    Quadratic, // 2 — convex (slow onset)
+    Sqrt,        // 0 — concave (fast onset)
+    Linear,      // 1 — straight line
+    Quadratic,   // 2 — convex (slow onset)
+    Exponential, // 3 — true exponential: no overshoot, pure RC decay
 }
 
 impl EnvShape {
@@ -25,6 +26,7 @@ impl EnvShape {
         match v as u32 {
             1 => Self::Linear,
             2 => Self::Quadratic,
+            3 => Self::Exponential,
             _ => Self::Sqrt,
         }
     }
@@ -37,6 +39,7 @@ impl EnvShape {
             Self::Sqrt => t.sqrt(),
             Self::Linear => t,
             Self::Quadratic => t * t,
+            Self::Exponential => t,
         }
     }
 }
@@ -56,6 +59,7 @@ pub struct Envelope {
     // Shape selection
     attack_shape: EnvShape,
     decay_shape: EnvShape,
+    release_shape: EnvShape,
 }
 
 /// Compute one-pole coefficient from time in seconds and sample rate.
@@ -80,6 +84,7 @@ impl Envelope {
             sample_rate,
             attack_shape: EnvShape::Sqrt,
             decay_shape: EnvShape::Sqrt,
+            release_shape: EnvShape::Sqrt,
         };
         env.set_adsr(0.01, 0.1, 0.7, 0.3);
         env
@@ -107,6 +112,11 @@ impl Envelope {
     /// Set decay/release shape (0=sqrt, 1=linear, 2=quadratic).
     pub fn set_decay_shape(&mut self, shape: f32) {
         self.decay_shape = EnvShape::from_param(shape);
+    }
+
+    /// Set release shape independently (0=sqrt, 1=linear, 2=quadratic, 3=exponential).
+    pub fn set_release_shape(&mut self, shape: f32) {
+        self.release_shape = EnvShape::from_param(shape);
     }
 
     pub fn note_on(&mut self) {
@@ -148,6 +158,11 @@ impl Envelope {
                         // Convex — square the output for slower start
                         self.output * self.output
                     }
+                    EnvShape::Exponential => {
+                        // Pure RC charge toward 1.0 (no overshoot)
+                        self.output = self.attack_coeff * self.output + (1.0 - self.attack_coeff) * 1.0;
+                        self.output
+                    }
                 };
 
                 if self.output >= 1.0 {
@@ -171,6 +186,11 @@ impl Envelope {
                         } else { 0.0 };
                         self.sustain + (1.0 - self.sustain) * norm * norm
                     }
+                    EnvShape::Exponential => {
+                        // Pure exponential decay to sustain
+                        self.output = self.decay_coeff * self.output + (1.0 - self.decay_coeff) * self.sustain;
+                        self.output
+                    }
                 };
 
                 if self.output <= self.sustain + 0.001 {
@@ -192,11 +212,16 @@ impl Envelope {
                 self.output = self.release_coeff * self.output
                     + (1.0 - self.release_coeff) * self.release_target;
 
-                let out = match self.decay_shape {
+                let out = match self.release_shape {
                     EnvShape::Quadratic => {
                         // Slower release curve
                         let norm = (self.output / self.sustain.max(0.01)).clamp(0.0, 1.0);
                         self.sustain.max(0.01) * norm * norm
+                    }
+                    EnvShape::Exponential => {
+                        // Pure exponential decay to zero
+                        self.output = self.release_coeff * self.output + (1.0 - self.release_coeff) * 0.0;
+                        self.output
                     }
                     _ => self.output,
                 };

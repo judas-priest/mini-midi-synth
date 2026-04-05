@@ -63,6 +63,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Mallet", "fm_bell", include_str!("../presets/fm_bell.json")),
     ("Mallet", "fm_bell_v2",     include_str!("../presets/fm_bell_v2.json")),
     ("Mallet", "fm_bell_v3",     include_str!("../presets/fm_bell_v3.json")),
+    ("Mallet", "fm_bell_v4",     include_str!("../presets/fm_bell_v4.json")),
     ("Mallet", "vibraphone_v2",  include_str!("../presets/vibraphone_v2.json")),
     ("Mallet", "bell_chime", include_str!("../presets/bell_chime.json")),
     ("Mallet", "music_box", include_str!("../presets/music_box.json")),

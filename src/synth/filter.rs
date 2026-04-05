@@ -43,6 +43,8 @@ pub enum FilterType {
     ResWarpBP,     // 32 — SVF with tanh on resonance feedback (BP)
     ResWarpNotch,  // 33 — SVF with tanh on resonance feedback (Notch)
     ResWarpAP,     // 34 — SVF with tanh on resonance feedback (Allpass)
+    VintageLadderLP, // 35 — Moog ladder with tanh only at input (warmer, linear integrators)
+    SVFMorph,      // 36 — SVF with LP/BP/HP morphing via svf_morph parameter
 }
 
 impl FilterType {
@@ -83,12 +85,14 @@ impl FilterType {
             32 => Self::ResWarpBP,
             33 => Self::ResWarpNotch,
             34 => Self::ResWarpAP,
+            35 => Self::VintageLadderLP,
+            36 => Self::SVFMorph,
             _ => Self::LowPass,
         }
     }
 
     pub fn is_moog(self) -> bool {
-        matches!(self, Self::MoogLP24 | Self::MoogLP12)
+        matches!(self, Self::MoogLP24 | Self::MoogLP12 | Self::VintageLadderLP)
     }
 
     pub fn is_diode(self) -> bool {
@@ -173,6 +177,8 @@ pub struct Filter {
     // Sample & Hold
     snh_phase: f32,  // phase accumulator 0..1
     snh_held: f32,   // held sample value
+    // SVF Morph parameter (0=LP, 0.5=BP, 1=HP)
+    pub svf_morph: f32,
     // Control-rate coefficient update
     coeff_counter: u8,          // wrapping counter, update every 32 samples
 }
@@ -233,6 +239,7 @@ impl Filter {
             // Sample & Hold
             snh_phase: 0.0,
             snh_held: 0.0,
+            svf_morph: 0.0,
             coeff_counter: 31, // so first tick after set_cutoff/set_resonance triggers update
         };
         f.update_coefficients();
@@ -381,6 +388,8 @@ impl Filter {
             FilterType::ResWarpBP => self.tick_resonance_warp(input, 2),
             FilterType::ResWarpNotch => self.tick_resonance_warp(input, 3),
             FilterType::ResWarpAP => self.tick_resonance_warp(input, 4),
+            FilterType::VintageLadderLP => self.tick_vintage_ladder(input),
+            FilterType::SVFMorph => self.tick_svf_morph(input),
             _ => self.tick_svf(input),
         }
     }
@@ -724,6 +733,48 @@ impl Filter {
             2 => v1,                       // BP
             3 => input - k_sat,            // Notch
             _ => input - 2.0 * k_sat,     // AP
+        }
+    }
+
+    /// Vintage Ladder LP — Moog ladder with tanh only at input (warmer, linear integrators).
+    /// Simplified from tick_moog: only applies fast_tanh() at the input stage, not per-stage.
+    /// Linear integrators give a warmer, less aggressive character than the full Huovilainen model.
+    fn tick_vintage_ladder(&mut self, input: f32) -> f32 {
+        for _ in 0..2 {
+            let feedback = (self.moog_stage[3] + self.moog_delay4) * 0.5;
+            self.moog_delay4 = self.moog_stage[3];
+            let x = fast_tanh((input - self.moog_res_quad * feedback) * (1.0 / 1.22070313_f32));
+            // Linear integrators (warmer character, no per-stage saturation)
+            self.moog_stage[0] += self.moog_tune * (x - self.moog_stage[0]);
+            self.moog_stage[1] += self.moog_tune * (self.moog_stage[0] - self.moog_stage[1]);
+            self.moog_stage[2] += self.moog_tune * (self.moog_stage[1] - self.moog_stage[2]);
+            self.moog_stage[3] += self.moog_tune * (self.moog_stage[2] - self.moog_stage[3]);
+        }
+        self.moog_stage[3] * self.moog_gain_comp
+    }
+
+    /// SVF Morph — SVF with LP/BP/HP morphing via svf_morph parameter.
+    /// svf_morph = 0.0 → pure LP, 0.5 → pure BP, 1.0 → pure HP.
+    fn tick_svf_morph(&mut self, input: f32) -> f32 {
+        let v3 = input - self.ic2eq;
+        let v1 = self.a1 * self.ic1eq + self.a2 * v3;
+        let v2 = self.ic2eq + self.a2 * self.ic1eq + self.a3 * v3;
+
+        self.ic1eq = 2.0 * v1 - self.ic1eq;
+        self.ic2eq = 2.0 * v2 - self.ic2eq;
+
+        let lp = v2;
+        let bp = v1;
+        let hp = input - self.k * v1 - v2;
+
+        // Morph: 0=LP, 0.5=BP, 1=HP
+        let m = self.svf_morph.clamp(0.0, 1.0);
+        if m < 0.5 {
+            let t = m * 2.0;
+            lp * (1.0 - t) + bp * t
+        } else {
+            let t = (m - 0.5) * 2.0;
+            bp * (1.0 - t) + hp * t
         }
     }
 

@@ -139,6 +139,7 @@ pub struct SamplerEngine {
     layer_bank: [u8; 2],
     drums_sf2: bool,
     sample_rate: i32,
+    pub drum_volume: f32,
 }
 
 impl SamplerEngine {
@@ -152,6 +153,7 @@ impl SamplerEngine {
             layer_bank: [0; 2],
             drums_sf2: false,
             sample_rate: sample_rate as i32,
+            drum_volume: 1.0,
         }
     }
 
@@ -288,6 +290,7 @@ impl SamplerEngine {
         let bs = self.block_size;
         let (kl, kr) = self.keys.tick(bs);
         let (dl, dr) = self.drums.tick(bs);
-        (kl + dl, kr + dr)
+        let dv = self.drum_volume * self.drum_volume; // perceptual curve
+        (kl + dl * dv, kr + dr * dv)
     }
 }

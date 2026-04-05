@@ -24,6 +24,8 @@ pub enum LfoWaveform {
     SampleHold,
     Sawtooth,
     Envelope,
+    Noise,
+    SmoothNoise,
 }
 
 impl LfoWaveform {
@@ -34,6 +36,8 @@ impl LfoWaveform {
             3 => Self::SampleHold,
             4 => Self::Sawtooth,
             5 => Self::Envelope,
+            6 => Self::Noise,
+            7 => Self::SmoothNoise,
             _ => Self::Sine,
         }
     }
@@ -71,6 +75,11 @@ impl Lfo {
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+    }
+
+    /// Reset LFO phase to 0 (retrigger on note-on). Does not affect noise state.
+    pub fn reset_phase(&mut self) {
+        self.phase = 0.0;
     }
 
     /// Trigger envelope mode (one-shot from LFO).
@@ -154,6 +163,23 @@ impl Lfo {
             }
             LfoWaveform::Sawtooth => {
                 2.0 * self.phase - 1.0
+            }
+            LfoWaveform::Noise => {
+                // xorshift32 — new random value every sample
+                self.noise_state ^= self.noise_state << 13;
+                self.noise_state ^= self.noise_state >> 17;
+                self.noise_state ^= self.noise_state << 5;
+                (self.noise_state as i32 as f32) / i32::MAX as f32
+            }
+            LfoWaveform::SmoothNoise => {
+                self.noise_state ^= self.noise_state << 13;
+                self.noise_state ^= self.noise_state >> 17;
+                self.noise_state ^= self.noise_state << 5;
+                let raw = (self.noise_state as i32 as f32) / i32::MAX as f32;
+                // deform 0=very smooth (coeff~0.999), 1=less smooth (coeff~0.9)
+                let coeff = 0.999 - deform * 0.099;
+                self.sh_smooth = self.sh_smooth * coeff + raw * (1.0 - coeff);
+                return self.sh_smooth; // skip apply_deform, deform already used for pole
             }
             LfoWaveform::Envelope => {
                 // One-shot ADSR driven by LFO rate

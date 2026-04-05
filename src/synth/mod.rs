@@ -1,5 +1,7 @@
 /// Synth engine: layered polyphonic voice pools + MIDI event dispatch.
 
+mod airwindows;
+use airwindows::Airwindows;
 pub mod bass;
 pub mod bbd_ensemble;
 pub mod bitcrusher;
@@ -279,6 +281,11 @@ struct Layer {
     alt_bipolar: f32,       // current alternate bipolar value
     alt_unipolar: f32,      // current alternate unipolar value
     release_vel: f32,       // last note-off velocity
+    breath: f32,            // CC2, 0..1
+    expression: f32,        // CC11, 0..1
+    sustain_pedal: f32,     // CC64: 0.0 or 1.0
+    lowest_held: u8,        // lowest active note (default 60)
+    highest_held: u8,       // highest active note (default 60)
 }
 
 impl Layer {
@@ -297,6 +304,8 @@ impl Layer {
             rng_state: 0x5851f42d4c957f2d, alt_counter: 0,
             rand_bipolar: 0.0, rand_unipolar: 0.5,
             alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
+            breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
+            lowest_held: 60, highest_held: 60,
         }
     }
 
@@ -351,8 +360,13 @@ impl Layer {
                 let voice_params = self.build_voice_params();
                 self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
                 self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
+                if self.params.lfo1_retrigger > 0.5 { self.lfos[0].reset_phase(); }
+                if self.params.lfo2_retrigger > 0.5 { self.lfos[1].reset_phase(); }
+                if self.params.lfo3_retrigger > 0.5 { self.lfos[2].reset_phase(); }
+                if self.params.lfo4_retrigger > 0.5 { self.lfos[3].reset_phase(); }
                 if self.params.mseg_enabled > 0.5 { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
             }
+            self.update_held_range();
             return;
         }
 
@@ -375,7 +389,14 @@ impl Layer {
                 self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
             }
             self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
+            if !retrigger {
+                if self.params.lfo1_retrigger > 0.5 { self.lfos[0].reset_phase(); }
+                if self.params.lfo2_retrigger > 0.5 { self.lfos[1].reset_phase(); }
+                if self.params.lfo3_retrigger > 0.5 { self.lfos[2].reset_phase(); }
+                if self.params.lfo4_retrigger > 0.5 { self.lfos[3].reset_phase(); }
+            }
             if self.params.mseg_enabled > 0.5 && !retrigger { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
+            self.update_held_range();
             return;
         }
 
@@ -393,11 +414,17 @@ impl Layer {
         let voice_params = self.build_voice_params();
         self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
         self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
+        // Retrigger LFOs on note-on if flagged
+        if self.params.lfo1_retrigger > 0.5 { self.lfos[0].reset_phase(); }
+        if self.params.lfo2_retrigger > 0.5 { self.lfos[1].reset_phase(); }
+        if self.params.lfo3_retrigger > 0.5 { self.lfos[2].reset_phase(); }
+        if self.params.lfo4_retrigger > 0.5 { self.lfos[3].reset_phase(); }
         // Trigger MSEGs on note-on (per-layer, not per-voice)
         if self.params.mseg_enabled > 0.5 {
             self.mseg1_state.trigger();
             self.mseg2_state.trigger();
         }
+        self.update_held_range();
     }
 
     fn build_voice_params(&self) -> VoiceParams {
@@ -442,12 +469,20 @@ impl Layer {
             window_type: self.params.window_type, window_morph: self.params.window_morph,
             window_formant: self.params.window_formant,
             env_attack_shape: self.params.env_attack_shape, env_decay_shape: self.params.env_decay_shape,
+            env_release_shape: self.params.env_release_shape,
+            filter_env_attack_shape: self.params.filter_env_attack_shape,
+            filter_env_decay_shape: self.params.filter_env_decay_shape,
+            filter_env_release_shape: self.params.filter_env_release_shape,
             velocity_curve: self.params.velocity_curve, vel_to_filter: self.params.vel_to_filter,
             portamento_time: self.params.portamento_time, _portamento_mode: self.params.portamento_mode,
             unison_voices: self.params.unison_voices, unison_detune: self.params.unison_detune,
             unison_spread: self.params.unison_spread,
             fm_cross_depth: self.params.fm_cross_depth,
             filter_env_semitones: self.params.filter_env_semitones,
+            osc_ws_mode: self.params.osc_ws_mode as u32,
+            osc_ws_drive: self.params.osc_ws_drive * 4.0 + 0.5,
+            osc_ws_mix: self.params.osc_ws_mix,
+            svf_morph: self.params.svf_morph,
         }
     }
 
@@ -476,6 +511,7 @@ impl Layer {
                     self.mseg2_state.release();
                 }
             }
+            self.update_held_range();
             return;
         }
 
@@ -488,10 +524,28 @@ impl Layer {
             self.mseg1_state.release();
             self.mseg2_state.release();
         }
+        self.update_held_range();
     }
 
     fn has_active_notes(&self) -> bool {
         self.voices.iter().any(|v| v.active && !v.is_releasing())
+    }
+
+    fn update_held_range(&mut self) {
+        let mut lo = 255u8;
+        let mut hi = 0u8;
+        for v in &self.voices {
+            if v.active && !v.is_releasing() {
+                if v.note < lo { lo = v.note; }
+                if v.note > hi { hi = v.note; }
+            }
+        }
+        if lo > hi {
+            // No active non-releasing voices — keep last known values
+        } else {
+            self.lowest_held = lo;
+            self.highest_held = hi;
+        }
     }
 
     fn set_sample_rate(&mut self, sample_rate: f32) {
@@ -580,6 +634,14 @@ impl Layer {
             "reverb_type" => self.params.reverb_type = value,
             "env_attack_shape" => self.params.env_attack_shape = value,
             "env_decay_shape" => self.params.env_decay_shape = value,
+            "env_release_shape" => self.params.env_release_shape = value,
+            "filter_env_attack_shape" => self.params.filter_env_attack_shape = value,
+            "filter_env_decay_shape" => self.params.filter_env_decay_shape = value,
+            "filter_env_release_shape" => self.params.filter_env_release_shape = value,
+            "lfo1_retrigger" => self.params.lfo1_retrigger = value,
+            "lfo2_retrigger" => self.params.lfo2_retrigger = value,
+            "lfo3_retrigger" => self.params.lfo3_retrigger = value,
+            "lfo4_retrigger" => self.params.lfo4_retrigger = value,
             "lfo_deform" => self.params.lfo_deform = value,
             "lfo2_rate" => self.params.lfo2_rate = value,
             "lfo2_pitch_depth" => self.params.lfo2_pitch_depth = value,
@@ -645,6 +707,10 @@ pub struct PresetParams {
     unison_voices: f32, unison_detune: f32, unison_spread: f32,
     // Envelope shapes
     env_attack_shape: f32, env_decay_shape: f32,
+    env_release_shape: f32,
+    filter_env_attack_shape: f32, filter_env_decay_shape: f32, filter_env_release_shape: f32,
+    // LFO retrigger flags
+    lfo1_retrigger: f32, lfo2_retrigger: f32, lfo3_retrigger: f32, lfo4_retrigger: f32,
     // LFO deform
     lfo_deform: f32,
     // Alias oscillator
@@ -696,7 +762,7 @@ pub struct PresetParams {
     // Bonsai saturation
     bonsai_drive: f32, bonsai_tone: f32, bonsai_asym: f32,
     bonsai_mode: f32, bonsai_mix: f32,
-    // WaveShaper
+    // WaveShaper (FX chain)
     wave_shaper_drive: f32, wave_shaper_mode: f32, wave_shaper_bias: f32, wave_shaper_mix: f32,
     // MS Tool
     ms_mid_gain: f32, ms_side_gain: f32, ms_rotation: f32, ms_mix: f32,
@@ -722,6 +788,14 @@ pub struct PresetParams {
     vocoder_env_follow: f32, vocoder_gate: f32, vocoder_mix: f32,
     // Convolution Reverb
     conv_reverb_room: f32, conv_reverb_damping: f32, conv_reverb_predelay: f32, conv_reverb_mix: f32,
+    // Osc Waveshaper (per-voice, pre-filter)
+    osc_ws_mode: f32, osc_ws_drive: f32, osc_ws_mix: f32,
+    // SVF Morph filter parameter (0=LP, 0.5=BP, 1=HP)
+    pub svf_morph: f32,
+    // Airwindows
+    airwindows_mode: f32,
+    airwindows_drive: f32,
+    airwindows_mix: f32,
 }
 
 impl Default for PresetParams {
@@ -756,6 +830,9 @@ impl Default for PresetParams {
             epiano_type: 0.0,
             velocity_curve: 0.0, vel_to_filter: 0.0,
             env_attack_shape: 0.0, env_decay_shape: 0.0,
+            env_release_shape: 0.0,
+            filter_env_attack_shape: 0.0, filter_env_decay_shape: 0.0, filter_env_release_shape: 0.0,
+            lfo1_retrigger: 1.0, lfo2_retrigger: 1.0, lfo3_retrigger: 0.0, lfo4_retrigger: 0.0,
             lfo_waveform: 0.0, lfo_rate: 5.0, lfo_pitch_depth: 0.0, lfo_filter_depth: 0.0, lfo_amp_depth: 0.0,
             lfo_deform: 0.0,
             lfo2_waveform: 0.0, lfo2_rate: 5.0, lfo2_pitch_depth: 0.0, lfo2_filter_depth: 0.0, lfo2_amp_depth: 0.0, lfo2_deform: 0.0,
@@ -807,6 +884,9 @@ impl Default for PresetParams {
             nimbus_spread: 0.5, nimbus_texture: 0.5, nimbus_mix: 0.0,
             vocoder_env_follow: 0.5, vocoder_gate: 0.0, vocoder_mix: 0.0,
             conv_reverb_room: 0.5, conv_reverb_damping: 0.5, conv_reverb_predelay: 0.02, conv_reverb_mix: 0.0,
+            osc_ws_mode: 0.0, osc_ws_drive: 0.5, osc_ws_mix: 0.0,
+            svf_morph: 0.0,
+            airwindows_mode: 0.0, airwindows_drive: 0.5, airwindows_mix: 0.0,
         }
     }
 }
@@ -859,6 +939,12 @@ impl PresetParams {
             epiano_type: p("epiano_type", 0.0),
             velocity_curve: p("velocity_curve", 0.0), vel_to_filter: p("vel_to_filter", 0.0),
             env_attack_shape: p("env_attack_shape", 0.0), env_decay_shape: p("env_decay_shape", 0.0),
+            env_release_shape: p("env_release_shape", 0.0),
+            filter_env_attack_shape: p("filter_env_attack_shape", 0.0),
+            filter_env_decay_shape: p("filter_env_decay_shape", 0.0),
+            filter_env_release_shape: p("filter_env_release_shape", 0.0),
+            lfo1_retrigger: p("lfo1_retrigger", 1.0), lfo2_retrigger: p("lfo2_retrigger", 1.0),
+            lfo3_retrigger: p("lfo3_retrigger", 0.0), lfo4_retrigger: p("lfo4_retrigger", 0.0),
             lfo_waveform: p("lfo_waveform", 0.0), lfo_rate: p("lfo_rate", 5.0),
             lfo_pitch_depth: p("lfo_pitch_depth", 0.0), lfo_filter_depth: p("lfo_filter_depth", 0.0),
             lfo_amp_depth: p("lfo_amp_depth", 0.0),
@@ -942,6 +1028,12 @@ impl PresetParams {
             vocoder_mix: p("vocoder_mix", 0.0),
             conv_reverb_room: p("conv_reverb_room", 0.5), conv_reverb_damping: p("conv_reverb_damping", 0.5),
             conv_reverb_predelay: p("conv_reverb_predelay", 0.02), conv_reverb_mix: p("conv_reverb_mix", 0.0),
+            osc_ws_mode: p("osc_ws_mode", 0.0), osc_ws_drive: p("osc_ws_drive", 0.5),
+            osc_ws_mix: p("osc_ws_mix", 0.0),
+            svf_morph: p("svf_morph", 0.0),
+            airwindows_mode: p("airwindows_mode", 0.0),
+            airwindows_drive: p("airwindows_drive", 0.5),
+            airwindows_mix: p("airwindows_mix", 0.0),
         }
     }
 }
@@ -987,6 +1079,7 @@ pub struct SynthEngine {
     nimbus: Nimbus,
     vocoder: Vocoder,
     conv_reverb: ConvolutionReverb,
+    airwindows: Airwindows,
     delay: StereoDelay,
     reverb: Reverb,
     pub spring_reverb: SpringReverb,
@@ -1066,6 +1159,8 @@ struct CachedFxParams {
     vocoder_env_follow: f32, vocoder_gate: f32, vocoder_mix: f32,
     // Convolution Reverb
     conv_reverb_room: f32, conv_reverb_damping: f32, conv_reverb_predelay: f32, conv_reverb_mix: f32,
+    // Airwindows
+    airwindows_mode: u32, airwindows_drive: f32, airwindows_mix: f32,
 }
 
 impl CachedFxParams {
@@ -1181,6 +1276,9 @@ impl CachedFxParams {
             conv_reverb_damping: p.map(|p| p.conv_reverb_damping).unwrap_or(0.5),
             conv_reverb_predelay: p.map(|p| p.conv_reverb_predelay).unwrap_or(0.02),
             conv_reverb_mix: p.map(|p| p.conv_reverb_mix).unwrap_or(0.0),
+            airwindows_mode: p.map(|p| p.airwindows_mode as u32).unwrap_or(0),
+            airwindows_drive: p.map(|p| p.airwindows_drive).unwrap_or(0.5),
+            airwindows_mix: p.map(|p| p.airwindows_mix).unwrap_or(0.0),
         }
     }
 }
@@ -1225,6 +1323,7 @@ impl SynthEngine {
             nimbus: Nimbus::new(sample_rate),
             vocoder: Vocoder::new(sample_rate),
             conv_reverb: ConvolutionReverb::new(sample_rate),
+            airwindows: Airwindows::new(sample_rate),
             delay: StereoDelay::new(sample_rate),
             reverb: Reverb::new(sample_rate),
             spring_reverb: SpringReverb::new(sample_rate),
@@ -1466,6 +1565,15 @@ impl SynthEngine {
                         self.cc_values[i] = value as f32 / 127.0;
                     }
                 }
+                // Dedicated mod sources: Breath (CC2), Expression (CC11), Sustain (CC64)
+                for layer in &mut self.layers {
+                    match cc {
+                        2  => layer.breath = value as f32 / 127.0,
+                        11 => layer.expression = value as f32 / 127.0,
+                        64 => layer.sustain_pedal = if value >= 64 { 1.0 } else { 0.0 },
+                        _ => {}
+                    }
+                }
                 // CcBinding is Copy — no heap allocation
                 if let Some(binding) = self.cc_map.bindings[cc as usize] {
                     if self.check_pickup(cc, value, binding) {
@@ -1531,7 +1639,10 @@ impl SynthEngine {
                     DrumParam::Decay(v) => self.drum_engine.params[s].decay = v,
                 }
             }
-            ControlEvent::DrumSetVolume { volume } => { self.drum_engine.volume = volume; }
+            ControlEvent::DrumSetVolume { volume } => {
+                self.drum_engine.volume = volume;
+                self.sampler.drum_volume = volume;
+            }
             ControlEvent::DrumSeqPlay { playing } => {
                 self.drum_engine.sequencer.playing = playing;
                 if playing { self.drum_engine.sequencer.reset(); }
@@ -1563,6 +1674,7 @@ impl SynthEngine {
                 self.drum_engine.sequencer.bpm = bpm;
                 self.drum_engine.sequencer.swing = swing;
                 self.drum_engine.volume = volume;
+                self.sampler.drum_volume = volume;
             }
             ControlEvent::LooperRecord => { self.looper.start_record(); }
             ControlEvent::LooperStopRecord => { self.looper.stop_record(); }
@@ -1681,6 +1793,7 @@ impl SynthEngine {
         self.nimbus.set_sample_rate(sample_rate);
         self.vocoder.set_sample_rate(sample_rate);
         self.conv_reverb.set_sample_rate(sample_rate);
+        self.airwindows.set_sample_rate(sample_rate);
     }
 
     /// Process a block of audio samples. Control-rate computations (LFO, MSEG,
@@ -1801,6 +1914,12 @@ impl SynthEngine {
                 release_vel: layer.release_vel,
                 pitch_bend: self.pitch_bend_semitones / 2.0, // normalize -1..+1
                 cc: self.cc_values,
+                breath: layer.breath,
+                expression: layer.expression,
+                sustain_pedal: layer.sustain_pedal,
+                lowest_key: (layer.lowest_held as f32 - 60.0) / 48.0,
+                highest_key: (layer.highest_held as f32 - 60.0) / 48.0,
+                latest_key: (layer.last_note as f32 - 60.0) / 48.0,
             };
             let mod_offsets = layer.mod_matrix.evaluate(&mod_sources);
 
@@ -1988,6 +2107,10 @@ impl SynthEngine {
             // Convolution Reverb
             let (rl, rr) = if fx.conv_reverb_mix > 0.001 {
                 self.conv_reverb.tick(rl, rr, fx.conv_reverb_room, fx.conv_reverb_damping, fx.conv_reverb_predelay, fx.conv_reverb_mix)
+            } else { (rl, rr) };
+            // Airwindows
+            let (rl, rr) = if fx.airwindows_mix > 0.001 {
+                self.airwindows.tick(rl, rr, fx.airwindows_mode, fx.airwindows_drive, fx.airwindows_mix)
             } else { (rl, rr) };
 
             let sample_rate = self.sample_rate;

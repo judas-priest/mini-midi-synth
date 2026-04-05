@@ -31,6 +31,12 @@ pub enum ModSource {
     Cc2 = 21,             // MIDI CC assignable 2
     Cc3 = 22,             // MIDI CC assignable 3
     Cc4 = 23,             // MIDI CC assignable 4
+    Breath = 24,          // CC2, 0..1
+    Expression = 25,      // CC11, 0..1
+    SustainPedal = 26,    // CC64: 0.0 or 1.0
+    LowestKey = 27,       // lowest held note, -1..+1 centered on C4
+    HighestKey = 28,      // highest held note, -1..+1 centered on C4
+    LatestKey = 29,       // most recent note, -1..+1 centered on C4
 }
 
 impl ModSource {
@@ -59,6 +65,12 @@ impl ModSource {
             21 => Self::Cc2,
             22 => Self::Cc3,
             23 => Self::Cc4,
+            24 => Self::Breath,
+            25 => Self::Expression,
+            26 => Self::SustainPedal,
+            27 => Self::LowestKey,
+            28 => Self::HighestKey,
+            29 => Self::LatestKey,
             _ => Self::None,
         }
     }
@@ -89,6 +101,12 @@ impl ModSource {
             Self::Cc2 => "CC 2",
             Self::Cc3 => "CC 3",
             Self::Cc4 => "CC 4",
+            Self::Breath => "Breath",
+            Self::Expression => "Expression",
+            Self::SustainPedal => "Sustain Pedal",
+            Self::LowestKey => "Lowest Key",
+            Self::HighestKey => "Highest Key",
+            Self::LatestKey => "Latest Key",
         }
     }
 
@@ -101,6 +119,8 @@ impl ModSource {
         Self::AltBipolar, Self::AltUnipolar,
         Self::ReleaseVel, Self::PitchBend,
         Self::Cc1, Self::Cc2, Self::Cc3, Self::Cc4,
+        Self::Breath, Self::Expression, Self::SustainPedal,
+        Self::LowestKey, Self::HighestKey, Self::LatestKey,
     ];
 }
 
@@ -316,6 +336,12 @@ pub struct ModSources {
     pub release_vel: f32,     // last note-off velocity 0..1
     pub pitch_bend: f32,      // pitch bend -1..+1
     pub cc: [f32; 4],         // MIDI CC assignable 1..4
+    pub breath: f32,          // CC2, 0..1
+    pub expression: f32,      // CC11, 0..1
+    pub sustain_pedal: f32,   // CC64: 0.0 or 1.0
+    pub lowest_key: f32,      // lowest held note -1..+1 centered on C4
+    pub highest_key: f32,     // highest held note -1..+1 centered on C4
+    pub latest_key: f32,      // most recent note -1..+1 centered on C4
 }
 
 const MOD_SOURCE_KEYS: [&str; MOD_SLOTS] = [
@@ -351,8 +377,8 @@ impl Default for ModMatrix {
 impl ModMatrix {
     /// Evaluate all active slots. Returns accumulated offsets.
     pub fn evaluate(&self, sources: &ModSources) -> ModOffsets {
-        // Precompute all source values indexed by ModSource discriminant (0..23)
-        let src_vals: [f32; 24] = [
+        // Precompute all source values indexed by ModSource discriminant (0..29)
+        let src_vals: [f32; 30] = [
             0.0,                        // None = 0
             sources.lfo_outputs[0],     // Lfo1 = 1
             sources.lfo_outputs[1],     // Lfo2 = 2
@@ -377,6 +403,12 @@ impl ModMatrix {
             sources.cc[1],              // Cc2 = 21
             sources.cc[2],              // Cc3 = 22
             sources.cc[3],              // Cc4 = 23
+            sources.breath,             // Breath = 24
+            sources.expression,         // Expression = 25
+            sources.sustain_pedal,      // SustainPedal = 26
+            sources.lowest_key,         // LowestKey = 27
+            sources.highest_key,        // HighestKey = 28
+            sources.latest_key,         // LatestKey = 29
         ];
 
         let mut offsets = ModOffsets::default();
