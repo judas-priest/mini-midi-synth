@@ -240,7 +240,7 @@ impl Filter {
             snh_phase: 0.0,
             snh_held: 0.0,
             svf_morph: 0.0,
-            coeff_counter: 31, // so first tick after set_cutoff/set_resonance triggers update
+            coeff_counter: 7, // so first tick after set_cutoff/set_resonance triggers update
         };
         f.update_coefficients();
         f
@@ -350,12 +350,12 @@ impl Filter {
 
     pub fn force_update(&mut self) {
         self.update_coefficients();
-        self.coeff_counter = 31; // next tick will update again with latest cutoff from envelope
+        self.coeff_counter = 7; // next tick will update again with latest cutoff from envelope
     }
 
     pub fn tick(&mut self, input: f32) -> f32 {
         self.coeff_counter = self.coeff_counter.wrapping_add(1);
-        if (self.coeff_counter & 31 == 0) && self.dirty {
+        if (self.coeff_counter & 7 == 0) && self.dirty {
             self.update_coefficients();
         }
 
@@ -663,23 +663,23 @@ impl Filter {
         // Resonance feedback gain (approaches self-oscillation near 1.0)
         let res = self.resonance * 3.5;
 
-        // Subtract resonance feedback from input
-        let x = input - res * self.tri_s3;
+        // Subtract resonance feedback from input, clamp to prevent runaway
+        let x = (input - res * self.tri_s3).clamp(-4.0, 4.0);
 
         // One-pole integrator gain (bilinear transform: g / (1 + g))
         let g1 = g / (1.0 + g);
 
         // Stage 1
         let lp1 = g1 * x + self.tri_s1;
-        self.tri_s1 = 2.0 * lp1 - self.tri_s1;
+        self.tri_s1 = (2.0 * lp1 - self.tri_s1).clamp(-4.0, 4.0) + 1e-30;
 
         // Stage 2
         let lp2 = g1 * lp1 + self.tri_s2;
-        self.tri_s2 = 2.0 * lp2 - self.tri_s2;
+        self.tri_s2 = (2.0 * lp2 - self.tri_s2).clamp(-4.0, 4.0) + 1e-30;
 
         // Stage 3
         let lp3 = g1 * lp2 + self.tri_s3;
-        self.tri_s3 = 2.0 * lp3 - self.tri_s3;
+        self.tri_s3 = (2.0 * lp3 - self.tri_s3).clamp(-4.0, 4.0) + 1e-30;
 
         (lp3 * (1.0 + self.resonance * 0.5)).clamp(-2.0, 2.0)
     }
@@ -786,12 +786,12 @@ impl Filter {
         let g1 = 1.0 + g;
 
         // ZDF: solve for lp2 algebraically then compute lp1
-        let denom = g1 * g1 + g * g * k;
+        let denom = (g1 * g1 + g * g * k).max(1e-10);
         let lp2 = (g * g * input + g * self.k35_s1 + self.k35_s2 * g1) / denom;
         let lp1 = (g * (input - k * lp2) + self.k35_s1) / g1;
 
-        self.k35_s1 = 2.0 * lp1 - self.k35_s1;
-        self.k35_s2 = 2.0 * lp2 - self.k35_s2;
+        self.k35_s1 = 2.0 * lp1 - self.k35_s1 + 1e-30;
+        self.k35_s2 = 2.0 * lp2 - self.k35_s2 + 1e-30;
 
         // Gain compensation (k=3.5 → div by 1+1.75=2.75)
         (lp2 / (1.0 + k * 0.5)).clamp(-2.0, 2.0)
@@ -808,14 +808,14 @@ impl Filter {
         // hp1 = (x1 - s1) / (1+g),  where x1 = input - k*hp2
         // hp2 = (hp1 - s2) / (1+g)
         // → hp2*((1+g)^2 + k) = input - s1 - s2*(1+g)
-        let denom = g1 * g1 + k;
+        let denom = (g1 * g1 + k).max(1e-10);
         let hp2 = (input - self.k35_s1 - self.k35_s2 * g1) / denom;
         let lp1 = (g * (input - k * hp2) + self.k35_s1) / g1;
         let hp1 = (input - k * hp2) - lp1;
         let lp2 = (g * hp1 + self.k35_s2) / g1;
 
-        self.k35_s1 = 2.0 * lp1 - self.k35_s1;
-        self.k35_s2 = 2.0 * lp2 - self.k35_s2;
+        self.k35_s1 = 2.0 * lp1 - self.k35_s1 + 1e-30;
+        self.k35_s2 = 2.0 * lp2 - self.k35_s2 + 1e-30;
 
         (hp2 / (1.0 + k * 0.5)).clamp(-2.0, 2.0)
     }

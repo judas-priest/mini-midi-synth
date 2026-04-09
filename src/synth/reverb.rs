@@ -164,12 +164,11 @@ impl DelayLine {
         self.buffer[idx]
     }
 
-    /// Read the most recently written sample (1 sample behind write head).
+    /// Read the oldest sample in the buffer (at current write position, about to be overwritten).
+    /// This is the sample that has traveled through the entire delay line.
     #[inline]
-    fn last(&self) -> f32 {
-        let len = self.buffer.len();
-        let idx = if self.pos == 0 { len - 1 } else { self.pos - 1 };
-        self.buffer[idx]
+    fn oldest(&self) -> f32 {
+        self.buffer[self.pos]
     }
 }
 
@@ -365,26 +364,26 @@ impl Reverb {
         let tank_in_l = diffused + decay * self.right_out;
         let mod_ap_out_l = self.mod_ap_l.tick_mod(tank_in_l, excursion_l);
         self.delay_l1.push(mod_ap_out_l);
-        let dl1_out = self.delay_l1.last();
+        let dl1_out = self.delay_l1.oldest();
         // Damping LPF
         self.damp_state_l = (1.0 - damp) * dl1_out + damp * self.damp_state_l;
         let damped_l = self.damp_state_l * decay;
         let ap_l2_out = self.ap_l2.tick(damped_l);
         self.delay_l2.push(ap_l2_out);
         // The output that feeds to the right tank is the end of delay_l2
-        self.left_out = self.delay_l2.last();
+        self.left_out = self.delay_l2.oldest();
 
         // --- Right tank ---
         let tank_in_r = diffused + decay * self.left_out;
         let mod_ap_out_r = self.mod_ap_r.tick_mod(tank_in_r, excursion_r);
         self.delay_r1.push(mod_ap_out_r);
-        let dr1_out = self.delay_r1.last();
+        let dr1_out = self.delay_r1.oldest();
         // Damping LPF
         self.damp_state_r = (1.0 - damp) * dr1_out + damp * self.damp_state_r;
         let damped_r = self.damp_state_r * decay;
         let ap_r2_out = self.ap_r2.tick(damped_r);
         self.delay_r2.push(ap_r2_out);
-        self.right_out = self.delay_r2.last();
+        self.right_out = self.delay_r2.oldest();
 
         // --- Output taps ---
         let t = &self.taps;

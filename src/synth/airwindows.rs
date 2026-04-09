@@ -21,8 +21,8 @@ impl AirwindowsTape2 {
         let s2_r = (s1_r * gain * 0.5).tanh() / gain.sqrt();
         // Slight high-freq rolloff (tape bias)
         let lp = 0.85;
-        self.lp_l = self.lp_l * lp + s2_l * (1.0 - lp);
-        self.lp_r = self.lp_r * lp + s2_r * (1.0 - lp);
+        self.lp_l = self.lp_l * lp + s2_l * (1.0 - lp) + 1e-30;
+        self.lp_r = self.lp_r * lp + s2_r * (1.0 - lp) + 1e-30;
         let _ = (self.stage_l, self.stage_r, self.wow_phase, self.sample_rate);
         (self.lp_l, self.lp_r)
     }
@@ -69,15 +69,17 @@ impl AirwindowsToVinyl4 {
     pub fn set_sample_rate(&mut self, sr: f32) { self.sample_rate = sr; }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
         // Bass enhancement + HF rolloff + subtle vinyl warmth
-        let bass_coeff = 0.995_f32;
-        let hf_coeff = 0.75 + drive * 0.1;
+        // SR-independent: use exp(-2*PI*fc/sr) for filter coefficients
+        let sr = self.sample_rate;
+        let bass_coeff = (-2.0 * std::f32::consts::PI * 35.0 / sr).exp();
+        let hf_base = 5000.0 + drive * 2000.0; // 5kHz..7kHz
+        let hf_coeff = (-2.0 * std::f32::consts::PI * hf_base / sr).exp();
         self.bass_lp_l = self.bass_lp_l * bass_coeff + in_l * (1.0 - bass_coeff);
         self.bass_lp_r = self.bass_lp_r * bass_coeff + in_r * (1.0 - bass_coeff);
         self.hf_lp_l = self.hf_lp_l * hf_coeff + in_l * (1.0 - hf_coeff);
         self.hf_lp_r = self.hf_lp_r * hf_coeff + in_r * (1.0 - hf_coeff);
         let out_l = self.hf_lp_l + (self.bass_lp_l * drive * 0.2);
         let out_r = self.hf_lp_r + (self.bass_lp_r * drive * 0.2);
-        let _ = self.sample_rate;
         (out_l, out_r)
     }
 }
@@ -91,8 +93,8 @@ impl AirwindowsAtmosphere {
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
         // Air: high-shelf presence boost + gentle stereo widening
         let coeff = 0.55 - drive * 0.15; // higher drive = more HF
-        self.hs_l = self.hs_l * coeff + in_l * (1.0 - coeff);
-        self.hs_r = self.hs_r * coeff + in_r * (1.0 - coeff);
+        self.hs_l = self.hs_l * coeff + in_l * (1.0 - coeff) + 1e-30;
+        self.hs_r = self.hs_r * coeff + in_r * (1.0 - coeff) + 1e-30;
         let air_l = in_l - self.hs_l;  // high shelf (subtract LP)
         let air_r = in_r - self.hs_r;
         let out_l = in_l + air_l * drive * 0.5 + air_r * drive * 0.1;
@@ -113,8 +115,11 @@ impl AirwindowsPressure5 {
     pub fn set_sample_rate(&mut self, sr: f32) { self.sample_rate = sr; }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
         // Soft compressor with character saturation
-        let att = 0.9995_f32;
-        let rel = 0.999_f32;
+        // SR-independent: preserve 44.1kHz behavior at any sample rate
+        // att_time ~0.45ms, rel_time ~2.27ms at 44100 Hz
+        let sr = self.sample_rate;
+        let att = (-1.0 / (0.00045 * sr)).exp();
+        let rel = (-1.0 / (0.00227 * sr)).exp();
         let level_l = in_l.abs();
         let level_r = in_r.abs();
         self.env_l = if level_l > self.env_l { att * self.env_l + (1.0 - att) * level_l }
@@ -126,7 +131,6 @@ impl AirwindowsPressure5 {
         let gain_r = if self.env_r > threshold { threshold / self.env_r.max(0.001) } else { 1.0 };
         let out_l = (in_l * gain_l * (1.0 + drive * 0.5)).tanh();
         let out_r = (in_r * gain_r * (1.0 + drive * 0.5)).tanh();
-        let _ = self.sample_rate;
         (out_l, out_r)
     }
 }

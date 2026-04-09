@@ -140,27 +140,30 @@ impl Envelope {
         match self.stage {
             EnvStage::Idle => 0.0,
             EnvStage::Attack => {
-                // One-pole filter charging toward overshoot target above 1.0
-                self.output = self.attack_coeff * self.output
-                    + (1.0 - self.attack_coeff) * self.attack_target;
-
-                // Apply shape: transform the raw exponential curve
+                // Apply shape: each arm handles its own self.output update
                 let shaped = match self.attack_shape {
-                    EnvShape::Sqrt => self.output,   // Default — already concave from overshoot
+                    EnvShape::Sqrt => {
+                        // Default — concave from overshoot target 1.3
+                        self.output = self.attack_coeff * self.output
+                            + (1.0 - self.attack_coeff) * 1.3;
+                        self.output
+                    }
                     EnvShape::Linear => {
                         // Linearize by reducing overshoot effect
-                        let raw = self.attack_coeff * self.output
+                        self.output = self.attack_coeff * self.output
                             + (1.0 - self.attack_coeff) * 1.05;
-                        self.output = raw;
-                        raw
+                        self.output
                     }
                     EnvShape::Quadratic => {
-                        // Convex — square the output for slower start
+                        // Convex — charge toward 1.0, output squared for slower start
+                        self.output = self.attack_coeff * self.output
+                            + (1.0 - self.attack_coeff) * 1.0;
                         self.output * self.output
                     }
                     EnvShape::Exponential => {
                         // Pure RC charge toward 1.0 (no overshoot)
-                        self.output = self.attack_coeff * self.output + (1.0 - self.attack_coeff) * 1.0;
+                        self.output = self.attack_coeff * self.output
+                            + (1.0 - self.attack_coeff) * 1.0;
                         self.output
                     }
                 };
@@ -173,8 +176,11 @@ impl Envelope {
             }
             EnvStage::Decay => {
                 // One-pole filter discharging toward target below sustain
-                self.output = self.decay_coeff * self.output
-                    + (1.0 - self.decay_coeff) * self.decay_target;
+                // Skip for Exponential — it uses its own target in its match arm
+                if self.decay_shape != EnvShape::Exponential {
+                    self.output = self.decay_coeff * self.output
+                        + (1.0 - self.decay_coeff) * self.decay_target;
+                }
 
                 let out = match self.decay_shape {
                     EnvShape::Sqrt => self.output,
@@ -209,8 +215,11 @@ impl Envelope {
             }
             EnvStage::Release => {
                 // One-pole filter discharging toward target below 0
-                self.output = self.release_coeff * self.output
-                    + (1.0 - self.release_coeff) * self.release_target;
+                // Skip for Exponential — it uses its own target in its match arm
+                if self.release_shape != EnvShape::Exponential {
+                    self.output = self.release_coeff * self.output
+                        + (1.0 - self.release_coeff) * self.release_target;
+                }
 
                 let out = match self.release_shape {
                     EnvShape::Quadratic => {

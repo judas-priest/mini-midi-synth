@@ -106,6 +106,7 @@ fn main() -> Result<()> {
     let looper_atoms = engine.looper.atoms();
     let seq_target_atom = engine.seq_target_atom();
     let pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
+    let scope_buf = engine.scope_buffer();
 
     let audio_config = audio::AudioConfig {
         host_id,
@@ -269,6 +270,7 @@ fn main() -> Result<()> {
         pitch_seq_scale: [0; 2], // chromatic
         pitch_seq_swing: [0.0; 2],
         preset_search: String::new(),
+        scope_buf,
     };
 
     app.load_edited_params(0);

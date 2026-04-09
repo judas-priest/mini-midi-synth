@@ -10,12 +10,12 @@
 /// Parameters:
 /// - `room_size` (0..1): scales the IR length used (0=64 samples, 1=512 samples)
 /// - `damping` (0..1): attenuates the late tail, favouring early reflections
-/// - `pre_delay` (0..1): pre-delay 0..40ms (0..1764 samples at 44.1kHz)
+/// - `pre_delay` (0..1): pre-delay 0..40ms
 /// - `mix` (0..1): wet/dry
 
 const IR_LEN: usize = 512;
 /// Maximum pre-delay: 40ms at 44.1kHz
-const MAX_PRE_DELAY: usize = 1764;
+const MAX_PRE_DELAY: usize = 7680;
 
 pub struct ConvolutionReverb {
     sample_rate: f32,
@@ -208,14 +208,29 @@ impl ConvolutionReverb {
         }
 
         // --- Convolution using the precomputed damped IR ---
+        // Split into two contiguous segments to avoid per-iteration modulo,
+        // enabling auto-vectorization (SIMD).
         let mut acc_l = 0.0_f32;
         let mut acc_r = 0.0_f32;
-        let hist_pos = self.hist_pos;
-        for k in 0..ir_len {
-            let idx = (hist_pos + IR_LEN - k) % IR_LEN;
-            let damp_factor = self.damped_ir[k]; // precomputed
-            acc_l += damp_factor * self.hist_l[idx];
-            acc_r += damp_factor * self.hist_r[idx];
+        let hp = self.hist_pos;
+        // Segment 1: IR taps 0..hp+1 read hist[hp], hist[hp-1], ..., hist[0]
+        let seg1_len = (hp + 1).min(ir_len);
+        let ir = &*self.damped_ir;
+        let hl = &self.hist_l;
+        let hr = &self.hist_r;
+        for k in 0..seg1_len {
+            let idx = hp - k; // no wrap needed
+            acc_l += ir[k] * hl[idx];
+            acc_r += ir[k] * hr[idx];
+        }
+        // Segment 2: remaining taps wrap around to end of buffer
+        if ir_len > seg1_len {
+            let base = IR_LEN - 1; // hist[IR_LEN-1], hist[IR_LEN-2], ...
+            for k in seg1_len..ir_len {
+                let idx = base - (k - seg1_len);
+                acc_l += ir[k] * hl[idx];
+                acc_r += ir[k] * hr[idx];
+            }
         }
 
         self.hist_pos = (self.hist_pos + 1) % IR_LEN;

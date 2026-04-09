@@ -87,9 +87,10 @@ impl Resonator {
             let bp = v1; // bandpass output
 
             // Write to comb buffer (with decay feedback)
-            let read_pos = (self.write[i] + MAX_COMB - 1) % MAX_COMB;
+            let delay_samples = (sr / freq).round().clamp(1.0, (MAX_COMB - 1) as f32) as usize;
+            let read_pos = (self.write[i] + MAX_COMB - delay_samples) % MAX_COMB;
             let feedback = self.bufs[i][read_pos] * decay;
-            self.bufs[i][self.write[i]] = bp + feedback;
+            self.bufs[i][self.write[i]] = (bp + feedback).clamp(-4.0, 4.0);
             let out = self.bufs[i][self.write[i]];
             self.write[i] = (self.write[i] + 1) % MAX_COMB;
 
@@ -99,8 +100,9 @@ impl Resonator {
         }
 
         // Balance L/R
+        let orig_l = out_l;
         let out_l = out_l + out_r * 0.2;
-        let out_r = out_r + out_l * 0.2;
+        let out_r = out_r + orig_l * 0.2;
         let dry = 1.0 - mix;
         (input * dry + out_l * mix, input * dry + out_r * mix)
     }

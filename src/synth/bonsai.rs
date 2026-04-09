@@ -64,14 +64,10 @@ impl Bonsai {
 
         let sr = self.sample_rate;
 
-        // DC blocker (6 Hz HP)
-        let dc_coef = 1.0 - (-2.0 * PI * 6.0 / sr).exp();
-        let (bl, br) = Self::dc_block(&mut self.dc_x, &mut self.dc_y, in_l, in_r, dc_coef);
-
         // Drive: 1..32x
         let drive_lin = (drive * 4.0).exp2(); // 1..16x gain
-        let dl = bl * drive_lin;
-        let dr = br * drive_lin;
+        let dl = in_l * drive_lin;
+        let dr = in_r * drive_lin;
 
         // Saturation
         let (sl, sr_s) = Self::saturate(dl, dr, asym, mode);
@@ -87,8 +83,12 @@ impl Bonsai {
         self.post_lp.0 += lp_coef * (sl - self.post_lp.0);
         self.post_lp.1 += lp_coef * (sr_s - self.post_lp.1);
 
+        // DC blocker (6 Hz HP) — post-saturation to remove DC offset from asymmetric clipping
+        let dc_coef = 1.0 - (-2.0 * PI * 6.0 / sr).exp();
+        let (bl, br) = Self::dc_block(&mut self.dc_x, &mut self.dc_y, self.post_lp.0, self.post_lp.1, dc_coef);
+
         let dry = 1.0 - mix;
-        (in_l * dry + self.post_lp.0 * mix, in_r * dry + self.post_lp.1 * mix)
+        (in_l * dry + bl * mix, in_r * dry + br * mix)
     }
 
     fn dc_block(
@@ -128,7 +128,7 @@ impl Bonsai {
                     let sign = x.signum();
                     let excess = (x.abs() - knee) / (1.0 - knee);
                     let soft = knee + (1.0 - knee) * fast_tanh(excess * 3.0) / 3.0;
-                    sign * soft * (1.0 + asym * 0.3).min(1.0)
+                    sign * soft * (1.0 + asym * 0.3)
                 }
             }
             BonsaiMode::Fuzz => {
@@ -142,9 +142,9 @@ impl Bonsai {
                 }
             }
             BonsaiMode::Fold => {
-                // Wavefolder with asymmetric bias
-                let biased = x + asym * 0.3;
-                fold(biased)
+                // Wavefolder with asymmetric bias, DC-compensated
+                let bias = asym * 0.3;
+                fold(x + bias) - fold(bias)
             }
         }
     }

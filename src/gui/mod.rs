@@ -268,6 +268,8 @@ pub struct App {
     pub pitch_seq_swing: [f32; 2],
     // Preset search
     pub preset_search: String,
+    // Oscilloscope
+    pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
 }
 
 impl eframe::App for App {
@@ -424,6 +426,36 @@ impl eframe::App for App {
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "delay_mix", value: delay });
                     self.global_dirty = true;
                 }
+
+                ui.separator();
+
+                // Oscilloscope
+                let scope_data = self.scope_buf.read();
+                let scope_w = 100.0_f32;
+                let scope_h = 24.0_f32;
+                let (resp, painter) = ui.allocate_painter(
+                    egui::vec2(scope_w, scope_h),
+                    egui::Sense::hover(),
+                );
+                let r = resp.rect;
+                painter.rect_filled(r, 2.0, egui::Color32::from_rgb(20, 20, 30));
+                let mid_y = r.center().y;
+                // Draw waveform
+                let n = scope_data.len();
+                let step = n as f32 / scope_w;
+                let points: Vec<egui::Pos2> = (0..scope_w as usize).map(|px| {
+                    let idx = (px as f32 * step) as usize;
+                    let s = scope_data[idx.min(n - 1)].clamp(-1.0, 1.0);
+                    egui::pos2(r.left() + px as f32, mid_y - s * scope_h * 0.45)
+                }).collect();
+                if points.len() >= 2 {
+                    painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 200, 100))));
+                }
+                // Center line
+                painter.line_segment(
+                    [egui::pos2(r.left(), mid_y), egui::pos2(r.right(), mid_y)],
+                    egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 80)),
+                );
             });
             ui.add_space(4.0);
         });
@@ -465,7 +497,29 @@ impl eframe::App for App {
                 if is_sf2 {
                     ui.strong(format!("GM Instruments (Layer {layer_label})"));
                 } else {
-                    ui.strong(format!("Presets (Layer {layer_label})"));
+                    ui.horizontal(|ui| {
+                        if ui.small_button("\u{25C0}").clicked() {
+                            // Prev preset
+                            let idx = self.layers[layer].preset_idx;
+                            if idx > 0 {
+                                self.layers[layer].preset_idx = idx - 1;
+                                self.load_edited_params(layer);
+                                self.send_edited_params(layer);
+                                self.save_config();
+                            }
+                        }
+                        ui.strong(format!("Presets ({layer_label})"));
+                        if ui.small_button("\u{25B6}").clicked() {
+                            // Next preset
+                            let idx = self.layers[layer].preset_idx;
+                            if idx + 1 < self.presets.len() {
+                                self.layers[layer].preset_idx = idx + 1;
+                                self.load_edited_params(layer);
+                                self.send_edited_params(layer);
+                                self.save_config();
+                            }
+                        }
+                    });
                 }
                 ui.add_space(2.0);
 
@@ -812,7 +866,8 @@ impl App {
         } else { None };
         let mut pitch_seq = crate::synth::step_seq::PitchSequencer::new();
         pitch_seq.load_from_params(&self.layers[layer].edited_params);
-        let _ = self.ctrl_tx.push(ControlEvent::LoadPreset { layer, params, mod_matrix, mseg1, mseg2: None, pitch_seq: Some(pitch_seq) });
+        let lfo_step_params = Some(self.layers[layer].edited_params.clone());
+        let _ = self.ctrl_tx.push(ControlEvent::LoadPreset { layer, params, mod_matrix, mseg1, mseg2: None, pitch_seq: Some(pitch_seq), lfo_step_params });
     }
 
     fn send_layer_enabled(&mut self, layer: usize) {

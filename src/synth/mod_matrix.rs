@@ -467,6 +467,53 @@ impl ModMatrix {
         offsets
     }
 
+    /// Compute only the PolyAftertouch contribution to ModOffsets,
+    /// scaled by the given aftertouch value. Much cheaper than full evaluate()
+    /// since it only iterates slots that use PolyAftertouch as source.
+    pub fn evaluate_poly_at_delta(&self, poly_at: f32) -> ModOffsets {
+        let mut offsets = ModOffsets::default();
+        for slot in &self.slots {
+            if slot.source != ModSource::PolyAftertouch || slot.depth.abs() < 0.001 {
+                continue;
+            }
+            let offset = poly_at * slot.depth * slot.dest.range();
+            match slot.dest {
+                ModDest::None => {},
+                ModDest::Pitch => offsets.pitch += offset,
+                ModDest::FilterCutoff => offsets.filter_cutoff += offset,
+                ModDest::FilterResonance => offsets.filter_resonance += offset,
+                ModDest::Amplitude => offsets.amplitude += offset,
+                ModDest::Osc1Level => offsets.osc1_level += offset,
+                ModDest::Osc2Level => offsets.osc2_level += offset,
+                ModDest::Osc3Level => offsets.osc3_level += offset,
+                ModDest::FmCrossDepth => offsets.fm_cross_depth += offset,
+                ModDest::PulseWidth => offsets.pulse_width += offset,
+                ModDest::NoiseLevel => offsets.noise_level += offset,
+                ModDest::Pan => offsets.pan += offset,
+                ModDest::Lfo1Rate => offsets.lfo1_rate += offset,
+                ModDest::Lfo2Rate => offsets.lfo2_rate += offset,
+                ModDest::ChorusMix => offsets.chorus_mix += offset,
+                ModDest::DelayMix => offsets.delay_mix += offset,
+                ModDest::ReverbMix => offsets.reverb_mix += offset,
+                ModDest::TapeDrive => offsets.tape_drive += offset,
+                ModDest::NeuronDrive => offsets.neuron_drive += offset,
+                ModDest::RingModFreq => offsets.ring_mod_freq += offset,
+                ModDest::FreqShiftHz => offsets.freq_shift_hz += offset,
+                ModDest::PhaserRate => offsets.phaser_rate += offset,
+                ModDest::FlangerRate => offsets.flanger_rate += offset,
+                ModDest::Lfo3Rate => offsets.lfo3_rate += offset,
+                ModDest::Lfo4Rate => offsets.lfo4_rate += offset,
+                ModDest::WaveShaperDrive => offsets.wave_shaper_drive += offset,
+                ModDest::WaveShaperMix => offsets.wave_shaper_mix += offset,
+                ModDest::RotaryMix => offsets.rotary_mix += offset,
+                ModDest::EnsembleMix => offsets.ensemble_mix += offset,
+                ModDest::ResonatorMix => offsets.resonator_mix += offset,
+                ModDest::BonsaiDrive => offsets.bonsai_drive += offset,
+            }
+        }
+        offsets
+    }
+
     /// Load from flat param map (preset serialization).
     pub fn load_from_params(&mut self, params: &std::collections::BTreeMap<String, f32>) {
         for i in 0..MOD_SLOTS {

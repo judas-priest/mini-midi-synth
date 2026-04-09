@@ -12,6 +12,8 @@ pub struct BbdEnsemble {
     write: usize,
     // 3 LFO phases at slightly different rates for chorus spread
     phases: [f32; 3],
+    // BBD input LP filter state (separate from per-tap output filters)
+    input_lp: f32,
     // BBD LP filter states (per tap, per channel)
     lp_l: [f32; 3],
     lp_r: [f32; 3],
@@ -31,6 +33,7 @@ impl BbdEnsemble {
             buf: vec![0.0; BUF],
             write: 0,
             phases: [0.0, 0.33, 0.67],
+            input_lp: 0.0,
             lp_l: [0.0; 3],
             lp_r: [0.0; 3],
         }
@@ -40,6 +43,7 @@ impl BbdEnsemble {
         self.sample_rate = sr;
         self.buf = vec![0.0; BUF];
         self.write = 0;
+        self.input_lp = 0.0;
         self.lp_l = [0.0; 3];
         self.lp_r = [0.0; 3];
     }
@@ -48,10 +52,10 @@ impl BbdEnsemble {
     /// `depth` (0..1): modulation depth.
     /// `rate` (0..1): LFO rate scaling (0.5 = normal, 1.0 = fast).
     pub fn tick(&mut self, input: f32, depth: f32, rate: f32, mix: f32) -> (f32, f32) {
-        // BBD input LP filter (~8 kHz cutoff)
-        let bbd_coef = 0.55;
-        let filtered = self.lp_l[0] + bbd_coef * (input - self.lp_l[0]);
-        self.lp_l[0] = filtered;
+        // BBD input LP filter (~8 kHz cutoff), SR-independent
+        let bbd_coef = 1.0 - (-2.0 * std::f32::consts::PI * 8000.0 / self.sample_rate).exp();
+        let filtered = self.input_lp + bbd_coef * (input - self.input_lp);
+        self.input_lp = filtered;
 
         self.buf[self.write] = filtered;
         self.write = (self.write + 1) % BUF;
@@ -80,8 +84,8 @@ impl BbdEnsemble {
             let wet_l = read_linear(&self.buf, self.write, delay_l);
             let wet_r = read_linear(&self.buf, self.write, delay_r);
 
-            // BBD output LP per tap
-            let bbd_out = 0.55;
+            // BBD output LP per tap (~8 kHz), SR-independent
+            let bbd_out = 1.0 - (-2.0 * std::f32::consts::PI * 8000.0 / sr).exp();
             let wl = self.lp_l[i] + bbd_out * (wet_l - self.lp_l[i]);
             self.lp_l[i] = wl;
             let wr = self.lp_r[i] + bbd_out * (wet_r - self.lp_r[i]);

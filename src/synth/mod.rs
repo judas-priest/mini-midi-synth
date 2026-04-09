@@ -90,6 +90,40 @@ use mod_matrix::ModMatrix;
 use mseg::{Mseg, MsegState};
 use voice::{Voice, VoiceParams};
 
+/// Lock-free oscilloscope buffer shared between audio and GUI threads.
+/// Audio writes samples; GUI reads them for display. Uses atomic f32 encoding.
+pub const SCOPE_SIZE: usize = 256;
+pub struct ScopeBuffer {
+    pub data: [std::sync::atomic::AtomicU32; SCOPE_SIZE],
+    pub write_pos: std::sync::atomic::AtomicUsize,
+}
+
+impl ScopeBuffer {
+    pub fn new() -> Self {
+        Self {
+            data: std::array::from_fn(|_| std::sync::atomic::AtomicU32::new(0)),
+            write_pos: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    #[inline]
+    pub fn push(&self, sample: f32, pos: &mut usize) {
+        self.data[*pos].store(sample.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        *pos = (*pos + 1) & (SCOPE_SIZE - 1);
+        self.write_pos.store(*pos, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn read(&self) -> [f32; SCOPE_SIZE] {
+        let mut out = [0.0f32; SCOPE_SIZE];
+        let wp = self.write_pos.load(std::sync::atomic::Ordering::Relaxed);
+        for i in 0..SCOPE_SIZE {
+            let idx = (wp + i) & (SCOPE_SIZE - 1);
+            out[i] = f32::from_bits(self.data[idx].load(std::sync::atomic::Ordering::Relaxed));
+        }
+        out
+    }
+}
+
 /// MIDI events sent from the MIDI thread to the audio thread.
 #[allow(dead_code)]
 pub enum MidiEvent {
@@ -108,7 +142,7 @@ pub enum MidiEvent {
 /// Control events sent from GUI to the audio thread.
 #[allow(dead_code)]
 pub enum ControlEvent {
-    LoadPreset { layer: usize, params: PresetParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer> },
+    LoadPreset { layer: usize, params: PresetParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_params: Option<std::collections::BTreeMap<String, f32>> },
     SetLayerEnabled { layer: usize, enabled: bool },
     SetLayerVolume { layer: usize, volume: f32 },
     SetLayerRange { layer: usize, min_note: u8, max_note: u8 },
@@ -282,6 +316,7 @@ struct Layer {
     alt_bipolar: f32,       // current alternate bipolar value
     alt_unipolar: f32,      // current alternate unipolar value
     release_vel: f32,       // last note-off velocity
+    sustained_notes: [bool; 128], // notes held by sustain pedal
     breath: f32,            // CC2, 0..1
     expression: f32,        // CC11, 0..1
     sustain_pedal: f32,     // CC64: 0.0 or 1.0
@@ -290,6 +325,10 @@ struct Layer {
     // Cached mod sources (control-rate, with poly_aftertouch=0) for per-voice re-evaluation
     cached_mod_sources: mod_matrix::ModSources,
     poly_at_in_matrix: bool,  // true if any mod slot uses PolyAftertouch
+    // Cached routing flags — updated on preset load, not per-block
+    lfo2_routed: bool,
+    lfo3_routed: bool,
+    lfo4_routed: bool,
     // Cached control-rate base values for per-voice ModulationState reconstruction
     cached_lfo_pitch_offset: f32,  // pitch_offset minus mod_offsets.pitch
     cached_filter_offset: f32,
@@ -312,6 +351,7 @@ impl Layer {
             rng_state: 0x5851f42d4c957f2d, alt_counter: 0,
             rand_bipolar: 0.0, rand_unipolar: 0.5,
             alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
+            sustained_notes: [false; 128],
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
             cached_mod_sources: mod_matrix::ModSources {
@@ -325,6 +365,9 @@ impl Layer {
                 latest_key: 0.0, poly_aftertouch: 0.0,
             },
             poly_at_in_matrix: false,
+            lfo2_routed: false,
+            lfo3_routed: false,
+            lfo4_routed: false,
             cached_lfo_pitch_offset: 0.0,
             cached_filter_offset: 0.0,
             cached_lfo_amp_base: 1.0,
@@ -338,6 +381,23 @@ impl Layer {
         self.max_note = self.params.max_note as u8;
         self.pitch_seq.load_from_params(&preset.params);
         self.mod_matrix.load_from_params(&preset.params);
+        for i in 0..4u8 {
+            self.lfos[i as usize].load_step_seq_from_params(i, &preset.params);
+        }
+        self.update_routing_cache();
+    }
+
+    /// Update cached routing flags from mod matrix slots. Call after loading a preset
+    /// or changing mod matrix routing to avoid per-block scanning.
+    fn update_routing_cache(&mut self) {
+        self.lfo2_routed = self.mod_matrix.slots.iter()
+            .any(|s| s.source == mod_matrix::ModSource::Lfo2 && s.depth.abs() > 0.001);
+        self.lfo3_routed = self.mod_matrix.slots.iter()
+            .any(|s| s.source == mod_matrix::ModSource::Lfo3 && s.depth.abs() > 0.001);
+        self.lfo4_routed = self.mod_matrix.slots.iter()
+            .any(|s| s.source == mod_matrix::ModSource::Lfo4 && s.depth.abs() > 0.001);
+        self.poly_at_in_matrix = self.mod_matrix.slots.iter()
+            .any(|s| s.source == mod_matrix::ModSource::PolyAftertouch && s.depth.abs() > 0.001);
     }
 
     /// LCG random float 0..1
@@ -574,6 +634,7 @@ impl Layer {
             match self.params.sustain_mode as u32 {
                 0 => {
                     // Hold all notes — don't release while pedal is down
+                    self.sustained_notes[note as usize] = true;
                 }
                 1 => {
                     // Release note only if other active non-releasing notes are held
@@ -636,19 +697,20 @@ impl Layer {
         if !self.enabled { return (0.0, 0.0); }
         let (mut out_l, mut out_r) = (0.0, 0.0);
         for voice in &mut self.voices {
-            // Per-voice mod matrix re-evaluation when PolyAftertouch is used
-            let voice_mods = if self.poly_at_in_matrix && voice.active {
-                let mut src = self.cached_mod_sources;
-                src.poly_aftertouch = voice.poly_aftertouch;
-                let offsets = self.mod_matrix.evaluate(&src);
-                let pitch_offset = self.cached_lfo_pitch_offset + offsets.pitch;
-                let pitch_mult = if pitch_offset.abs() < 0.001 { 1.0 } else { (pitch_offset / 12.0).exp2() };
-                let amp_mod = self.cached_lfo_amp_base * (1.0 + offsets.amplitude).max(0.0);
+            // Per-voice poly aftertouch: compute only the AT delta, not full matrix
+            let voice_mods = if self.poly_at_in_matrix && voice.active && voice.poly_aftertouch > 0.001 {
+                let delta = self.mod_matrix.evaluate_poly_at_delta(voice.poly_aftertouch);
+                let pitch_mult = if (mods.pitch_mult - 1.0).abs() < 0.001 && delta.pitch.abs() < 0.001 {
+                    1.0
+                } else {
+                    mods.pitch_mult * if delta.pitch.abs() > 0.001 { (delta.pitch / 12.0).exp2() } else { 1.0 }
+                };
+                let amp_mod = mods.amp_mod * (1.0 + delta.amplitude).max(0.0);
                 ModulationState {
                     pitch_mult,
-                    filter_offset: self.cached_filter_offset,
-                    filter_offset_semis: offsets.filter_cutoff,
-                    amp_mod: amp_mod.max(0.0),
+                    filter_offset: mods.filter_offset,
+                    filter_offset_semis: mods.filter_offset_semis + delta.filter_cutoff,
+                    amp_mod,
                 }
             } else {
                 *mods
@@ -796,6 +858,9 @@ pub struct PresetParams {
     // LFO 3 & 4 (routed via mod matrix only)
     lfo3_waveform: f32, lfo3_rate: f32, lfo3_deform: f32,
     lfo4_waveform: f32, lfo4_rate: f32, lfo4_deform: f32,
+    // LFO tempo sync & unipolar (all 4 LFOs)
+    lfo1_tempo_sync: f32, lfo2_tempo_sync: f32, lfo3_tempo_sync: f32, lfo4_tempo_sync: f32,
+    lfo1_unipolar: f32, lfo2_unipolar: f32, lfo3_unipolar: f32, lfo4_unipolar: f32,
     portamento_time: f32, portamento_mode: f32,
     pub play_mode: f32,     // 0=poly, 1=mono, 2=mono-st, 3=latch
     pub sustain_mode: f32,  // 0=hold all notes, 1=release if others held, 4=poly-high, 5=poly-low, 6=piano
@@ -933,6 +998,8 @@ impl Default for PresetParams {
             lfo2_waveform: 0.0, lfo2_rate: 5.0, lfo2_pitch_depth: 0.0, lfo2_filter_depth: 0.0, lfo2_amp_depth: 0.0, lfo2_deform: 0.0,
             lfo3_waveform: 0.0, lfo3_rate: 3.0, lfo3_deform: 0.0,
             lfo4_waveform: 0.0, lfo4_rate: 1.0, lfo4_deform: 0.0,
+            lfo1_tempo_sync: 0.0, lfo2_tempo_sync: 0.0, lfo3_tempo_sync: 0.0, lfo4_tempo_sync: 0.0,
+            lfo1_unipolar: 0.0, lfo2_unipolar: 0.0, lfo3_unipolar: 0.0, lfo4_unipolar: 0.0,
             alias_wave_type: 0.0, alias_crush: 8.0,
             window_type: 0.0, window_morph: 0.0, window_formant: 0.0,
             portamento_time: 0.0, portamento_mode: 0.0, play_mode: 0.0, sustain_mode: 0.0,
@@ -1049,6 +1116,10 @@ impl PresetParams {
             lfo2_amp_depth: p("lfo2_amp_depth", 0.0), lfo2_deform: p("lfo2_deform", 0.0),
             lfo3_waveform: p("lfo3_waveform", 0.0), lfo3_rate: p("lfo3_rate", 3.0), lfo3_deform: p("lfo3_deform", 0.0),
             lfo4_waveform: p("lfo4_waveform", 0.0), lfo4_rate: p("lfo4_rate", 1.0), lfo4_deform: p("lfo4_deform", 0.0),
+            lfo1_tempo_sync: p("lfo1_tempo_sync", 0.0), lfo2_tempo_sync: p("lfo2_tempo_sync", 0.0),
+            lfo3_tempo_sync: p("lfo3_tempo_sync", 0.0), lfo4_tempo_sync: p("lfo4_tempo_sync", 0.0),
+            lfo1_unipolar: p("lfo1_unipolar", 0.0), lfo2_unipolar: p("lfo2_unipolar", 0.0),
+            lfo3_unipolar: p("lfo3_unipolar", 0.0), lfo4_unipolar: p("lfo4_unipolar", 0.0),
             alias_wave_type: p("alias_wave_type", 0.0), alias_crush: p("alias_crush", 8.0),
             window_type: p("window_type", 0.0), window_morph: p("window_morph", 0.0),
             window_formant: p("window_formant", 0.0),
@@ -1188,6 +1259,9 @@ pub struct SynthEngine {
     pickup_states: [PickupState; 128],
     /// 0 = SEQ buttons target drums, 1 = SEQ buttons target looper
     seq_target: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Oscilloscope ring buffer: 256 mono samples shared with GUI via atomics
+    scope_buf: std::sync::Arc<ScopeBuffer>,
+    scope_write: usize,
 }
 
 /// Cached effect parameters — extracted once per block from PresetParams.
@@ -1428,6 +1502,8 @@ impl SynthEngine {
             global_params: GlobalParams::default(),
             pickup_states: [PickupState::default(); 128],
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth layer shown at start)
+            scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
+            scope_write: 0,
         }
     }
 
@@ -1444,6 +1520,7 @@ impl SynthEngine {
         self.presets = presets;
     }
     pub fn set_feedback_tx(&mut self, tx: rtrb::Producer<ParamFeedback>) { self.feedback_tx = Some(tx); }
+    pub fn scope_buffer(&self) -> std::sync::Arc<ScopeBuffer> { self.scope_buf.clone() }
     pub fn set_program_change_atom(&mut self, atom: std::sync::Arc<std::sync::atomic::AtomicU8>) {
         self.program_change = Some(atom);
     }
@@ -1642,6 +1719,7 @@ impl SynthEngine {
                             l.mod_matrix.load_from_params(&preset.params);
                             l.pitch_seq.load_from_params(&preset.params);
                         }
+                        l.update_routing_cache();
                     }
                     self.reset_preset_pickups();
                 }
@@ -1679,14 +1757,16 @@ impl SynthEngine {
                         64 => {
                             let was_held = layer.sustain_pedal > 0.5;
                             layer.sustain_pedal = if value >= 64 { 1.0 } else { 0.0 };
-                            // When pedal is released, release any voices that were held by sustain
+                            // When pedal is released, release only voices that were held by sustain
                             if was_held && layer.sustain_pedal < 0.5 {
                                 for voice in &mut layer.voices {
-                                    // Release voices that are still active (held by sustain, not re-pressed)
-                                    if voice.active && !voice.is_releasing() {
+                                    if voice.active && !voice.is_releasing()
+                                        && layer.sustained_notes[voice.note as usize]
+                                    {
                                         voice.note_off();
                                     }
                                 }
+                                layer.sustained_notes = [false; 128];
                             }
                         }
                         _ => {}
@@ -1718,7 +1798,7 @@ impl SynthEngine {
 
     pub fn handle_control(&mut self, event: ControlEvent) {
         match event {
-            ControlEvent::LoadPreset { layer, params, mod_matrix, mseg1, mseg2, pitch_seq } => {
+            ControlEvent::LoadPreset { layer, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_params } => {
                 if let Some(l) = self.layers.get_mut(layer) {
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
@@ -1727,6 +1807,12 @@ impl SynthEngine {
                     if let Some(m) = mseg1 { l.mseg1 = m; }
                     if let Some(m) = mseg2 { l.mseg2 = m; }
                     if let Some(sq) = pitch_seq { l.pitch_seq = sq; }
+                    if let Some(ref sp) = lfo_step_params {
+                        for i in 0..4u8 {
+                            l.lfos[i as usize].load_step_seq_from_params(i, sp);
+                        }
+                    }
+                    l.update_routing_cache();
                 }
                 self.reset_preset_pickups();
             }
@@ -1970,41 +2056,68 @@ impl SynthEngine {
 
             let bl = block_len as f32;
 
+            // Set BPM, tempo sync, unipolar on all LFOs
+            let lfo_tempo_syncs = [layer.params.lfo1_tempo_sync, layer.params.lfo2_tempo_sync,
+                                   layer.params.lfo3_tempo_sync, layer.params.lfo4_tempo_sync];
+            let lfo_unipolars = [layer.params.lfo1_unipolar, layer.params.lfo2_unipolar,
+                                 layer.params.lfo3_unipolar, layer.params.lfo4_unipolar];
+            for i in 0..4 {
+                layer.lfos[i].set_bpm(seq_bpm);
+                layer.lfos[i].tempo_sync = lfo_tempo_syncs[i] > 0.5;
+                layer.lfos[i].unipolar = lfo_unipolars[i] > 0.5;
+            }
+
             // LFO 1
-            let lfo1_active = layer.params.lfo_pitch_depth > 0.001
+            let lfo1_wf = LfoWaveform::from_param(layer.params.lfo_waveform);
+            let lfo1_active = lfo1_wf == LfoWaveform::StepSeq
+                || layer.params.lfo_pitch_depth > 0.001
                 || layer.params.lfo_filter_depth > 0.001
                 || layer.params.lfo_amp_depth > 0.001
                 || self.aftertouch_smooth > 0.001;
             let lfo1_val = if lfo1_active {
-                let lfo_wf = LfoWaveform::from_param(layer.params.lfo_waveform);
-                layer.lfos[0].tick_with_deform(lfo_rate * bl, lfo_wf, layer.params.lfo_deform)
+                layer.lfos[0].tick_with_deform(lfo_rate * bl, lfo1_wf, layer.params.lfo_deform)
             } else { 0.0 };
 
-            // LFO 2 — also active when routed through mod matrix
-            let lfo2_in_matrix = layer.mod_matrix.slots.iter()
-                .any(|s| s.source == mod_matrix::ModSource::Lfo2 && s.depth.abs() > 0.001);
-            let lfo2_active = lfo2_in_matrix
+            // LFO 2 — also active when routed through mod matrix or in StepSeq mode
+            let lfo2_wf = LfoWaveform::from_param(layer.params.lfo2_waveform);
+            let lfo2_active = lfo2_wf == LfoWaveform::StepSeq || layer.lfo2_routed
                 || layer.params.lfo2_pitch_depth > 0.001
                 || layer.params.lfo2_filter_depth > 0.001
                 || layer.params.lfo2_amp_depth > 0.001;
             let lfo2_val = if lfo2_active {
-                let lfo2_wf = LfoWaveform::from_param(layer.params.lfo2_waveform);
                 layer.lfos[1].tick_with_deform(layer.params.lfo2_rate * bl, lfo2_wf, layer.params.lfo2_deform)
             } else { 0.0 };
 
-            // LFO 3 & 4 — only tick when routed
-            let lfo3_in_matrix = layer.mod_matrix.slots.iter()
-                .any(|s| s.source == mod_matrix::ModSource::Lfo3 && s.depth.abs() > 0.001);
-            let lfo3_val = if lfo3_in_matrix {
-                let lfo3_wf = LfoWaveform::from_param(layer.params.lfo3_waveform);
+            // LFO 3 & 4 — tick when routed or in StepSeq mode
+            let lfo3_wf = LfoWaveform::from_param(layer.params.lfo3_waveform);
+            let lfo3_val = if lfo3_wf == LfoWaveform::StepSeq || layer.lfo3_routed {
                 layer.lfos[2].tick_with_deform(layer.params.lfo3_rate * bl, lfo3_wf, layer.params.lfo3_deform)
             } else { 0.0 };
-            let lfo4_in_matrix = layer.mod_matrix.slots.iter()
-                .any(|s| s.source == mod_matrix::ModSource::Lfo4 && s.depth.abs() > 0.001);
-            let lfo4_val = if lfo4_in_matrix {
-                let lfo4_wf = LfoWaveform::from_param(layer.params.lfo4_waveform);
+            let lfo4_wf = LfoWaveform::from_param(layer.params.lfo4_waveform);
+            let lfo4_val = if lfo4_wf == LfoWaveform::StepSeq || layer.lfo4_routed {
                 layer.lfos[3].tick_with_deform(layer.params.lfo4_rate * bl, lfo4_wf, layer.params.lfo4_deform)
             } else { 0.0 };
+
+            // Step sequencer envelope retrigger from any LFO in StepSeq mode
+            let lfo_wfs = [lfo1_wf, lfo2_wf, lfo3_wf, lfo4_wf];
+            for (i, &wf) in lfo_wfs.iter().enumerate() {
+                if wf == LfoWaveform::StepSeq {
+                    let evt = layer.lfos[i].last_step_event();
+                    if evt.stepped && (evt.retrigger_aeg || evt.retrigger_feg) {
+                        for voice in &mut layer.voices {
+                            if voice.active && !voice.is_releasing() {
+                                if evt.retrigger_aeg && evt.retrigger_feg {
+                                    voice.retrigger_envelope();
+                                } else if evt.retrigger_aeg {
+                                    voice.retrigger_amp_env();
+                                } else {
+                                    voice.retrigger_filter_env();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // MSEGs
             let mseg1_val = if layer.params.mseg_enabled > 0.5 {
@@ -2061,8 +2174,6 @@ impl SynthEngine {
             let amp_mod = lfo_amp_base * (1.0 + mod_offsets.amplitude).max(0.0);
 
             // Cache mod sources and base values for per-voice poly AT re-evaluation
-            layer.poly_at_in_matrix = layer.mod_matrix.slots.iter()
-                .any(|s| s.source == mod_matrix::ModSource::PolyAftertouch && s.depth.abs() > 0.001);
             layer.cached_mod_sources = mod_sources;
             layer.cached_lfo_pitch_offset = lfo_pitch_offset_base;
             layer.cached_filter_offset = filter_offset;
@@ -2245,6 +2356,8 @@ impl SynthEngine {
             let vol = self.global_params.master_volume;
             buf_l[s] = tl * vol;
             buf_r[s] = tr * vol;
+            // Write mono mix to oscilloscope buffer
+            self.scope_buf.push((buf_l[s] + buf_r[s]) * 0.5, &mut self.scope_write);
         }
     }
 
@@ -2543,10 +2656,10 @@ mod tests {
         let params2 = params.clone();
 
         synth_a.handle_control(ControlEvent::LoadPreset {
-            layer: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None,
+            layer: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None,
         });
         synth_b.handle_control(ControlEvent::LoadPreset {
-            layer: 0, params: params2, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None,
+            layer: 0, params: params2, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None,
         });
 
         synth_a.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
@@ -2586,7 +2699,7 @@ mod tests {
         let params = PresetParams::from_map(&presets[idx].params);
         synth.set_presets(presets);
         synth.handle_control(ControlEvent::LoadPreset {
-            layer: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None,
+            layer: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None,
         });
         synth.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
         let mut max_val = 0.0_f32;
@@ -2623,6 +2736,7 @@ mod tests {
                 mseg1: None,
                 mseg2: None,
                 pitch_seq: None,
+                lfo_step_params: None,
             });
             synth.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
 
@@ -2664,7 +2778,7 @@ mod tests {
             let mut synth = SynthEngine::new(44100.0);
             let params = PresetParams::from_map(&preset.params);
             synth.handle_control(ControlEvent::LoadPreset {
-                layer: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None,
+                layer: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None,
             });
             // No notes — should be completely silent
             let mut max_val = 0.0_f32;

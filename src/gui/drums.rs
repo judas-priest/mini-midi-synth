@@ -341,6 +341,11 @@ impl App {
                         self.drum_params[slot].decay = decay;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
                     }
+                    let mut pan = self.drum_params[slot].pan;
+                    if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).changed() {
+                        self.drum_params[slot].pan = pan;
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
+                    }
                 });
             });
         }

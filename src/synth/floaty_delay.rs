@@ -7,7 +7,7 @@
 
 use std::f32::consts::PI;
 
-const BUF_SIZE: usize = 88200; // 2s at 44.1kHz
+const BUF_SIZE: usize = 384000; // ~8s at 48kHz, supports high sample rates
 
 pub struct FloatyDelay {
     buf_l: Box<[f32; BUF_SIZE]>,

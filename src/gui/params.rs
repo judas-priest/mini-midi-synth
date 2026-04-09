@@ -14,6 +14,64 @@ use super::{
 };
 
 impl App {
+    /// Draw a small ADSR envelope curve from parameter values.
+    fn draw_adsr_curve(
+        ui: &mut egui::Ui,
+        _layer: usize,
+        params: &std::collections::BTreeMap<String, f32>,
+        prefix: &str,
+    ) {
+        let a = params.get(&format!("{prefix}_attack")).copied().unwrap_or(0.01);
+        let d = params.get(&format!("{prefix}_decay")).copied().unwrap_or(0.1);
+        let s = params.get(&format!("{prefix}_sustain")).copied().unwrap_or(0.7);
+        let r = params.get(&format!("{prefix}_release")).copied().unwrap_or(0.3);
+
+        let w = ui.available_width().min(280.0);
+        let h = 32.0_f32;
+        let (resp, painter) = ui.allocate_painter(egui::vec2(w, h), egui::Sense::hover());
+        let rect = resp.rect;
+        painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(25, 25, 35));
+
+        // Normalize time segments to fit width (sustain gets fixed portion)
+        let total_time = a + d + r + 0.001;
+        let sustain_w = w * 0.15; // fixed sustain hold width
+        let env_w = w - sustain_w;
+        let a_w = (a / total_time * env_w).max(2.0);
+        let d_w = (d / total_time * env_w).max(2.0);
+        let r_w = (r / total_time * env_w).max(2.0);
+        // Scale to fit
+        let scale = env_w / (a_w + d_w + r_w);
+        let a_w = a_w * scale;
+        let d_w = d_w * scale;
+        let r_w = r_w * scale;
+
+        let bot = rect.bottom() - 2.0;
+        let top = rect.top() + 2.0;
+        let range = bot - top;
+
+        let p0 = egui::pos2(rect.left() + 1.0, bot);               // start
+        let p1 = egui::pos2(rect.left() + 1.0 + a_w, top);         // peak
+        let p2 = egui::pos2(p1.x + d_w, bot - s * range);          // sustain level
+        let p3 = egui::pos2(p2.x + sustain_w, bot - s * range);    // sustain hold end
+        let p4 = egui::pos2(p3.x + r_w, bot);                      // release end
+
+        let color = if prefix == "amp" {
+            egui::Color32::from_rgb(100, 180, 255)
+        } else {
+            egui::Color32::from_rgb(255, 160, 80)
+        };
+        painter.add(egui::Shape::line(
+            vec![p0, p1, p2, p3, p4],
+            egui::Stroke::new(1.5, color),
+        ));
+        // Sustain level dashed line
+        let sy = bot - s * range;
+        painter.line_segment(
+            [egui::pos2(rect.left(), sy), egui::pos2(rect.right(), sy)],
+            egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 80)),
+        );
+    }
+
     pub(super) fn draw_params_editable(&mut self, ui: &mut egui::Ui) {
         let layer = self.active_layer;
         let preset_idx = self.layers[layer].preset_idx;
@@ -613,6 +671,7 @@ impl App {
         changed |= self.param_slider(ui, "amp_decay", "Decay", 0.0, 5.0, false);
         changed |= self.param_slider(ui, "amp_sustain", "Sustain", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "amp_release", "Release", 0.001, 5.0, true);
+        Self::draw_adsr_curve(ui, layer, &self.layers[layer].edited_params, "amp");
 
         ui.add_space(6.0);
 
@@ -622,6 +681,7 @@ impl App {
         changed |= self.param_slider(ui, "filter_decay", "Decay", 0.0, 5.0, false);
         changed |= self.param_slider(ui, "filter_sustain", "Sustain", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "filter_release", "Release", 0.001, 5.0, true);
+        Self::draw_adsr_curve(ui, layer, &self.layers[layer].edited_params, "filter");
 
         // Envelope shapes
         ui.horizontal(|ui| {

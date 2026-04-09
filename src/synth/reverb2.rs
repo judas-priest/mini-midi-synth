@@ -14,7 +14,7 @@ use std::f32::consts::PI;
 const BASE_DELAYS: [usize; 8] = [1481, 1867, 2053, 2399, 2707, 3001, 3299, 3607];
 
 /// Maximum scale factor * longest prime + headroom, sized for 2x scaling.
-const MAX_DELAY: usize = 8192;
+const MAX_DELAY: usize = 32768;
 
 pub struct Reverb2 {
     /// 8 delay line buffers, each MAX_DELAY samples.

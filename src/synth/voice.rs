@@ -472,6 +472,16 @@ impl Voice {
         self.filter_env.note_on();
     }
 
+    /// Re-trigger only the amplitude envelope.
+    pub fn retrigger_amp_env(&mut self) {
+        self.amp_env.note_on();
+    }
+
+    /// Re-trigger only the filter envelope.
+    pub fn retrigger_filter_env(&mut self) {
+        self.filter_env.note_on();
+    }
+
     /// Mono Single Trigger: change pitch without retriggering envelopes.
     /// Used when a new note arrives while another is held (legato slide).
     pub fn retrigger_note(&mut self, note: u8, params: &VoiceParams) {
@@ -557,26 +567,66 @@ impl Voice {
             return (out, out);
         }
 
-        // Unison path
+        // Unison path: all voices use oscs[0].tick() for consistent timbre
         let mut sum_l = 0.0_f32;
         let mut sum_r = 0.0_f32;
         let gain = self.unison_gain;
 
         for u in 0..self.unison_count as usize {
             let detuned_freq = base_freq * self.unison_detunes[u];
-
-            let sample = if u == 0 {
-                self.render_oscs(detuned_freq)
-            } else {
-                self.oscs[0].tick(detuned_freq)
-            };
-
+            let sample = self.oscs[0].tick(detuned_freq);
             sum_l += sample * self.unison_l_gains[u];
             sum_r += sample * self.unison_r_gains[u];
         }
 
-        sum_l *= gain;
-        sum_r *= gain;
+        // Add multi-osc contributions (once, at base freq)
+        let mut extra = 0.0_f32;
+        if self.num_oscs >= 2 {
+            let osc1_out = sum_l + sum_r; // approximate for FM cross
+            let fm_freq = if self.fm_cross_depth > 0.001 {
+                base_freq * (1.0 + self.fm_cross_depth * osc1_out * 0.5)
+            } else {
+                base_freq
+            };
+            extra += self.oscs[1].tick(fm_freq) * self.osc_levels[1];
+        }
+        if self.num_oscs >= 3 {
+            let osc1_out = sum_l + sum_r;
+            let fm_freq = if self.fm_cross_depth > 0.001 {
+                base_freq * (1.0 + self.fm_cross_depth * osc1_out * 0.5)
+            } else {
+                base_freq
+            };
+            extra += self.oscs[2].tick(fm_freq) * self.osc_levels[2];
+        }
+
+        // Apply osc1 level and add extra oscs
+        sum_l = sum_l * self.osc_levels[0] * gain + extra * 0.5;
+        sum_r = sum_r * self.osc_levels[0] * gain + extra * 0.5;
+
+        // Add noise once on summed result
+        if self.noise_level > 0.001
+            && self.oscs[0].osc_type != OscType::Noise
+            && self.oscs[0].osc_type != OscType::DrumSynth
+        {
+            let n = self.next_noise() * self.noise_level;
+            sum_l += n;
+            sum_r += n;
+        }
+
+        // Apply waveshaper once on summed result
+        if self.osc_ws_mix > 0.001 {
+            let mono = (sum_l + sum_r) * 0.5;
+            let shaped = shape_sample(mono, self.osc_ws_mode, self.osc_ws_drive);
+            let r = 0.9997_f32;
+            let dc_out = shaped - self.osc_ws_dc_x1 + r * self.osc_ws_dc_y1;
+            self.osc_ws_dc_x1 = shaped;
+            self.osc_ws_dc_y1 = dc_out;
+            let ws_mono = mono + self.osc_ws_mix * (dc_out - mono);
+            let ratio = if mono.abs() > 0.0001 { ws_mono / mono } else { 1.0 };
+            sum_l *= ratio;
+            sum_r *= ratio;
+        }
 
         // Filter the mono sum, restore L/R ratio with safe crossfade
         let mono = (sum_l + sum_r) * 0.5;
