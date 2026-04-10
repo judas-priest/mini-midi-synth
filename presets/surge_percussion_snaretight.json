@@ -1,0 +1,27 @@
+{
+  "name": "SnareTight (Surge)",
+  "category": "Percussion",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 1.0,
+    "fm_index": 2.38,
+    "osc1_level": 0.0,
+    "osc_count": 2.0,
+    "osc2_type": 4.0,
+    "osc2_level": 0.0,
+    "osc2_detune": 24.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 389.6,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 8000.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.7467,
+    "amp_sustain": 0.0,
+    "amp_release": 0.5138,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.076,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

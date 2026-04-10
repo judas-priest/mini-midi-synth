@@ -1,0 +1,28 @@
+{
+  "name": "Battered Beauty (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 0.0,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 1.0,
+    "osc2_detune": -36.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 8837.9,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 0.504,
+    "amp_attack": 0.0039,
+    "amp_decay": 3.2948,
+    "amp_sustain": 0.0,
+    "amp_release": 1.416,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.25,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 0.0,
+    "lfo_rate": 5.9604,
+    "lfo_pitch_depth": 0.239
+  }
+}

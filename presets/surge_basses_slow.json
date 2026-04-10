@@ -1,0 +1,29 @@
+{
+  "name": "Slow (Surge)",
+  "category": "Bass",
+  "params": {
+    "osc_type": 0.0,
+    "osc_count": 3.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.786,
+    "osc2_detune": 0.0,
+    "osc3_type": 1.0,
+    "osc3_level": 1.0,
+    "osc3_detune": 0.0,
+    "portamento": 0.0301,
+    "filter_type": 0.0,
+    "filter_cutoff": 1717.0,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 1.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.25,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0312,
+    "filter_attack": 0.5372,
+    "filter_decay": 1.2296,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "Moody statement (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 0.0,
+    "osc1_level": 0.93,
+    "osc_count": 3.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.748,
+    "osc2_detune": -38.606,
+    "osc3_type": 1.0,
+    "osc3_level": 0.866,
+    "osc3_detune": -36.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 16173.7,
+    "filter_resonance": 0.271,
+    "filter_env_amount": 8000.0,
+    "amp_attack": 0.7177,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 1.7176,
+    "filter_attack": 1.7112,
+    "filter_decay": 2.417,
+    "filter_sustain": 1.0,
+    "filter_release": 2.9318,
+    "master_volume": 0.75
+  }
+}

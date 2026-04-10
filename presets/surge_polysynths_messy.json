@@ -1,0 +1,25 @@
+{
+  "name": "Messy (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 2.0,
+    "pulse_width": 0.5,
+    "unison_voices": 13.0,
+    "unison_detune": 32.68,
+    "unison_spread": 0.5,
+    "filter_type": 0.0,
+    "filter_cutoff": 373.2,
+    "filter_resonance": 0.477,
+    "filter_env_amount": 8000.0,
+    "filter_key_track": 0.343,
+    "amp_attack": 0.0081,
+    "amp_decay": 0.908,
+    "amp_sustain": 0.727,
+    "amp_release": 1.6366,
+    "filter_attack": 0.0039,
+    "filter_decay": 4.3137,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

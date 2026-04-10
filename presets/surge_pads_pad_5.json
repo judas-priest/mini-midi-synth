@@ -1,0 +1,31 @@
+{
+  "name": "Pad 5 (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 2.0,
+    "fm_index": 3.09,
+    "osc1_level": 0.946,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.845,
+    "osc2_detune": 0.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 1642.1,
+    "filter_resonance": 0.445,
+    "filter_env_amount": 8000.0,
+    "filter_key_track": 0.396,
+    "amp_attack": 1.0062,
+    "amp_decay": 3.0352,
+    "amp_sustain": 0.664,
+    "amp_release": 1.9852,
+    "filter_attack": 4.2818,
+    "filter_decay": 3.5563,
+    "filter_sustain": 0.552,
+    "filter_release": 3.9167,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.782,
+    "lfo_pitch_depth": 0.066
+  }
+}

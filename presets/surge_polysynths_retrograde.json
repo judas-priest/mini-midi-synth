@@ -1,0 +1,33 @@
+{
+  "name": "Retrograde (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "osc1_level": 0.861,
+    "osc_count": 3.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.77,
+    "osc2_detune": 0.131,
+    "osc3_type": 1.0,
+    "osc3_level": 0.438,
+    "osc3_detune": 12.0,
+    "portamento": 0.0383,
+    "filter_type": 0.0,
+    "filter_cutoff": 803.5,
+    "filter_resonance": 0.662,
+    "filter_env_amount": 2057.1,
+    "filter_key_track": 0.761,
+    "amp_attack": 0.0612,
+    "amp_decay": 4.2554,
+    "amp_sustain": 0.325,
+    "amp_release": 2.7833,
+    "filter_attack": 5.7202,
+    "filter_decay": 3.229,
+    "filter_sustain": 0.364,
+    "filter_release": 3.9167,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 4.7701,
+    "lfo_pitch_depth": 0.263
+  }
+}

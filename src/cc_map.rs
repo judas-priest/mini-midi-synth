@@ -57,11 +57,12 @@ pub const PARAM_REGISTRY: &[ParamMeta] = &[
     ParamMeta { key: "reverb_damping", label: "Reverb Damp", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
     ParamMeta { key: "reverb_width", label: "Reverb Width", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
     ParamMeta { key: "reverb_pre_delay", label: "Reverb Pre-Delay", min: 0.0, max: 0.1, logarithmic: false, scope: ParamScope::Preset },
+    ParamMeta { key: "pitch_bend_range", label: "Pitch Bend Range (st)", min: 1.0, max: 24.0, logarithmic: false, scope: ParamScope::Global },
 ];
 
 /// List of global param keys for quick lookup.
 pub const GLOBAL_PARAM_KEYS: &[&str] = &[
-    "master_volume", "master_tone", "reverb_mix", "delay_mix",
+    "master_volume", "master_tone", "reverb_mix", "delay_mix", "pitch_bend_range",
 ];
 
 pub fn is_global_param(key: &str) -> bool {

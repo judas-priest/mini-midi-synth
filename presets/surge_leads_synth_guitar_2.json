@@ -1,0 +1,33 @@
+{
+  "name": "Synth Guitar 2 (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 5.0,
+    "fm_index": 3.01,
+    "osc1_level": 0.979,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.823,
+    "osc2_detune": 0.0,
+    "portamento": 0.011,
+    "filter_type": 0.0,
+    "filter_cutoff": 710.2,
+    "filter_resonance": 0.71,
+    "filter_env_amount": 2982.9,
+    "filter_key_track": 0.236,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0284,
+    "filter_attack": 0.0103,
+    "filter_decay": 0.227,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.1909,
+    "lfo_pitch_depth": 0.206,
+    "lfo_filter_depth": 0.165
+  }
+}

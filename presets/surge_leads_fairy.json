@@ -1,0 +1,25 @@
+{
+  "name": "Fairy (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 0.0,
+    "portamento": 0.025,
+    "filter_type": 0.0,
+    "filter_cutoff": 3145.0,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 0.514,
+    "amp_attack": 0.0202,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.1396,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.0176,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.4052,
+    "lfo_pitch_depth": 0.141
+  }
+}

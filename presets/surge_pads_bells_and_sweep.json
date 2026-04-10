@@ -1,0 +1,24 @@
+{
+  "name": "Bells and Sweep (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 1.0,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.866,
+    "osc2_detune": 0.0,
+    "filter_type": 1.0,
+    "filter_cutoff": 453.5,
+    "filter_resonance": 0.782,
+    "filter_env_amount": 8000.0,
+    "amp_attack": 0.422,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 2.2946,
+    "filter_attack": 0.0039,
+    "filter_decay": 7.6989,
+    "filter_sustain": 0.0,
+    "filter_release": 6.9903,
+    "master_volume": 0.75
+  }
+}

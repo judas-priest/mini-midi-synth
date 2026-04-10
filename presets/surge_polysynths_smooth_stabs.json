@@ -1,0 +1,24 @@
+{
+  "name": "Smooth stabs (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 3.0,
+    "unison_detune": 19.73,
+    "unison_spread": 0.5,
+    "filter_type": 0.0,
+    "filter_cutoff": 80.5,
+    "filter_resonance": 0.475,
+    "filter_env_amount": 3188.6,
+    "filter_key_track": 0.454,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.2588,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0556,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.9659,
+    "filter_sustain": 0.0,
+    "filter_release": 1.4212,
+    "master_volume": 0.75
+  }
+}

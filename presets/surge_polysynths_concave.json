@@ -1,0 +1,28 @@
+{
+  "name": "Concave (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "osc_count": 2.0,
+    "osc3_type": 1.0,
+    "osc3_level": 1.0,
+    "osc3_detune": 0.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 47.6,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 8000.0,
+    "filter_key_track": 0.504,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.2743,
+    "filter_attack": 0.0039,
+    "filter_decay": 3.0768,
+    "filter_sustain": 0.0,
+    "filter_release": 4.5271,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 6.583,
+    "lfo_pitch_depth": 0.281
+  }
+}

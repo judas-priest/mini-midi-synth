@@ -1,0 +1,25 @@
+{
+  "name": "FM Poly 1 (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 1.0,
+    "fm_index": 3.62,
+    "filter_type": 2.0,
+    "filter_cutoff": 309.1,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 0.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0312,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.9204,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.5054,
+    "lfo_pitch_depth": 0.225
+  }
+}

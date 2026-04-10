@@ -1,0 +1,24 @@
+{
+  "name": "Choirpad thing (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 1.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 3290.0,
+    "filter_resonance": 0.482,
+    "filter_env_amount": 5142.9,
+    "filter_key_track": 0.3,
+    "amp_attack": 0.2046,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 1.416,
+    "filter_attack": 2.6423,
+    "filter_decay": 2.417,
+    "filter_sustain": 0.0,
+    "filter_release": 1.1165,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.839,
+    "lfo_pitch_depth": 0.064
+  }
+}

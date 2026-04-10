@@ -1,0 +1,25 @@
+{
+  "name": "Tolk (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 1.0,
+    "portamento": 0.0405,
+    "filter_type": 1.0,
+    "filter_cutoff": 395.6,
+    "filter_resonance": 0.619,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 0.636,
+    "amp_attack": 1.7958,
+    "amp_decay": 0.25,
+    "amp_sustain": 1.0,
+    "amp_release": 1.7176,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.25,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 4.4811,
+    "lfo_pitch_depth": 0.056
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "FM bass 4 (Surge)",
+  "category": "Bass",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 4.0,
+    "fm_index": 2.65,
+    "filter_type": 0.0,
+    "filter_cutoff": 103.8,
+    "filter_resonance": 0.263,
+    "filter_env_amount": 288.0,
+    "filter_key_track": 0.171,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0312,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.1212,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

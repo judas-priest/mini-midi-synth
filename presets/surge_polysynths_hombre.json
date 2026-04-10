@@ -1,0 +1,28 @@
+{
+  "name": "Hombre (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 1.0,
+    "osc2_detune": -11.897,
+    "filter_type": 0.0,
+    "filter_cutoff": 527.6,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 1337.1,
+    "filter_key_track": 0.129,
+    "amp_attack": 0.2365,
+    "amp_decay": 1.6306,
+    "amp_sustain": 0.621,
+    "amp_release": 1.8025,
+    "filter_attack": 1.2809,
+    "filter_decay": 2.9318,
+    "filter_sustain": 0.0,
+    "filter_release": 1.0638,
+    "master_volume": 0.75,
+    "lfo_waveform": 4.0,
+    "lfo_rate": 1.0,
+    "lfo_pitch_depth": 0.684
+  }
+}

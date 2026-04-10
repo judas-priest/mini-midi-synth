@@ -1,0 +1,29 @@
+{
+  "name": "Crackling (Surge)",
+  "category": "Experimental",
+  "params": {
+    "osc_type": 5.0,
+    "osc1_level": 0.925,
+    "osc_count": 3.0,
+    "osc2_type": 5.0,
+    "osc2_level": 0.877,
+    "osc2_detune": 25.387,
+    "osc3_type": 5.0,
+    "osc3_level": 0.962,
+    "osc3_detune": 25.481,
+    "portamento": 1.4055,
+    "filter_type": 1.0,
+    "filter_cutoff": 3024.8,
+    "filter_resonance": 0.446,
+    "filter_env_amount": 0.0,
+    "amp_attack": 2.6423,
+    "amp_decay": 1.0,
+    "amp_sustain": 0.882,
+    "amp_release": 1.1473,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.25,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

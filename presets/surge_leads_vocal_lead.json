@@ -1,0 +1,25 @@
+{
+  "name": "Vocal lead (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 1.0,
+    "portamento": 0.0212,
+    "filter_type": 0.0,
+    "filter_cutoff": 19912.1,
+    "filter_resonance": 0.316,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 0.634,
+    "amp_attack": 0.0327,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0796,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.25,
+    "filter_sustain": 0.0,
+    "filter_release": 0.0625,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 4.9322,
+    "lfo_pitch_depth": 0.141
+  }
+}

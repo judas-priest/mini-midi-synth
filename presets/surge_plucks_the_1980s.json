@@ -1,0 +1,30 @@
+{
+  "name": "The 1980s (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 22.0,
+    "fm_index": 3.62,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 1.0,
+    "osc2_detune": 0.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 153.4,
+    "filter_resonance": 0.067,
+    "filter_env_amount": 8000.0,
+    "filter_key_track": 0.568,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 0.995,
+    "amp_release": 2.408,
+    "filter_attack": 0.0039,
+    "filter_decay": 1.2296,
+    "filter_sustain": 0.0,
+    "filter_release": 1.6427,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 4.8467,
+    "lfo_pitch_depth": 0.084
+  }
+}

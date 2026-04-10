@@ -1,0 +1,29 @@
+{
+  "name": "Safety (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 2.0,
+    "pulse_width": 0.505,
+    "unison_voices": 2.0,
+    "unison_detune": 6.16,
+    "unison_spread": 0.5,
+    "portamento": 0.0131,
+    "filter_type": 0.0,
+    "filter_cutoff": 63.1,
+    "filter_resonance": 0.033,
+    "filter_env_amount": 7714.3,
+    "filter_key_track": 0.593,
+    "amp_attack": 1.7958,
+    "amp_decay": 3.6817,
+    "amp_sustain": 1.0,
+    "amp_release": 2.4501,
+    "filter_attack": 0.0039,
+    "filter_decay": 9.8006,
+    "filter_sustain": 0.648,
+    "filter_release": 4.3728,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.5083,
+    "lfo_pitch_depth": 0.384
+  }
+}

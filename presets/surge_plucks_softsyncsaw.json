@@ -1,0 +1,22 @@
+{
+  "name": "Softsyncsaw (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 1.0,
+    "portamento": 0.0237,
+    "filter_type": 0.0,
+    "filter_cutoff": 147.6,
+    "filter_resonance": 0.657,
+    "filter_env_amount": 4422.9,
+    "filter_key_track": 0.45,
+    "amp_attack": 0.0144,
+    "amp_decay": 0.25,
+    "amp_sustain": 1.0,
+    "amp_release": 2.0834,
+    "filter_attack": 0.0045,
+    "filter_decay": 7.6989,
+    "filter_sustain": 0.0,
+    "filter_release": 2.7936,
+    "master_volume": 0.75
+  }
+}

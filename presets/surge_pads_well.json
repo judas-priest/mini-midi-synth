@@ -1,0 +1,30 @@
+{
+  "name": "Well (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 2.0,
+    "pulse_width": 0.662,
+    "osc1_level": 0.893,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.646,
+    "osc2_detune": 24.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 168.9,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 8000.0,
+    "filter_key_track": 0.118,
+    "amp_attack": 1.9778,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 2.8708,
+    "filter_attack": 3.054,
+    "filter_decay": 7.6989,
+    "filter_sustain": 0.134,
+    "filter_release": 2.662,
+    "master_volume": 0.75,
+    "lfo_waveform": 3.0,
+    "lfo_rate": 0.7133,
+    "lfo_pitch_depth": 0.075
+  }
+}

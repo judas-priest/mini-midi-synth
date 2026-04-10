@@ -1,0 +1,29 @@
+{
+  "name": "Late Fall (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 1.0,
+    "osc_count": 3.0,
+    "osc2_type": 1.0,
+    "osc2_level": 1.0,
+    "osc2_detune": 0.0,
+    "osc3_type": 1.0,
+    "osc3_level": 1.0,
+    "osc3_detune": 0.0,
+    "portamento": 0.0204,
+    "filter_type": 0.0,
+    "filter_cutoff": 40.0,
+    "filter_resonance": 0.471,
+    "filter_env_amount": 5862.9,
+    "filter_key_track": 1.0,
+    "amp_attack": 0.0089,
+    "amp_decay": 2.2719,
+    "amp_sustain": 1.0,
+    "amp_release": 1.486,
+    "filter_attack": 0.0039,
+    "filter_decay": 4.1104,
+    "filter_sustain": 0.0,
+    "filter_release": 3.0768,
+    "master_volume": 0.75
+  }
+}

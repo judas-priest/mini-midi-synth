@@ -1,0 +1,27 @@
+{
+  "name": "Megamega (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 8.0,
+    "unison_detune": 44.2,
+    "unison_spread": 0.5,
+    "filter_type": 1.0,
+    "filter_cutoff": 402.9,
+    "filter_resonance": 0.694,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 0.321,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.2614,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.0114,
+    "filter_sustain": 0.0,
+    "filter_release": 2.1946,
+    "master_volume": 0.75,
+    "lfo_waveform": 0.0,
+    "lfo_rate": 1.0,
+    "lfo_filter_depth": 0.051
+  }
+}

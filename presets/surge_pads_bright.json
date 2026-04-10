@@ -1,0 +1,29 @@
+{
+  "name": "Bright (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 2.0,
+    "pulse_width": 0.505,
+    "unison_voices": 3.0,
+    "unison_detune": 5.89,
+    "unison_spread": 0.5,
+    "portamento": 0.0131,
+    "filter_type": 0.0,
+    "filter_cutoff": 394.6,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 7714.3,
+    "filter_key_track": 0.593,
+    "amp_attack": 1.7958,
+    "amp_decay": 3.6817,
+    "amp_sustain": 1.0,
+    "amp_release": 0.8891,
+    "filter_attack": 0.0039,
+    "filter_decay": 9.8006,
+    "filter_sustain": 0.584,
+    "filter_release": 3.119,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.5083,
+    "lfo_pitch_depth": 0.244
+  }
+}

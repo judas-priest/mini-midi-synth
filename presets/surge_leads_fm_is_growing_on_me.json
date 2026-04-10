@@ -1,0 +1,27 @@
+{
+  "name": "FM is growing on me (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 2.0,
+    "fm_index": 5.3,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 1.0,
+    "osc2_detune": 0.0,
+    "portamento": 0.026,
+    "filter_type": 0.0,
+    "filter_cutoff": 222.2,
+    "filter_resonance": 0.477,
+    "filter_env_amount": 8000.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.25,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0312,
+    "filter_attack": 1.0062,
+    "filter_decay": 0.4683,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

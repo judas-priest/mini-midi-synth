@@ -1,0 +1,27 @@
+{
+  "name": "Later (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 3.0,
+    "unison_detune": 18.66,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 1.0,
+    "osc2_detune": 12.0,
+    "portamento": 0.0066,
+    "filter_type": 0.0,
+    "filter_cutoff": 103.1,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 8000.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.1085,
+    "amp_sustain": 0.637,
+    "amp_release": 0.0312,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.8357,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

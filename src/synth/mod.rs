@@ -43,6 +43,7 @@ pub mod ring_mod;
 pub mod treemonster;
 pub mod spring_reverb;
 pub mod vocoder;
+pub mod midi_player;
 pub mod step_seq;
 pub mod tape;
 pub mod tremolo;
@@ -186,6 +187,13 @@ pub enum ControlEvent {
     SeqSetRate { layer: usize, rate: u8 },
     SeqSetScale { layer: usize, scale: u8 },
     SeqSetSwing { layer: usize, swing: f32 },
+    // MIDI file sequencer
+    MidiSeqLoad { data: Box<midi_player::MidiSeqData> },
+    MidiSeqPlay { playing: bool },
+    MidiSeqSetBpm { bpm: Option<f32> },
+    MidiSeqSetLooping { looping: bool },
+    MidiSeqSetTrackInstrument { track_idx: usize, instrument: midi_player::TrackInstrument },
+    MidiSeqSetTrackMute { track_idx: usize, muted: bool },
 }
 
 #[derive(Clone, Copy)]
@@ -232,6 +240,7 @@ struct GlobalParams {
     // Fader-controlled global (persist across preset changes)
     reverb_mix: Option<f32>,       // None = use preset value
     delay_mix: Option<f32>,        // None = use preset value
+    pitch_bend_range: f32,         // semitones, default 2
     // One-pole LP state for master tone
     tone_lp_l: f32,
     tone_lp_r: f32,
@@ -244,6 +253,7 @@ impl Default for GlobalParams {
             master_tone: 20000.0,
             reverb_mix: None,
             delay_mix: None,
+            pitch_bend_range: 2.0,
             tone_lp_l: 0.0,
             tone_lp_r: 0.0,
         }
@@ -257,6 +267,7 @@ impl GlobalParams {
             "master_tone" => self.master_tone = value,
             "reverb_mix" => self.reverb_mix = Some(value),
             "delay_mix" => self.delay_mix = Some(value),
+            "pitch_bend_range" => self.pitch_bend_range = value.clamp(1.0, 24.0),
             _ => {}
         }
     }
@@ -1262,6 +1273,10 @@ pub struct SynthEngine {
     /// Oscilloscope ring buffer: 256 mono samples shared with GUI via atomics
     scope_buf: std::sync::Arc<ScopeBuffer>,
     scope_write: usize,
+    /// MIDI file sequencer player
+    pub midi_player: midi_player::MidiPlayer,
+    /// Reusable event buffer for midi_player.process_block (avoids per-block allocation)
+    midi_seq_buf: Vec<(u8, midi_player::SeqEventData)>,
 }
 
 /// Cached effect parameters — extracted once per block from PresetParams.
@@ -1504,6 +1519,8 @@ impl SynthEngine {
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth layer shown at start)
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
             scope_write: 0,
+            midi_player: midi_player::MidiPlayer::new(),
+            midi_seq_buf: Vec::new(),
         }
     }
 
@@ -1513,6 +1530,14 @@ impl SynthEngine {
 
     pub fn pitch_seq_step_atoms(&self) -> Vec<std::sync::Arc<std::sync::atomic::AtomicU8>> {
         self.layers.iter().map(|l| l.pitch_seq.step_atom()).collect()
+    }
+
+    pub fn midi_player_play_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
+        self.midi_player.play_atom.clone()
+    }
+
+    pub fn midi_player_pos_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU32> {
+        self.midi_player.position_atom.clone()
     }
 
     pub fn set_presets(&mut self, presets: Vec<Preset>) {
@@ -1692,7 +1717,7 @@ impl SynthEngine {
                 }
             }
             MidiEvent::PitchBend { value, .. } => {
-                self.pitch_bend_semitones = value * 2.0;
+                self.pitch_bend_semitones = value * self.global_params.pitch_bend_range;
                 for i in 0..2 {
                     if self.layers.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
                         self.sampler.pitch_bend(i, value);
@@ -1958,6 +1983,43 @@ impl SynthEngine {
                     l.pitch_seq.swing = swing;
                 }
             }
+            ControlEvent::MidiSeqLoad { data } => {
+                self.midi_player.load(data); // Box<MidiSeqData> passed directly, no re-boxing
+            }
+            ControlEvent::MidiSeqPlay { playing } => {
+                self.midi_player.playing = playing;
+                self.midi_player.play_atom.store(playing as u8, std::sync::atomic::Ordering::Relaxed);
+                if !playing {
+                    self.midi_player.reset_position();
+                    // All notes off on all engines
+                    self.sampler.all_notes_off();
+                    for layer in &mut self.layers {
+                        for voice in &mut layer.voices {
+                            if voice.active { voice.note_off(); }
+                        }
+                    }
+                }
+            }
+            ControlEvent::MidiSeqSetBpm { bpm } => {
+                self.midi_player.bpm_override = bpm;
+            }
+            ControlEvent::MidiSeqSetLooping { looping } => {
+                self.midi_player.looping = looping;
+            }
+            ControlEvent::MidiSeqSetTrackInstrument { track_idx, instrument } => {
+                if let Some(track) = self.midi_player.tracks.get_mut(track_idx) {
+                    track.instrument = instrument;
+                    // Pre-set the SF2 program for this channel so notes play correctly
+                    if let midi_player::TrackInstrument::Sf2 { program } = instrument {
+                        self.sampler.seq_program_set(track.channel, program);
+                    }
+                }
+            }
+            ControlEvent::MidiSeqSetTrackMute { track_idx, muted } => {
+                if let Some(track) = self.midi_player.tracks.get_mut(track_idx) {
+                    track.muted = muted;
+                }
+            }
         }
     }
 
@@ -2187,6 +2249,59 @@ impl SynthEngine {
         // Cache effect params (once per block)
         let ep = self.layers.iter().find(|l| l.enabled).map(|l| &l.params);
         let fx = CachedFxParams::from_preset(ep, &self.global_params);
+
+        // --- MIDI file sequencer: fire block-level events ---
+        // (process_block clears midi_seq_buf itself before filling it)
+        {
+            self.midi_player.process_block(block_len, self.sample_rate, &mut self.midi_seq_buf);
+            for i in 0..self.midi_seq_buf.len() {
+                let ch = self.midi_seq_buf[i].0;
+                let evt = self.midi_seq_buf[i].1.clone();
+                let instr = self.midi_player.instrument_for_channel(ch);
+                match evt {
+                    midi_player::SeqEventData::NoteOn { note, velocity } => match instr {
+                        midi_player::TrackInstrument::Drums => {
+                            let sf2 = self.drum_engine.sf2_mode;
+                            if sf2 {
+                                self.sampler.drum_note_on(note, velocity);
+                            } else {
+                                self.drum_engine.note_on(note, velocity);
+                            }
+                        }
+                        midi_player::TrackInstrument::DspLayer0 => {
+                            if let Some(layer) = self.layers.get_mut(0) {
+                                layer.note_on(note, velocity);
+                            }
+                        }
+                        midi_player::TrackInstrument::Sf2 { program } => {
+                            self.sampler.seq_program_set(ch, program);
+                            self.sampler.seq_note_on(ch, note, velocity);
+                        }
+                    },
+                    midi_player::SeqEventData::NoteOff { note } => match instr {
+                        midi_player::TrackInstrument::Drums => {
+                            let sf2 = self.drum_engine.sf2_mode;
+                            if sf2 { self.sampler.drum_note_off(note); }
+                        }
+                        midi_player::TrackInstrument::DspLayer0 => {
+                            if let Some(layer) = self.layers.get_mut(0) {
+                                layer.note_off(note);
+                            }
+                        }
+                        midi_player::TrackInstrument::Sf2 { .. } => {
+                            self.sampler.seq_note_off(ch, note);
+                        }
+                    },
+                    midi_player::SeqEventData::ProgramChange { program } => {
+                        // Follow file program changes when in SF2 mode
+                        if let midi_player::TrackInstrument::Sf2 { .. } = instr {
+                            self.sampler.seq_program_set(ch, program);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         // --- Audio rate (per sample) ---
         for s in 0..block_len {

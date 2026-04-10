@@ -1,0 +1,22 @@
+{
+  "name": "Zizzly Saw (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 2.0,
+    "unison_detune": 15.18,
+    "filter_type": 2.0,
+    "filter_cutoff": 1111.9,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 0.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0312,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.25,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

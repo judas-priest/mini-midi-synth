@@ -1,0 +1,25 @@
+{
+  "name": "You Fairy (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 16.0,
+    "fm_index": 2.85,
+    "filter_type": 0.0,
+    "filter_cutoff": 10998.1,
+    "filter_resonance": 0.81,
+    "filter_env_amount": 0.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.5441,
+    "amp_sustain": 0.0,
+    "amp_release": 1.486,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.25,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 2.0,
+    "lfo_rate": 7.9125,
+    "lfo_pitch_depth": 0.131
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "Simplistic (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 2.0,
+    "pulse_width": 0.5,
+    "portamento": 0.0124,
+    "filter_type": 1.0,
+    "filter_cutoff": 86.5,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 0.546,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.0895,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0677,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.6256,
+    "filter_sustain": 1.0,
+    "filter_release": 10.0,
+    "master_volume": 0.75,
+    "lfo_waveform": 0.0,
+    "lfo_rate": 5.9985,
+    "lfo_pitch_depth": 0.225
+  }
+}

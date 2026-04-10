@@ -1,0 +1,25 @@
+{
+  "name": "Quickbasic (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 3.0,
+    "unison_detune": 10.36,
+    "unison_spread": 0.5,
+    "portamento": 0.0141,
+    "filter_type": 0.0,
+    "filter_cutoff": 294.0,
+    "filter_resonance": 0.372,
+    "filter_env_amount": 8000.0,
+    "filter_key_track": 0.711,
+    "amp_attack": 0.0041,
+    "amp_decay": 0.8244,
+    "amp_sustain": 0.525,
+    "amp_release": 0.0222,
+    "filter_attack": 0.0039,
+    "filter_decay": 2.3031,
+    "filter_sustain": 0.0,
+    "filter_release": 2.0199,
+    "master_volume": 0.75
+  }
+}

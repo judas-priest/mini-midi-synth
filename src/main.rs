@@ -107,6 +107,8 @@ fn main() -> Result<()> {
     let seq_target_atom = engine.seq_target_atom();
     let pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
     let scope_buf = engine.scope_buffer();
+    let midi_seq_play_atom = engine.midi_player_play_atom();
+    let midi_seq_pos_atom = engine.midi_player_pos_atom();
 
     let audio_config = audio::AudioConfig {
         host_id,
@@ -216,6 +218,7 @@ fn main() -> Result<()> {
             gp.insert("master_tone".to_string(), config.ui.master_tone);
             gp.insert("reverb_mix".to_string(), config.ui.fader_reverb);
             gp.insert("delay_mix".to_string(), config.ui.fader_delay);
+            gp.insert("pitch_bend_range".to_string(), config.ui.pitch_bend_range as f32);
             gp
         },
         pickup_indicators: std::collections::BTreeMap::new(),
@@ -271,6 +274,16 @@ fn main() -> Result<()> {
         pitch_seq_swing: [0.0; 2],
         preset_search: String::new(),
         scope_buf,
+        show_midi_seq: false,
+        midi_seq_path: String::new(),
+        midi_seq_status: String::new(),
+        midi_seq_tracks: Vec::new(),
+        midi_seq_playing: false,
+        midi_seq_looping: true,
+        midi_seq_bpm: None,
+        midi_seq_play_atom,
+        midi_seq_pos_atom,
+        midi_seq_file_pick: None,
     };
 
     app.load_edited_params(0);

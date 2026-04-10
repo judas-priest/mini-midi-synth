@@ -1,0 +1,25 @@
+{
+  "name": "Bee (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 1.0,
+    "portamento": 0.0066,
+    "filter_type": 0.0,
+    "filter_cutoff": 13694.9,
+    "filter_resonance": 0.866,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 1.0,
+    "amp_attack": 0.0085,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.2743,
+    "filter_attack": 0.3832,
+    "filter_decay": 1.6427,
+    "filter_sustain": 0.3,
+    "filter_release": 0.689,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 4.82,
+    "lfo_pitch_depth": 0.225
+  }
+}

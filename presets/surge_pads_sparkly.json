@@ -1,0 +1,26 @@
+{
+  "name": "Sparkly (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 1.0,
+    "osc1_level": 0.512,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 1.0,
+    "osc2_detune": 0.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 321.4,
+    "filter_resonance": 0.42,
+    "filter_env_amount": 7200.0,
+    "filter_key_track": 0.707,
+    "amp_attack": 0.7904,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 2.9209,
+    "filter_attack": 4.4936,
+    "filter_decay": 1.8092,
+    "filter_sustain": 0.568,
+    "filter_release": 1.6427,
+    "master_volume": 0.75
+  }
+}

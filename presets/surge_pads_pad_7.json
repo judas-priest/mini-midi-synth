@@ -1,0 +1,23 @@
+{
+  "name": "Pad 7 (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 1.0,
+    "filter_type": 2.0,
+    "filter_cutoff": 406.2,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 0.0,
+    "amp_attack": 0.7904,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 2.0834,
+    "filter_attack": 1.6306,
+    "filter_decay": 2.662,
+    "filter_sustain": 0.595,
+    "filter_release": 1.2904,
+    "master_volume": 0.75,
+    "lfo_waveform": 0.0,
+    "lfo_rate": 1.0,
+    "lfo_filter_depth": 0.058
+  }
+}

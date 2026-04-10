@@ -1,0 +1,22 @@
+{
+  "name": "Drum 1 (Surge)",
+  "category": "Percussion",
+  "params": {
+    "osc_type": 0.0,
+    "osc1_level": 0.016,
+    "filter_type": 0.0,
+    "filter_cutoff": 490.6,
+    "filter_resonance": 0.131,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 1.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.4714,
+    "amp_sustain": 0.0,
+    "amp_release": 0.2373,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.3182,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

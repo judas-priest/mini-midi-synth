@@ -1,0 +1,29 @@
+{
+  "name": "Molusk (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 2.0,
+    "unison_detune": 7.68,
+    "unison_spread": 0.5,
+    "osc1_level": 0.829,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 1.0,
+    "osc2_detune": 0.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 496.7,
+    "filter_resonance": 0.614,
+    "filter_env_amount": 1954.3,
+    "filter_key_track": 0.546,
+    "amp_attack": 0.0073,
+    "amp_decay": 0.3832,
+    "amp_sustain": 0.064,
+    "amp_release": 0.3171,
+    "filter_attack": 0.0043,
+    "filter_decay": 0.6476,
+    "filter_sustain": 0.0,
+    "filter_release": 0.2061,
+    "master_volume": 0.75
+  }
+}

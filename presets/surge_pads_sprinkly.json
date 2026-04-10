@@ -1,0 +1,27 @@
+{
+  "name": "Sprinkly (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 1.0,
+    "osc1_level": 0.611,
+    "osc_count": 2.0,
+    "osc2_type": 0.0,
+    "osc2_level": 0.552,
+    "osc2_detune": 0.0,
+    "portamento": 0.1281,
+    "filter_type": 0.0,
+    "filter_cutoff": 197.4,
+    "filter_resonance": 0.526,
+    "filter_env_amount": 7817.2,
+    "filter_key_track": 0.707,
+    "amp_attack": 2.2861,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 2.1864,
+    "filter_attack": 0.7904,
+    "filter_decay": 2.9318,
+    "filter_sustain": 0.734,
+    "filter_release": 10.0,
+    "master_volume": 0.75
+  }
+}

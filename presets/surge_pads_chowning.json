@@ -1,0 +1,25 @@
+{
+  "name": "Chowning (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 1.0,
+    "portamento": 0.0131,
+    "filter_type": 0.0,
+    "filter_cutoff": 65.6,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 7714.3,
+    "filter_key_track": 0.593,
+    "amp_attack": 0.2253,
+    "amp_decay": 3.6817,
+    "amp_sustain": 1.0,
+    "amp_release": 0.8891,
+    "filter_attack": 0.0039,
+    "filter_decay": 9.8006,
+    "filter_sustain": 0.498,
+    "filter_release": 0.8472,
+    "master_volume": 0.75,
+    "lfo_waveform": 0.0,
+    "lfo_rate": 4.7129,
+    "lfo_pitch_depth": 0.244
+  }
+}

@@ -15,7 +15,7 @@ impl App {
         ui.horizontal(|ui| {
             for i in 0..MAX_LAYERS {
                 let label = *LAYER_NAMES.get(i).unwrap_or(&"?");
-                let is_active = i == self.active_layer && !self.show_drums && !self.show_looper;
+                let is_active = i == self.active_layer && !self.show_drums && !self.show_looper && !self.show_midi_seq;
                 let is_enabled = self.layers[i].enabled;
 
                 let text = if is_enabled {
@@ -29,15 +29,24 @@ impl App {
                     self.active_layer = i;
                     self.show_drums = false;
                     self.show_looper = false;
+                    self.show_midi_seq = false;
                     self.seq_target_atom.store(1, Ordering::Relaxed); // synth → looper
                 }
             }
 
             // Drums tab
-            if ui.selectable_label(self.show_drums, "Drums").clicked() {
+            if ui.selectable_label(self.show_drums && !self.show_midi_seq, "Drums").clicked() {
                 self.show_drums = true;
                 self.show_looper = false;
+                self.show_midi_seq = false;
                 self.seq_target_atom.store(0, Ordering::Relaxed); // drums
+            }
+
+            // MIDI Sequencer tab
+            if ui.selectable_label(self.show_midi_seq, "MIDI Seq").clicked() {
+                self.show_midi_seq = true;
+                self.show_drums = false;
+                self.show_looper = false;
             }
 
             // Looper tab removed — controls are now inline in synth panel

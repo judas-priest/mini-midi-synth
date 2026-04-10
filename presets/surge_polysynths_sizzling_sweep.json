@@ -1,0 +1,23 @@
+{
+  "name": "Sizzling sweep (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 16.0,
+    "unison_detune": 45.36,
+    "unison_spread": 0.5,
+    "filter_type": 1.0,
+    "filter_cutoff": 210.7,
+    "filter_resonance": 0.712,
+    "filter_env_amount": 7200.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.8326,
+    "filter_attack": 0.0039,
+    "filter_decay": 2.0911,
+    "filter_sustain": 0.0,
+    "filter_release": 1.2904,
+    "master_volume": 0.75
+  }
+}

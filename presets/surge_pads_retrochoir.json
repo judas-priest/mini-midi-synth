@@ -1,0 +1,25 @@
+{
+  "name": "Retrochoir (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 1.0,
+    "portamento": 0.0055,
+    "filter_type": 0.0,
+    "filter_cutoff": 471.6,
+    "filter_resonance": 0.28,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 0.506,
+    "amp_attack": 1.5537,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.8891,
+    "filter_attack": 1.9778,
+    "filter_decay": 1.6427,
+    "filter_sustain": 0.0,
+    "filter_release": 0.933,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 4.9139,
+    "lfo_pitch_depth": 0.206
+  }
+}

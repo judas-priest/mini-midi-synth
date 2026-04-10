@@ -1,0 +1,27 @@
+{
+  "name": "Pie (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 3.0,
+    "fm_index": 1.57,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.823,
+    "osc2_detune": 12.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 179.1,
+    "filter_resonance": 0.139,
+    "filter_env_amount": 5245.7,
+    "filter_key_track": 0.579,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.7856,
+    "amp_sustain": 0.0,
+    "amp_release": 0.1777,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.5961,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "Pad 6 (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 3.0,
+    "fm_index": 2.05,
+    "osc1_level": 0.834,
+    "osc_count": 3.0,
+    "osc2_type": 4.0,
+    "osc2_level": 0.866,
+    "osc2_detune": -11.949,
+    "osc3_type": 4.0,
+    "osc3_level": 0.866,
+    "osc3_detune": -12.053,
+    "filter_type": 0.0,
+    "filter_cutoff": 523.3,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 0.0,
+    "amp_attack": 1.5537,
+    "amp_decay": 4.9185,
+    "amp_sustain": 0.252,
+    "amp_release": 3.217,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.25,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 4.3088,
+    "lfo_pitch_depth": 0.076
+  }
+}

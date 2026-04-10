@@ -1,0 +1,29 @@
+{
+  "name": "Moogy saw (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 2.0,
+    "unison_detune": 6.16,
+    "unison_spread": 0.5,
+    "portamento": 0.0157,
+    "filter_type": 0.0,
+    "filter_cutoff": 1386.8,
+    "filter_resonance": 0.434,
+    "filter_env_amount": 4731.3,
+    "filter_key_track": 0.418,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0312,
+    "filter_attack": 1.7958,
+    "filter_decay": 0.386,
+    "filter_sustain": 0.493,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 6.0891,
+    "lfo_pitch_depth": 0.328,
+    "lfo_filter_depth": 0.007
+  }
+}

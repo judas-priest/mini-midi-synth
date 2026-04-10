@@ -1,0 +1,32 @@
+{
+  "name": "Crisp noise brass (Surge)",
+  "category": "Brass",
+  "params": {
+    "osc_type": 5.0,
+    "osc1_level": 0.573,
+    "osc_count": 3.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.487,
+    "osc2_detune": 24.0,
+    "osc3_type": 1.0,
+    "osc3_level": 0.834,
+    "osc3_detune": 0.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 352.0,
+    "filter_resonance": 0.48,
+    "filter_env_amount": 7817.2,
+    "filter_key_track": 1.0,
+    "amp_attack": 0.0108,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0558,
+    "filter_attack": 0.9136,
+    "filter_decay": 1.5653,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 32.423,
+    "lfo_pitch_depth": 0.3
+  }
+}

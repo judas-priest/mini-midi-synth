@@ -1,0 +1,29 @@
+{
+  "name": "Thingamajob (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 0.0,
+    "osc1_level": 0.904,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.93,
+    "osc2_detune": 0.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 321.4,
+    "filter_resonance": 0.326,
+    "filter_env_amount": 1337.1,
+    "filter_key_track": 0.611,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 0.973,
+    "amp_release": 0.9624,
+    "filter_attack": 0.0039,
+    "filter_decay": 2.5365,
+    "filter_sustain": 0.0,
+    "filter_release": 1.6427,
+    "master_volume": 0.75,
+    "lfo_waveform": 0.0,
+    "lfo_rate": 7.4651,
+    "lfo_pitch_depth": 0.506
+  }
+}

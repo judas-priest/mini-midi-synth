@@ -2,6 +2,7 @@
 
 mod params;
 mod drums;
+mod midi_seq;
 mod settings;
 mod keyboard;
 mod layers;
@@ -270,6 +271,18 @@ pub struct App {
     pub preset_search: String,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
+    // MIDI file sequencer
+    pub show_midi_seq: bool,
+    pub midi_seq_path: String,
+    pub midi_seq_status: String,
+    pub midi_seq_tracks: Vec<midi_seq::MidiSeqTrackGui>,
+    pub midi_seq_playing: bool,
+    pub midi_seq_looping: bool,
+    pub midi_seq_bpm: Option<f32>,
+    pub midi_seq_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub midi_seq_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    /// Result of an async file picker (zenity/kdialog subprocess). None = no pending pick.
+    pub midi_seq_file_pick: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 }
 
 impl eframe::App for App {
@@ -292,7 +305,8 @@ impl eframe::App for App {
         let has_active_notes = (0..128u8)
             .any(|i| self.note_state[i as usize].load(Ordering::Relaxed) > 0);
         let looper_active = self.looper_atoms.state.load(Ordering::Relaxed) != 0;
-        if has_active_notes || self.drum_playing || looper_active {
+        let midi_seq_active = self.midi_seq_play_atom.load(Ordering::Relaxed) != 0;
+        if has_active_notes || self.drum_playing || looper_active || midi_seq_active {
             ctx.request_repaint_after(Duration::from_millis(33));
         } else {
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -424,6 +438,18 @@ impl eframe::App for App {
                 if ui.add(egui::Slider::new(&mut delay, 0.0..=1.0).show_value(false)).changed() {
                     self.global_params.insert("delay_mix".into(), delay);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "delay_mix", value: delay });
+                    self.global_dirty = true;
+                }
+
+                ui.separator();
+
+                // Pitch Bend Range
+                let mut pbr = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as i32;
+                ui.label("PB:");
+                if ui.add(egui::Slider::new(&mut pbr, 1..=24).suffix("st").show_value(true)).changed() {
+                    let val = pbr as f32;
+                    self.global_params.insert("pitch_bend_range".into(), val);
+                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "pitch_bend_range", value: val });
                     self.global_dirty = true;
                 }
 
@@ -726,7 +752,11 @@ impl eframe::App for App {
             ui.add_space(4.0);
             ui.separator();
             ui.add_space(6.0);
-            if self.show_drums {
+            if self.show_midi_seq {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    self.draw_midi_seq(ui);
+                });
+            } else if self.show_drums {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     self.draw_drum_sequencer(ui);
                 });
@@ -837,6 +867,7 @@ impl App {
         self.config.ui.master_tone = self.global_params.get("master_tone").copied().unwrap_or(20000.0);
         self.config.ui.fader_reverb = self.global_params.get("reverb_mix").copied().unwrap_or(0.0);
         self.config.ui.fader_delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
+        self.config.ui.pitch_bend_range = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as u8;
         self.config.ui.drum_volume = self.drum_volume;
         if let Some(l) = self.layers.get(0) { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.layers.get(1) { self.config.ui.layer_b_volume = l.volume; }

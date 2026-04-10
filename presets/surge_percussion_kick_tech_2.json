@@ -1,0 +1,20 @@
+{
+  "name": "Kick tech 2 (Surge)",
+  "category": "Percussion",
+  "params": {
+    "osc_type": 0.0,
+    "filter_type": 1.0,
+    "filter_cutoff": 51.4,
+    "filter_resonance": 0.618,
+    "filter_env_amount": 0.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.1537,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.0907,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

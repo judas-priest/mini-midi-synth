@@ -1,0 +1,26 @@
+{
+  "name": "Pulsar (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 1.0,
+    "osc1_level": 0.841,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 1.0,
+    "osc2_detune": 0.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 1442.0,
+    "filter_resonance": 0.05,
+    "filter_env_amount": 5245.7,
+    "filter_key_track": 0.611,
+    "amp_attack": 0.0481,
+    "amp_decay": 0.8244,
+    "amp_sustain": 1.0,
+    "amp_release": 2.1864,
+    "filter_attack": 0.0039,
+    "filter_decay": 5.2325,
+    "filter_sustain": 0.0,
+    "filter_release": 1.1717,
+    "master_volume": 0.75
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "Fonk (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "osc1_level": 0.957,
+    "osc_count": 2.0,
+    "osc3_type": 1.0,
+    "osc3_level": 0.695,
+    "osc3_detune": -12.0,
+    "filter_type": 2.0,
+    "filter_cutoff": 203.3,
+    "filter_resonance": 0.89,
+    "filter_env_amount": 1645.7,
+    "filter_key_track": 0.343,
+    "amp_attack": 0.0093,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0131,
+    "filter_attack": 0.0085,
+    "filter_decay": 0.0271,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 7.7145,
+    "lfo_pitch_depth": 0.291
+  }
+}

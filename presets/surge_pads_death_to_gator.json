@@ -1,0 +1,27 @@
+{
+  "name": "Death to Gator (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 3.0,
+    "unison_detune": 12.77,
+    "unison_spread": 0.5,
+    "filter_type": 0.0,
+    "filter_cutoff": 97.2,
+    "filter_resonance": 0.671,
+    "filter_env_amount": 8000.0,
+    "filter_key_track": 0.454,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 2.1864,
+    "filter_attack": 3.2051,
+    "filter_decay": 4.7509,
+    "filter_sustain": 0.589,
+    "filter_release": 5.4913,
+    "master_volume": 0.75,
+    "lfo_waveform": 3.0,
+    "lfo_rate": 0.8205,
+    "lfo_filter_depth": 0.066
+  }
+}

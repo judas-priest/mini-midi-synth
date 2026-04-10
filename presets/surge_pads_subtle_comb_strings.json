@@ -1,0 +1,26 @@
+{
+  "name": "Subtle Comb Strings (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 16.0,
+    "unison_detune": 22.77,
+    "unison_spread": 0.5,
+    "filter_type": 2.0,
+    "filter_cutoff": 576.8,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 6480.0,
+    "amp_attack": 0.0779,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.4445,
+    "filter_attack": 1.7958,
+    "filter_decay": 6.0479,
+    "filter_sustain": 0.0,
+    "filter_release": 3.7321,
+    "master_volume": 0.75,
+    "lfo_waveform": 0.0,
+    "lfo_rate": 4.7526,
+    "lfo_pitch_depth": 0.272
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "Jim (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.925,
+    "osc2_detune": 0.0,
+    "portamento": 0.0204,
+    "filter_type": 0.0,
+    "filter_cutoff": 114.4,
+    "filter_resonance": 0.587,
+    "filter_env_amount": 5554.3,
+    "filter_key_track": 0.557,
+    "amp_attack": 0.0124,
+    "amp_decay": 0.25,
+    "amp_sustain": 1.0,
+    "amp_release": 0.917,
+    "filter_attack": 0.0137,
+    "filter_decay": 5.7629,
+    "filter_sustain": 0.45,
+    "filter_release": 3.5563,
+    "master_volume": 0.75
+  }
+}

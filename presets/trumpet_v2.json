@@ -1,0 +1,28 @@
+{
+  "name": "Trumpet v2",
+  "params": {
+    "osc_type": 15.0,
+    "bell_type": 0.0,
+    "lip_tension": 0.6,
+    "blowing_pressure": 0.6,
+    "filter_cutoff": 7000.0,
+    "filter_resonance": 0.05,
+    "filter_type": 0.0,
+    "filter_key_track": 0.3,
+    "amp_attack": 0.06,
+    "amp_decay": 0.1,
+    "amp_sustain": 0.9,
+    "amp_release": 0.15,
+    "filter_attack": 0.04,
+    "filter_decay": 0.15,
+    "filter_sustain": 0.6,
+    "filter_release": 0.1,
+    "lfo_waveform": 0.0,
+    "lfo_rate": 5.5,
+    "lfo_pitch_depth": 0.03,
+    "vel_to_filter": 0.3,
+    "reverb_mix": 0.12,
+    "reverb_room_size": 0.45,
+    "master_volume": 0.75
+  }
+}

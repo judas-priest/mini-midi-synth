@@ -1,0 +1,26 @@
+{
+  "name": "Stone (Surge)",
+  "category": "Bass",
+  "params": {
+    "osc_type": 1.0,
+    "osc1_level": 0.887,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.834,
+    "osc2_detune": -12.05,
+    "filter_type": 0.0,
+    "filter_cutoff": 147.8,
+    "filter_resonance": 0.275,
+    "filter_env_amount": 5554.3,
+    "filter_key_track": 0.593,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.1085,
+    "amp_sustain": 0.204,
+    "amp_release": 0.0458,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.227,
+    "filter_sustain": 0.0,
+    "filter_release": 0.3074,
+    "master_volume": 0.75
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Bell pad (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 1.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 157.5,
+    "filter_resonance": 0.297,
+    "filter_env_amount": 3805.7,
+    "filter_key_track": 0.571,
+    "amp_attack": 0.9588,
+    "amp_decay": 4.9185,
+    "amp_sustain": 0.696,
+    "amp_release": 1.6881,
+    "filter_attack": 1.1082,
+    "filter_decay": 2.7287,
+    "filter_sustain": 0.777,
+    "filter_release": 0.6256,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.0762,
+    "lfo_pitch_depth": 0.075
+  }
+}

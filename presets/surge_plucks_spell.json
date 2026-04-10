@@ -1,0 +1,27 @@
+{
+  "name": "Spell (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 1.0,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.796,
+    "osc2_detune": 12.037,
+    "filter_type": 0.0,
+    "filter_cutoff": 131.1,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 5005.7,
+    "amp_attack": 0.0119,
+    "amp_decay": 0.3996,
+    "amp_sustain": 0.043,
+    "amp_release": 0.6541,
+    "filter_attack": 0.0066,
+    "filter_decay": 0.0587,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.0777,
+    "lfo_pitch_depth": 0.291
+  }
+}

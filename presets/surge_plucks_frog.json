@@ -1,0 +1,31 @@
+{
+  "name": "Frog (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 0.0,
+    "osc_count": 3.0,
+    "osc2_type": 0.0,
+    "osc2_level": 0.668,
+    "osc2_detune": 0.0,
+    "osc3_type": 0.0,
+    "osc3_level": 0.562,
+    "osc3_detune": 24.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 61.3,
+    "filter_resonance": 0.185,
+    "filter_env_amount": 3085.7,
+    "filter_key_track": 0.471,
+    "amp_attack": 0.0151,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 1.416,
+    "filter_attack": 0.0151,
+    "filter_decay": 1.1165,
+    "filter_sustain": 0.0,
+    "filter_release": 1.4915,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.814,
+    "lfo_pitch_depth": 0.206
+  }
+}

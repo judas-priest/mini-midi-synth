@@ -1,0 +1,25 @@
+{
+  "name": "Sinesaw7 (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "portamento": 0.0154,
+    "filter_type": 0.0,
+    "filter_cutoff": 62.6,
+    "filter_resonance": 0.131,
+    "filter_env_amount": 8000.0,
+    "filter_key_track": 0.407,
+    "amp_attack": 0.0174,
+    "amp_decay": 2.8922,
+    "amp_sustain": 0.595,
+    "amp_release": 0.917,
+    "filter_attack": 0.0085,
+    "filter_decay": 4.1104,
+    "filter_sustain": 0.0,
+    "filter_release": 2.662,
+    "master_volume": 0.75,
+    "lfo_waveform": 3.0,
+    "lfo_rate": 24.4625,
+    "lfo_pitch_depth": 0.159
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Disturbing Resonance (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 2.0,
+    "pulse_width": 0.5,
+    "unison_voices": 16.0,
+    "unison_detune": 12.05,
+    "unison_spread": 0.5,
+    "filter_type": 0.0,
+    "filter_cutoff": 395.7,
+    "filter_resonance": 0.99,
+    "filter_env_amount": 0.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 1.1123,
+    "filter_attack": 0.0378,
+    "filter_decay": 0.877,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

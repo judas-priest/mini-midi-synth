@@ -1,0 +1,27 @@
+{
+  "name": "Sawteeth (Surge)",
+  "category": "Keys",
+  "params": {
+    "osc_type": 4.0,
+    "fm_ratio": 10.0,
+    "fm_index": 0.0,
+    "osc_count": 2.0,
+    "osc2_type": 4.0,
+    "osc2_level": 1.0,
+    "osc2_detune": 0.094,
+    "filter_type": 0.0,
+    "filter_cutoff": 2619.4,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 102.9,
+    "filter_key_track": 0.829,
+    "amp_attack": 0.0039,
+    "amp_decay": 2.4776,
+    "amp_sustain": 0.632,
+    "amp_release": 1.2465,
+    "filter_attack": 0.0039,
+    "filter_decay": 2.7287,
+    "filter_sustain": 0.552,
+    "filter_release": 2.972,
+    "master_volume": 0.75
+  }
+}

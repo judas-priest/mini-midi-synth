@@ -1,0 +1,28 @@
+{
+  "name": "Bitten (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 1.0,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 1.0,
+    "osc2_detune": 0.112,
+    "portamento": 0.0117,
+    "filter_type": 0.0,
+    "filter_cutoff": 13180.5,
+    "filter_resonance": 0.445,
+    "filter_env_amount": 0.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.25,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0312,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.25,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 2.0,
+    "lfo_rate": 16.0,
+    "lfo_pitch_depth": 6.0
+  }
+}

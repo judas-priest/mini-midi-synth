@@ -1,0 +1,23 @@
+{
+  "name": "Combpluck (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 1.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 40.0,
+    "filter_resonance": 0.99,
+    "filter_env_amount": 0.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 10.0,
+    "amp_sustain": 0.0,
+    "amp_release": 1.01,
+    "filter_attack": 0.0039,
+    "filter_decay": 3.054,
+    "filter_sustain": 0.0,
+    "filter_release": 0.6565,
+    "master_volume": 0.75,
+    "lfo_waveform": 0.0,
+    "lfo_rate": 3.7933,
+    "lfo_pitch_depth": 0.075
+  }
+}

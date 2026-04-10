@@ -1,0 +1,25 @@
+{
+  "name": "Retrofit (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 2.0,
+    "pulse_width": 0.211,
+    "unison_voices": 7.0,
+    "unison_detune": 25.45,
+    "unison_spread": 0.5,
+    "filter_type": 1.0,
+    "filter_cutoff": 595.9,
+    "filter_resonance": 0.796,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 1.0,
+    "amp_attack": 0.0151,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 1.6305,
+    "filter_attack": 0.0039,
+    "filter_decay": 3.7321,
+    "filter_sustain": 0.338,
+    "filter_release": 4.751,
+    "master_volume": 0.75
+  }
+}

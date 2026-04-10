@@ -140,6 +140,8 @@ pub struct SamplerEngine {
     drums_sf2: bool,
     sample_rate: i32,
     pub drum_volume: f32,
+    /// Last GM program sent per MIDI channel for the sequencer (255 = never sent).
+    seq_channel_program: [u8; 16],
 }
 
 impl SamplerEngine {
@@ -154,11 +156,13 @@ impl SamplerEngine {
             drums_sf2: false,
             sample_rate: sample_rate as i32,
             drum_volume: 1.0,
+            seq_channel_program: [255; 16], // 255 = not yet initialised
         }
     }
 
     /// Load SF2 for keys (layers A/B).
     pub fn load_keys_soundfont(&mut self, sf: Arc<SoundFont>) {
+        self.seq_channel_program = [255; 16]; // new synth instance — reset program cache
         self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
         // Restore programs on new synth
         if let Some(synth) = &mut self.keys.synth {
@@ -261,6 +265,29 @@ impl SamplerEngine {
 
     pub fn drum_note_off(&mut self, note: u8) {
         self.drums.midi(9, 0x80, note as i32, 0);
+    }
+
+    /// MIDI sequencer: note-on on any channel of the keys synth.
+    pub fn seq_note_on(&mut self, channel: u8, note: u8, velocity: u8) {
+        self.keys.midi(channel as i32, 0x90, note as i32, velocity as i32);
+    }
+
+    /// MIDI sequencer: note-off on any channel of the keys synth.
+    pub fn seq_note_off(&mut self, channel: u8, note: u8) {
+        self.keys.midi(channel as i32, 0x80, note as i32, 0);
+    }
+
+    /// MIDI sequencer: set GM program for a channel of the keys synth.
+    /// Skips the MIDI message if the program is already set (avoids per-note overhead).
+    pub fn seq_program_set(&mut self, channel: u8, program: u8) {
+        let ch = channel as usize;
+        if ch < 16 && self.seq_channel_program[ch] == program {
+            return; // already set, no-op
+        }
+        self.keys.midi(channel as i32, 0xC0, program as i32, 0);
+        if ch < 16 {
+            self.seq_channel_program[ch] = program;
+        }
     }
 
     pub fn pitch_bend(&mut self, layer: usize, value: f32) {

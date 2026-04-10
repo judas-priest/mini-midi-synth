@@ -1,0 +1,29 @@
+{
+  "name": "Anthemish 1 (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 4.0,
+    "unison_detune": 15.45,
+    "unison_spread": 0.5,
+    "osc_count": 2.0,
+    "osc2_type": 1.0,
+    "osc2_level": 0.882,
+    "osc2_detune": -12.0,
+    "portamento": 0.011,
+    "filter_type": 0.0,
+    "filter_cutoff": 46.3,
+    "filter_resonance": 0.521,
+    "filter_env_amount": 7302.9,
+    "filter_key_track": 0.386,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.0526,
+    "amp_sustain": 0.738,
+    "amp_release": 0.0312,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.2753,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

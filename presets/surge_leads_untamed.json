@@ -1,0 +1,25 @@
+{
+  "name": "Untamed (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 1.0,
+    "portamento": 0.0216,
+    "filter_type": 0.0,
+    "filter_cutoff": 403.5,
+    "filter_resonance": 0.614,
+    "filter_env_amount": 4628.6,
+    "filter_key_track": 0.182,
+    "amp_attack": 0.0039,
+    "amp_decay": 0.3808,
+    "amp_sustain": 0.846,
+    "amp_release": 0.1077,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.8357,
+    "filter_sustain": 0.0,
+    "filter_release": 0.3032,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 5.5597,
+    "lfo_pitch_depth": 0.094
+  }
+}

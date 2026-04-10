@@ -1,0 +1,24 @@
+{
+  "name": "Diamonds (Surge)",
+  "category": "Plucks",
+  "params": {
+    "osc_type": 1.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 1642.1,
+    "filter_resonance": 0.501,
+    "filter_env_amount": 2777.1,
+    "filter_key_track": 1.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.9624,
+    "filter_attack": 0.0039,
+    "filter_decay": 1.0638,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 2.9398,
+    "lfo_pitch_depth": 0.131
+  }
+}

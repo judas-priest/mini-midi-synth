@@ -1,0 +1,25 @@
+{
+  "name": "E Bass (Surge)",
+  "category": "Bass",
+  "params": {
+    "osc_type": 1.0,
+    "portamento": 0.0097,
+    "filter_type": 0.0,
+    "filter_cutoff": 493.5,
+    "filter_resonance": 0.0,
+    "filter_env_amount": 1028.6,
+    "filter_key_track": 0.475,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0312,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.4914,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 0.0,
+    "lfo_rate": 3.9838,
+    "lfo_pitch_depth": 0.037
+  }
+}

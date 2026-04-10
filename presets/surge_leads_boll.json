@@ -1,0 +1,25 @@
+{
+  "name": "Boll (Surge)",
+  "category": "Leads",
+  "params": {
+    "osc_type": 1.0,
+    "unison_voices": 6.0,
+    "unison_detune": 10.63,
+    "unison_spread": 0.5,
+    "portamento": 0.0186,
+    "filter_type": 0.0,
+    "filter_cutoff": 305.1,
+    "filter_resonance": 0.734,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 0.675,
+    "amp_attack": 0.0103,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0312,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.25,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "Rather low (Surge)",
+  "category": "Experimental",
+  "params": {
+    "osc_type": 0.0,
+    "osc_count": 2.0,
+    "osc3_type": 1.0,
+    "osc3_level": 0.4,
+    "osc3_detune": 0.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 441.9,
+    "filter_resonance": 0.678,
+    "filter_env_amount": 0.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0585,
+    "filter_attack": 0.0039,
+    "filter_decay": 1.4915,
+    "filter_sustain": 0.0,
+    "filter_release": 2.1946,
+    "master_volume": 0.75
+  }
+}

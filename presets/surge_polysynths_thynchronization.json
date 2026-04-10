@@ -1,0 +1,24 @@
+{
+  "name": "Thynchronization (Surge)",
+  "category": "Polysynths",
+  "params": {
+    "osc_type": 0.0,
+    "filter_type": 1.0,
+    "filter_cutoff": 456.5,
+    "filter_resonance": 0.314,
+    "filter_env_amount": 0.0,
+    "filter_key_track": 1.0,
+    "amp_attack": 0.0041,
+    "amp_decay": 1.873,
+    "amp_sustain": 0.0,
+    "amp_release": 0.5138,
+    "filter_attack": 0.0039,
+    "filter_decay": 0.5157,
+    "filter_sustain": 0.0,
+    "filter_release": 0.25,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 6.4141,
+    "lfo_pitch_depth": 0.131
+  }
+}

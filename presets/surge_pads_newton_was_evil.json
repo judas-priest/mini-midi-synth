@@ -1,0 +1,24 @@
+{
+  "name": "Newton was evil (Surge)",
+  "category": "Pads",
+  "params": {
+    "osc_type": 2.0,
+    "pulse_width": 0.575,
+    "unison_voices": 4.0,
+    "unison_detune": 11.16,
+    "unison_spread": 0.5,
+    "filter_type": 0.0,
+    "filter_cutoff": 112.2,
+    "filter_resonance": 0.401,
+    "filter_env_amount": 5142.9,
+    "amp_attack": 2.6423,
+    "amp_decay": 1.0,
+    "amp_sustain": 1.0,
+    "amp_release": 3.3761,
+    "filter_attack": 2.773,
+    "filter_decay": 8.4792,
+    "filter_sustain": 0.0,
+    "filter_release": 6.9903,
+    "master_volume": 0.75
+  }
+}

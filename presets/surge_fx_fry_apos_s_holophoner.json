@@ -1,0 +1,25 @@
+{
+  "name": "Fry&apos;s holophoner (Surge)",
+  "category": "Experimental",
+  "params": {
+    "osc_type": 0.0,
+    "portamento": 0.0084,
+    "filter_type": 2.0,
+    "filter_cutoff": 1840.8,
+    "filter_resonance": 0.542,
+    "filter_env_amount": 102.9,
+    "filter_key_track": 1.0,
+    "amp_attack": 0.0039,
+    "amp_decay": 1.5537,
+    "amp_sustain": 1.0,
+    "amp_release": 0.0212,
+    "filter_attack": 0.0039,
+    "filter_decay": 6.9903,
+    "filter_sustain": 0.0,
+    "filter_release": 0.0625,
+    "master_volume": 0.75,
+    "lfo_waveform": 1.0,
+    "lfo_rate": 4.4575,
+    "lfo_pitch_depth": 0.066
+  }
+}
