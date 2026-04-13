@@ -242,7 +242,9 @@ struct GlobalParams {
     // Fader-controlled global (persist across preset changes)
     reverb_mix: Option<f32>,       // None = use preset value
     delay_mix: Option<f32>,        // None = use preset value
-    pitch_bend_range: f32,         // semitones, default 2
+    pitch_bend_range: f32,         // semitones, default 2 (used when up/down not set)
+    pitch_bend_up: f32,            // semitones up (0 = use pitch_bend_range)
+    pitch_bend_down: f32,          // semitones down (0 = use pitch_bend_range)
     // One-pole LP state for master tone
     tone_lp_l: f32,
     tone_lp_r: f32,
@@ -256,6 +258,8 @@ impl Default for GlobalParams {
             reverb_mix: None,
             delay_mix: None,
             pitch_bend_range: 2.0,
+            pitch_bend_up: 0.0,
+            pitch_bend_down: 0.0,
             tone_lp_l: 0.0,
             tone_lp_r: 0.0,
         }
@@ -270,6 +274,8 @@ impl GlobalParams {
             "reverb_mix" => self.reverb_mix = Some(value),
             "delay_mix" => self.delay_mix = Some(value),
             "pitch_bend_range" => self.pitch_bend_range = value.clamp(1.0, 24.0),
+            "pitch_bend_up"    => self.pitch_bend_up    = value.clamp(0.0, 48.0),
+            "pitch_bend_down"  => self.pitch_bend_down  = value.clamp(0.0, 48.0),
             _ => {}
         }
     }
@@ -455,10 +461,10 @@ impl Layer {
                 let voice_params = self.build_voice_params();
                 self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
                 self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
-                if self.params.lfo1_retrigger > 0.5 { self.lfos[0].reset_phase(); }
-                if self.params.lfo2_retrigger > 0.5 { self.lfos[1].reset_phase(); }
-                if self.params.lfo3_retrigger > 0.5 { self.lfos[2].reset_phase(); }
-                if self.params.lfo4_retrigger > 0.5 { self.lfos[3].reset_phase(); }
+                self.lfos[0].trigger_mode(self.params.lfo1_trigger_mode as u8);
+                self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
+                self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
+                self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
                 if self.params.mseg_enabled > 0.5 { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
             }
             self.update_held_range();
@@ -485,10 +491,10 @@ impl Layer {
             }
             self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
             if !retrigger {
-                if self.params.lfo1_retrigger > 0.5 { self.lfos[0].reset_phase(); }
-                if self.params.lfo2_retrigger > 0.5 { self.lfos[1].reset_phase(); }
-                if self.params.lfo3_retrigger > 0.5 { self.lfos[2].reset_phase(); }
-                if self.params.lfo4_retrigger > 0.5 { self.lfos[3].reset_phase(); }
+                self.lfos[0].trigger_mode(self.params.lfo1_trigger_mode as u8);
+                self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
+                self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
+                self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
             }
             if self.params.mseg_enabled > 0.5 && !retrigger { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
             self.update_held_range();
@@ -541,10 +547,10 @@ impl Layer {
         self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
         self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
         // Retrigger LFOs on note-on if flagged
-        if self.params.lfo1_retrigger > 0.5 { self.lfos[0].reset_phase(); }
-        if self.params.lfo2_retrigger > 0.5 { self.lfos[1].reset_phase(); }
-        if self.params.lfo3_retrigger > 0.5 { self.lfos[2].reset_phase(); }
-        if self.params.lfo4_retrigger > 0.5 { self.lfos[3].reset_phase(); }
+        self.lfos[0].trigger_mode(self.params.lfo1_trigger_mode as u8);
+        self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
+        self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
+        self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
         // Trigger MSEGs on note-on (per-layer, not per-voice)
         if self.params.mseg_enabled > 0.5 {
             self.mseg1_state.trigger();
@@ -569,8 +575,10 @@ impl Layer {
             noise_level: self.params.noise_level,
             amp_attack: self.params.amp_attack, amp_decay: self.params.amp_decay,
             amp_sustain: self.params.amp_sustain, amp_release: self.params.amp_release,
+            amp_hold: self.params.amp_hold,
             filter_attack: self.params.filter_attack, filter_decay: self.params.filter_decay,
             filter_sustain: self.params.filter_sustain, filter_release: self.params.filter_release,
+            filter_hold: self.params.filter_hold,
             ks_brightness: self.params.ks_brightness, ks_feedback: self.params.ks_feedback,
             organ_drawbars: self.params.organ_drawbars,
             formant_voice: self.params.formant_voice, formant_vowel: self.params.formant_vowel,
@@ -814,6 +822,10 @@ impl Layer {
             "lfo2_retrigger" => self.params.lfo2_retrigger = value,
             "lfo3_retrigger" => self.params.lfo3_retrigger = value,
             "lfo4_retrigger" => self.params.lfo4_retrigger = value,
+            "lfo1_trigger_mode" => self.params.lfo1_trigger_mode = value,
+            "lfo2_trigger_mode" => self.params.lfo2_trigger_mode = value,
+            "lfo3_trigger_mode" => self.params.lfo3_trigger_mode = value,
+            "lfo4_trigger_mode" => self.params.lfo4_trigger_mode = value,
             "lfo_deform" => self.params.lfo_deform = value,
             "lfo2_rate" => self.params.lfo2_rate = value,
             "lfo2_pitch_depth" => self.params.lfo2_pitch_depth = value,
@@ -842,7 +854,9 @@ pub struct PresetParams {
     filter_routing: f32, filter2_type: f32, filter2_cutoff: f32, filter2_resonance: f32,
     noise_level: f32,
     amp_attack: f32, amp_decay: f32, amp_sustain: f32, amp_release: f32,
+    amp_hold: f32,
     filter_attack: f32, filter_decay: f32, filter_sustain: f32, filter_release: f32,
+    filter_hold: f32,
     ks_brightness: f32, ks_feedback: f32, organ_drawbars: [f32; 9],
     formant_voice: f32, formant_vowel: f32,
     drum_pitch_amount: f32, drum_pitch_decay: f32, drum_noise_level: f32,
@@ -878,6 +892,8 @@ pub struct PresetParams {
     lfo1_tempo_sync: f32, lfo2_tempo_sync: f32, lfo3_tempo_sync: f32, lfo4_tempo_sync: f32,
     lfo1_unipolar: f32, lfo2_unipolar: f32, lfo3_unipolar: f32, lfo4_unipolar: f32,
     portamento_time: f32, portamento_mode: f32,
+    pitch_bend_up: f32,   // 0 = use global pitch_bend_range
+    pitch_bend_down: f32,
     pub play_mode: f32,     // 0=poly, 1=mono, 2=mono-st, 3=latch
     pub sustain_mode: f32,  // 0=hold all notes, 1=release if others held, 4=poly-high, 5=poly-low, 6=piano
     unison_voices: f32, unison_detune: f32, unison_spread: f32,
@@ -887,6 +903,7 @@ pub struct PresetParams {
     filter_env_attack_shape: f32, filter_env_decay_shape: f32, filter_env_release_shape: f32,
     // LFO retrigger flags
     lfo1_retrigger: f32, lfo2_retrigger: f32, lfo3_retrigger: f32, lfo4_retrigger: f32,
+    lfo1_trigger_mode: f32, lfo2_trigger_mode: f32, lfo3_trigger_mode: f32, lfo4_trigger_mode: f32,
     // LFO deform
     lfo_deform: f32,
     // Alias oscillator
@@ -989,8 +1006,8 @@ impl Default for PresetParams {
             filter_env_amount: 0.0, filter_key_track: 0.0,
             filter_routing: 0.0, filter2_type: 0.0, filter2_cutoff: 8000.0, filter2_resonance: 0.0,
             noise_level: 0.0,
-            amp_attack: 0.01, amp_decay: 0.1, amp_sustain: 0.7, amp_release: 0.3,
-            filter_attack: 0.01, filter_decay: 0.2, filter_sustain: 0.5, filter_release: 0.3,
+            amp_attack: 0.01, amp_decay: 0.1, amp_sustain: 0.7, amp_release: 0.3, amp_hold: 0.0,
+            filter_attack: 0.01, filter_decay: 0.2, filter_sustain: 0.5, filter_release: 0.3, filter_hold: 0.0,
             ks_brightness: 0.5, ks_feedback: 0.996,
             organ_drawbars: [0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             formant_voice: 0.0, formant_vowel: 0.0,
@@ -1013,6 +1030,7 @@ impl Default for PresetParams {
             env_release_shape: 0.0,
             filter_env_attack_shape: 0.0, filter_env_decay_shape: 0.0, filter_env_release_shape: 0.0,
             lfo1_retrigger: 1.0, lfo2_retrigger: 1.0, lfo3_retrigger: 0.0, lfo4_retrigger: 0.0,
+            lfo1_trigger_mode: 1.0, lfo2_trigger_mode: 1.0, lfo3_trigger_mode: 0.0, lfo4_trigger_mode: 0.0,
             lfo_waveform: 0.0, lfo_rate: 5.0, lfo_pitch_depth: 0.0, lfo_filter_depth: 0.0, lfo_amp_depth: 0.0,
             lfo_deform: 0.0,
             lfo2_waveform: 0.0, lfo2_rate: 5.0, lfo2_pitch_depth: 0.0, lfo2_filter_depth: 0.0, lfo2_amp_depth: 0.0, lfo2_deform: 0.0,
@@ -1022,7 +1040,9 @@ impl Default for PresetParams {
             lfo1_unipolar: 0.0, lfo2_unipolar: 0.0, lfo3_unipolar: 0.0, lfo4_unipolar: 0.0,
             alias_wave_type: 0.0, alias_crush: 8.0,
             window_type: 0.0, window_morph: 0.0, window_formant: 0.0,
-            portamento_time: 0.0, portamento_mode: 0.0, play_mode: 0.0, sustain_mode: 0.0,
+            portamento_time: 0.0, portamento_mode: 0.0,
+            pitch_bend_up: 0.0, pitch_bend_down: 0.0,
+            play_mode: 0.0, sustain_mode: 0.0,
             unison_voices: 1.0, unison_detune: 0.0, unison_spread: 0.0,
             chorus_mix: 0.0,
             delay_mix: 0.0, delay_time_l: 0.3, delay_time_r: 0.4,
@@ -1095,8 +1115,10 @@ impl PresetParams {
             noise_level: p("noise_level", 0.0),
             amp_attack: p("amp_attack", 0.01), amp_decay: p("amp_decay", 0.1),
             amp_sustain: p("amp_sustain", 0.7), amp_release: p("amp_release", 0.3),
+            amp_hold: p("amp_hold", 0.0),
             filter_attack: p("filter_attack", 0.01), filter_decay: p("filter_decay", 0.2),
             filter_sustain: p("filter_sustain", 0.5), filter_release: p("filter_release", 0.3),
+            filter_hold: p("filter_hold", 0.0),
             ks_brightness: p("ks_brightness", 0.5), ks_feedback: p("ks_feedback", 0.996),
             organ_drawbars: [
                 p("drawbar_1", 0.0), p("drawbar_2", 0.0), p("drawbar_3", 8.0),
@@ -1129,6 +1151,11 @@ impl PresetParams {
             filter_env_release_shape: p("filter_env_release_shape", 0.0),
             lfo1_retrigger: p("lfo1_retrigger", 1.0), lfo2_retrigger: p("lfo2_retrigger", 1.0),
             lfo3_retrigger: p("lfo3_retrigger", 0.0), lfo4_retrigger: p("lfo4_retrigger", 0.0),
+            // Trigger mode: 0=Free Run, 1=Key, 2=Random, 3=RandomUni. Falls back to retrigger boolean.
+            lfo1_trigger_mode: p("lfo1_trigger_mode", if p("lfo1_retrigger", 1.0) > 0.5 { 1.0 } else { 0.0 }),
+            lfo2_trigger_mode: p("lfo2_trigger_mode", if p("lfo2_retrigger", 1.0) > 0.5 { 1.0 } else { 0.0 }),
+            lfo3_trigger_mode: p("lfo3_trigger_mode", if p("lfo3_retrigger", 0.0) > 0.5 { 1.0 } else { 0.0 }),
+            lfo4_trigger_mode: p("lfo4_trigger_mode", if p("lfo4_retrigger", 0.0) > 0.5 { 1.0 } else { 0.0 }),
             lfo_waveform: p("lfo_waveform", 0.0), lfo_rate: p("lfo_rate", 5.0),
             lfo_pitch_depth: p("lfo_pitch_depth", 0.0), lfo_filter_depth: p("lfo_filter_depth", 0.0),
             lfo_amp_depth: p("lfo_amp_depth", 0.0),
@@ -1146,6 +1173,7 @@ impl PresetParams {
             window_type: p("window_type", 0.0), window_morph: p("window_morph", 0.0),
             window_formant: p("window_formant", 0.0),
             portamento_time: p("portamento_time", 0.0), portamento_mode: p("portamento_mode", 0.0),
+            pitch_bend_up: p("pitch_bend_up", 0.0), pitch_bend_down: p("pitch_bend_down", 0.0),
             play_mode: p("play_mode", 0.0), sustain_mode: p("sustain_mode", 0.0),
             unison_voices: p("unison_voices", 1.0), unison_detune: p("unison_detune", 0.0),
             unison_spread: p("unison_spread", 0.0),
@@ -1735,7 +1763,20 @@ impl SynthEngine {
                 }
             }
             MidiEvent::PitchBend { value, .. } => {
-                self.pitch_bend_semitones = value * self.global_params.pitch_bend_range;
+                // Asymmetric bend: per-layer preset overrides global range
+                let layer_up   = self.layers.iter().find(|l| l.enabled).map(|l| l.params.pitch_bend_up).unwrap_or(0.0);
+                let layer_down = self.layers.iter().find(|l| l.enabled).map(|l| l.params.pitch_bend_down).unwrap_or(0.0);
+                self.pitch_bend_semitones = if value >= 0.0 {
+                    let up = if layer_up > 0.0 { layer_up }
+                        else if self.global_params.pitch_bend_up > 0.0 { self.global_params.pitch_bend_up }
+                        else { self.global_params.pitch_bend_range };
+                    value * up
+                } else {
+                    let down = if layer_down > 0.0 { layer_down }
+                        else if self.global_params.pitch_bend_down > 0.0 { self.global_params.pitch_bend_down }
+                        else { self.global_params.pitch_bend_range };
+                    value * down
+                };
                 for i in 0..2 {
                     if self.layers.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
                         self.sampler.pitch_bend(i, value);

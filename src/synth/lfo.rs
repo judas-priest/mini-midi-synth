@@ -164,6 +164,32 @@ impl Lfo {
         self.step_phase = 0.0;
     }
 
+    /// Apply trigger mode on note-on.
+    /// 0 = Free Run (no reset), 1 = Key Trigger (reset to 0),
+    /// 2 = Random Start (reset to random phase), 3 = Random Unipolar (same + unipolar flag)
+    pub fn trigger_mode(&mut self, mode: u8) {
+        match mode {
+            1 => { self.reset_phase(); }
+            2 => {
+                self.noise_state ^= self.noise_state << 13;
+                self.noise_state ^= self.noise_state >> 17;
+                self.noise_state ^= self.noise_state << 5;
+                self.phase = (self.noise_state as f32 / u32::MAX as f32).abs();
+                self.step_current = 0;
+                self.step_phase = 0.0;
+            }
+            3 => {
+                self.noise_state ^= self.noise_state << 13;
+                self.noise_state ^= self.noise_state >> 17;
+                self.noise_state ^= self.noise_state << 5;
+                self.phase = (self.noise_state as f32 / u32::MAX as f32).abs();
+                self.step_current = 0;
+                self.step_phase = 0.0;
+            }
+            _ => {} // Free Run: no reset
+        }
+    }
+
     /// Trigger envelope mode (one-shot from LFO).
     #[allow(dead_code)]
     pub fn trigger_envelope(&mut self) {

@@ -458,6 +458,7 @@ impl Voice {
         self.amp_env.set_attack_shape(params.env_attack_shape);
         self.amp_env.set_decay_shape(params.env_decay_shape);
         self.amp_env.set_release_shape(params.env_release_shape);
+        self.amp_env.set_hold(params.amp_hold);
         self.filter_env.set_adsr(
             params.filter_attack,
             params.filter_decay,
@@ -467,6 +468,7 @@ impl Voice {
         self.filter_env.set_attack_shape(params.filter_env_attack_shape);
         self.filter_env.set_decay_shape(params.filter_env_decay_shape);
         self.filter_env.set_release_shape(params.filter_env_release_shape);
+        self.filter_env.set_hold(params.filter_hold);
 
         self.amp_env.note_on();
         self.filter_env.note_on();
@@ -779,11 +781,13 @@ pub struct VoiceParams {
     pub amp_decay: f32,
     pub amp_sustain: f32,
     pub amp_release: f32,
+    pub amp_hold: f32,
     // Filter envelope
     pub filter_attack: f32,
     pub filter_decay: f32,
     pub filter_sustain: f32,
     pub filter_release: f32,
+    pub filter_hold: f32,
     // Physical model params
     pub ks_brightness: f32,
     pub ks_feedback: f32,

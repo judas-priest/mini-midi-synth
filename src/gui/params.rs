@@ -13,6 +13,34 @@ use super::{
     WAVE_SHAPER_MODE_NAMES, LAYER_NAMES,
 };
 
+const LFO_TRIGGER_MODE_NAMES: &[&str] = &["Free Run", "Key Trigger", "Random Start", "Random Unipolar"];
+
+fn draw_lfo_trigger_mode(
+    ui: &mut egui::Ui,
+    layer: usize,
+    lfo_num: u8,
+    params: &mut std::collections::BTreeMap<String, f32>,
+) -> bool {
+    let key = format!("lfo{lfo_num}_trigger_mode");
+    let default = if lfo_num <= 2 { 1.0 } else { 0.0 };
+    let mut mode = params.get(key.as_str()).copied().unwrap_or(default) as usize;
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label("Trigger:");
+        egui::ComboBox::from_id_salt(format!("lfo_trig_{layer}_{lfo_num}"))
+            .selected_text(*LFO_TRIGGER_MODE_NAMES.get(mode).unwrap_or(&"Key Trigger"))
+            .show_ui(ui, |ui| {
+                for (i, name) in LFO_TRIGGER_MODE_NAMES.iter().enumerate() {
+                    if ui.selectable_value(&mut mode, i, *name).clicked() {
+                        params.insert(key.clone(), mode as f32);
+                        changed = true;
+                    }
+                }
+            });
+    });
+    changed
+}
+
 impl App {
     /// Draw a small ADSR envelope curve from parameter values.
     fn draw_adsr_curve(
@@ -687,21 +715,23 @@ impl App {
 
         ui.add_space(6.0);
 
-        // Amp Envelope
+        // Amp Envelope (AHDSR)
         ui.strong("Amp Envelope");
-        changed |= self.param_slider(ui, "amp_attack", "Attack", 0.001, 5.0, true);
-        changed |= self.param_slider(ui, "amp_decay", "Decay", 0.0, 5.0, false);
-        changed |= self.param_slider(ui, "amp_sustain", "Sustain", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "amp_attack",  "Attack",  0.001, 5.0, true);
+        changed |= self.param_slider(ui, "amp_hold",    "Hold",    0.0,   5.0, false);
+        changed |= self.param_slider(ui, "amp_decay",   "Decay",   0.0,   5.0, false);
+        changed |= self.param_slider(ui, "amp_sustain", "Sustain", 0.0,   1.0, false);
         changed |= self.param_slider(ui, "amp_release", "Release", 0.001, 5.0, true);
         Self::draw_adsr_curve(ui, layer, &self.layers[layer].edited_params, "amp");
 
         ui.add_space(6.0);
 
-        // Filter Envelope
+        // Filter Envelope (AHDSR)
         ui.strong("Filter Envelope");
-        changed |= self.param_slider(ui, "filter_attack", "Attack", 0.001, 5.0, true);
-        changed |= self.param_slider(ui, "filter_decay", "Decay", 0.0, 5.0, false);
-        changed |= self.param_slider(ui, "filter_sustain", "Sustain", 0.0, 1.0, false);
+        changed |= self.param_slider(ui, "filter_attack",  "Attack",  0.001, 5.0, true);
+        changed |= self.param_slider(ui, "filter_hold",    "Hold",    0.0,   5.0, false);
+        changed |= self.param_slider(ui, "filter_decay",   "Decay",   0.0,   5.0, false);
+        changed |= self.param_slider(ui, "filter_sustain", "Sustain", 0.0,   1.0, false);
         changed |= self.param_slider(ui, "filter_release", "Release", 0.001, 5.0, true);
         Self::draw_adsr_curve(ui, layer, &self.layers[layer].edited_params, "filter");
 
@@ -833,13 +863,7 @@ impl App {
         changed |= self.param_slider(ui, "lfo_filter_depth", "Filter Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_amp_depth", "Amp Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_deform", "Deform", -1.0, 1.0, false);
-        {
-            let mut retrig = *self.layers[layer].edited_params.get("lfo1_retrigger").unwrap_or(&1.0) > 0.5;
-            if ui.checkbox(&mut retrig, "Retrigger").changed() {
-                self.layers[layer].edited_params.insert("lfo1_retrigger".to_string(), if retrig { 1.0 } else { 0.0 });
-                changed = true;
-            }
-        }
+        changed |= draw_lfo_trigger_mode(ui, layer, 1, &mut self.layers[layer].edited_params);
 
         ui.add_space(6.0);
 
@@ -864,13 +888,7 @@ impl App {
         changed |= self.param_slider(ui, "lfo2_filter_depth", "Filter Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_amp_depth", "Amp Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_deform", "Deform", -1.0, 1.0, false);
-        {
-            let mut retrig = *self.layers[layer].edited_params.get("lfo2_retrigger").unwrap_or(&1.0) > 0.5;
-            if ui.checkbox(&mut retrig, "Retrigger").changed() {
-                self.layers[layer].edited_params.insert("lfo2_retrigger".to_string(), if retrig { 1.0 } else { 0.0 });
-                changed = true;
-            }
-        }
+        changed |= draw_lfo_trigger_mode(ui, layer, 2, &mut self.layers[layer].edited_params);
 
         ui.add_space(6.0);
 
@@ -892,13 +910,7 @@ impl App {
         });
         changed |= self.param_slider(ui, "lfo3_rate", "Rate", 0.1, 20.0, true);
         changed |= self.param_slider(ui, "lfo3_deform", "Deform", -1.0, 1.0, false);
-        {
-            let mut retrig = *self.layers[layer].edited_params.get("lfo3_retrigger").unwrap_or(&0.0) > 0.5;
-            if ui.checkbox(&mut retrig, "Retrigger").changed() {
-                self.layers[layer].edited_params.insert("lfo3_retrigger".to_string(), if retrig { 1.0 } else { 0.0 });
-                changed = true;
-            }
-        }
+        changed |= draw_lfo_trigger_mode(ui, layer, 3, &mut self.layers[layer].edited_params);
 
         ui.strong("LFO 4 (Mod Matrix)");
         ui.horizontal(|ui| {
@@ -917,12 +929,8 @@ impl App {
         });
         changed |= self.param_slider(ui, "lfo4_rate", "Rate", 0.1, 20.0, true);
         changed |= self.param_slider(ui, "lfo4_deform", "Deform", -1.0, 1.0, false);
+        changed |= draw_lfo_trigger_mode(ui, layer, 4, &mut self.layers[layer].edited_params);
         {
-            let mut retrig = *self.layers[layer].edited_params.get("lfo4_retrigger").unwrap_or(&0.0) > 0.5;
-            if ui.checkbox(&mut retrig, "Retrigger").changed() {
-                self.layers[layer].edited_params.insert("lfo4_retrigger".to_string(), if retrig { 1.0 } else { 0.0 });
-                changed = true;
-            }
         }
 
         ui.add_space(6.0);
@@ -1218,6 +1226,12 @@ impl App {
                     }
                 });
         });
+
+        // Asymmetric pitch bend
+        ui.add_space(4.0);
+        ui.strong("Pitch Bend");
+        changed |= self.param_slider(ui, "pitch_bend_up",   "Range Up (st)",   0.0, 48.0, false);
+        changed |= self.param_slider(ui, "pitch_bend_down", "Range Down (st)", 0.0, 48.0, false);
 
         if changed {
             self.layers[layer].params_dirty = true;

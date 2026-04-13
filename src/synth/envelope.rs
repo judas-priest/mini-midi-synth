@@ -7,6 +7,7 @@
 enum EnvStage {
     Idle,
     Attack,
+    Hold,    // AHDSR: hold at peak before decay
     Decay,
     Sustain,
     Release,
@@ -51,6 +52,9 @@ pub struct Envelope {
     phase_step_a: f32,
     phase_step_d: f32,
     phase_step_r: f32,
+    // Hold stage (AHDSR)
+    hold_samples: u32,
+    hold_counter: u32,
     // Remembered start levels for phase-based decay/release
     decay_start: f32,
     release_start: f32,
@@ -80,6 +84,8 @@ impl Envelope {
             phase_step_a: 0.0,
             phase_step_d: 0.0,
             phase_step_r: 0.0,
+            hold_samples: 0,
+            hold_counter: 0,
             decay_start: 1.0,
             release_start: 0.0,
             sustain: 0.7,
@@ -108,6 +114,11 @@ impl Envelope {
         self.phase_step_a = 1.0 / (a * self.sample_rate);
         self.phase_step_d = 1.0 / (d * self.sample_rate);
         self.phase_step_r = 1.0 / (r * self.sample_rate);
+    }
+
+    /// Set hold time in seconds (0 = no hold, ADSR behaviour).
+    pub fn set_hold(&mut self, hold_secs: f32) {
+        self.hold_samples = (hold_secs.max(0.0) * self.sample_rate) as u32;
     }
 
     pub fn set_attack_shape(&mut self, shape: f32) {
@@ -171,7 +182,8 @@ impl Envelope {
                         self.output = 1.0;
                         self.decay_start = 1.0;
                         self.phase = 0.0;
-                        self.stage = EnvStage::Decay;
+                        self.stage = if self.hold_samples > 0 { EnvStage::Hold } else { EnvStage::Decay };
+                        self.hold_counter = 0;
                     }
                     out
                 } else {
@@ -183,11 +195,22 @@ impl Envelope {
                         self.output = 1.0;
                         self.decay_start = 1.0;
                         self.phase = 0.0;
-                        self.stage = EnvStage::Decay;
+                        self.stage = if self.hold_samples > 0 { EnvStage::Hold } else { EnvStage::Decay };
+                        self.hold_counter = 0;
                     }
                     self.output
                 };
                 shaped.min(1.0)
+            }
+
+            EnvStage::Hold => {
+                self.hold_counter += 1;
+                if self.hold_counter >= self.hold_samples {
+                    self.stage = EnvStage::Decay;
+                    self.phase = 0.0;
+                    self.decay_start = 1.0;
+                }
+                1.0
             }
 
             EnvStage::Decay => {
