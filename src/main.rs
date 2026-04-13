@@ -160,28 +160,28 @@ fn main() -> Result<()> {
         Ok(())
     });
 
-    let layer_a = gui::LayerState {
-        preset_idx,
+    let make_part = |pidx: usize, en: bool, vol: f32, lo: u8, hi: u8,
+                     sf2: bool, prog: u8| gui::LayerState {
+        preset_idx: pidx,
         edited_params: std::collections::BTreeMap::new(),
         params_dirty: false,
-        enabled: true,
-        volume: config.ui.layer_a_volume,
-        min_note: 0,
-        max_note: 127,
-        sf2_mode: config.sf2.layer_a_sf2,
-        sf2_program: config.sf2.layer_a_program,
+        enabled: en,
+        mute: false,
+        volume: vol,
+        min_note: lo,
+        max_note: hi,
+        vel_min: 1,
+        vel_max: 127,
+        pan: 0.0,
+        transpose: 0,
+        sf2_mode: sf2,
+        sf2_program: prog,
     };
-    let layer_b = gui::LayerState {
-        preset_idx: 0,
-        edited_params: std::collections::BTreeMap::new(),
-        params_dirty: false,
-        enabled: false,
-        volume: config.ui.layer_b_volume,
-        min_note: 60,
-        max_note: 127,
-        sf2_mode: config.sf2.layer_b_sf2,
-        sf2_program: config.sf2.layer_b_program,
-    };
+    let layer_a = make_part(preset_idx, true,  config.ui.layer_a_volume, 0,   127, config.sf2.layer_a_sf2, config.sf2.layer_a_program);
+    let layer_b = make_part(0,          false, config.ui.layer_b_volume, 60,  127, config.sf2.layer_b_sf2, config.sf2.layer_b_program);
+    // Parts 3-8: pre-created but disabled (zero cost when disabled)
+    let empty_part = |_i: usize| make_part(0, false, 0.8, 0, 127, false, 0);
+    let parts_extra: Vec<gui::LayerState> = (2..crate::synth::MAX_LAYERS).map(empty_part).collect();
 
     let mut app = gui::App {
         _frame_count: 0,
@@ -203,7 +203,7 @@ fn main() -> Result<()> {
         selected_midi_port: config.midi.port_name.clone(),
         settings_status: String::new(),
         is_jack,
-        layers: vec![layer_a, layer_b],
+        layers: std::iter::once(layer_a).chain(std::iter::once(layer_b)).chain(parts_extra).collect(),
         active_layer: 0,
         on_midi_reconnect: Some(on_midi_reconnect),
         collapsed_categories: config.ui.collapsed_categories.iter().cloned().collect(),

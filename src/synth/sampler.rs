@@ -134,9 +134,9 @@ pub struct SamplerEngine {
     keys: SubSynth,
     drums: SubSynth,
     pub block_size: usize,
-    layer_sf2: [bool; 2],
-    layer_program: [u8; 2],
-    layer_bank: [u8; 2],
+    layer_sf2: [bool; 8],
+    layer_program: [u8; 8],
+    layer_bank: [u8; 8],
     drums_sf2: bool,
     sample_rate: i32,
     pub drum_volume: f32,
@@ -150,9 +150,9 @@ impl SamplerEngine {
             keys: SubSynth::new(),
             drums: SubSynth::new(),
             block_size: DEFAULT_BLOCK_SIZE,
-            layer_sf2: [false; 2],
-            layer_program: [0; 2],
-            layer_bank: [0; 2],
+            layer_sf2: [false; 8],
+            layer_program: [0; 8],
+            layer_bank: [0; 8],
             drums_sf2: false,
             sample_rate: sample_rate as i32,
             drum_volume: 1.0,
@@ -166,7 +166,7 @@ impl SamplerEngine {
         self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
         // Restore programs on new synth
         if let Some(synth) = &mut self.keys.synth {
-            for i in 0..2 {
+            for i in 0..8 {
                 if self.layer_sf2[i] {
                     synth.process_midi_message(i as i32, 0xB0, 0, self.layer_bank[i] as i32);
                     synth.process_midi_message(i as i32, 0xC0, self.layer_program[i] as i32, 0);
@@ -224,11 +224,11 @@ impl SamplerEngine {
     }
 
     pub fn set_layer_mode(&mut self, layer: usize, enabled: bool) {
-        if layer < 2 { self.layer_sf2[layer] = enabled; }
+        if layer < 8 { self.layer_sf2[layer] = enabled; }
     }
 
     pub fn set_layer_program(&mut self, layer: usize, program: u8, bank: u8) {
-        if layer >= 2 { return; }
+        if layer >= 8 { return; }
         self.layer_program[layer] = program;
         self.layer_bank[layer] = bank;
         self.keys.midi(layer as i32, 0xB0, 0, bank as i32);

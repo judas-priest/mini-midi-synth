@@ -111,21 +111,26 @@ const FILTER_NAMES: &[&str] = &[
 const FILTER_ROUTING_NAMES: &[&str] = &["Single", "Serial", "Parallel"];
 const FORMANT_VOICE_NAMES: &[&str] = &["Bass", "Tenor", "Alto", "Soprano"];
 const FORMANT_VOWEL_NAMES: &[&str] = &["A (ah)", "E (eh)", "I (ee)", "O (oh)", "U (oo)"];
-const LAYER_NAMES: &[&str] = &["A", "B"];
+const LAYER_NAMES: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8"];
 
 fn buffer_label(size: u32) -> String {
     if size == 0 { "Default".to_string() } else { format!("{size}") }
 }
 
-/// Per-layer GUI state
+/// Per-part GUI state (one entry per part slot 0-7)
 pub struct LayerState {
     pub preset_idx: usize,
     pub edited_params: std::collections::BTreeMap<String, f32>,
     pub params_dirty: bool,
-    pub enabled: bool,
+    pub enabled: bool,   // part is in scene
+    pub mute: bool,      // temporarily silenced
     pub volume: f32,
     pub min_note: u8,
     pub max_note: u8,
+    pub vel_min: u8,
+    pub vel_max: u8,
+    pub pan: f32,        // -1..+1
+    pub transpose: i8,   // semitones
     pub sf2_mode: bool,
     pub sf2_program: u8,
 }

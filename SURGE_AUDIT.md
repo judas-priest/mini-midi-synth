@@ -80,12 +80,12 @@
 | ✅ | 🔴 Высокий | Полная Airwindows библиотека (33 алгоритма) | Высокая |
 | ✅ | 🔴 Высокий | 16-слотовая FX-цепочка | Высокая |
 | ⬜ | 🟡 Средний | Scene LFO (2 доп. LFO на слой) | Средняя |
-| ⬜ | 🟡 Средний | Hold-сегмент (AHDSR) | Низкая |
-| ⬜ | 🟡 Средний | Fingered portamento | Низкая |
+| ✅ | 🟡 Средний | Hold-сегмент (AHDSR) | Низкая |
+| ✅ | 🟡 Средний | Fingered portamento | Низкая |
 | ⬜ | 🟡 Средний | 8 макро-ручек | Средняя |
-| ⬜ | 🟡 Средний | LFO trigger modes (Free Run, Random) | Низкая |
+| ✅ | 🟡 Средний | LFO trigger modes (Free Run, Random, RandomUni) | Низкая |
 | ⬜ | 🟡 Средний | Микротюнинг Scala/KBM | Средняя |
-| ⬜ | 🟡 Средний | Asymmetric pitch bend | Низкая |
+| ✅ | 🟡 Средний | Asymmetric pitch bend | Низкая |
 | ⬜ | 🟢 Низкий | Twist/Plaits порт | Очень высокая |
 | ⬜ | 🟢 Низкий | Lua Formula LFO | Очень высокая |
 | ⬜ | 🟢 Низкий | MPE | Высокая |

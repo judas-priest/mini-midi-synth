@@ -147,8 +147,12 @@ pub enum MidiEvent {
 pub enum ControlEvent {
     LoadPreset { layer: usize, params: PresetParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_params: Option<std::collections::BTreeMap<String, f32>> },
     SetLayerEnabled { layer: usize, enabled: bool },
+    SetLayerMute { layer: usize, mute: bool },
     SetLayerVolume { layer: usize, volume: f32 },
     SetLayerRange { layer: usize, min_note: u8, max_note: u8 },
+    SetLayerVelRange { layer: usize, vel_min: u8, vel_max: u8 },
+    SetLayerPan { layer: usize, pan: f32 },
+    SetLayerTranspose { layer: usize, semitones: i8 },
     SetCcMap { map: CcMap },
     SetGlobalParam { key: &'static str, value: f32 },
     // Drum engine controls
@@ -231,8 +235,8 @@ pub struct ModulationState {
     pub amp_mod: f32,
 }
 
-pub const MAX_LAYERS: usize = 2;
-const VOICES_PER_LAYER: usize = 12;
+pub const MAX_LAYERS: usize = 8;
+const VOICES_PER_LAYER: usize = 8;
 pub const BLOCK_SIZE: usize = 32;
 
 /// Global parameters — only truly global controls that persist across everything.
@@ -309,9 +313,14 @@ struct Layer {
     voices: Vec<Voice>,
     age_counter: u64,
     volume: f32,
-    enabled: bool,
+    enabled: bool,   // part is in scene (has preset, receives MIDI)
+    mute: bool,      // temporary silence without removing from scene
     min_note: u8,
     max_note: u8,
+    vel_min: u8,     // velocity range (1-127)
+    vel_max: u8,
+    pan: f32,        // -1.0 (L) .. 0.0 (C) .. +1.0 (R)
+    transpose: i8,   // semitone offset per part (-24..+24)
     params: PresetParams,
     lfos: [Lfo; 4],
     mod_matrix: ModMatrix,
@@ -358,8 +367,10 @@ impl Layer {
     fn new(sample_rate: f32) -> Self {
         let voices = (0..VOICES_PER_LAYER).map(|_| Voice::new(sample_rate)).collect();
         Self {
-            voices, age_counter: 0, volume: 0.8, enabled: true,
-            min_note: 0, max_note: 127, params: PresetParams::default(),
+            voices, age_counter: 0, volume: 0.8, enabled: false, mute: false,
+            min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
+            pan: 0.0, transpose: 0,
+            params: PresetParams::default(),
             lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate)],
             mod_matrix: ModMatrix::default(),
             mseg1: Mseg::default(), mseg1_state: MsegState::new(sample_rate),
@@ -1515,8 +1526,9 @@ impl CachedFxParams {
 
 impl SynthEngine {
     pub fn new(sample_rate: f32) -> Self {
+        // All 8 layers pre-allocated; only layer 0 enabled by default
         let mut layers: Vec<Layer> = (0..MAX_LAYERS).map(|_| Layer::new(sample_rate)).collect();
-        if layers.len() > 1 { layers[1].enabled = false; }
+        layers[0].enabled = true; // parts 1-7 start disabled (zero CPU cost)
         Self {
             layers, drum_engine: DrumEngine::new(sample_rate),
             sampler: SamplerEngine::new(sample_rate),
@@ -1732,13 +1744,15 @@ impl SynthEngine {
                     self.looper.record_event(note, 0);
                 } else {
                     for (i, layer) in self.layers.iter_mut().enumerate() {
-                        if !layer.enabled { continue; }
+                        if !layer.enabled || layer.mute { continue; }
+                        // Key range + velocity range check
+                        let transposed = (note as i16 + layer.transpose as i16).clamp(0, 127) as u8;
+                        if note < layer.min_note || note > layer.max_note { continue; }
+                        if velocity < layer.vel_min || velocity > layer.vel_max { continue; }
                         if layer.sf2_mode {
-                            if note >= layer.min_note && note <= layer.max_note {
-                                self.sampler.note_on(i, note, velocity);
-                            }
-                        } else if note >= layer.min_note && note <= layer.max_note {
-                            layer.note_on(note, velocity);
+                            self.sampler.note_on(i, transposed, velocity);
+                        } else {
+                            layer.note_on(transposed, velocity);
                         }
                     }
                     self.looper.record_event(note, velocity);
@@ -1901,7 +1915,23 @@ impl SynthEngine {
                 self.reset_preset_pickups();
             }
             ControlEvent::SetLayerEnabled { layer, enabled } => {
-                if let Some(l) = self.layers.get_mut(layer) { l.enabled = enabled; }
+                if let Some(l) = self.layers.get_mut(layer) {
+                    l.enabled = enabled;
+                    if !enabled {
+                        // Graceful note-off all voices
+                        for v in &mut l.voices { if v.active { v.note_off(); } }
+                        l.note_stack.clear();
+                        l.latch_held.clear();
+                    }
+                }
+            }
+            ControlEvent::SetLayerMute { layer, mute } => {
+                if let Some(l) = self.layers.get_mut(layer) {
+                    l.mute = mute;
+                    if mute {
+                        for v in &mut l.voices { if v.active { v.note_off(); } }
+                    }
+                }
             }
             ControlEvent::SetLayerVolume { layer, volume } => {
                 if let Some(l) = self.layers.get_mut(layer) { l.volume = volume; }
@@ -1909,6 +1939,15 @@ impl SynthEngine {
             }
             ControlEvent::SetLayerRange { layer, min_note, max_note } => {
                 if let Some(l) = self.layers.get_mut(layer) { l.min_note = min_note; l.max_note = max_note; }
+            }
+            ControlEvent::SetLayerVelRange { layer, vel_min, vel_max } => {
+                if let Some(l) = self.layers.get_mut(layer) { l.vel_min = vel_min; l.vel_max = vel_max; }
+            }
+            ControlEvent::SetLayerPan { layer, pan } => {
+                if let Some(l) = self.layers.get_mut(layer) { l.pan = pan.clamp(-1.0, 1.0); }
+            }
+            ControlEvent::SetLayerTranspose { layer, semitones } => {
+                if let Some(l) = self.layers.get_mut(layer) { l.transpose = semitones; }
             }
             ControlEvent::SetCcMap { map } => { self.cc_map = map; }
             ControlEvent::SetGlobalParam { key, value } => {
@@ -2152,9 +2191,9 @@ impl SynthEngine {
         let seq_bpm = self.drum_engine.sequencer.bpm;
 
         // Pre-compute modulation state for each layer (control rate)
-        let mut layer_mods: [ModulationState; MAX_LAYERS] = [ModulationState {
+        let mut layer_mods: Vec<ModulationState> = vec![ModulationState {
             pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
-        }; MAX_LAYERS];
+        }; self.layers.len()];
 
         for (li, layer) in self.layers.iter_mut().enumerate() {
             if !layer.enabled { continue; }
@@ -2398,7 +2437,12 @@ impl SynthEngine {
             for (li, layer) in self.layers.iter_mut().enumerate() {
                 if !layer.enabled { continue; }
                 let (l, r) = layer.tick(&layer_mods[li]);
-                out_l += l; out_r += r;
+                // Apply per-part pan (constant-power: sqrt of (0.5 ± pan*0.5))
+                let pan = layer.pan.clamp(-1.0, 1.0);
+                let gain_l = ((0.5 - pan * 0.5) as f64).sqrt() as f32;
+                let gain_r = ((0.5 + pan * 0.5) as f64).sqrt() as f32;
+                out_l += l * gain_l;
+                out_r += r * gain_r;
             }
 
             // SF2 + drums
