@@ -129,8 +129,8 @@ pub struct LayerState {
     pub volume: f32,
     pub min_note: u8,
     pub max_note: u8,
-    pub vel_min: u8,
-    pub vel_max: u8,
+    #[allow(dead_code)] pub vel_min: u8,
+    #[allow(dead_code)] pub vel_max: u8,
     pub pan: f32,        // -1..+1
     pub transpose: i8,   // semitones
     pub sf2_mode: bool,
@@ -297,7 +297,7 @@ pub struct App {
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
     // Split mode
-    pub split_enabled: bool,
+    #[allow(dead_code)] pub split_enabled: bool,
     pub split_point: u8,   // MIDI note where right zone starts (default 60 = C4)
     // FX Chain panel
     pub show_fx_chain: bool,

@@ -28,7 +28,7 @@ impl App {
             }
 
             // Add to Zone A
-            let a_count = (ZONE_A).filter(|&i| self.layers[i].enabled).count();
+            let a_count = ZONE_A.into_iter().filter(|&i| self.layers[i].enabled).count();
             if a_count < 4 && ui.small_button("+ A").clicked() {
                 self.add_part_to_zone(false);
             }
@@ -41,7 +41,7 @@ impl App {
             if ui.checkbox(&mut split, "Split").changed() {
                 if split {
                     // Enable the first free B slot
-                    if let Some(i) = (ZONE_B).find(|&i| !self.layers[i].enabled) {
+                    if let Some(i) = ZONE_B.into_iter().find(|&i| !self.layers[i].enabled) {
                         self.layers[i].enabled = true;
                         let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer: i, enabled: true });
                         self.send_edited_params(i);
@@ -75,7 +75,7 @@ impl App {
                     if !self.layers[i].enabled { continue; }
                     self.draw_part_tab(ui, i);
                 }
-                let b_count = (ZONE_B).filter(|&i| self.layers[i].enabled).count();
+                let b_count = ZONE_B.into_iter().filter(|&i| self.layers[i].enabled).count();
                 if b_count < 4 && ui.small_button("+ B").clicked() {
                     self.add_part_to_zone(true);
                 }
@@ -255,8 +255,8 @@ impl App {
     }
 
     fn add_part_to_zone(&mut self, zone_b: bool) {
-        let mut range = if zone_b { ZONE_B } else { ZONE_A };
-        if let Some(i) = range.find(|&i| !self.layers[i].enabled) {
+        let range = if zone_b { ZONE_B } else { ZONE_A };
+        if let Some(i) = range.into_iter().find(|&i| !self.layers[i].enabled) {
             self.layers[i].enabled = true;
             self.layers[i].mute = false;
             self.layers[i].volume = 0.8;
@@ -277,8 +277,8 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer, enabled: false });
         self.active_layer = if layer >= 4 { 4 } else { 0 };
         // find first enabled in same zone
-        let mut zone = if layer >= 4 { ZONE_B } else { ZONE_A };
-        if let Some(i) = zone.find(|&i| self.layers[i].enabled) {
+        let zone = if layer >= 4 { ZONE_B } else { ZONE_A };
+        if let Some(i) = zone.into_iter().find(|&i| self.layers[i].enabled) {
             self.active_layer = i;
         }
     }
