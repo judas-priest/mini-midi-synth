@@ -119,6 +119,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Bass", "wobble_bass", include_str!("../presets/wobble_bass.json")),
     ("Bass", "fuzz_bass", include_str!("../presets/fuzz_bass.json")),
     ("Bass", "pressure_bass", include_str!("../presets/pressure_bass.json")),
+    ("Bass", "aw_iron_tape_bass", include_str!("../presets/aw_iron_tape_bass.json")),
     // Bass Guitar
     ("Bass Guitar", "bass_finger", include_str!("../presets/bass_finger.json")),
     ("Bass Guitar", "bass_finger_v2",  include_str!("../presets/bass_finger_v2.json")),
@@ -138,6 +139,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Lead", "treemonster_lead", include_str!("../presets/treemonster_lead.json")),
     ("Lead", "vintage_ladder_lead", include_str!("../presets/vintage_ladder_lead.json")),
     ("Lead", "westcoast_lead", include_str!("../presets/westcoast_lead.json")),
+    ("Lead", "aw_hardvac_lead", include_str!("../presets/aw_hardvac_lead.json")),
     // Pad
     ("Pad", "warm_pad", include_str!("../presets/warm_pad.json")),
     ("Pad", "warm_pad_v2",       include_str!("../presets/warm_pad_v2.json")),
@@ -157,6 +159,8 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Pad", "lofi_tape_pad",     include_str!("../presets/lofi_tape_pad.json")),
     ("Pad", "svf_morph_sweep",   include_str!("../presets/svf_morph_sweep.json")),
     ("Pad", "harmonic_shimmer_pad", include_str!("../presets/harmonic_shimmer_pad.json")),
+    ("Pad", "aw_galactic_pad",   include_str!("../presets/aw_galactic_pad.json")),
+    ("Pad", "aw_melt_chorus",    include_str!("../presets/aw_melt_chorus.json")),
     // FX / Stab
     ("FX", "synth_stab", include_str!("../presets/synth_stab.json")),
     ("FX", "noise_sweep", include_str!("../presets/noise_sweep.json")),
@@ -164,6 +168,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("FX", "wobble", include_str!("../presets/wobble.json")),
     ("FX", "wind", include_str!("../presets/wind.json")),
     // Drums / Percussion
+    ("Drums", "aw_pressure_drums", include_str!("../presets/aw_pressure_drums.json")),
     ("Drums", "taiko", include_str!("../presets/taiko.json")),
     ("Drums", "timpani", include_str!("../presets/timpani.json")),
     ("Drums", "bass_drum", include_str!("../presets/bass_drum.json")),

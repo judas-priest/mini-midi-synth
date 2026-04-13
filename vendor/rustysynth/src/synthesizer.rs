@@ -282,6 +282,13 @@ impl Synthesizer {
         }
     }
 
+    /// Sets the pitch bend range for all channels.
+    pub fn set_pitch_bend_range(&mut self, semitones: i32) {
+        for channel in &mut self.channels {
+            channel.set_pitch_bend_range_semitones(semitones);
+        }
+    }
+
     /// Resets all the controllers.
     pub fn reset_all_controllers(&mut self) {
         for channel in &mut self.channels {

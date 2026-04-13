@@ -2,6 +2,8 @@
 
 mod airwindows;
 use airwindows::Airwindows;
+pub mod fx_chain;
+pub use fx_chain::FxChain;
 pub mod bass;
 pub mod bbd_ensemble;
 pub mod bitcrusher;
@@ -606,6 +608,9 @@ impl Layer {
             osc_ws_mode: self.params.osc_ws_mode as u32,
             osc_ws_drive: self.params.osc_ws_drive * 4.0 + 0.5,
             osc_ws_mix: self.params.osc_ws_mix,
+            inter_ws_mode: self.params.inter_ws_mode as u32,
+            inter_ws_drive: self.params.inter_ws_drive * 4.0 + 0.5,
+            inter_ws_mix: self.params.inter_ws_mix,
             svf_morph: self.params.svf_morph,
         }
     }
@@ -961,12 +966,16 @@ pub struct PresetParams {
     conv_reverb_room: f32, conv_reverb_damping: f32, conv_reverb_predelay: f32, conv_reverb_mix: f32,
     // Osc Waveshaper (per-voice, pre-filter)
     osc_ws_mode: f32, osc_ws_drive: f32, osc_ws_mix: f32,
+    // Inter-filter waveshaper (between F1 and F2 in Serial routing)
+    inter_ws_mode: f32, inter_ws_drive: f32, inter_ws_mix: f32,
     // SVF Morph filter parameter (0=LP, 0.5=BP, 1=HP)
     pub svf_morph: f32,
     // Airwindows
     airwindows_mode: f32,
     airwindows_drive: f32,
     airwindows_mix: f32,
+    // 16-slot FX chain (new style — takes precedence when active)
+    pub fx_chain: FxChain,
 }
 
 impl Default for PresetParams {
@@ -1058,8 +1067,10 @@ impl Default for PresetParams {
             vocoder_env_follow: 0.5, vocoder_gate: 0.0, vocoder_mix: 0.0,
             conv_reverb_room: 0.5, conv_reverb_damping: 0.5, conv_reverb_predelay: 0.02, conv_reverb_mix: 0.0,
             osc_ws_mode: 0.0, osc_ws_drive: 0.5, osc_ws_mix: 0.0,
+            inter_ws_mode: 0.0, inter_ws_drive: 0.5, inter_ws_mix: 0.0,
             svf_morph: 0.0,
             airwindows_mode: 0.0, airwindows_drive: 0.5, airwindows_mix: 0.0,
+            fx_chain: FxChain::default(),
         }
     }
 }
@@ -1207,10 +1218,17 @@ impl PresetParams {
             conv_reverb_predelay: p("conv_reverb_predelay", 0.02), conv_reverb_mix: p("conv_reverb_mix", 0.0),
             osc_ws_mode: p("osc_ws_mode", 0.0), osc_ws_drive: p("osc_ws_drive", 0.5),
             osc_ws_mix: p("osc_ws_mix", 0.0),
+            inter_ws_mode: p("inter_ws_mode", 0.0), inter_ws_drive: p("inter_ws_drive", 0.5),
+            inter_ws_mix: p("inter_ws_mix", 0.0),
             svf_morph: p("svf_morph", 0.0),
             airwindows_mode: p("airwindows_mode", 0.0),
             airwindows_drive: p("airwindows_drive", 0.5),
             airwindows_mix: p("airwindows_mix", 0.0),
+            fx_chain: if params.contains_key("fx0_type") {
+                FxChain::from_map(params)
+            } else {
+                FxChain::default() // active=false → legacy path in tick_block
+            },
         }
     }
 }
@@ -1854,6 +1872,9 @@ impl SynthEngine {
             ControlEvent::SetCcMap { map } => { self.cc_map = map; }
             ControlEvent::SetGlobalParam { key, value } => {
                 self.global_params.set(&key, value);
+                if key == "pitch_bend_range" {
+                    self.sampler.set_pitch_bend_range(value.clamp(1.0, 24.0) as u8);
+                }
             }
             ControlEvent::DrumSetStep { slot, step, velocity } => {
                 let pat = self.drum_engine.sequencer.current_pattern as usize;
@@ -1924,6 +1945,7 @@ impl SynthEngine {
             }
             ControlEvent::LoadKeysSoundFont { soundfont } => {
                 self.sampler.load_keys_soundfont(soundfont);
+                self.sampler.set_pitch_bend_range(self.global_params.pitch_bend_range as u8);
             }
             ControlEvent::LoadDrumsSoundFont { soundfont } => {
                 self.sampler.load_drums_soundfont(soundfont);
@@ -2249,6 +2271,7 @@ impl SynthEngine {
         // Cache effect params (once per block)
         let ep = self.layers.iter().find(|l| l.enabled).map(|l| &l.params);
         let fx = CachedFxParams::from_preset(ep, &self.global_params);
+        let fx_chain = ep.map(|p| p.fx_chain).unwrap_or_default();
 
         // --- MIDI file sequencer: fire block-level events ---
         // (process_block clears midi_seq_buf itself before filling it)
@@ -2466,6 +2489,21 @@ impl SynthEngine {
                 self.airwindows.tick(rl, rr, fx.airwindows_mode, fx.airwindows_drive, fx.airwindows_mix)
             } else { (rl, rr) };
 
+            // ── New 16-slot FX chain (runs after legacy chain when active) ──
+            let (rl, rr) = if fx_chain.active {
+                let mut sl = rl;
+                let mut sr = rr;
+                for slot in &fx_chain.slots {
+                    if slot.enabled && slot.slot_type != fx_chain::FxSlotType::None && slot.mix > 0.001 {
+                        let slot_copy = *slot;
+                        (sl, sr) = self.apply_fx_slot(&slot_copy, sl, sr);
+                    }
+                }
+                (sl, sr)
+            } else {
+                (rl, rr)
+            };
+
             let sample_rate = self.sample_rate;
             let (tl, tr) = self.global_params.apply_tone(rl, rr, sample_rate);
             let vol = self.global_params.master_volume;
@@ -2474,6 +2512,138 @@ impl SynthEngine {
             // Write mono mix to oscilloscope buffer
             self.scope_buf.push((buf_l[s] + buf_r[s]) * 0.5, &mut self.scope_write);
         }
+    }
+
+    /// Process one sample through a single FX chain slot. Returns (out_l, out_r).
+    /// `mix` is the slot's dry/wet (0..1). Slot's own mix is already checked by caller.
+    #[inline]
+    fn apply_fx_slot(&mut self, slot: &fx_chain::FxSlot, in_l: f32, in_r: f32) -> (f32, f32) {
+        use fx_chain::FxSlotType;
+        let p = slot.params;
+        let mix = slot.mix;
+        let dry_l = in_l;
+        let dry_r = in_r;
+        let (wet_l, wet_r) = match slot.slot_type {
+            FxSlotType::None => return (in_l, in_r),
+            FxSlotType::Overdrive => {
+                self.overdrive.drive = p[0] * 48.0 + 1.0;
+                self.overdrive.tone  = p[1];
+                self.overdrive.mix   = 1.0;
+                self.overdrive.tick(in_l, in_r)
+            }
+            FxSlotType::Tape => {
+                self.tape.tick(in_l, in_r, p[0]*3.0, p[1], p[2], p[3], 0.5, 1.0)
+            }
+            FxSlotType::Neuron => {
+                self.neuron.tick(in_l, in_r, p[0], p[1], p[2], 0.0, 0.5, p[3].max(10.0), 0.5, 1.0)
+            }
+            FxSlotType::Bonsai => {
+                let mode = bonsai::BonsaiMode::from_param(p[3]);
+                self.bonsai.tick(in_l, in_r, p[0], p[1], p[2], mode, 1.0)
+            }
+            FxSlotType::WaveShaper => {
+                self.wave_shaper.tick(in_l, in_r, p[0]*4.0+0.5, p[1] as u32, p[2]*2.0-1.0, 1.0)
+            }
+            FxSlotType::Airwindows => {
+                self.airwindows.tick(in_l, in_r, p[0] as u32, p[1], 1.0)
+            }
+            FxSlotType::Chorus => {
+                let mono = (in_l + in_r) * 0.5;
+                self.chorus.tick(mono, 1.0)
+            }
+            FxSlotType::BbdEnsemble => {
+                let mono = (in_l + in_r) * 0.5;
+                self.bbd_ensemble.tick(mono, p[0], p[1], 1.0)
+            }
+            FxSlotType::Flanger => {
+                self.flanger.mix = 1.0;
+                self.flanger.tick(in_l, in_r)
+            }
+            FxSlotType::Phaser => {
+                self.phaser.mix = 1.0;
+                self.phaser.tick(in_l, in_r)
+            }
+            FxSlotType::Tremolo => {
+                self.tremolo.mix = 1.0;
+                self.tremolo.tick(in_l, in_r)
+            }
+            FxSlotType::Rotary => {
+                self.rotary.tick(in_l, in_r, p[0], 1.0)
+            }
+            FxSlotType::Bitcrusher => {
+                self.bitcrusher.mix = 1.0;
+                self.bitcrusher.tick(in_l, in_r)
+            }
+            FxSlotType::Delay => {
+                self.delay.tick(in_l, in_r, p[0], p[1], p[2], p[3], false, 1.0)
+            }
+            FxSlotType::FloatyDelay => {
+                self.floaty_delay.tick(in_l, in_r, p[0], p[1], p[2], p[3]*5.0, 0.3, 1.0)
+            }
+            FxSlotType::Reverb => {
+                self.reverb.tick(in_l, in_r, p[0], p[1], p[2], p[3], 1.0)
+            }
+            FxSlotType::Reverb2 => {
+                self.reverb2.tick(in_l, in_r, p[0], p[1], p[2], 1.0)
+            }
+            FxSlotType::SpringReverb => {
+                self.spring_reverb.tick(in_l, in_r, p[0], p[1], p[2], p[3], 0.3, 0.0, 1.0)
+            }
+            FxSlotType::ConvReverb => {
+                self.conv_reverb.tick(in_l, in_r, p[0], p[1], p[2]*0.2, 1.0)
+            }
+            FxSlotType::Nimbus => {
+                self.nimbus.tick(in_l, in_r, p[0], p[1], p[2], p[3], 0.5, 0.5, 1.0)
+            }
+            FxSlotType::RingMod => {
+                self.ring_mod.tick(in_l, in_r, p[0], p[1], p[2], 0.5, 1.0)
+            }
+            FxSlotType::FreqShift => {
+                self.freq_shift.tick(in_l, in_r, p[0]*1000.0, p[1], p[2], 1.0)
+            }
+            FxSlotType::Resonator => {
+                let rf = p[0];
+                let rd = p[1];
+                self.resonator.set_freq(0, rf);
+                self.resonator.set_freq(1, rf * 1.5);
+                self.resonator.set_freq(2, rf * 2.0);
+                self.resonator.set_freq(3, rf * 3.0);
+                for i in 0..4 { self.resonator.set_decay(i, rd); }
+                let mono = (in_l + in_r) * 0.5;
+                self.resonator.tick(mono, 1.0)
+            }
+            FxSlotType::Combulator => {
+                self.combulator.tick(in_l, in_r, p[0], p[1], p[2], p[3], 0.5, 1.0)
+            }
+            FxSlotType::Treemonster => {
+                self.treemonster.tick(in_l, in_r, p[0], p[1]*24.0-12.0, p[2], 1.0)
+            }
+            FxSlotType::Vocoder => {
+                let mod_in = (in_l + in_r) * 0.5;
+                self.vocoder.tick(in_l, in_r, mod_in, p[0], p[1], 1.0)
+            }
+            FxSlotType::GraphicEq => {
+                // p0=low p1=mid p2=high p3=output — map to 11-band array
+                let gains = [p[0]*24.0-12.0, p[0]*24.0-12.0, p[0]*24.0-12.0,
+                             p[1]*24.0-12.0, p[1]*24.0-12.0, p[1]*24.0-12.0, p[1]*24.0-12.0,
+                             p[2]*24.0-12.0, p[2]*24.0-12.0, p[2]*24.0-12.0, p[2]*24.0-12.0];
+                self.graphic_eq_fx.tick(in_l, in_r, &gains, p[3])
+            }
+            FxSlotType::Compressor => {
+                self.compressor.tick(in_l, in_r)
+            }
+            FxSlotType::MsTool => {
+                self.ms_tool.tick(in_l, in_r, p[0]*2.0-1.0, p[1]*2.0-1.0, p[2], 1.0)
+            }
+            FxSlotType::Conditioner => {
+                self.conditioner.tick(in_l, in_r, p[0], p[1], p[2], 1.0)
+            }
+            FxSlotType::Exciter => {
+                self.exciter.tick(in_l, in_r, p[0], p[1]*8000.0+200.0, p[2], 1.0)
+            }
+        };
+        // Apply slot's dry/wet mix
+        (dry_l + (wet_l - dry_l) * mix, dry_r + (wet_r - dry_r) * mix)
     }
 
     #[cfg(test)]

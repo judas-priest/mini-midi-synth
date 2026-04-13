@@ -134,6 +134,7 @@ impl MidiPlayer {
     }
 
     /// Stop playback and seek to beginning.
+    #[allow(dead_code)]
     pub fn stop(&mut self) {
         self.playing = false;
         self.play_atom.store(0, Ordering::Relaxed);

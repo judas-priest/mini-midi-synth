@@ -47,6 +47,7 @@ impl LfoWaveform {
 }
 
 /// Tempo-sync rate divisions. Index maps to musical subdivision.
+#[allow(dead_code)]
 pub const TEMPO_SYNC_NAMES: &[&str] = &[
     "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/8", "1/16", "1/32",
     "1/2T", "1/4T", "1/8T", "1/16T", "1/2D", "1/4D", "1/8D", "1/16D",

@@ -136,6 +136,10 @@ impl Channel {
         self.chorus_send = value as u8;
     }
 
+    pub(crate) fn set_pitch_bend_range_semitones(&mut self, semitones: i32) {
+        self.pitch_bend_range = (semitones << 7) as i16;
+    }
+
     pub(crate) fn set_rpn_coarse(&mut self, value: i32) {
         self.rpn = (self.rpn & 0x7F) | (value << 7) as i16;
     }

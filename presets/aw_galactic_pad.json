@@ -1,0 +1,17 @@
+{
+  "name": "AW Galactic Pad",
+  "params": {
+    "osc_type": 3.0,
+    "filter_type": 0.0,
+    "filter_cutoff": 3000.0,
+    "filter_resonance": 0.1,
+    "amp_attack": 0.8,
+    "amp_decay": 0.5,
+    "amp_sustain": 0.85,
+    "amp_release": 2.0,
+    "airwindows_mode": 20.0,
+    "airwindows_drive": 0.65,
+    "airwindows_mix": 0.7,
+    "master_volume": 0.75
+  }
+}

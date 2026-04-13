@@ -101,6 +101,10 @@ pub struct Voice {
     osc_ws_mix: f32,
     osc_ws_dc_x1: f32,
     osc_ws_dc_y1: f32,
+    // Inter-filter waveshaper (applied between Filter1 and Filter2 in Serial routing)
+    inter_ws_mode: u32,
+    inter_ws_drive: f32,
+    inter_ws_mix: f32,
 }
 
 impl Voice {
@@ -156,6 +160,9 @@ impl Voice {
             osc_ws_mix: 0.0,
             osc_ws_dc_x1: 0.0,
             osc_ws_dc_y1: 0.0,
+            inter_ws_mode: 0,
+            inter_ws_drive: 1.0,
+            inter_ws_mix: 0.0,
         }
     }
 
@@ -402,6 +409,11 @@ impl Voice {
         self.osc_ws_mix = params.osc_ws_mix;
         self.osc_ws_dc_x1 = 0.0;
         self.osc_ws_dc_y1 = 0.0;
+
+        // Inter-filter waveshaper
+        self.inter_ws_mode = params.inter_ws_mode;
+        self.inter_ws_drive = params.inter_ws_drive;
+        self.inter_ws_mix = params.inter_ws_mix;
 
         // Unison
         let is_physical = !self.oscs[0].osc_type.is_simple()
@@ -706,11 +718,18 @@ impl Voice {
                 FilterRouting::Single => self.filter.tick(mix),
                 FilterRouting::Serial => {
                     let f1 = self.filter.tick(mix);
+                    // Inter-filter waveshaper (Surge-style: WS between F1 and F2)
+                    let inter = if self.inter_ws_mix > 0.001 {
+                        let shaped = shape_sample(f1, self.inter_ws_mode, self.inter_ws_drive);
+                        f1 + self.inter_ws_mix * (shaped - f1)
+                    } else {
+                        f1
+                    };
                     let cutoff2 = (self.filter2_base_cutoff * semis_mult
                         + self.filter_env_amount * filter_mod)
                         * self.filter_key_mult;
                     self.filter2.set_cutoff(cutoff2);
-                    self.filter2.tick(f1)
+                    self.filter2.tick(inter)
                 }
                 FilterRouting::Parallel => {
                     let f1 = self.filter.tick(mix);
@@ -854,6 +873,10 @@ pub struct VoiceParams {
     pub osc_ws_mode: u32,
     pub osc_ws_drive: f32,
     pub osc_ws_mix: f32,
+    // Inter-filter waveshaper (between F1 and F2 in Serial routing)
+    pub inter_ws_mode: u32,
+    pub inter_ws_drive: f32,
+    pub inter_ws_mix: f32,
     // SVF Morph filter parameter
     pub svf_morph: f32,
 }

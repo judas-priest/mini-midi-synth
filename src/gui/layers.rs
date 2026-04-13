@@ -30,6 +30,7 @@ impl App {
                     self.show_drums = false;
                     self.show_looper = false;
                     self.show_midi_seq = false;
+                    self.show_fx_chain = false;
                     self.seq_target_atom.store(1, Ordering::Relaxed); // synth → looper
                 }
             }
@@ -39,6 +40,7 @@ impl App {
                 self.show_drums = true;
                 self.show_looper = false;
                 self.show_midi_seq = false;
+                self.show_fx_chain = false;
                 self.seq_target_atom.store(0, Ordering::Relaxed); // drums
             }
 
@@ -47,6 +49,15 @@ impl App {
                 self.show_midi_seq = true;
                 self.show_drums = false;
                 self.show_looper = false;
+                self.show_fx_chain = false;
+            }
+
+            // FX Chain tab
+            if ui.selectable_label(self.show_fx_chain, "FX Chain").clicked() {
+                self.show_fx_chain = true;
+                self.show_drums = false;
+                self.show_looper = false;
+                self.show_midi_seq = false;
             }
 
             // Looper tab removed — controls are now inline in synth panel

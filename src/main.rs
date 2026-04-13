@@ -274,6 +274,7 @@ fn main() -> Result<()> {
         pitch_seq_swing: [0.0; 2],
         preset_search: String::new(),
         scope_buf,
+        show_fx_chain: false,
         show_midi_seq: false,
         midi_seq_path: String::new(),
         midi_seq_status: String::new(),

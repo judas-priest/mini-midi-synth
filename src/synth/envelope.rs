@@ -1,6 +1,7 @@
-/// Analog-style ADSR envelope generator using one-pole IIR filters with
-/// overshoot targets, modeled after RC charging circuits in analog synths.
-/// Supports configurable attack/decay shapes (Surge XT analog mode).
+/// Analog-style ADSR envelope generator.
+///
+/// Sqrt and Exponential shapes use one-pole IIR (RC-circuit model) with overshoot targets.
+/// Linear and Quadratic shapes use phase tracking for correct curve shapes.
 
 #[derive(Clone, Copy, PartialEq)]
 enum EnvStage {
@@ -15,10 +16,10 @@ enum EnvStage {
 /// 0=sqrt (fast start), 1=linear, 2=quadratic (slow start), 3=exponential (pure RC)
 #[derive(Clone, Copy, PartialEq)]
 pub enum EnvShape {
-    Sqrt,        // 0 — concave (fast onset)
-    Linear,      // 1 — straight line
-    Quadratic,   // 2 — convex (slow onset)
-    Exponential, // 3 — true exponential: no overshoot, pure RC decay
+    Sqrt,        // 0 — concave (fast onset), IIR with overshoot
+    Linear,      // 1 — straight line, phase-tracked
+    Quadratic,   // 2 — convex (slow onset), phase-tracked
+    Exponential, // 3 — true exponential: pure RC decay, no overshoot
 }
 
 impl EnvShape {
@@ -31,16 +32,9 @@ impl EnvShape {
         }
     }
 
-    /// Apply shape to a 0..1 fraction.
     #[inline(always)]
-    #[allow(dead_code)]
-    fn apply(self, t: f32) -> f32 {
-        match self {
-            Self::Sqrt => t.sqrt(),
-            Self::Linear => t,
-            Self::Quadratic => t * t,
-            Self::Exponential => t,
-        }
+    fn is_phase_based(self) -> bool {
+        matches!(self, Self::Linear | Self::Quadratic)
     }
 }
 
@@ -48,12 +42,18 @@ impl EnvShape {
 pub struct Envelope {
     stage: EnvStage,
     output: f32,
+    // IIR coefficients and targets (for Sqrt / Exponential)
     attack_coeff: f32,
     decay_coeff: f32,
     release_coeff: f32,
-    attack_target: f32,
-    decay_target: f32,
-    release_target: f32,
+    // Phase tracking (for Linear / Quadratic)
+    phase: f32,
+    phase_step_a: f32,
+    phase_step_d: f32,
+    phase_step_r: f32,
+    // Remembered start levels for phase-based decay/release
+    decay_start: f32,
+    release_start: f32,
     sustain: f32,
     sample_rate: f32,
     // Shape selection
@@ -62,8 +62,7 @@ pub struct Envelope {
     release_shape: EnvShape,
 }
 
-/// Compute one-pole coefficient from time in seconds and sample rate.
-/// For very short times, clamp to avoid numerical blow-up.
+/// Compute one-pole IIR coefficient from time in seconds.
 fn time_to_coeff(time_secs: f32, sample_rate: f32) -> f32 {
     let t = time_secs.max(0.001);
     (-1.0_f32 / (t * sample_rate)).exp()
@@ -77,9 +76,12 @@ impl Envelope {
             attack_coeff: 0.0,
             decay_coeff: 0.0,
             release_coeff: 0.0,
-            attack_target: 0.0,
-            decay_target: 0.0,
-            release_target: 0.0,
+            phase: 0.0,
+            phase_step_a: 0.0,
+            phase_step_d: 0.0,
+            phase_step_r: 0.0,
+            decay_start: 1.0,
+            release_start: 0.0,
             sustain: 0.7,
             sample_rate,
             attack_shape: EnvShape::Sqrt,
@@ -93,38 +95,54 @@ impl Envelope {
     pub fn set_adsr(&mut self, attack: f32, decay: f32, sustain: f32, release: f32) {
         self.sustain = sustain.clamp(0.0, 1.0);
 
-        // Pre-compute coefficients
-        self.attack_coeff = time_to_coeff(attack, self.sample_rate);
-        self.decay_coeff = time_to_coeff(decay, self.sample_rate);
-        self.release_coeff = time_to_coeff(release, self.sample_rate);
+        let a = attack.max(0.001);
+        let d = decay.max(0.001);
+        let r = release.max(0.001);
 
-        // Overshoot targets for analog-style exponential curves
-        self.attack_target = 1.0 + 0.3; // Charge past 1.0 for concave-up attack
-        self.decay_target = (self.sustain - 0.001).max(-0.001); // Never undershoot below -0.001
-        self.release_target = -0.01; // Slight undershoot below 0
+        // IIR coefficients (for Sqrt/Exponential)
+        self.attack_coeff = time_to_coeff(a, self.sample_rate);
+        self.decay_coeff = time_to_coeff(d, self.sample_rate);
+        self.release_coeff = time_to_coeff(r, self.sample_rate);
+
+        // Phase steps (for Linear/Quadratic) — phase advances 0→1 over the stage duration
+        self.phase_step_a = 1.0 / (a * self.sample_rate);
+        self.phase_step_d = 1.0 / (d * self.sample_rate);
+        self.phase_step_r = 1.0 / (r * self.sample_rate);
     }
 
-    /// Set attack shape (0=sqrt, 1=linear, 2=quadratic).
     pub fn set_attack_shape(&mut self, shape: f32) {
         self.attack_shape = EnvShape::from_param(shape);
     }
 
-    /// Set decay/release shape (0=sqrt, 1=linear, 2=quadratic).
     pub fn set_decay_shape(&mut self, shape: f32) {
         self.decay_shape = EnvShape::from_param(shape);
     }
 
-    /// Set release shape independently (0=sqrt, 1=linear, 2=quadratic, 3=exponential).
     pub fn set_release_shape(&mut self, shape: f32) {
         self.release_shape = EnvShape::from_param(shape);
     }
 
     pub fn note_on(&mut self) {
-        // Start attack from current output value — no jump to 0, avoids clicks
+        // For phase-based attack, initialize phase so the curve starts from current output
+        // (avoids click when retriggering during decay/release).
+        self.phase = if self.attack_shape.is_phase_based() {
+            let cur = self.output.clamp(0.0, 1.0);
+            match self.attack_shape {
+                // output = phase  →  phase = output
+                EnvShape::Linear => cur,
+                // output = phase²  →  phase = sqrt(output)
+                EnvShape::Quadratic => cur.sqrt(),
+                _ => 0.0,
+            }
+        } else {
+            0.0
+        };
         self.stage = EnvStage::Attack;
     }
 
     pub fn note_off(&mut self) {
+        self.release_start = self.output;
+        self.phase = 0.0;
         self.stage = EnvStage::Release;
     }
 
@@ -139,107 +157,119 @@ impl Envelope {
     pub fn tick(&mut self) -> f32 {
         match self.stage {
             EnvStage::Idle => 0.0,
-            EnvStage::Attack => {
-                // Apply shape: each arm handles its own self.output update
-                let shaped = match self.attack_shape {
-                    EnvShape::Sqrt => {
-                        // Default — concave from overshoot target 1.3
-                        self.output = self.attack_coeff * self.output
-                            + (1.0 - self.attack_coeff) * 1.3;
-                        self.output
-                    }
-                    EnvShape::Linear => {
-                        // Linearize by reducing overshoot effect
-                        self.output = self.attack_coeff * self.output
-                            + (1.0 - self.attack_coeff) * 1.05;
-                        self.output
-                    }
-                    EnvShape::Quadratic => {
-                        // Convex — charge toward 1.0, output squared for slower start
-                        self.output = self.attack_coeff * self.output
-                            + (1.0 - self.attack_coeff) * 1.0;
-                        self.output * self.output
-                    }
-                    EnvShape::Exponential => {
-                        // Pure RC charge toward 1.0 (no overshoot)
-                        self.output = self.attack_coeff * self.output
-                            + (1.0 - self.attack_coeff) * 1.0;
-                        self.output
-                    }
-                };
 
-                if self.output >= 1.0 {
-                    self.output = 1.0;
-                    self.stage = EnvStage::Decay;
-                }
+            EnvStage::Attack => {
+                let shaped = if self.attack_shape.is_phase_based() {
+                    self.phase = (self.phase + self.phase_step_a).min(1.0);
+                    let out = match self.attack_shape {
+                        EnvShape::Linear    => self.phase,
+                        EnvShape::Quadratic => self.phase * self.phase,
+                        _ => unreachable!(),
+                    };
+                    self.output = out;
+                    if self.phase >= 1.0 {
+                        self.output = 1.0;
+                        self.decay_start = 1.0;
+                        self.phase = 0.0;
+                        self.stage = EnvStage::Decay;
+                    }
+                    out
+                } else {
+                    // IIR with overshoot
+                    let target = if self.attack_shape == EnvShape::Sqrt { 1.3 } else { 1.0 };
+                    self.output = self.attack_coeff * self.output
+                        + (1.0 - self.attack_coeff) * target;
+                    if self.output >= 1.0 {
+                        self.output = 1.0;
+                        self.decay_start = 1.0;
+                        self.phase = 0.0;
+                        self.stage = EnvStage::Decay;
+                    }
+                    self.output
+                };
                 shaped.min(1.0)
             }
+
             EnvStage::Decay => {
-                // One-pole filter discharging toward target below sustain
-                // Skip for Exponential — it uses its own target in its match arm
-                if self.decay_shape != EnvShape::Exponential {
-                    self.output = self.decay_coeff * self.output
-                        + (1.0 - self.decay_coeff) * self.decay_target;
-                }
-
-                let out = match self.decay_shape {
-                    EnvShape::Sqrt => self.output,
-                    EnvShape::Linear => self.output,  // Already close to linear with undershoot
-                    EnvShape::Quadratic => {
-                        // Slower initial decay, faster at end
-                        let norm = if self.sustain < 0.99 {
-                            ((self.output - self.sustain) / (1.0 - self.sustain)).clamp(0.0, 1.0)
-                        } else { 0.0 };
-                        self.sustain + (1.0 - self.sustain) * norm * norm
+                let out = if self.decay_shape.is_phase_based() {
+                    self.phase = (self.phase + self.phase_step_d).min(1.0);
+                    // norm goes 1→0 as phase goes 0→1
+                    let norm = 1.0 - self.phase;
+                    let v = match self.decay_shape {
+                        EnvShape::Linear    => self.sustain + (self.decay_start - self.sustain) * norm,
+                        EnvShape::Quadratic => self.sustain + (self.decay_start - self.sustain) * norm * norm,
+                        _ => unreachable!(),
+                    };
+                    self.output = v;
+                    if self.phase >= 1.0 {
+                        self.output = self.sustain;
+                        if self.sustain < 0.0001 {
+                            self.stage = EnvStage::Idle;
+                        } else {
+                            self.stage = EnvStage::Sustain;
+                        }
                     }
-                    EnvShape::Exponential => {
-                        // Pure exponential decay to sustain
-                        self.output = self.decay_coeff * self.output + (1.0 - self.decay_coeff) * self.sustain;
-                        self.output
-                    }
-                };
-
-                if self.output <= self.sustain + 0.001 {
-                    self.output = self.sustain;
-                    if self.sustain < 0.0001 {
-                        self.stage = EnvStage::Idle; // sustain=0: note is dead
+                    v
+                } else {
+                    // IIR decay
+                    let target = if self.decay_shape == EnvShape::Exponential {
+                        self.sustain
                     } else {
-                        self.stage = EnvStage::Sustain;
+                        // Sqrt: undershoot slightly for analog feel
+                        (self.sustain - 0.001).max(-0.001)
+                    };
+                    self.output = self.decay_coeff * self.output
+                        + (1.0 - self.decay_coeff) * target;
+                    if self.output <= self.sustain + 0.001 {
+                        self.output = self.sustain;
+                        if self.sustain < 0.0001 {
+                            self.stage = EnvStage::Idle;
+                        } else {
+                            self.stage = EnvStage::Sustain;
+                        }
                     }
-                }
-                out.max(0.0) // never output negative amplitude
+                    self.output
+                };
+                out.max(0.0)
             }
+
             EnvStage::Sustain => {
                 self.output = self.sustain;
                 self.sustain
             }
+
             EnvStage::Release => {
-                // One-pole filter discharging toward target below 0
-                // Skip for Exponential — it uses its own target in its match arm
-                if self.release_shape != EnvShape::Exponential {
+                let out = if self.release_shape.is_phase_based() {
+                    self.phase = (self.phase + self.phase_step_r).min(1.0);
+                    let norm = 1.0 - self.phase;
+                    let start = self.release_start.max(0.0);
+                    let v = match self.release_shape {
+                        EnvShape::Linear    => start * norm,
+                        EnvShape::Quadratic => start * norm * norm,
+                        _ => unreachable!(),
+                    };
+                    self.output = v;
+                    if self.phase >= 1.0 {
+                        self.output = 0.0;
+                        self.stage = EnvStage::Idle;
+                    }
+                    v
+                } else {
+                    // IIR release
+                    let target = if self.release_shape == EnvShape::Exponential {
+                        0.0
+                    } else {
+                        -0.01 // Sqrt: slight undershoot for natural feel
+                    };
                     self.output = self.release_coeff * self.output
-                        + (1.0 - self.release_coeff) * self.release_target;
-                }
-
-                let out = match self.release_shape {
-                    EnvShape::Quadratic => {
-                        // Slower release curve
-                        let norm = (self.output / self.sustain.max(0.01)).clamp(0.0, 1.0);
-                        self.sustain.max(0.01) * norm * norm
+                        + (1.0 - self.release_coeff) * target;
+                    if self.output <= 0.001 {
+                        self.output = 0.0;
+                        self.stage = EnvStage::Idle;
                     }
-                    EnvShape::Exponential => {
-                        // Pure exponential decay to zero
-                        self.output = self.release_coeff * self.output + (1.0 - self.release_coeff) * 0.0;
-                        self.output
-                    }
-                    _ => self.output,
+                    self.output
                 };
-
-                if self.output <= 0.001 {
-                    self.output = 0.0;
-                    self.stage = EnvStage::Idle;
-                }
-                out
+                out.max(0.0)
             }
         }
     }

@@ -1,0 +1,22 @@
+{
+  "name": "AW HardVacuum Lead",
+  "params": {
+    "osc_type": 2.0,
+    "filter_type": 4.0,
+    "filter_cutoff": 2500.0,
+    "filter_resonance": 0.35,
+    "filter_env_amount": 1200.0,
+    "filter_attack": 0.005,
+    "filter_decay": 0.4,
+    "filter_sustain": 0.3,
+    "filter_release": 0.3,
+    "amp_attack": 0.008,
+    "amp_decay": 0.15,
+    "amp_sustain": 0.8,
+    "amp_release": 0.25,
+    "airwindows_mode": 7.0,
+    "airwindows_drive": 0.5,
+    "airwindows_mix": 0.75,
+    "master_volume": 0.72
+  }
+}

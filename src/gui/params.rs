@@ -660,6 +660,28 @@ impl App {
                 });
                 changed |= self.param_slider(ui, "filter2_cutoff", "Cutoff 2", 20.0, 20000.0, true);
                 changed |= self.param_slider(ui, "filter2_resonance", "Resonance 2", 0.0, 1.0, false);
+
+                // Inter-filter waveshaper (Serial routing only)
+                if routing == 1 {
+                    ui.add_space(4.0);
+                    ui.strong("Inter-Filter Shaper");
+                    ui.horizontal(|ui| {
+                        let mut wsm = self.layers[layer].edited_params.get("inter_ws_mode").copied().unwrap_or(0.0) as usize;
+                        ui.label("Mode:");
+                        egui::ComboBox::from_id_salt(format!("inter_ws_mode_{layer}"))
+                            .selected_text(*WAVE_SHAPER_MODE_NAMES.get(wsm).unwrap_or(&"?"))
+                            .show_ui(ui, |ui| {
+                                for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
+                                    if ui.selectable_value(&mut wsm, i, *name).changed() {
+                                        self.layers[layer].edited_params.insert("inter_ws_mode".into(), wsm as f32);
+                                        changed = true;
+                                    }
+                                }
+                            });
+                    });
+                    changed |= self.param_slider(ui, "inter_ws_drive", "Drive", 0.0, 1.0, false);
+                    changed |= self.param_slider(ui, "inter_ws_mix", "Mix", 0.0, 1.0, false);
+                }
             }
         }
 
@@ -1166,15 +1188,31 @@ impl App {
         changed |= self.param_slider(ui, "airwindows_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "airwindows_drive", "Drive", 0.0, 1.0, false);
         ui.horizontal(|ui| {
-            let airwindows_mode_names = &["Tape2", "Density", "Console", "ToVinyl4", "Atmosphere", "Pressure5"];
+            let airwindows_mode_names = &[
+                // 0-5: original
+                "Tape2", "Density", "Console", "ToVinyl4", "Atmosphere", "Pressure5",
+                // 6-12: saturation/drive
+                "Drive", "HardVacuum", "Spiral2", "Fracture", "Mojo", "ADClip7", "Loud",
+                // 13-15: tape
+                "IronOxide5", "ToTape6", "ChromeOxide",
+                // 16-19: compressors
+                "Pressure4", "ButterComp2", "VariMu", "PowerSag",
+                // 20-21: reverbs
+                "Galactic", "Verbity",
+                // 22-24: filters
+                "Capacitor", "Focus", "YLowpass",
+                // 25-32: special
+                "DubSub", "Melt", "Pop", "BitGlitter", "DeRez2", "BussColors4", "Hombre", "Slew2",
+            ];
+            let num_modes = airwindows_mode_names.len();
             let mut awm = self.layers[layer].edited_params.get("airwindows_mode").copied().unwrap_or(0.0) as usize;
             ui.label("Mode:");
             egui::ComboBox::from_id_salt(format!("aw_mode_{layer}"))
-                .selected_text(*airwindows_mode_names.get(awm.min(5)).unwrap_or(&"Tape2"))
+                .selected_text(*airwindows_mode_names.get(awm.min(num_modes-1)).unwrap_or(&"Tape2"))
                 .show_ui(ui, |ui| {
                     for (i, name) in airwindows_mode_names.iter().enumerate() {
                         if ui.selectable_value(&mut awm, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("airwindows_mode".into(), awm as f32);
+                            self.layers[layer].edited_params.insert("airwindows_mode".into(), i as f32);
                             changed = true;
                         }
                     }

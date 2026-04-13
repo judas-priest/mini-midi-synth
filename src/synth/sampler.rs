@@ -298,6 +298,12 @@ impl SamplerEngine {
         self.keys.midi(layer as i32, 0xE0, lsb, msb);
     }
 
+    pub fn set_pitch_bend_range(&mut self, semitones: u8) {
+        if let Some(synth) = &mut self.keys.synth {
+            synth.set_pitch_bend_range(semitones as i32);
+        }
+    }
+
     pub fn mod_wheel(&mut self, layer: usize, value: f32) {
         if layer >= 2 { return; }
         let cc_val = (value * 127.0).round().clamp(0.0, 127.0) as i32;

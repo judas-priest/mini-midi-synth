@@ -6,6 +6,7 @@ mod midi_seq;
 mod settings;
 mod keyboard;
 mod layers;
+mod fx_chain;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -271,6 +272,8 @@ pub struct App {
     pub preset_search: String,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
+    // FX Chain panel
+    pub show_fx_chain: bool,
     // MIDI file sequencer
     pub show_midi_seq: bool,
     pub midi_seq_path: String,
@@ -752,7 +755,11 @@ impl eframe::App for App {
             ui.add_space(4.0);
             ui.separator();
             ui.add_space(6.0);
-            if self.show_midi_seq {
+            if self.show_fx_chain {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    self.draw_fx_chain(ui);
+                });
+            } else if self.show_midi_seq {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     self.draw_midi_seq(ui);
                 });
