@@ -558,6 +558,7 @@ impl eframe::App for App {
                             // Prev preset
                             let idx = self.layers[layer].preset_idx;
                             if idx > 0 {
+                                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                                 self.layers[layer].preset_idx = idx - 1;
                                 self.load_edited_params(layer);
                                 self.send_edited_params(layer);
@@ -569,6 +570,7 @@ impl eframe::App for App {
                             // Next preset
                             let idx = self.layers[layer].preset_idx;
                             if idx + 1 < self.presets.len() {
+                                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                                 self.layers[layer].preset_idx = idx + 1;
                                 self.load_edited_params(layer);
                                 self.send_edited_params(layer);
@@ -754,6 +756,7 @@ impl eframe::App for App {
                         self.save_collapsed_categories();
                     }
                     if let Some(idx) = new_idx {
+                        let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                         self.layers[layer].preset_idx = idx;
                         self.load_edited_params(layer);
                         self.send_edited_params(layer);
@@ -810,6 +813,7 @@ impl eframe::App for App {
                         if ui.selectable_label(!sf2, "Synth").clicked() { sf2 = false; }
                         if ui.selectable_label(sf2, "SF2").clicked() { sf2 = true; }
                         if sf2 != is_sf2 {
+                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                             self.layers[layer].sf2_mode = sf2;
                             let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer, enabled: sf2 });
                             // Save to config

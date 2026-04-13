@@ -2096,9 +2096,15 @@ impl SynthEngine {
             }
             ControlEvent::AllNotesOff => {
                 for layer in &mut self.layers {
-                    for note in 0..128u8 {
-                        layer.note_off(note);
+                    // Kill all active voices immediately
+                    for v in &mut layer.voices {
+                        if v.active { v.note_off(); }
                     }
+                    // Clear held-note state so retriggering doesn't ghost
+                    layer.note_stack.clear();
+                    layer.latch_held.clear();
+                    layer.sustain_pedal = 0.0;
+                    layer.sustained_notes = [false; 128];
                 }
                 self.sampler.all_notes_off();
             }
