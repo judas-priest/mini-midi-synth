@@ -7,6 +7,7 @@ mod settings;
 mod keyboard;
 mod layers;
 mod fx_chain;
+mod macros;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -133,6 +134,23 @@ pub struct LayerState {
     pub transpose: i8,   // semitones
     pub sf2_mode: bool,
     pub sf2_program: u8,
+    /// Macro knob values (0..1) — live, sent to engine via SetMacro
+    pub macro_vals: [f32; 8],
+    /// Macro knob names (user-editable, shown as label in GUI)
+    pub macro_names: Vec<String>,
+}
+
+impl LayerState {
+    pub fn new_empty() -> Self {
+        Self {
+            preset_idx: 0, edited_params: Default::default(), params_dirty: false,
+            enabled: false, mute: false, volume: 0.8,
+            min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
+            pan: 0.0, transpose: 0, sf2_mode: false, sf2_program: 0,
+            macro_vals: [0.0; 8],
+            macro_names: (1..=8).map(|i| format!("Macro {i}")).collect(),
+        }
+    }
 }
 
 /// Scan for .sf2 files in the standard data directory.

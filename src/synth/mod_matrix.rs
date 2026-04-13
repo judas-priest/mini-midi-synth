@@ -40,6 +40,14 @@ pub enum ModSource {
     PolyAftertouch = 30,  // per-note pressure, 0..1
     SceneLfo1 = 31,       // free-running Scene LFO 1 (never resets on note-on)
     SceneLfo2 = 32,       // free-running Scene LFO 2
+    Macro1 = 33,          // user-named macro knob 1 (0..1)
+    Macro2 = 34,
+    Macro3 = 35,
+    Macro4 = 36,
+    Macro5 = 37,
+    Macro6 = 38,
+    Macro7 = 39,
+    Macro8 = 40,
 }
 
 impl ModSource {
@@ -77,6 +85,14 @@ impl ModSource {
             30 => Self::PolyAftertouch,
             31 => Self::SceneLfo1,
             32 => Self::SceneLfo2,
+            33 => Self::Macro1,
+            34 => Self::Macro2,
+            35 => Self::Macro3,
+            36 => Self::Macro4,
+            37 => Self::Macro5,
+            38 => Self::Macro6,
+            39 => Self::Macro7,
+            40 => Self::Macro8,
             _ => Self::None,
         }
     }
@@ -116,12 +132,22 @@ impl ModSource {
             Self::PolyAftertouch => "Poly AT",
             Self::SceneLfo1 => "Scene LFO 1",
             Self::SceneLfo2 => "Scene LFO 2",
+            Self::Macro1 => "Macro 1",
+            Self::Macro2 => "Macro 2",
+            Self::Macro3 => "Macro 3",
+            Self::Macro4 => "Macro 4",
+            Self::Macro5 => "Macro 5",
+            Self::Macro6 => "Macro 6",
+            Self::Macro7 => "Macro 7",
+            Self::Macro8 => "Macro 8",
         }
     }
 
     pub const ALL: &[ModSource] = &[
         Self::None, Self::Lfo1, Self::Lfo2, Self::Lfo3, Self::Lfo4,
         Self::SceneLfo1, Self::SceneLfo2,
+        Self::Macro1, Self::Macro2, Self::Macro3, Self::Macro4,
+        Self::Macro5, Self::Macro6, Self::Macro7, Self::Macro8,
         Self::AmpEnv, Self::FilterEnv, Self::Mseg1, Self::Mseg2,
         Self::ModWheel, Self::Aftertouch, Self::Velocity, Self::KeyTrack,
         Self::StepSeq,
@@ -356,6 +382,7 @@ pub struct ModSources {
     pub latest_key: f32,       // most recent note -1..+1 centered on C4
     pub poly_aftertouch: f32,      // current voice's poly AT value, 0..1
     pub scene_lfo_outputs: [f32; 2], // free-running scene LFOs (never retrigger)
+    pub macro_vals: [f32; 8],        // user macro knobs 0..1
 }
 
 const MOD_SOURCE_KEYS: [&str; MOD_SLOTS] = [
@@ -391,8 +418,8 @@ impl Default for ModMatrix {
 impl ModMatrix {
     /// Evaluate all active slots. Returns accumulated offsets.
     pub fn evaluate(&self, sources: &ModSources) -> ModOffsets {
-        // Precompute all source values indexed by ModSource discriminant (0..32)
-        let src_vals: [f32; 33] = [
+        // Precompute all source values indexed by ModSource discriminant (0..40)
+        let src_vals: [f32; 41] = [
             0.0,                             // None = 0
             sources.lfo_outputs[0],          // Lfo1 = 1
             sources.lfo_outputs[1],          // Lfo2 = 2
@@ -426,6 +453,14 @@ impl ModMatrix {
             sources.poly_aftertouch,         // PolyAftertouch = 30
             sources.scene_lfo_outputs[0],    // SceneLfo1 = 31
             sources.scene_lfo_outputs[1],    // SceneLfo2 = 32
+            sources.macro_vals[0],           // Macro1 = 33
+            sources.macro_vals[1],           // Macro2 = 34
+            sources.macro_vals[2],           // Macro3 = 35
+            sources.macro_vals[3],           // Macro4 = 36
+            sources.macro_vals[4],           // Macro5 = 37
+            sources.macro_vals[5],           // Macro6 = 38
+            sources.macro_vals[6],           // Macro7 = 39
+            sources.macro_vals[7],           // Macro8 = 40
         ];
 
         let mut offsets = ModOffsets::default();

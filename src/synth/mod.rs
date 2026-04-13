@@ -153,6 +153,7 @@ pub enum ControlEvent {
     SetLayerVelRange { layer: usize, vel_min: u8, vel_max: u8 },
     SetLayerPan { layer: usize, pan: f32 },
     SetLayerTranspose { layer: usize, semitones: i8 },
+    SetMacro { layer: usize, index: usize, value: f32 },
     SetCcMap { map: CcMap },
     SetGlobalParam { key: &'static str, value: f32 },
     // Drum engine controls
@@ -327,6 +328,8 @@ struct Layer {
     /// tick every block regardless of note activity.
     scene_lfos: [Lfo; 2],
     scene_lfo_routed: [bool; 2],  // true when used in mod matrix
+    /// Current macro knob values (0..1). Updated by SetMacro event.
+    macro_vals: [f32; 8],
     mod_matrix: ModMatrix,
     mseg1: Mseg,
     mseg1_state: MsegState,
@@ -378,6 +381,7 @@ impl Layer {
             lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate)],
             scene_lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate)],
             scene_lfo_routed: [false; 2],
+            macro_vals: [0.0; 8],
             mod_matrix: ModMatrix::default(),
             mseg1: Mseg::default(), mseg1_state: MsegState::new(sample_rate),
             mseg2: Mseg::default(), mseg2_state: MsegState::new(sample_rate),
@@ -400,6 +404,7 @@ impl Layer {
                 sustain_pedal: 0.0, lowest_key: 0.0, highest_key: 0.0,
                 latest_key: 0.0, poly_aftertouch: 0.0,
                 scene_lfo_outputs: [0.0; 2],
+                macro_vals: [0.0; 8],
             },
             poly_at_in_matrix: false,
             lfo2_routed: false,
@@ -943,6 +948,8 @@ pub struct PresetParams {
     slfo1_tempo_sync: f32, slfo1_unipolar: f32,
     slfo2_rate: f32, slfo2_waveform: f32, slfo2_deform: f32,
     slfo2_tempo_sync: f32, slfo2_unipolar: f32,
+    // Macro knobs (8 named user-controllable mod sources, 0..1)
+    macro_vals: [f32; 8],
     // Alias oscillator
     alias_wave_type: f32, alias_crush: f32,
     // Window oscillator
@@ -1077,6 +1084,7 @@ impl Default for PresetParams {
             lfo1_unipolar: 0.0, lfo2_unipolar: 0.0, lfo3_unipolar: 0.0, lfo4_unipolar: 0.0,
             slfo1_rate: 0.5, slfo1_waveform: 0.0, slfo1_deform: 0.0, slfo1_tempo_sync: 0.0, slfo1_unipolar: 0.0,
             slfo2_rate: 0.25, slfo2_waveform: 0.0, slfo2_deform: 0.0, slfo2_tempo_sync: 0.0, slfo2_unipolar: 0.0,
+            macro_vals: [0.0; 8],
             alias_wave_type: 0.0, alias_crush: 8.0,
             window_type: 0.0, window_morph: 0.0, window_formant: 0.0,
             portamento_time: 0.0, portamento_mode: 0.0,
@@ -1214,6 +1222,10 @@ impl PresetParams {
             slfo2_rate: p("slfo2_rate", 0.25), slfo2_waveform: p("slfo2_waveform", 0.0),
             slfo2_deform: p("slfo2_deform", 0.0), slfo2_tempo_sync: p("slfo2_tempo_sync", 0.0),
             slfo2_unipolar: p("slfo2_unipolar", 0.0),
+            macro_vals: [
+                p("macro_0", 0.0), p("macro_1", 0.0), p("macro_2", 0.0), p("macro_3", 0.0),
+                p("macro_4", 0.0), p("macro_5", 0.0), p("macro_6", 0.0), p("macro_7", 0.0),
+            ],
             alias_wave_type: p("alias_wave_type", 0.0), alias_crush: p("alias_crush", 8.0),
             window_type: p("window_type", 0.0), window_morph: p("window_morph", 0.0),
             window_formant: p("window_formant", 0.0),
@@ -1934,6 +1946,8 @@ impl SynthEngine {
                 if let Some(l) = self.layers.get_mut(layer) {
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
+                    // Sync macro values from preset into live layer state
+                    l.macro_vals = params.macro_vals;
                     l.params = params;
                     l.mod_matrix = mod_matrix;
                     if let Some(m) = mseg1 { l.mseg1 = m; }
@@ -1982,6 +1996,14 @@ impl SynthEngine {
             }
             ControlEvent::SetLayerTranspose { layer, semitones } => {
                 if let Some(l) = self.layers.get_mut(layer) { l.transpose = semitones; }
+            }
+            ControlEvent::SetMacro { layer, index, value } => {
+                if let Some(l) = self.layers.get_mut(layer) {
+                    if index < 8 {
+                        l.macro_vals[index] = value.clamp(0.0, 1.0);
+                        l.params.macro_vals[index] = value.clamp(0.0, 1.0);
+                    }
+                }
             }
             ControlEvent::SetCcMap { map } => { self.cc_map = map; }
             ControlEvent::SetGlobalParam { key, value } => {
@@ -2357,6 +2379,7 @@ impl SynthEngine {
             let mod_sources = mod_matrix::ModSources {
                 lfo_outputs: [lfo1_val, lfo2_val, lfo3_val, lfo4_val],
                 scene_lfo_outputs: [slfo1_val, slfo2_val],
+                macro_vals: layer.macro_vals,
                 amp_env: 0.0, filter_env: 0.0,
                 mseg_outputs: [mseg1_val, mseg2_val],
                 mod_wheel: self.mod_wheel,

@@ -161,21 +161,11 @@ fn main() -> Result<()> {
     });
 
     let make_part = |pidx: usize, en: bool, vol: f32, lo: u8, hi: u8,
-                     sf2: bool, prog: u8| gui::LayerState {
-        preset_idx: pidx,
-        edited_params: std::collections::BTreeMap::new(),
-        params_dirty: false,
-        enabled: en,
-        mute: false,
-        volume: vol,
-        min_note: lo,
-        max_note: hi,
-        vel_min: 1,
-        vel_max: 127,
-        pan: 0.0,
-        transpose: 0,
-        sf2_mode: sf2,
-        sf2_program: prog,
+                     sf2: bool, prog: u8| {
+        let mut s = gui::LayerState::new_empty();
+        s.preset_idx = pidx; s.enabled = en; s.volume = vol;
+        s.min_note = lo; s.max_note = hi; s.sf2_mode = sf2; s.sf2_program = prog;
+        s
     };
     let layer_a = make_part(preset_idx, true,  config.ui.layer_a_volume, 0,   127, config.sf2.layer_a_sf2, config.sf2.layer_a_program);
     let layer_b = make_part(0,          false, config.ui.layer_b_volume, 60,  127, config.sf2.layer_b_sf2, config.sf2.layer_b_program);

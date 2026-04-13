@@ -115,6 +115,12 @@ impl App {
 
         let mut changed = false;
 
+        // Macro knobs (always visible at top — key performance controls)
+        self.draw_macros(ui);
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+
         // Oscillator 1
         ui.strong("Oscillator 1");
         ui.horizontal(|ui| {
