@@ -313,6 +313,15 @@ impl Voice {
             OscType::Window => self.oscs[0].init_window(params.window_type as u8, params.window_morph, params.window_formant),
             OscType::Wavetable => self.oscs[0].init_wavetable(params.window_morph),
             OscType::Fm3 => { /* state initialized in reset() */ }
+            OscType::Twist => self.oscs[0].init_twist(
+                params.twist_engine,
+                params.twist_harmonics,
+                params.twist_timbre,
+                params.twist_morph,
+                params.twist_lpg_decay,
+                params.twist_lpg_colour,
+                params.twist_aux_mix,
+            ),
             _ => {}
         }
 
@@ -852,6 +861,14 @@ pub struct VoiceParams {
     pub window_type: f32,
     pub window_morph: f32,
     pub window_formant: f32,
+    // Twist / Plaits (Mutable Instruments Plaits port)
+    pub twist_engine:     u32,  // 0-23 engine index
+    pub twist_harmonics:  f32,  // 0..1
+    pub twist_timbre:     f32,  // 0..1
+    pub twist_morph:      f32,  // 0..1
+    pub twist_lpg_decay:  f32,  // 0..1
+    pub twist_lpg_colour: f32,  // 0..1
+    pub twist_aux_mix:    f32,  // 0..1 (blend main ↔ aux)
     // Envelope shapes
     pub env_attack_shape: f32,
     pub env_decay_shape: f32,

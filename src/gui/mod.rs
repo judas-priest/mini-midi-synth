@@ -42,7 +42,8 @@ const OSC_NAMES: &[&str] = &[
     "Piano (Additive)", "Drum Synth", "Bass Guitar", "Bowed String", "Brass",
     "Phase Dist", "Wavefolder", "Modal", "Hard Sync", "Supersaw",
     "Piano (Inharmonic)", "Accordion", "Saxophone", "E.Piano (Rhodes/Wurli)",
-    "Alias (8-bit)", "Window",
+    "Alias (8-bit)", "Window", "Wavetable", "FM3",
+    "Twist (Plaits)",  // 29 — Mutable Instruments Plaits: 24 synthesis engines
 ];
 const PD_SHAPE_NAMES: &[&str] = &["Saw", "Square", "Pulse", "DoubleSine", "SawPulse", "Reso1", "Reso2", "Reso3"];
 const FOLD_SOURCE_NAMES: &[&str] = &["Sine", "Triangle", "Saw"];

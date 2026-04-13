@@ -8,6 +8,35 @@ use super::piano::PianoModel;
 
 const TAU: f32 = 2.0 * PI;
 
+// ─── Plaits (Twist) integration ─────────────────────────────────────────────
+
+/// Block size for Plaits rendering. 12 = native Plaits block; we use 32 to
+/// amortize the overhead more cheaply. Must be ≤ TWIST_BLOCK.
+const TWIST_BLOCK: usize = 32;
+
+/// Newtype wrapping a Plaits Voice so we can derive Clone for Oscillator.
+/// Cloning re-initialises the voice (state is not meaningful to copy).
+struct TwistVoice(Box<mi_plaits_dsp::voice::Voice<'static>>);
+
+impl TwistVoice {
+    fn new(sample_rate: f32) -> Self {
+        let mut v = Box::new(mi_plaits_dsp::voice::Voice::new(TWIST_BLOCK, sample_rate));
+        v.init();
+        TwistVoice(v)
+    }
+}
+
+impl Clone for TwistVoice {
+    fn clone(&self) -> Self {
+        // Don't copy DSP state — create a fresh voice (Plaits always runs at 48kHz).
+        Self::new(48000.0)
+    }
+}
+
+// Make Oscillator cloneable even with TwistVoice inside.
+// The Voice field lives on Oscillator, not inside OscState, so OscState
+// stays #[derive(Clone)] cleanly.
+
 /// PolyBLEP residual — call for each discontinuity point.
 /// `t` = phase position (0..1), `dt` = phase increment per sample.
 #[inline(always)]
@@ -56,6 +85,7 @@ pub enum OscType {
     Window,           // 26 — windowed oscillator with formant control
     Wavetable,        // 27 — morphing wavetable (8 waveforms, sine→saw)
     Fm3,              // 28 — 3-operator FM (stacked: op3→op2→op1)
+    Twist,            // 29 — Mutable Instruments Plaits (16 synthesis engines)
 }
 
 impl OscType {
@@ -90,6 +120,7 @@ impl OscType {
             26 => Self::Window,
             27 => Self::Wavetable,
             28 => Self::Fm3,
+            29 => Self::Twist,
             _ => Self::Sine,
         }
     }
@@ -304,6 +335,13 @@ pub enum OscState {
         mod1_phase: f32,     // op2 (modulates carrier) phase
         mod2_phase: f32,     // op3 (modulates op2) phase
     },
+    /// Plaits (Twist): ring-buffer of pre-rendered samples from block processing.
+    Twist {
+        buf_out: [f32; TWIST_BLOCK],
+        buf_aux: [f32; TWIST_BLOCK],
+        pos: usize,    // read position in buf
+        note: f32,     // current MIDI note (for re-render check)
+    },
 }
 
 /// Maximum delay line length: covers MIDI note 21 (A0 ≈ 27.5 Hz) at 192 kHz.
@@ -328,6 +366,15 @@ pub struct Oscillator {
     pool_b: Vec<f32>,
     pool_c: Vec<f32>,
     pool_d: Vec<f32>,
+    // ── Plaits (Twist) parameters ──────────────────────────────────────────
+    pub twist_engine:    u32,   // 0-23 engine index
+    pub twist_harmonics: f32,   // 0..1
+    pub twist_timbre:    f32,   // 0..1
+    pub twist_morph:     f32,   // 0..1
+    pub twist_lpg_decay: f32,   // 0..1 (LPG envelope decay)
+    pub twist_lpg_colour:f32,   // 0..1 (LPG LP/VCA colour)
+    pub twist_aux_mix:   f32,   // 0..1 (blend main ↔ aux output)
+    twist_voice: Option<TwistVoice>,
 }
 
 impl Oscillator {
@@ -349,6 +396,14 @@ impl Oscillator {
             pool_b: Vec::with_capacity(MAX_DELAY),
             pool_c: Vec::with_capacity(MAX_DELAY),
             pool_d: Vec::with_capacity(MAX_DELAY),
+            twist_engine: 0,
+            twist_harmonics: 0.5,
+            twist_timbre: 0.5,
+            twist_morph: 0.5,
+            twist_lpg_decay: 0.5,
+            twist_lpg_colour: 0.5,
+            twist_aux_mix: 0.0,
+            twist_voice: None,
         }
     }
 
@@ -583,6 +638,12 @@ impl Oscillator {
             },
             OscType::Fm3 => OscState::Fm3 {
                 carrier_phase: 0.0, mod1_phase: 0.0, mod2_phase: 0.0,
+            },
+            OscType::Twist => OscState::Twist {
+                buf_out: [0.0; TWIST_BLOCK],
+                buf_aux: [0.0; TWIST_BLOCK],
+                pos: TWIST_BLOCK, // force render on first tick
+                note: 60.0,
             },
         };
     }
@@ -954,6 +1015,7 @@ impl Oscillator {
             OscType::Window => self.tick_window(freq),
             OscType::Wavetable => self.tick_wavetable(freq),
             OscType::Fm3 => self.tick_fm3(freq),
+            OscType::Twist => self.tick_twist(freq),
             _ => self.tick_standard(freq),
         }
     }
@@ -2614,6 +2676,88 @@ impl Oscillator {
             let window = w0 * (1.0 - *morph) + w1 * *morph;
 
             (base * window).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+// ─── Plaits / Twist ────────────────────────────────────────────────
+
+impl Oscillator {
+    /// Initialise Plaits voice. Called from voice.rs note_on for OscType::Twist.
+    pub fn init_twist(
+        &mut self,
+        engine: u32,
+        harmonics: f32,
+        timbre: f32,
+        morph: f32,
+        lpg_decay: f32,
+        lpg_colour: f32,
+        aux_mix: f32,
+    ) {
+        self.twist_engine    = engine;
+        self.twist_harmonics = harmonics;
+        self.twist_timbre    = timbre;
+        self.twist_morph     = morph;
+        self.twist_lpg_decay = lpg_decay;
+        self.twist_lpg_colour= lpg_colour;
+        self.twist_aux_mix   = aux_mix;
+
+        // Create voice if not yet initialised (lazy, at 48kHz per Plaits spec)
+        if self.twist_voice.is_none() {
+            self.twist_voice = Some(TwistVoice::new(48000.0));
+        }
+
+        self.state = OscState::Twist {
+            buf_out: [0.0; TWIST_BLOCK],
+            buf_aux: [0.0; TWIST_BLOCK],
+            pos: TWIST_BLOCK, // force render immediately on first tick
+            note: 60.0,
+        };
+    }
+
+    /// Sample-by-sample tick for Plaits. Renders a block internally when buffer
+    /// is exhausted and returns one sample.
+    #[inline]
+    fn tick_twist(&mut self, freq: f32) -> f32 {
+        let voice = match &mut self.twist_voice {
+            Some(v) => &mut v.0,
+            None => return 0.0,
+        };
+
+        // Convert Hz → MIDI note (Plaits uses MIDI note number)
+        let midi_note = 69.0 + 12.0 * (freq / 440.0).log2();
+
+        if let OscState::Twist { buf_out, buf_aux, pos, note } = &mut self.state {
+            // Re-render block when exhausted
+            if *pos >= TWIST_BLOCK {
+                use mi_plaits_dsp::voice::{Patch, Modulations};
+                let patch = Patch {
+                    note: midi_note,
+                    harmonics: self.twist_harmonics,
+                    timbre: self.twist_timbre,
+                    morph: self.twist_morph,
+                    frequency_modulation_amount: 0.0,
+                    timbre_modulation_amount: 0.0,
+                    morph_modulation_amount: 0.0,
+                    engine: self.twist_engine as usize,
+                    decay: self.twist_lpg_decay,
+                    lpg_colour: self.twist_lpg_colour,
+                };
+                let mods = Modulations::default();
+                voice.render(&patch, &mods, buf_out, buf_aux);
+                *pos = 0;
+                *note = midi_note;
+            }
+
+            let out = buf_out[*pos];
+            let aux = buf_aux[*pos];
+            *pos += 1;
+
+            // Blend main + aux outputs
+            let mix = self.twist_aux_mix;
+            out * (1.0 - mix) + aux * mix
         } else {
             0.0
         }

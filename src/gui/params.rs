@@ -383,6 +383,44 @@ impl App {
             changed |= self.param_slider(ui, "window_formant", "Formant", -24.0, 24.0, false);
         }
 
+        // Twist / Plaits (engine 29)
+        if osc_type == 29 {
+            ui.add_space(4.0);
+            ui.strong("Twist (Plaits)");
+            // Engine selector
+            const TWIST_ENGINES: &[&str] = &[
+                // engine2 engines (0-7)
+                "VA+VCF", "Phase Dist", "6-Op FM A", "6-Op FM B", "6-Op FM C",
+                "Wave Terrain", "String Machine", "Chiptune",
+                // classic Plaits engines (8-23)
+                "VA (Waveforms)", "Waveshaper", "2-Op FM", "Grain",
+                "Additive", "Wavetable", "Chords", "Vowels/Speech",
+                "Swarm", "Noise", "Particle", "String (KS)",
+                "Modal", "Bass Drum", "Snare Drum", "Hi-Hat",
+            ];
+            ui.horizontal(|ui| {
+                let mut eng = self.layers[layer].edited_params.get("twist_engine").copied().unwrap_or(8.0) as usize;
+                ui.label("Engine:");
+                egui::ComboBox::from_id_salt(format!("twist_eng_{layer}"))
+                    .width(160.0)
+                    .selected_text(*TWIST_ENGINES.get(eng).unwrap_or(&"?"))
+                    .show_ui(ui, |ui| {
+                        for (i, name) in TWIST_ENGINES.iter().enumerate() {
+                            if ui.selectable_value(&mut eng, i, *name).clicked() {
+                                self.layers[layer].edited_params.insert("twist_engine".into(), eng as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+            changed |= self.param_slider(ui, "twist_harmonics",  "Harmonics", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "twist_timbre",     "Timbre",    0.0, 1.0, false);
+            changed |= self.param_slider(ui, "twist_morph",      "Morph",     0.0, 1.0, false);
+            changed |= self.param_slider(ui, "twist_lpg_decay",  "LPG Decay", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "twist_lpg_colour", "LPG Colour",0.0, 1.0, false);
+            changed |= self.param_slider(ui, "twist_aux_mix",    "Aux Mix",   0.0, 1.0, false);
+        }
+
         // Square wave — pulse width control
         if osc_type == 2 {
             let pw = self.layers[layer].edited_params.get("pulse_width").copied().unwrap_or(0.5);
