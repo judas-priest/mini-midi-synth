@@ -62,6 +62,8 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Organ", "farfisa", include_str!("../presets/farfisa.json")),
     ("Organ", "synth_organ", include_str!("../presets/organ.json")),
     // Mallet / Percussion
+    ("Mallet", "twist_modal_bell", include_str!("../presets/twist_modal.json")),
+    ("Mallet", "twist_string",     include_str!("../presets/twist_string.json")),
     ("Mallet", "vibraphone", include_str!("../presets/vibraphone.json")),
     ("Mallet", "glockenspiel", include_str!("../presets/glockenspiel.json")),
     ("Mallet", "fm_bell", include_str!("../presets/fm_bell.json")),
@@ -140,6 +142,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Lead", "vintage_ladder_lead", include_str!("../presets/vintage_ladder_lead.json")),
     ("Lead", "westcoast_lead", include_str!("../presets/westcoast_lead.json")),
     ("Lead", "aw_hardvac_lead", include_str!("../presets/aw_hardvac_lead.json")),
+    ("Lead", "twist_wavetable", include_str!("../presets/twist_wavetable.json")),
     // Pad
     ("Pad", "warm_pad", include_str!("../presets/warm_pad.json")),
     ("Pad", "warm_pad_v2",       include_str!("../presets/warm_pad_v2.json")),
@@ -161,6 +164,9 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Pad", "harmonic_shimmer_pad", include_str!("../presets/harmonic_shimmer_pad.json")),
     ("Pad", "aw_galactic_pad",   include_str!("../presets/aw_galactic_pad.json")),
     ("Pad", "aw_melt_chorus",    include_str!("../presets/aw_melt_chorus.json")),
+    ("Pad", "twist_grain",       include_str!("../presets/twist_grain.json")),
+    ("Pad", "twist_chords",      include_str!("../presets/twist_chords.json")),
+    ("Pad", "twist_vowels",      include_str!("../presets/twist_vowels.json")),
     // FX / Stab
     ("FX", "synth_stab", include_str!("../presets/synth_stab.json")),
     ("FX", "noise_sweep", include_str!("../presets/noise_sweep.json")),

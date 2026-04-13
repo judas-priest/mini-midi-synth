@@ -1,0 +1,23 @@
+{
+  "name": "Twist Vowels",
+  "params": {
+    "osc_type": 29.0,
+    "twist_engine": 15.0,
+    "twist_harmonics": 0.5,
+    "twist_timbre": 0.4,
+    "twist_morph": 0.3,
+    "twist_lpg_decay": 0.7,
+    "twist_lpg_colour": 0.4,
+    "twist_aux_mix": 0.2,
+    "filter_type": 0.0,
+    "filter_cutoff": 4000.0,
+    "filter_resonance": 0.1,
+    "amp_attack": 0.05,
+    "amp_decay": 0.2,
+    "amp_sustain": 0.9,
+    "amp_release": 0.4,
+    "reverb_mix": 0.25,
+    "reverb_room_size": 0.5,
+    "master_volume": 0.72
+  }
+}
