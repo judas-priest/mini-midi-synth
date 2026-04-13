@@ -323,6 +323,10 @@ struct Layer {
     transpose: i8,   // semitone offset per part (-24..+24)
     params: PresetParams,
     lfos: [Lfo; 4],
+    /// Scene LFOs — free-running, never reset on note-on (unlike voice LFOs).
+    /// tick every block regardless of note activity.
+    scene_lfos: [Lfo; 2],
+    scene_lfo_routed: [bool; 2],  // true when used in mod matrix
     mod_matrix: ModMatrix,
     mseg1: Mseg,
     mseg1_state: MsegState,
@@ -372,6 +376,8 @@ impl Layer {
             pan: 0.0, transpose: 0,
             params: PresetParams::default(),
             lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate)],
+            scene_lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate)],
+            scene_lfo_routed: [false; 2],
             mod_matrix: ModMatrix::default(),
             mseg1: Mseg::default(), mseg1_state: MsegState::new(sample_rate),
             mseg2: Mseg::default(), mseg2_state: MsegState::new(sample_rate),
@@ -393,6 +399,7 @@ impl Layer {
                 pitch_bend: 0.0, cc: [0.0; 4], breath: 0.0, expression: 1.0,
                 sustain_pedal: 0.0, lowest_key: 0.0, highest_key: 0.0,
                 latest_key: 0.0, poly_aftertouch: 0.0,
+                scene_lfo_outputs: [0.0; 2],
             },
             poly_at_in_matrix: false,
             lfo2_routed: false,
@@ -428,6 +435,10 @@ impl Layer {
             .any(|s| s.source == mod_matrix::ModSource::Lfo4 && s.depth.abs() > 0.001);
         self.poly_at_in_matrix = self.mod_matrix.slots.iter()
             .any(|s| s.source == mod_matrix::ModSource::PolyAftertouch && s.depth.abs() > 0.001);
+        self.scene_lfo_routed[0] = self.mod_matrix.slots.iter()
+            .any(|s| s.source == mod_matrix::ModSource::SceneLfo1 && s.depth.abs() > 0.001);
+        self.scene_lfo_routed[1] = self.mod_matrix.slots.iter()
+            .any(|s| s.source == mod_matrix::ModSource::SceneLfo2 && s.depth.abs() > 0.001);
     }
 
     /// LCG random float 0..1
@@ -838,6 +849,16 @@ impl Layer {
             "lfo3_trigger_mode" => self.params.lfo3_trigger_mode = value,
             "lfo4_trigger_mode" => self.params.lfo4_trigger_mode = value,
             "lfo_deform" => self.params.lfo_deform = value,
+            "slfo1_rate"       => self.params.slfo1_rate = value,
+            "slfo1_waveform"   => self.params.slfo1_waveform = value,
+            "slfo1_deform"     => self.params.slfo1_deform = value,
+            "slfo1_tempo_sync" => self.params.slfo1_tempo_sync = value,
+            "slfo1_unipolar"   => self.params.slfo1_unipolar = value,
+            "slfo2_rate"       => self.params.slfo2_rate = value,
+            "slfo2_waveform"   => self.params.slfo2_waveform = value,
+            "slfo2_deform"     => self.params.slfo2_deform = value,
+            "slfo2_tempo_sync" => self.params.slfo2_tempo_sync = value,
+            "slfo2_unipolar"   => self.params.slfo2_unipolar = value,
             "lfo2_rate" => self.params.lfo2_rate = value,
             "lfo2_pitch_depth" => self.params.lfo2_pitch_depth = value,
             "lfo2_filter_depth" => self.params.lfo2_filter_depth = value,
@@ -917,6 +938,11 @@ pub struct PresetParams {
     lfo1_trigger_mode: f32, lfo2_trigger_mode: f32, lfo3_trigger_mode: f32, lfo4_trigger_mode: f32,
     // LFO deform
     lfo_deform: f32,
+    // Scene LFOs (free-running — never retrigger on note-on)
+    slfo1_rate: f32, slfo1_waveform: f32, slfo1_deform: f32,
+    slfo1_tempo_sync: f32, slfo1_unipolar: f32,
+    slfo2_rate: f32, slfo2_waveform: f32, slfo2_deform: f32,
+    slfo2_tempo_sync: f32, slfo2_unipolar: f32,
     // Alias oscillator
     alias_wave_type: f32, alias_crush: f32,
     // Window oscillator
@@ -1049,6 +1075,8 @@ impl Default for PresetParams {
             lfo4_waveform: 0.0, lfo4_rate: 1.0, lfo4_deform: 0.0,
             lfo1_tempo_sync: 0.0, lfo2_tempo_sync: 0.0, lfo3_tempo_sync: 0.0, lfo4_tempo_sync: 0.0,
             lfo1_unipolar: 0.0, lfo2_unipolar: 0.0, lfo3_unipolar: 0.0, lfo4_unipolar: 0.0,
+            slfo1_rate: 0.5, slfo1_waveform: 0.0, slfo1_deform: 0.0, slfo1_tempo_sync: 0.0, slfo1_unipolar: 0.0,
+            slfo2_rate: 0.25, slfo2_waveform: 0.0, slfo2_deform: 0.0, slfo2_tempo_sync: 0.0, slfo2_unipolar: 0.0,
             alias_wave_type: 0.0, alias_crush: 8.0,
             window_type: 0.0, window_morph: 0.0, window_formant: 0.0,
             portamento_time: 0.0, portamento_mode: 0.0,
@@ -1180,6 +1208,12 @@ impl PresetParams {
             lfo3_tempo_sync: p("lfo3_tempo_sync", 0.0), lfo4_tempo_sync: p("lfo4_tempo_sync", 0.0),
             lfo1_unipolar: p("lfo1_unipolar", 0.0), lfo2_unipolar: p("lfo2_unipolar", 0.0),
             lfo3_unipolar: p("lfo3_unipolar", 0.0), lfo4_unipolar: p("lfo4_unipolar", 0.0),
+            slfo1_rate: p("slfo1_rate", 0.5), slfo1_waveform: p("slfo1_waveform", 0.0),
+            slfo1_deform: p("slfo1_deform", 0.0), slfo1_tempo_sync: p("slfo1_tempo_sync", 0.0),
+            slfo1_unipolar: p("slfo1_unipolar", 0.0),
+            slfo2_rate: p("slfo2_rate", 0.25), slfo2_waveform: p("slfo2_waveform", 0.0),
+            slfo2_deform: p("slfo2_deform", 0.0), slfo2_tempo_sync: p("slfo2_tempo_sync", 0.0),
+            slfo2_unipolar: p("slfo2_unipolar", 0.0),
             alias_wave_type: p("alias_wave_type", 0.0), alias_crush: p("alias_crush", 8.0),
             window_type: p("window_type", 0.0), window_morph: p("window_morph", 0.0),
             window_formant: p("window_formant", 0.0),
@@ -2283,6 +2317,33 @@ impl SynthEngine {
                 }
             }
 
+            // Scene LFOs — always tick regardless of note state, never retrigger
+            let slfo1_wf = LfoWaveform::from_param(layer.params.slfo1_waveform);
+            layer.scene_lfos[0].set_bpm(seq_bpm);
+            layer.scene_lfos[0].tempo_sync = layer.params.slfo1_tempo_sync > 0.5;
+            layer.scene_lfos[0].unipolar  = layer.params.slfo1_unipolar  > 0.5;
+            let slfo1_val = if layer.scene_lfo_routed[0] || slfo1_wf == LfoWaveform::StepSeq {
+                let rate = if layer.scene_lfos[0].tempo_sync {
+                    layer.params.slfo1_rate
+                } else {
+                    layer.params.slfo1_rate * bl
+                };
+                layer.scene_lfos[0].tick_with_deform(rate, slfo1_wf, layer.params.slfo1_deform)
+            } else { 0.0 };
+
+            let slfo2_wf = LfoWaveform::from_param(layer.params.slfo2_waveform);
+            layer.scene_lfos[1].set_bpm(seq_bpm);
+            layer.scene_lfos[1].tempo_sync = layer.params.slfo2_tempo_sync > 0.5;
+            layer.scene_lfos[1].unipolar  = layer.params.slfo2_unipolar  > 0.5;
+            let slfo2_val = if layer.scene_lfo_routed[1] || slfo2_wf == LfoWaveform::StepSeq {
+                let rate = if layer.scene_lfos[1].tempo_sync {
+                    layer.params.slfo2_rate
+                } else {
+                    layer.params.slfo2_rate * bl
+                };
+                layer.scene_lfos[1].tick_with_deform(rate, slfo2_wf, layer.params.slfo2_deform)
+            } else { 0.0 };
+
             // MSEGs
             let mseg1_val = if layer.params.mseg_enabled > 0.5 {
                 layer.mseg1_state.tick(&layer.mseg1)
@@ -2295,6 +2356,7 @@ impl SynthEngine {
             let key_track = (layer.last_note as f32 - 60.0) / 48.0;
             let mod_sources = mod_matrix::ModSources {
                 lfo_outputs: [lfo1_val, lfo2_val, lfo3_val, lfo4_val],
+                scene_lfo_outputs: [slfo1_val, slfo2_val],
                 amp_env: 0.0, filter_env: 0.0,
                 mseg_outputs: [mseg1_val, mseg2_val],
                 mod_wheel: self.mod_wheel,

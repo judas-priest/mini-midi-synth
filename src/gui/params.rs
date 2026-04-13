@@ -935,6 +935,75 @@ impl App {
 
         ui.add_space(6.0);
 
+        // Scene LFOs (free-running — never reset on note-on)
+        ui.strong("Scene LFO 1");
+        ui.label(egui::RichText::new("Free-running: phase never resets on note-on").small().weak());
+        ui.horizontal(|ui| {
+            let mut wf = self.layers[layer].edited_params.get("slfo1_waveform").copied().unwrap_or(0.0) as usize;
+            ui.label("Wave:");
+            egui::ComboBox::from_id_salt(format!("slfo1_wf_{layer}"))
+                .selected_text(*LFO_WAVEFORM_NAMES.get(wf).unwrap_or(&"Sine"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut wf, i, *name).clicked() {
+                            self.layers[layer].edited_params.insert("slfo1_waveform".into(), wf as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        changed |= self.param_slider(ui, "slfo1_rate", "Rate", 0.01, 20.0, true);
+        changed |= self.param_slider(ui, "slfo1_deform", "Deform", -1.0, 1.0, false);
+        {
+            let mut uni = self.layers[layer].edited_params.get("slfo1_unipolar").copied().unwrap_or(0.0) > 0.5;
+            let mut tsync = self.layers[layer].edited_params.get("slfo1_tempo_sync").copied().unwrap_or(0.0) > 0.5;
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut uni, "Unipolar").changed() {
+                    self.layers[layer].edited_params.insert("slfo1_unipolar".into(), if uni { 1.0 } else { 0.0 });
+                    changed = true;
+                }
+                if ui.checkbox(&mut tsync, "Tempo Sync").changed() {
+                    self.layers[layer].edited_params.insert("slfo1_tempo_sync".into(), if tsync { 1.0 } else { 0.0 });
+                    changed = true;
+                }
+            });
+        }
+
+        ui.add_space(4.0);
+        ui.strong("Scene LFO 2");
+        ui.horizontal(|ui| {
+            let mut wf = self.layers[layer].edited_params.get("slfo2_waveform").copied().unwrap_or(0.0) as usize;
+            ui.label("Wave:");
+            egui::ComboBox::from_id_salt(format!("slfo2_wf_{layer}"))
+                .selected_text(*LFO_WAVEFORM_NAMES.get(wf).unwrap_or(&"Sine"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut wf, i, *name).clicked() {
+                            self.layers[layer].edited_params.insert("slfo2_waveform".into(), wf as f32);
+                            changed = true;
+                        }
+                    }
+                });
+        });
+        changed |= self.param_slider(ui, "slfo2_rate", "Rate", 0.01, 20.0, true);
+        changed |= self.param_slider(ui, "slfo2_deform", "Deform", -1.0, 1.0, false);
+        {
+            let mut uni = self.layers[layer].edited_params.get("slfo2_unipolar").copied().unwrap_or(0.0) > 0.5;
+            let mut tsync = self.layers[layer].edited_params.get("slfo2_tempo_sync").copied().unwrap_or(0.0) > 0.5;
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut uni, "Unipolar").changed() {
+                    self.layers[layer].edited_params.insert("slfo2_unipolar".into(), if uni { 1.0 } else { 0.0 });
+                    changed = true;
+                }
+                if ui.checkbox(&mut tsync, "Tempo Sync").changed() {
+                    self.layers[layer].edited_params.insert("slfo2_tempo_sync".into(), if tsync { 1.0 } else { 0.0 });
+                    changed = true;
+                }
+            });
+        }
+
+        ui.add_space(6.0);
+
         // Modulation Matrix
         ui.strong("Mod Matrix");
         {

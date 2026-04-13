@@ -38,6 +38,8 @@ pub enum ModSource {
     HighestKey = 28,      // highest held note, -1..+1 centered on C4
     LatestKey = 29,       // most recent note, -1..+1 centered on C4
     PolyAftertouch = 30,  // per-note pressure, 0..1
+    SceneLfo1 = 31,       // free-running Scene LFO 1 (never resets on note-on)
+    SceneLfo2 = 32,       // free-running Scene LFO 2
 }
 
 impl ModSource {
@@ -73,6 +75,8 @@ impl ModSource {
             28 => Self::HighestKey,
             29 => Self::LatestKey,
             30 => Self::PolyAftertouch,
+            31 => Self::SceneLfo1,
+            32 => Self::SceneLfo2,
             _ => Self::None,
         }
     }
@@ -110,11 +114,14 @@ impl ModSource {
             Self::HighestKey => "Highest Key",
             Self::LatestKey => "Latest Key",
             Self::PolyAftertouch => "Poly AT",
+            Self::SceneLfo1 => "Scene LFO 1",
+            Self::SceneLfo2 => "Scene LFO 2",
         }
     }
 
     pub const ALL: &[ModSource] = &[
         Self::None, Self::Lfo1, Self::Lfo2, Self::Lfo3, Self::Lfo4,
+        Self::SceneLfo1, Self::SceneLfo2,
         Self::AmpEnv, Self::FilterEnv, Self::Mseg1, Self::Mseg2,
         Self::ModWheel, Self::Aftertouch, Self::Velocity, Self::KeyTrack,
         Self::StepSeq,
@@ -347,7 +354,8 @@ pub struct ModSources {
     pub lowest_key: f32,       // lowest held note -1..+1 centered on C4
     pub highest_key: f32,      // highest held note -1..+1 centered on C4
     pub latest_key: f32,       // most recent note -1..+1 centered on C4
-    pub poly_aftertouch: f32,  // current voice's poly AT value, 0..1
+    pub poly_aftertouch: f32,      // current voice's poly AT value, 0..1
+    pub scene_lfo_outputs: [f32; 2], // free-running scene LFOs (never retrigger)
 }
 
 const MOD_SOURCE_KEYS: [&str; MOD_SLOTS] = [
@@ -383,39 +391,41 @@ impl Default for ModMatrix {
 impl ModMatrix {
     /// Evaluate all active slots. Returns accumulated offsets.
     pub fn evaluate(&self, sources: &ModSources) -> ModOffsets {
-        // Precompute all source values indexed by ModSource discriminant (0..30)
-        let src_vals: [f32; 31] = [
-            0.0,                        // None = 0
-            sources.lfo_outputs[0],     // Lfo1 = 1
-            sources.lfo_outputs[1],     // Lfo2 = 2
-            sources.lfo_outputs[2],     // Lfo3 = 3
-            sources.lfo_outputs[3],     // Lfo4 = 4
-            sources.amp_env,            // AmpEnv = 5
-            sources.filter_env,         // FilterEnv = 6
-            sources.mseg_outputs[0],    // Mseg1 = 7
-            sources.mseg_outputs[1],    // Mseg2 = 8
-            sources.mod_wheel,          // ModWheel = 9
-            sources.aftertouch,         // Aftertouch = 10
-            sources.velocity,           // Velocity = 11
-            sources.key_track,          // KeyTrack = 12
-            sources.step_seq,           // StepSeq = 13
-            sources.random_bipolar,     // RandomBipolar = 14
-            sources.random_unipolar,    // RandomUnipolar = 15
-            sources.alt_bipolar,        // AltBipolar = 16
-            sources.alt_unipolar,       // AltUnipolar = 17
-            sources.release_vel,        // ReleaseVel = 18
-            sources.pitch_bend,         // PitchBend = 19
-            sources.cc[0],              // Cc1 = 20
-            sources.cc[1],              // Cc2 = 21
-            sources.cc[2],              // Cc3 = 22
-            sources.cc[3],              // Cc4 = 23
-            sources.breath,             // Breath = 24
-            sources.expression,         // Expression = 25
-            sources.sustain_pedal,      // SustainPedal = 26
-            sources.lowest_key,         // LowestKey = 27
-            sources.highest_key,        // HighestKey = 28
-            sources.latest_key,         // LatestKey = 29
-            sources.poly_aftertouch,    // PolyAftertouch = 30
+        // Precompute all source values indexed by ModSource discriminant (0..32)
+        let src_vals: [f32; 33] = [
+            0.0,                             // None = 0
+            sources.lfo_outputs[0],          // Lfo1 = 1
+            sources.lfo_outputs[1],          // Lfo2 = 2
+            sources.lfo_outputs[2],          // Lfo3 = 3
+            sources.lfo_outputs[3],          // Lfo4 = 4
+            sources.amp_env,                 // AmpEnv = 5
+            sources.filter_env,              // FilterEnv = 6
+            sources.mseg_outputs[0],         // Mseg1 = 7
+            sources.mseg_outputs[1],         // Mseg2 = 8
+            sources.mod_wheel,               // ModWheel = 9
+            sources.aftertouch,              // Aftertouch = 10
+            sources.velocity,                // Velocity = 11
+            sources.key_track,               // KeyTrack = 12
+            sources.step_seq,                // StepSeq = 13
+            sources.random_bipolar,          // RandomBipolar = 14
+            sources.random_unipolar,         // RandomUnipolar = 15
+            sources.alt_bipolar,             // AltBipolar = 16
+            sources.alt_unipolar,            // AltUnipolar = 17
+            sources.release_vel,             // ReleaseVel = 18
+            sources.pitch_bend,              // PitchBend = 19
+            sources.cc[0],                   // Cc1 = 20
+            sources.cc[1],                   // Cc2 = 21
+            sources.cc[2],                   // Cc3 = 22
+            sources.cc[3],                   // Cc4 = 23
+            sources.breath,                  // Breath = 24
+            sources.expression,              // Expression = 25
+            sources.sustain_pedal,           // SustainPedal = 26
+            sources.lowest_key,              // LowestKey = 27
+            sources.highest_key,             // HighestKey = 28
+            sources.latest_key,              // LatestKey = 29
+            sources.poly_aftertouch,         // PolyAftertouch = 30
+            sources.scene_lfo_outputs[0],    // SceneLfo1 = 31
+            sources.scene_lfo_outputs[1],    // SceneLfo2 = 32
         ];
 
         let mut offsets = ModOffsets::default();
