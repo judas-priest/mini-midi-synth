@@ -86,7 +86,7 @@
 | ✅ | 🟡 Средний | LFO trigger modes (Free Run, Random, RandomUni) | Низкая |
 | ⬜ | 🟡 Средний | Микротюнинг Scala/KBM | Средняя |
 | ✅ | 🟡 Средний | Asymmetric pitch bend | Низкая |
-| ⬜ | 🟢 Низкий | Twist/Plaits порт | Очень высокая |
+| ✅ | 🟢 Низкий | Twist/Plaits порт (24 движка) | Очень высокая |
 | ⬜ | 🟢 Низкий | Lua Formula LFO | Очень высокая |
 | ⬜ | 🟢 Низкий | MPE | Высокая |
 | ⬜ | 🟢 Низкий | Неограниченный mod matrix | Высокая |
