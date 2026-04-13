@@ -1,0 +1,21 @@
+[package]
+name = "mi-plaits-dsp"
+version = "0.1.0"
+edition = "2021"
+authors = ["Oliver Rockstedt <info@sourcebox.de>"]
+description = "Port of DSP code from Mutable Instruments Plaits module"
+repository = "https://github.com/sourcebox/mi-plaits-dsp-rs"
+license = "MIT"
+keywords = ["audio", "dsp", "synthesizer"]
+categories = ["no-std", "multimedia::audio"]
+
+[dependencies]
+dyn-clone = "1.0.17"
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+spin = { version = "0.10.0", features = ["once"] }
+
+[dev-dependencies]
+hound = "3.5.1"
+log = "0.4.26"
+simple_logger = "5.0.0"
+audio-midi-shell = "0.1.0"
