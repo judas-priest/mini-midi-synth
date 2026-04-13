@@ -296,6 +296,9 @@ pub struct App {
     pub preset_search: String,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
+    // Split mode
+    pub split_enabled: bool,
+    pub split_point: u8,   // MIDI note where right zone starts (default 60 = C4)
     // FX Chain panel
     pub show_fx_chain: bool,
     // MIDI file sequencer

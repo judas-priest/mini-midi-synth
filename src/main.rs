@@ -264,6 +264,8 @@ fn main() -> Result<()> {
         pitch_seq_swing: [0.0; 2],
         preset_search: String::new(),
         scope_buf,
+        split_enabled: false,
+        split_point: 60,
         show_fx_chain: false,
         show_midi_seq: false,
         midi_seq_path: String::new(),

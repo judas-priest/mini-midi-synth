@@ -43,9 +43,37 @@ impl App {
                 }
             }
 
-            // Add Part button (if room exists)
+            // Split checkbox + add buttons
+            ui.separator();
+            let mut split = self.split_enabled;
+            if ui.checkbox(&mut split, "Split").changed() {
+                self.split_enabled = split;
+                if split {
+                    // Apply split point to all existing parts
+                    self.apply_split_ranges();
+                } else {
+                    // Full range for all parts
+                    for i in 0..self.layers.len() {
+                        if self.layers[i].enabled {
+                            self.layers[i].min_note = 0;
+                            self.layers[i].max_note = 127;
+                            self.send_layer_range(i);
+                        }
+                    }
+                }
+            }
+
             let enabled_count = self.layers.iter().filter(|l| l.enabled).count();
-            if enabled_count < MAX_LAYERS {
+            if self.split_enabled {
+                if enabled_count < MAX_LAYERS {
+                    if ui.small_button("+ Left").clicked() {
+                        self.add_part_to_zone(false);
+                    }
+                    if ui.small_button("+ Right").clicked() {
+                        self.add_part_to_zone(true);
+                    }
+                }
+            } else if enabled_count < MAX_LAYERS {
                 if ui.small_button("+ Part").clicked() {
                     self.add_part();
                 }
@@ -74,6 +102,19 @@ impl App {
                 self.show_midi_seq = false;
             }
         });
+
+        // ── Split point slider ──────────────────────────────────────────────
+        if self.split_enabled {
+            ui.horizontal(|ui| {
+                ui.label("Split:");
+                let mut sp = self.split_point;
+                let sp_name = note_name(sp);
+                if ui.add(egui::Slider::new(&mut sp, 0..=127).text(sp_name)).changed() {
+                    self.split_point = sp;
+                    self.apply_split_ranges();
+                }
+            });
+        }
 
         // ── Per-part routing strip (for active part) ────────────────────────
         let layer = self.active_layer;
@@ -294,12 +335,60 @@ impl App {
 
     /// Remove a part (layer > 0 only).
     fn remove_part(&mut self, layer: usize) {
-        if layer == 0 { return; } // Part 1 always stays
+        if layer == 0 { return; }
         self.layers[layer].enabled = false;
         self.layers[layer].mute = false;
         let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer, enabled: false });
-        // Switch to Part 1
         self.active_layer = 0;
+    }
+
+    /// Add a part to left (right=false) or right (right=true) split zone.
+    fn add_part_to_zone(&mut self, right: bool) {
+        let sp = self.split_point;
+        let slot = self.layers.iter().position(|l| !l.enabled);
+        if let Some(i) = slot {
+            self.layers[i].enabled = true;
+            self.layers[i].mute = false;
+            self.layers[i].volume = 0.8;
+            self.layers[i].preset_idx = 0;
+            self.layers[i].sf2_mode = false;
+            if right {
+                self.layers[i].min_note = sp;
+                self.layers[i].max_note = 127;
+            } else {
+                self.layers[i].min_note = 0;
+                self.layers[i].max_note = sp.saturating_sub(1);
+            }
+            let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer: i, enabled: true });
+            self.send_edited_params(i);
+            self.send_layer_volume(i);
+            self.send_layer_range(i);
+            self.active_layer = i;
+            self.show_drums = false;
+            self.show_midi_seq = false;
+            self.show_fx_chain = false;
+        }
+    }
+
+    /// Apply current split_point to all enabled parts based on their current zone.
+    /// Parts with min_note < split_point stay left; parts with min_note >= split_point stay right.
+    /// Part 1 (index 0) is always left if split enabled.
+    fn apply_split_ranges(&mut self) {
+        let sp = self.split_point;
+        for i in 0..self.layers.len() {
+            if !self.layers[i].enabled { continue; }
+            // Determine zone: if part's midpoint is below split → left zone
+            let mid = (self.layers[i].min_note as u16 + self.layers[i].max_note as u16) / 2;
+            let is_right = mid >= sp as u16;
+            if is_right {
+                self.layers[i].min_note = sp;
+                self.layers[i].max_note = 127;
+            } else {
+                self.layers[i].min_note = 0;
+                self.layers[i].max_note = sp.saturating_sub(1);
+            }
+            self.send_layer_range(i);
+        }
     }
 }
 
