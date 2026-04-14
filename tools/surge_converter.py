@@ -1,410 +1,471 @@
 #!/usr/bin/env python3
 """
 Surge XT .fxp → mini_midi_synth JSON preset converter.
-Converts all factory presets from /usr/share/surge-xt/patches_factory/
-Output goes to ~/.local/share/mini_midi_synth/presets/ (category subfolders).
+Uses exact parameter mappings from Surge XT source code.
 
-Usage: python3 surge_converter.py
+Run: python3 tools/surge_converter.py
 """
 
-import os
-import sys
-import json
-import math
+import os, json, math
 import xml.etree.ElementTree as ET
 from pathlib import Path
-
-# ── Paths ────────────────────────────────────────────────────────────────────
+from collections import defaultdict
 
 SURGE_PRESETS = Path("/usr/share/surge-xt/patches_factory")
-SURGE_WT = Path("/usr/share/surge-xt/wavetables")
-OUT_DIR = Path.home() / ".local/share/mini_midi_synth/presets"
 WT_DIR = Path.home() / ".local/share/mini_midi_synth/wavetables"
+OUT_DIR = Path.home() / ".local/share/mini_midi_synth/presets"
 
-# ── Oscillator type mapping ───────────────────────────────────────────────────
-# Surge osc types:
-# 0=Classic(saw/square/tri), 1=Sine, 2=Wavetable, 3=Window, 4=SH Noise,
-# 5=FM2, 6=FM3, 7=String, 8=Alias, 9=Twist, 10=Modern, 11=Audio Input
-#
-# Our osc types:
-# 0=Sine, 1=Saw, 2=Square, 3=Triangle, 4=FM, 5=Noise, 6=KS,
-# 27=Wavetable, 28=FM3, 29=Twist
-
-def surge_osc_to_ours(surge_type: int, param0: float) -> int:
-    """Map Surge osc type to our osc_type. param0 affects Classic shape."""
-    surge_type = int(surge_type)
-    if surge_type == 0:   # Classic: param0 controls shape (-1=saw, 0=square ish, 1=tri-ish)
-        if param0 < -0.5:
-            return 1  # Saw
-        elif param0 > 0.5:
-            return 3  # Triangle
-        else:
-            return 2  # Square
-    elif surge_type == 1:  return 0   # Sine
-    elif surge_type == 2:  return 27  # Wavetable
-    elif surge_type == 3:  return 27  # Window → Wavetable approx
-    elif surge_type == 4:  return 5   # SH Noise → Noise
-    elif surge_type == 5:  return 4   # FM2 → FM
-    elif surge_type == 6:  return 28  # FM3
-    elif surge_type == 7:  return 6   # String → Karplus-Strong
-    elif surge_type == 8:  return 25  # Alias
-    elif surge_type == 9:  return 29  # Twist / Plaits
-    elif surge_type == 10: return 1   # Modern → Saw (closest)
-    else:                  return 1   # Default to Saw
-
-def surge_filter_type_to_ours(surge_type: int) -> int:
-    """Map Surge filter type to our filter_type.
-    Surge: 0=LP, 1=LP2B, 2=HP, 3=HP2B, 4=BP, 5=Notch, 6=Multi, 7=Comb+, ...
-    Ours:  0=LowPass, 1=HighPass, 2=BandPass, 3=Formant, 4=MoogLP24, 5=MoogLP12, ...
-    """
-    t = int(surge_type)
-    # Surge filter type families (each has 4 subtypes)
-    family = t // 4
-    # 0=LP, 1=HP, 2=BP, 3=Notch, 4=Multi, 5=LadderLP, 6=LadderHP, 7=Comb
-    if family == 0:   return 0   # LP → our LowPass SVF
-    elif family == 1: return 1   # HP → our HighPass SVF
-    elif family == 2: return 2   # BP → our BandPass SVF
-    elif family == 3: return 8   # Notch → our Allpass/Notch (index 8)
-    elif family == 5: return 4   # Ladder LP → our MoogLP24
-    elif family == 6: return 5   # Ladder HP → our MoogLP12 approx
-    elif family == 7: return 7   # Comb
-    else:             return 0   # Default LP
-
-def surge_env_time(log_val: float) -> float:
-    """Convert Surge log-scale envelope time to seconds.
-    Surge uses: -8 ≈ 0.001s (instant), 0 = 1s, positive = longer
-    Formula: t = 2^val seconds, clamped
-    """
-    if log_val <= -8:
-        return 0.001
-    t = 2.0 ** log_val
-    return max(0.001, min(t, 30.0))
-
-def surge_cutoff_to_hz(semitones: float) -> float:
-    """Convert Surge filter cutoff (semitones from C4 = 261.63 Hz) to Hz."""
-    # Surge cutoff: 0 = C4 (261.63 Hz), each unit = 1 semitone
-    hz = 261.63 * (2.0 ** (semitones / 12.0))
-    return max(20.0, min(hz, 20000.0))
-
-def surge_lfo_rate_to_hz(val: float) -> float:
-    """Convert Surge LFO rate to Hz. Surge uses 2^val * base."""
-    # Surge LFO rate: 0 = ~1 Hz, each unit doubles
-    return max(0.01, min(2.0 ** val, 30.0))
-
-def surge_lfo_shape(val: int) -> int:
-    """Map Surge LFO shape to our lfo_waveform.
-    Surge: 0=Sine, 1=Tri, 2=Square, 3=Ramp(saw down), 4=Noise, 5=S&H, 6=Envelope
-    Ours:  0=Sine, 1=Triangle, 2=Square, 3=S&H, 4=Sawtooth, 5=Envelope, 6=Noise
-    """
-    m = {0: 0, 1: 1, 2: 2, 3: 4, 4: 6, 5: 3, 6: 5}
-    return m.get(int(val), 0)
-
-def get_param(params: dict, key: str, default=0.0):
-    el = params.get(key)
-    if el is None:
-        return default
-    try:
-        return float(el.get('value', default))
-    except:
-        return default
-
-def get_modrouting(el) -> list:
-    """Extract modulation routings from a param element."""
-    routes = []
-    if el is None:
-        return routes
-    for mod in el.findall('modrouting'):
-        try:
-            routes.append({
-                'source': int(mod.get('source', 0)),
-                'depth': float(mod.get('depth', 0)),
-            })
-        except:
-            pass
-    return routes
-
-# Surge modrouting source IDs
-SURGE_MOD_SOURCES = {
-    1: None,   # LFO A (scene A lfo1)
-    2: None,   # LFO B
-    4: None,   # AEG (amp env)
-    5: None,   # FEG (filter env)
-    6: None,   # keytrack
-    7: None,   # velocity
-    11: None,  # pitchbend
-    12: None,  # modwheel
+# ── Oscillator type IDs (from SurgeStorage.h) ────────────────────────────────
+# ot_classic=0, ot_sine=1, ot_wavetable=2, ot_shnoise=3, ot_audioinput=4,
+# ot_FM3=5, ot_FM2=6, ot_window=7, ot_modern=8, ot_string=9,
+# ot_twist=10, ot_alias=11
+OSC_MAP = {
+    0: 1,   # Classic → Saw (default, shape adjusts below)
+    1: 0,   # Sine
+    2: 27,  # Wavetable
+    3: 5,   # S&H Noise → Noise
+    4: 1,   # Audio Input → Saw (not supported)
+    5: 28,  # FM3
+    6: 4,   # FM2 → FM
+    7: 27,  # Window → Wavetable
+    8: 1,   # Modern → Saw
+    9: 6,   # String → Karplus-Strong
+    10: 29, # Twist / Plaits
+    11: 25, # Alias
 }
 
-def convert_fxp(fxp_path: Path, category: str) -> dict | None:
-    """Convert a single .fxp file to our preset dict. Returns None on failure."""
+def surge_osc(surge_type, param0):
+    """Map Surge osc type to ours. Classic: param0 = -1=Saw, 0=Square, 1=Tri"""
+    t = int(surge_type)
+    if t == 0:  # Classic oscillator
+        p = float(param0)
+        if p < -0.33:   return 1   # Saw
+        elif p > 0.33:  return 3   # Triangle
+        else:           return 2   # Square
+    return OSC_MAP.get(t, 1)
+
+# ── Filter type IDs (from SurgeStorage.h fut_* enum) ─────────────────────────
+# Our filter types: 0=LP SVF, 1=HP SVF, 2=BP SVF, 3=Formant,
+# 4=MoogLP24, 5=MoogLP12, 6=DiodeLP, 7=Comb, 8=Allpass
+FILTER_MAP = {
+    # LP family (0-3): fut_lp12, fut_lp24, fut_bp12_A, fut_lpmoog
+    0: 0, 1: 0, 2: 2, 3: 4,
+    # HP family (4-5)
+    4: 1, 5: 1,
+    # BP (6)
+    6: 2,
+    # Notch (7)
+    7: 8,
+    # Comb (8-9)
+    8: 7, 9: 7,
+    # S&H (9) → allpass approx
+    10: 4,  # fut_vintageladder → Moog
+    11: 5,  # → LP12
+    12: 4,  # OB-Xd 4-pole → Moog
+    13: 4,  # K35 LP
+    14: 1,  # K35 HP
+    15: 6,  # Diode
+    # Others → LP default
+}
+def surge_filter(surge_type):
+    return FILTER_MAP.get(int(surge_type), 0)
+
+# ── Filter cutoff: Hz = MIDI_0_FREQ * 2^(semitones/12) ───────────────────────
+# MIDI_0_FREQ = 8.1757994155... Hz (C-1)
+MIDI_0_FREQ = 8.1757994155
+
+def surge_cutoff_hz(semitones):
+    # In Surge, filter cutoff 0 = A4 (440 Hz), stored as semitones offset
+    hz = 440.0 * (2.0 ** (float(semitones) / 12.0))
+    return max(20.0, min(20000.0, hz))
+
+# ── Envelope time: t = 2^param seconds ───────────────────────────────────────
+# param -8 ≈ 0.004s (instant), 0 = 1s, 4 = 16s
+def surge_env_time(val):
+    t = 2.0 ** float(val)
+    return max(0.001, min(30.0, t))
+
+# ── LFO rate: 2^val Hz ───────────────────────────────────────────────────────
+def surge_lfo_rate(val):
+    return max(0.01, min(30.0, 2.0 ** float(val)))
+
+# ── LFO shape (lt_* enum) ────────────────────────────────────────────────────
+# lt_sine=0, lt_tri=1, lt_square=2, lt_ramp=3, lt_noise=4, lt_snh=5,
+# lt_envelope=6, lt_stepseq=7, lt_mseg=8, lt_formula=9
+# Our: 0=Sine, 1=Triangle, 2=Square, 3=S&H, 4=Sawtooth, 5=Envelope, 6=Noise
+LFO_SHAPE_MAP = {0:0, 1:1, 2:2, 3:4, 4:6, 5:3, 6:5, 7:0, 8:0, 9:0}
+def surge_lfo_shape(val): return LFO_SHAPE_MAP.get(int(val), 0)
+
+# ── FX type IDs (from SurgeStorage.h fxt_* enum) ─────────────────────────────
+# fxt_off=0, fxt_delay=1, fxt_reverb=2, fxt_phaser=3, fxt_rotaryspeaker=4,
+# fxt_distortion=5, fxt_eq=6, fxt_freqshift=7, fxt_conditioner=8,
+# fxt_chorus4=9, fxt_vocoder=10, fxt_reverb2=11, fxt_flanger=12,
+# fxt_ringmod=13, fxt_airwindows=14, fxt_neuron=15, fxt_geq11=16,
+# fxt_resonator=17, fxt_chow=18, fxt_exciter=19, fxt_ensemble=20,
+# fxt_combulator=21, fxt_nimbus=22, fxt_tape=23, fxt_treemonster=24,
+# fxt_waveshaper=25, fxt_mstool=26, fxt_spring_reverb=27, fxt_bonsai=28,
+# fxt_floaty_delay=30, fxt_convolution=31
+
+# Modulation sources (from ModulationSource.h ms_* enum)
+# ms_lfo1=17..ms_lfo6=22, ms_slfo1=23..ms_slfo6=28
+# ms_ampeg=15, ms_filtereg=16
+# ms_velocity=1, ms_keytrack=2, ms_aftertouch=4, ms_pitchbend=5, ms_modwheel=6
+
+MOD_SRC_MAP = {
+    1: 'velocity', 2: 'keytrack', 4: 'aftertouch', 5: 'pitchbend',
+    6: 'modwheel',
+    15: 'amp_env', 16: 'filter_env',
+    17: 'lfo1', 18: 'lfo2', 19: 'lfo3', 20: 'lfo4',
+    23: 'slfo1', 24: 'slfo2',
+}
+
+def gv(params_dict, key, default=0.0):
+    el = params_dict.get(key)
+    if el is None: return default
+    try: return float(el.get('value', default))
+    except: return float(default)
+
+def get_mods(params_dict, key):
+    """Get modrouting child elements of a param."""
+    el = params_dict.get(key)
+    if el is None: return []
+    return [{'src': int(m.get('source', 0)), 'depth': float(m.get('depth', 0))}
+            for m in el.findall('modrouting')]
+
+def find_wt(name):
+    if not name: return None
+    name_l = name.lower().strip()
+    for f in WT_DIR.rglob("*.wt"):
+        if f.stem.lower() == name_l:
+            return str(f.relative_to(WT_DIR))
+    return None
+
+def convert_fxp(fxp_path, category):
     try:
         data = fxp_path.read_bytes()
-    except:
-        return None
+    except: return None
 
     xml_start = data.find(b'<?xml')
-    if xml_start < 0:
-        return None
+    if xml_start < 0: return None
+
+    xml_bytes = data[xml_start:]
+    end_tag = b'</patch>'
+    end_pos = xml_bytes.rfind(end_tag)
+    if end_pos >= 0:
+        xml_bytes = xml_bytes[:end_pos + len(end_tag)]
 
     try:
-        xml_bytes = data[xml_start:]
-        # Truncate at </patch> to remove trailing binary data
-        end_tag = b'</patch>'
-        end_pos = xml_bytes.rfind(end_tag)
-        if end_pos >= 0:
-            xml_bytes = xml_bytes[:end_pos + len(end_tag)]
-        xml_str = xml_bytes.decode('utf-8', errors='replace')
-        root = ET.fromstring(xml_str)
+        root = ET.fromstring(xml_bytes.decode('utf-8', errors='replace'))
     except ET.ParseError:
-        try:
-            xml_clean = xml_str.rstrip('\x00').rstrip()
-            root = ET.fromstring(xml_clean)
-        except:
-            return None
-
-    meta = root.find('meta')
-    name = meta.get('name', fxp_path.stem) if meta is not None else fxp_path.stem
-
-    params_el = root.find('parameters')
-    if params_el is None:
         return None
 
-    # Build lookup: tag → element
+    meta = root.find('meta')
+    name = (meta.get('name') if meta is not None else None) or fxp_path.stem
+
+    params_el = root.find('parameters')
+    if params_el is None: return None
     P = {el.tag: el for el in params_el}
 
-    def gp(key, default=0.0):
-        return get_param(P, key, default)
+    # ── Scene A oscillator 1 ─────────────────────────────────────────────
+    osc1_type = int(gv(P, 'a_osc1_type'))
+    osc1_p0   = gv(P, 'a_osc1_param0')
+    osc1_oct  = int(gv(P, 'a_osc1_octave'))  # -2..+2 octave shift
+    osc1_pitch= gv(P, 'a_osc1_pitch')        # fine tune cents
+    our_osc   = surge_osc(osc1_type, osc1_p0)
 
-    # ── Scene A oscillator 1 ──────────────────────────────────────────────
-    osc1_type = int(gp('a_osc1_type'))
-    osc1_p0   = gp('a_osc1_param0')
-    osc1_oct  = int(gp('a_osc1_octave'))
-    our_osc   = surge_osc_to_ours(osc1_type, osc1_p0)
-    detune    = gp('a_osc1_pitch') / 100.0  # cents → 0..1 approx
+    # Pulse width (param1 of Classic, 0.5 = 50%)
+    pulse_width = gv(P, 'a_osc1_param1', 0.5) if osc1_type == 0 else 0.5
+    pulse_width = max(0.05, min(0.95, pulse_width))
 
-    # Osc 2
-    osc2_type = int(gp('a_osc2_type'))
-    osc2_p0   = gp('a_osc2_param0')
-    osc2_oct  = int(gp('a_osc2_octave'))
-    osc2_level_el = P.get('a_level_o2')
-    osc2_mute = gp('a_mute_o2') > 0.5
-    osc2_level = 0.0 if osc2_mute else max(0.0, min(1.0, gp('a_level_o2') * 0.5 + 0.5))
-    our_osc2  = surge_osc_to_ours(osc2_type, osc2_p0)
+    # ── Osc 2 ────────────────────────────────────────────────────────────
+    # a_level_o* is linear 0..1, a_mute_o* = 1 means muted
+    osc2_type  = int(gv(P, 'a_osc2_type'))
+    osc2_p0    = gv(P, 'a_osc2_param0')
+    osc2_muted = gv(P, 'a_mute_o2') > 0.5
+    osc2_level = 0.0 if osc2_muted else max(0.0, min(1.0, gv(P, 'a_level_o2', 1.0)))
+    our_osc2 = surge_osc(osc2_type, osc2_p0)
+
+    # ── Osc 3 ────────────────────────────────────────────────────────────
+    osc3_type  = int(gv(P, 'a_osc3_type'))
+    osc3_p0    = gv(P, 'a_osc3_param0')
+    osc3_muted = gv(P, 'a_mute_o3') > 0.5
+    osc3_level = 0.0 if osc3_muted else max(0.0, min(1.0, gv(P, 'a_level_o3', 1.0)))
+    our_osc3   = surge_osc(osc3_type, osc3_p0)
+
+    # ── Osc 1 level ──────────────────────────────────────────────────────
+    o1_muted = gv(P, 'a_mute_o1') > 0.5
+    o1_level = 0.0 if o1_muted else max(0.0, min(1.0, gv(P, 'a_level_o1', 1.0)))
+
+    # ── Wavetable reference ───────────────────────────────────────────────
+    wt_file = None
+    if osc1_type == 2:  # Wavetable osc
+        wt_el = P.get('a_osc1_wavetable_name')
+        wt_name = wt_el.get('value', '') if wt_el is not None else ''
+        if wt_name:
+            wt_file = find_wt(wt_name)
 
     # ── Filters ───────────────────────────────────────────────────────────
-    f1_type = int(gp('a_filter1_type'))
-    f1_cutoff_semi = gp('a_filter1_cutoff')
-    f1_reso   = gp('a_filter1_resonance')
-    f1_envmod = gp('a_filter1_envmod')
-    f1_ktrack = gp('a_filter1_keytrack')
-    our_ftype = surge_filter_type_to_ours(f1_type)
-    our_fcut  = surge_cutoff_to_hz(f1_cutoff_semi)
+    f1_type  = int(gv(P, 'a_filter1_type'))
+    f1_cut   = surge_cutoff_hz(gv(P, 'a_filter1_cutoff'))
+    f1_res   = max(0.0, min(0.99, gv(P, 'a_filter1_resonance')))
+    f1_env   = gv(P, 'a_filter1_envmod')   # semitones
+    f1_kt    = gv(P, 'a_filter1_keytrack') # 0..1
+    our_ft   = surge_filter(f1_type)
 
-    # ── AEG (amp envelope = env1) ─────────────────────────────────────────
-    aeg_a = surge_env_time(gp('a_env1_attack', -8))
-    aeg_d = surge_env_time(gp('a_env1_decay',  0))
-    aeg_s = max(0.0, min(1.0, gp('a_env1_sustain', 1.0)))
-    aeg_r = surge_env_time(gp('a_env1_release', -4))
-    aeg_as = int(gp('a_env1_attack_shape', 0))
-    aeg_ds = int(gp('a_env1_decay_shape', 0))
-    aeg_rs = int(gp('a_env1_release_shape', 0))
+    # Filter env mod: f1_env is in semitones added to cutoff
+    # delta_hz = cutoff_at_0 * (2^(N/12) - 1) where cutoff_at_0 = 440 Hz (A4)
+    # This gives the Hz offset from the base 440Hz reference point
+    env_hz = 440.0 * (2.0**(f1_env/12.0) - 1.0) if abs(f1_env) > 0.1 else 0.0
+    env_hz = max(-20000.0, min(20000.0, env_hz))
 
-    # ── FEG (filter envelope = env2) ─────────────────────────────────────
-    feg_a = surge_env_time(gp('a_env2_attack', -8))
-    feg_d = surge_env_time(gp('a_env2_decay',  0))
-    feg_s = max(0.0, min(1.0, gp('a_env2_sustain', 0.0)))
-    feg_r = surge_env_time(gp('a_env2_release', -4))
+    # Filter 2
+    f2_type = int(gv(P, 'a_filter2_type'))
+    f2_cut  = surge_cutoff_hz(gv(P, 'a_filter2_cutoff'))
+    f2_res  = max(0.0, min(0.99, gv(P, 'a_filter2_resonance')))
+    our_ft2 = surge_filter(f2_type)
 
-    # Filter env amount (semitones * hz_scale → Hz offset)
-    # f1_envmod is in semitones, convert to our Hz-based env amount
-    env_hz = f1_envmod * 40.0  # rough: each semitone ≈ 40 Hz at midrange
+    # Filter routing (0=series, 1=parallel, 2-5=other)
+    filter_route_surge = int(gv(P, 'a_filter_balance'))
+    # 0=Serial, 1=Parallel in Surge maps to our 1=Serial, 2=Parallel
+    filter_route = 0  # single by default
+    if f2_type > 0 and not gv(P, 'a_filter2_type') == 0:
+        filter_route = 1  # serial
 
-    # ── LFO 0 (voice LFO, often pitch/filter vibrato) ─────────────────────
-    lfo0_shape = surge_lfo_shape(int(gp('a_lfo0_shape')))
-    lfo0_rate  = surge_lfo_rate_to_hz(gp('a_lfo0_rate'))
-    lfo0_mag   = gp('a_lfo0_magnitude')
-    lfo0_deform= gp('a_lfo0_deform')
-    lfo0_uni   = gp('a_lfo0_unipolar') > 0.5
+    # ── AEG (env1 = amplitude) ────────────────────────────────────────────
+    aeg_a  = surge_env_time(gv(P, 'a_env1_attack',  -8))
+    aeg_d  = surge_env_time(gv(P, 'a_env1_decay',    0))
+    aeg_s  = max(0.0, min(1.0, gv(P, 'a_env1_sustain', 1.0)))
+    aeg_r  = surge_env_time(gv(P, 'a_env1_release', -4))
+    aeg_as = int(gv(P, 'a_env1_attack_shape',  0))  # 0=sqrt,1=linear,2=quad
+    aeg_ds = int(gv(P, 'a_env1_decay_shape',   0))
+    aeg_rs = int(gv(P, 'a_env1_release_shape', 0))
 
-    # LFO 1 (often scene/chorus LFO)
-    lfo1_shape = surge_lfo_shape(int(gp('a_lfo1_shape')))
-    lfo1_rate  = surge_lfo_rate_to_hz(gp('a_lfo1_rate'))
-    lfo1_mag   = gp('a_lfo1_magnitude')
+    # ── FEG (env2 = filter) ───────────────────────────────────────────────
+    feg_a  = surge_env_time(gv(P, 'a_env2_attack',  -8))
+    feg_d  = surge_env_time(gv(P, 'a_env2_decay',    0))
+    feg_s  = max(0.0, min(1.0, gv(P, 'a_env2_sustain', 0.0)))
+    feg_r  = surge_env_time(gv(P, 'a_env2_release', -4))
+    feg_as = int(gv(P, 'a_env2_attack_shape', 0))
+    feg_ds = int(gv(P, 'a_env2_decay_shape',  0))
+    feg_rs = int(gv(P, 'a_env2_release_shape',0))
 
-    # ── Check modulation routings for pitch/filter depth ─────────────────
-    # Surge stores modrouting as child elements of the destination param
+    # ── LFO 0 (voice LFO 1) ──────────────────────────────────────────────
+    lfo0_sh = surge_lfo_shape(gv(P, 'a_lfo0_shape'))
+    lfo0_rt = surge_lfo_rate(gv(P, 'a_lfo0_rate'))
+    lfo0_mg = gv(P, 'a_lfo0_magnitude', 0.0)
+    lfo0_df = gv(P, 'a_lfo0_deform', 0.0)
+    lfo0_uni= gv(P, 'a_lfo0_unipolar', 0.0) > 0.5
+    lfo0_trg= int(gv(P, 'a_lfo0_trigmode', 0))  # 0=free,1=keytrigger
+
+    # LFO 1 (voice LFO 2)
+    lfo1_sh = surge_lfo_shape(gv(P, 'a_lfo1_shape'))
+    lfo1_rt = surge_lfo_rate(gv(P, 'a_lfo1_rate'))
+    lfo1_mg = gv(P, 'a_lfo1_magnitude', 0.0)
+    lfo1_df = gv(P, 'a_lfo1_deform', 0.0)
+    lfo1_uni= gv(P, 'a_lfo1_unipolar', 0.0) > 0.5
+    lfo1_trg= int(gv(P, 'a_lfo1_trigmode', 0))
+
+    # ── Modulation routings ───────────────────────────────────────────────
+    # Check pitch modulation (from LFO)
     lfo_pitch_depth = 0.0
     lfo_filter_depth = 0.0
+    lfo_amp_depth = 0.0
 
-    # Check pitch modrouting
-    pitch_el = P.get('a_osc1_pitch')
-    if pitch_el is not None:
-        for mod in pitch_el.findall('modrouting'):
-            src = int(mod.get('source', 0))
-            depth = float(mod.get('depth', 0))
-            if src in (1, 2, 3, 4, 5, 6):  # LFO sources
-                lfo_pitch_depth = max(lfo_pitch_depth, abs(depth) / 12.0)
+    for dest_key, depth_factor in [
+        ('a_pitch', 1.0/48.0),          # pitch: semitones normalized
+        ('a_osc1_pitch', 1.0/48.0),
+    ]:
+        for mod in get_mods(P, dest_key):
+            src = mod['src']
+            if src in (17, 18):  # LFO1, LFO2
+                lfo_pitch_depth = max(lfo_pitch_depth, abs(mod['depth']) * depth_factor)
 
-    f1cut_el = P.get('a_filter1_cutoff')
-    if f1cut_el is not None:
-        for mod in f1cut_el.findall('modrouting'):
-            src = int(mod.get('source', 0))
-            depth = float(mod.get('depth', 0))
-            if src in (1, 2, 3, 4, 5, 6):
-                lfo_filter_depth = max(lfo_filter_depth, abs(depth) / 20.0)
+    for mod in get_mods(P, 'a_filter1_cutoff'):
+        src = mod['src']
+        if src in (17, 18):
+            # depth is in semitones, normalize to 0..1
+            lfo_filter_depth = max(lfo_filter_depth, abs(mod['depth']) / 60.0)
+
+    for mod in get_mods(P, 'a_amp_gain'):
+        src = mod['src']
+        if src in (17, 18):
+            lfo_amp_depth = max(lfo_amp_depth, abs(mod['depth']))
+
+    # LFO trigger mode → our lfo1_trigger_mode
+    # Surge: 0=free, 1=keytrigger, 2=random
+    lfo0_trigger = min(3, max(0, lfo0_trg))
+    lfo1_trigger = min(3, max(0, lfo1_trg))
 
     # ── FX slots ──────────────────────────────────────────────────────────
-    # Surge FX slots 1-8, types: 1=EQ, 2=Chorus, 3=Flanger, 4=Phaser,
-    # 5=Rotary, 6=Delay, 8=Reverb1, 10=Reverb2, 11=Airwindows, ...
-    reverb_mix = 0.0
-    chorus_mix = 0.0
-    delay_mix  = 0.0
-    chorus_rate = 0.5
-    chorus_depth = 0.3
+    reverb_mix  = 0.0; reverb_room = 0.5; reverb_damp = 0.5
+    reverb2_mix = 0.0
+    chorus_mix  = 0.0
+    delay_mix   = 0.0; delay_tl = 0.3; delay_tr = 0.4; delay_fb = 0.4
+    phaser_mix  = 0.0
+    rotary_mix  = 0.0
+    flanger_mix = 0.0
+    tape_mix    = 0.0; tape_drive = 0.0
+    distort_mix = 0.0
+    spring_mix  = 0.0
+    ensemble_mix= 0.0
 
-    fx_disable = int(gp('fx_disable'))
+    fx_disable = int(gv(P, 'fx_disable', 0))
+    fx_bypass  = int(gv(P, 'fx_bypass', 0))
+
     for slot in range(1, 9):
-        if (fx_disable >> (slot - 1)) & 1:
-            continue  # disabled
-        ftype = int(gp(f'fx{slot}_type'))
-        p0 = gp(f'fx{slot}_p0')
-        p1 = gp(f'fx{slot}_p1')
-        if ftype == 2:   # Chorus
+        bit = 1 << (slot - 1)
+        if (fx_disable & bit) or (fx_bypass & bit): continue
+        ftype = int(gv(P, f'fx{slot}_type', 0))
+        p = [gv(P, f'fx{slot}_p{i}', 0.0) for i in range(12)]
+
+        if ftype == 1:    # Delay
+            delay_mix = max(delay_mix, 0.35)
+            delay_tl = max(0.01, min(2.0, abs(p[0]) if p[0] > 0 else 0.3))
+            delay_tr = max(0.01, min(2.0, abs(p[1]) if p[1] > 0 else 0.4))
+            delay_fb = max(0.0, min(0.95, p[2] / 2.0 + 0.5 if abs(p[2]) < 2 else 0.4))
+        elif ftype == 2:  # Reverb 1
+            reverb_mix  = max(reverb_mix, 0.35)
+            reverb_room = max(0.0, min(1.0, p[0] / 10.0 + 0.5))
+            reverb_damp = max(0.0, min(1.0, p[1] / 10.0 + 0.5))
+        elif ftype == 3:  # Phaser
+            phaser_mix = max(phaser_mix, 0.3)
+        elif ftype == 4:  # Rotary Speaker
+            rotary_mix = max(rotary_mix, 0.4)
+        elif ftype == 5:  # Distortion → overdrive
+            distort_mix = max(distort_mix, 0.4)
+        elif ftype == 9:  # Chorus4
             chorus_mix = max(chorus_mix, 0.3)
-            chorus_rate = max(0.1, min(p0, 8.0)) if p0 > 0 else 1.0
-        elif ftype == 3: # Flanger → treat as chorus
-            chorus_mix = max(chorus_mix, 0.2)
-        elif ftype == 6: # Delay
-            delay_mix = max(delay_mix, 0.3)
-        elif ftype == 8 or ftype == 10:  # Reverb 1 or 2
-            reverb_mix = max(reverb_mix, 0.35)
-        elif ftype == 5: # Rotary (Leslie)
-            chorus_mix = max(chorus_mix, 0.25)
+        elif ftype == 11: # Reverb2
+            reverb2_mix = max(reverb2_mix, 0.35)
+        elif ftype == 12: # Flanger
+            flanger_mix = max(flanger_mix, 0.3)
+        elif ftype == 20: # Ensemble
+            ensemble_mix = max(ensemble_mix, 0.35)
+        elif ftype == 23: # Tape
+            tape_mix = max(tape_mix, 0.4)
+            tape_drive = max(0.0, min(1.0, p[0] / 10.0 + 0.5))
+        elif ftype == 27: # Spring Reverb
+            spring_mix = max(spring_mix, 0.35)
 
-    # Clamp mix values
-    reverb_mix = min(reverb_mix, 0.6)
-    chorus_mix = min(chorus_mix, 0.5)
-    delay_mix  = min(delay_mix, 0.4)
+    # Pick dominant reverb
+    use_reverb  = max(reverb_mix, spring_mix)
+    use_reverb2 = reverb2_mix
 
-    # ── Octave shift → detune ─────────────────────────────────────────────
-    # osc1_oct shifts by octaves (-2..+2), incorporate into our detune
-    # (our detune is in ratio units, 1 octave = 1.0 in detune param)
-    # Actually for transpose we use osc_detune differently; just note it
-    transpose_semitones = osc1_oct * 12
+    # ── Output params ─────────────────────────────────────────────────────
+    # Master volume: Surge volume param is in dB (-144 to +12)
+    vol_db = gv(P, 'volume', 0.0)
+    master_vol = round(min(1.0, 10**(vol_db/20.0)) if vol_db > -96 else 0.75, 2)
+    master_vol = max(0.5, min(1.0, master_vol))
 
-    # ── Wavetable file ────────────────────────────────────────────────────
-    wavetable_file = None
-    if our_osc == 27 and osc1_type == 2:  # Wavetable
-        wt_name = gp('a_osc1_wavetable_name') if 'a_osc1_wavetable_name' in P else None
-        # Try to find .wt file
-        if wt_name is None:
-            # Look for wavetable param
-            wt_el = P.get('a_osc1_wavetable_name')
-            if wt_el is not None:
-                wt_name = wt_el.get('value', '')
-        if wt_name:
-            wt_rel = find_wt_file(wt_name)
-            if wt_rel:
-                wavetable_file = wt_rel
+    # Octave shift → transpose
+    transpose = osc1_oct * 12
 
-    # ── Master volume ─────────────────────────────────────────────────────
-    master_vol = max(0.0, min(1.0, gp('volume', 0.0) / 24.0 + 0.75))
-
-    # ── Build output params ───────────────────────────────────────────────
-    out = {
-        "name": name,
-        "category": category,
-        "params": {
-            "osc_type": float(our_osc),
-            "osc_detune": max(-0.1, min(0.1, detune)),
-            "filter_type": float(our_ftype),
-            "filter_cutoff": round(our_fcut, 1),
-            "filter_resonance": round(max(0.0, min(0.99, f1_reso)), 3),
-            "filter_env_amount": round(env_hz, 1),
-            "filter_key_track": round(max(-1.0, min(1.0, f1_ktrack)), 3),
-            "amp_attack":  round(aeg_a, 4),
-            "amp_decay":   round(aeg_d, 4),
-            "amp_sustain": round(aeg_s, 3),
-            "amp_release": round(aeg_r, 4),
-            "env_attack_shape":  float(aeg_as),
-            "env_decay_shape":   float(aeg_ds),
-            "env_release_shape": float(aeg_rs),
-            "filter_attack":  round(feg_a, 4),
-            "filter_decay":   round(feg_d, 4),
-            "filter_sustain": round(feg_s, 3),
-            "filter_release": round(feg_r, 4),
-            "lfo_waveform": float(lfo0_shape),
-            "lfo_rate": round(lfo0_rate, 3),
-            "lfo_pitch_depth": round(lfo_pitch_depth, 3),
-            "lfo_filter_depth": round(lfo_filter_depth, 3),
-            "lfo_deform": round(lfo0_deform, 3),
-            "lfo1_waveform": float(lfo1_shape),
-            "lfo1_rate": round(lfo1_rate, 3),
-            "reverb_mix": round(reverb_mix, 2),
-            "chorus_mix": round(chorus_mix, 2),
-            "delay_mix":  round(delay_mix, 2),
-            "master_volume": round(master_vol, 2),
-        }
+    params = {
+        "osc_type": float(our_osc),
+        "osc_detune": round(osc1_pitch / 1200.0, 4),  # cents → small float
+        "pulse_width": round(pulse_width, 3),
+        "filter_type": float(our_ft),
+        "filter_cutoff": round(f1_cut, 1),
+        "filter_resonance": round(f1_res, 3),
+        "filter_env_amount": round(env_hz, 1),
+        "filter_key_track": round(f1_kt, 3),
+        "amp_attack":  round(aeg_a, 4),
+        "amp_decay":   round(aeg_d, 4),
+        "amp_sustain": round(aeg_s, 3),
+        "amp_release": round(aeg_r, 4),
+        "env_attack_shape":  float(aeg_as),
+        "env_decay_shape":   float(aeg_ds),
+        "env_release_shape": float(aeg_rs),
+        "filter_attack":  round(feg_a, 4),
+        "filter_decay":   round(feg_d, 4),
+        "filter_sustain": round(feg_s, 3),
+        "filter_release": round(feg_r, 4),
+        "filter_env_attack_shape":  float(feg_as),
+        "filter_env_decay_shape":   float(feg_ds),
+        "filter_env_release_shape": float(feg_rs),
+        "lfo_waveform": float(lfo0_sh),
+        "lfo_rate": round(lfo0_rt, 3),
+        "lfo_deform": round(lfo0_df, 3),
+        "lfo_unipolar": 1.0 if lfo0_uni else 0.0,
+        "lfo1_trigger_mode": float(lfo0_trigger),
+        "lfo_pitch_depth": round(lfo_pitch_depth, 3),
+        "lfo_filter_depth": round(lfo_filter_depth, 3),
+        "lfo_amp_depth": round(lfo_amp_depth, 3),
+        "lfo2_waveform": float(lfo1_sh),
+        "lfo2_rate": round(lfo1_rt, 3),
+        "lfo2_deform": round(lfo1_df, 3),
+        "lfo2_unipolar": 1.0 if lfo1_uni else 0.0,
+        "lfo2_trigger_mode": float(lfo1_trigger),
+        "reverb_mix":  round(use_reverb, 2),
+        "reverb_room_size": round(reverb_room, 2),
+        "reverb_damping": round(reverb_damp, 2),
+        "reverb2_mix": round(use_reverb2, 2),
+        "chorus_mix":  round(chorus_mix, 2),
+        "delay_mix":   round(delay_mix, 2),
+        "delay_time_l": round(delay_tl, 3),
+        "delay_time_r": round(delay_tr, 3),
+        "delay_feedback": round(delay_fb, 3),
+        "phaser_mix":  round(phaser_mix, 2),
+        "rotary_mix":  round(rotary_mix, 2),
+        "ensemble_mix": round(ensemble_mix, 2),
+        "tape_mix":    round(tape_mix, 2),
+        "tape_drive":  round(tape_drive, 2),
+        "master_volume": master_vol,
     }
 
-    # Osc 2 if active
+    # Filter 2 if active
+    if f2_type > 0:
+        params["filter2_type"] = float(our_ft2)
+        params["filter2_cutoff"] = round(f2_cut, 1)
+        params["filter2_resonance"] = round(f2_res, 3)
+        params["filter_routing"] = 1.0  # serial
+
+    # Osc 2 if audible
     if osc2_level > 0.05:
-        out["params"]["osc_count"] = 2.0
-        out["params"]["osc2_type"] = float(our_osc2)
-        out["params"]["osc2_level"] = round(osc2_level, 2)
-        out["params"]["osc1_level"] = 1.0
+        params["osc_count"] = 2.0
+        params["osc1_level"] = round(o1_level if o1_level > 0.01 else 1.0, 2)
+        params["osc2_type"] = float(our_osc2)
+        params["osc2_level"] = round(osc2_level, 2)
 
-    # Wavetable file
-    if wavetable_file:
-        out["wavetable_file"] = wavetable_file
+    # Osc 3 if audible
+    if osc3_level > 0.05:
+        params["osc_count"] = 3.0
+        params["osc3_type"] = float(our_osc3)
+        params["osc3_level"] = round(osc3_level, 2)
 
+    out = {"name": name, "category": category, "params": params}
+    if wt_file:
+        out["wavetable_file"] = wt_file
     return out
 
 
-def find_wt_file(name: str) -> str | None:
-    """Find a .wt file by name in our wavetable dir. Returns relative path or None."""
-    name_lower = name.lower().strip()
-    for wt in WT_DIR.rglob("*.wt"):
-        if wt.stem.lower() == name_lower:
-            return str(wt.relative_to(WT_DIR))
-    return None
-
+# ── Category map ─────────────────────────────────────────────────────────────
+CAT_MAP = {
+    "Basses": "Surge Bass", "Leads": "Surge Lead", "Pads": "Surge Pad",
+    "Plucks": "Surge Pluck", "Polysynths": "Surge Pad", "Sequences": "Surge Seq",
+    "Keys": "Surge Keys", "Brass": "Surge Brass", "FX": "Surge FX",
+    "Chords": "Surge Pad", "Winds": "Surge Lead", "Percussion": "Surge Perc",
+    "MPE": "Surge MPE", "Splits": "Surge Splits", "Templates": "Surge Templates",
+    "Vocoder": "Surge FX", "Tutorials": "Surge Templates",
+}
 
 def convert_all():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    converted = 0
-    failed = 0
+    converted = failed = 0
 
     for cat_dir in sorted(SURGE_PRESETS.iterdir()):
-        if not cat_dir.is_dir():
-            continue
-        category = cat_dir.name
-
-        # Map Surge categories to our categories
-        cat_map = {
-            "Basses": "Bass", "Leads": "Lead", "Pads": "Pad",
-            "Plucks": "Pluck", "Polysynths": "Pad", "Sequences": "Seq",
-            "Keys": "Keys", "Brass": "Brass", "FX": "FX",
-            "Chords": "Pad", "Winds": "Lead", "Percussion": "Perc",
-            "MPE": "MPE", "Splits": "Splits", "Templates": "Templates",
-            "Vocoder": "FX",
-        }
-        out_cat = cat_map.get(category, category)
-        out_subdir = OUT_DIR / f"Surge_{out_cat}"
-        out_subdir.mkdir(exist_ok=True)
+        if not cat_dir.is_dir(): continue
+        category = CAT_MAP.get(cat_dir.name, f"Surge {cat_dir.name}")
+        subdir = OUT_DIR / category.replace(" ", "_")
+        subdir.mkdir(exist_ok=True)
 
         for fxp in sorted(cat_dir.glob("*.fxp")):
-            result = convert_fxp(fxp, f"Surge {out_cat}")
+            result = convert_fxp(fxp, category)
             if result is None:
                 failed += 1
                 continue
-
-            # Safe filename
-            safe_name = result["name"].replace("/", "-").replace("\\", "-")
-            safe_name = "".join(c if c.isalnum() or c in " _-()" else "_" for c in safe_name)
-            out_path = out_subdir / f"{safe_name}.json"
-
-            with open(out_path, 'w') as f:
+            safe = "".join(c if c.isalnum() or c in " _-()" else "_" for c in result["name"])
+            with open(subdir / f"{safe}.json", 'w') as f:
                 json.dump(result, f, indent=2)
             converted += 1
 
@@ -412,6 +473,11 @@ def convert_all():
     print(f"✗ Failed:    {failed}")
     print(f"Output: {OUT_DIR}")
 
-
 if __name__ == "__main__":
+    # Clear old output
+    import shutil
+    for d in OUT_DIR.glob("Surge_*"):
+        shutil.rmtree(d, ignore_errors=True)
+    for d in OUT_DIR.glob("Surge *"):
+        shutil.rmtree(d, ignore_errors=True)
     convert_all()
