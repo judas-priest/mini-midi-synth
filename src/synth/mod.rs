@@ -145,7 +145,7 @@ pub enum MidiEvent {
 /// Control events sent from GUI to the audio thread.
 #[allow(dead_code)]
 pub enum ControlEvent {
-    LoadPreset { layer: usize, params: PresetParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_params: Option<std::collections::BTreeMap<String, f32>> },
+    LoadPreset { layer: usize, params: PresetParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_params: Option<std::collections::BTreeMap<String, f32>>, wavetable: Option<(Vec<f32>, usize, usize)> },
     SetLayerEnabled { layer: usize, enabled: bool },
     SetLayerMute { layer: usize, mute: bool },
     SetLayerVolume { layer: usize, volume: f32 },
@@ -328,6 +328,10 @@ struct Layer {
     /// tick every block regardless of note activity.
     scene_lfos: [Lfo; 2],
     scene_lfo_routed: [bool; 2],  // true when used in mod matrix
+    /// External wavetable loaded from .wt file (set via LoadPreset)
+    wavetable_data: Option<Vec<f32>>,
+    wavetable_frames: usize,
+    wavetable_frame_size: usize,
     /// Current macro knob values (0..1). Updated by SetMacro event.
     macro_vals: [f32; 8],
     mod_matrix: ModMatrix,
@@ -381,6 +385,9 @@ impl Layer {
             lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate)],
             scene_lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate)],
             scene_lfo_routed: [false; 2],
+            wavetable_data: None,
+            wavetable_frames: 0,
+            wavetable_frame_size: 0,
             macro_vals: [0.0; 8],
             mod_matrix: ModMatrix::default(),
             mseg1: Mseg::default(), mseg1_state: MsegState::new(sample_rate),
@@ -629,6 +636,9 @@ impl Layer {
             alias_wave_type: self.params.alias_wave_type, alias_crush: self.params.alias_crush,
             window_type: self.params.window_type, window_morph: self.params.window_morph,
             window_formant: self.params.window_formant,
+            wavetable_data: self.wavetable_data.clone(),
+            wavetable_frames: self.wavetable_frames,
+            wavetable_frame_size: self.wavetable_frame_size,
             twist_engine: self.params.twist_engine as u32,
             twist_harmonics: self.params.twist_harmonics,
             twist_timbre: self.params.twist_timbre,
@@ -1965,11 +1975,19 @@ impl SynthEngine {
 
     pub fn handle_control(&mut self, event: ControlEvent) {
         match event {
-            ControlEvent::LoadPreset { layer, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_params } => {
+            ControlEvent::LoadPreset { layer, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_params, wavetable } => {
                 if let Some(l) = self.layers.get_mut(layer) {
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
                     // Sync macro values from preset into live layer state
+                    // Load wavetable data if provided
+                    if let Some((data, frames, fsize)) = wavetable {
+                        l.wavetable_data = Some(data);
+                        l.wavetable_frames = frames;
+                        l.wavetable_frame_size = fsize;
+                    } else {
+                        l.wavetable_data = None;
+                    }
                     l.macro_vals = params.macro_vals;
                     l.params = params;
                     l.mod_matrix = mod_matrix;

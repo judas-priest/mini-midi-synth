@@ -311,7 +311,16 @@ impl Voice {
             OscType::ElectricPiano => self.oscs[0].init_electric_piano(self.freq, params.epiano_type as u8),
             OscType::Alias => self.oscs[0].init_alias(params.alias_wave_type as u8, params.alias_crush),
             OscType::Window => self.oscs[0].init_window(params.window_type as u8, params.window_morph, params.window_formant),
-            OscType::Wavetable => self.oscs[0].init_wavetable(params.window_morph),
+            OscType::Wavetable => {
+                if let Some(data) = params.wavetable_data.clone() {
+                    self.oscs[0].init_wavetable_from_data(
+                        params.window_morph, data,
+                        params.wavetable_frames, params.wavetable_frame_size,
+                    );
+                } else {
+                    self.oscs[0].init_wavetable(params.window_morph);
+                }
+            }
             OscType::Fm3 => { /* state initialized in reset() */ }
             OscType::Twist => self.oscs[0].init_twist(
                 params.twist_engine,
@@ -861,6 +870,10 @@ pub struct VoiceParams {
     pub window_type: f32,
     pub window_morph: f32,
     pub window_formant: f32,
+    // External wavetable data (from .wt file, None = use built-in)
+    pub wavetable_data: Option<Vec<f32>>,
+    pub wavetable_frames: usize,
+    pub wavetable_frame_size: usize,
     // Twist / Plaits (Mutable Instruments Plaits port)
     pub twist_engine:     u32,  // 0-23 engine index
     pub twist_harmonics:  f32,  // 0..1

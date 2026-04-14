@@ -936,7 +936,12 @@ impl App {
         let mut pitch_seq = crate::synth::step_seq::PitchSequencer::new();
         pitch_seq.load_from_params(&self.layers[layer].edited_params);
         let lfo_step_params = Some(self.layers[layer].edited_params.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::LoadPreset { layer, params, mod_matrix, mseg1, mseg2: None, pitch_seq: Some(pitch_seq), lfo_step_params });
+        // Pass wavetable data if preset has one loaded
+        let wavetable = self.presets.get(self.layers[layer].preset_idx)
+            .and_then(|p| p.wavetable_data.as_ref().map(|d| {
+                (d.clone(), p.wavetable_frames, p.wavetable_frame_size)
+            }));
+        let _ = self.ctrl_tx.push(ControlEvent::LoadPreset { layer, params, mod_matrix, mseg1, mseg2: None, pitch_seq: Some(pitch_seq), lfo_step_params, wavetable });
     }
 
     fn send_layer_enabled(&mut self, layer: usize) {

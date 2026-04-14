@@ -318,6 +318,10 @@ impl App {
             name: new_name.clone(),
             category: "User".to_string(),
             params: self.layers[layer].edited_params.clone(),
+            wavetable_file: None,
+            wavetable_data: None,
+            wavetable_frames: 0,
+            wavetable_frame_size: 0,
         };
 
         if let Ok(path) = preset::save_preset(&new_preset) {

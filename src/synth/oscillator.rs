@@ -328,7 +328,9 @@ pub enum OscState {
     },
     Wavetable {
         phase: f32,       // 0..1 oscillator phase
-        table: Vec<f32>,  // WT_COUNT * WT_SIZE pre-computed samples
+        table: Vec<f32>,  // wt_frames * wt_frame_size samples
+        wt_frames: usize,
+        wt_frame_size: usize,
     },
     Fm3 {
         carrier_phase: f32,  // op1 (output) phase
@@ -635,6 +637,8 @@ impl Oscillator {
             OscType::Wavetable => OscState::Wavetable {
                 phase: 0.0,
                 table: Vec::new(),
+                wt_frames: Self::WT_COUNT,
+                wt_frame_size: Self::WT_SIZE,
             },
             OscType::Fm3 => OscState::Fm3 {
                 carrier_phase: 0.0, mod1_phase: 0.0, mod2_phase: 0.0,
@@ -2534,62 +2538,64 @@ impl Oscillator {
     /// Samples per waveform.
     const WT_SIZE: usize = 256;
 
-    /// Initialize (or re-init) the wavetable — generates WT_COUNT waveforms.
+    /// Initialize built-in wavetable (8 additive waveforms, sine→saw).
     pub fn init_wavetable(&mut self, morph: f32) {
         self.wavetable_morph = morph.clamp(0.0, 1.0);
         self.reclaim_buffers();
 
-        let total = Self::WT_COUNT * Self::WT_SIZE;
+        let wt_frames = Self::WT_COUNT;
+        let wt_frame_size = Self::WT_SIZE;
+        let total = wt_frames * wt_frame_size;
         let mut table = Self::take_buf(&mut self.pool_a, total);
 
-        // Number of harmonics per waveform (sine→saw progression)
         let harmonics: [usize; 8] = [1, 2, 3, 4, 6, 8, 12, 16];
         for (wt, &n_harm) in harmonics.iter().enumerate() {
-            let offset = wt * Self::WT_SIZE;
+            let offset = wt * wt_frame_size;
             let mut peak = 0.0_f32;
-            for i in 0..Self::WT_SIZE {
-                let p = i as f32 / Self::WT_SIZE as f32;
+            for i in 0..wt_frame_size {
+                let p = i as f32 / wt_frame_size as f32;
                 let mut s = 0.0f32;
                 for h in 1..=n_harm {
-                    // Sawtooth series: sin(h*2π*p) / h
                     s += (p * h as f32 * TAU).sin() / h as f32;
                 }
                 table[offset + i] = s;
                 peak = peak.max(s.abs());
             }
-            // Normalize
             if peak > 0.001 {
-                for x in &mut table[offset..offset + Self::WT_SIZE] {
-                    *x /= peak;
-                }
+                for x in &mut table[offset..offset + wt_frame_size] { *x /= peak; }
             }
         }
 
-        self.state = OscState::Wavetable { phase: 0.0, table };
+        self.state = OscState::Wavetable { phase: 0.0, table, wt_frames, wt_frame_size };
+    }
+
+    /// Initialize wavetable from external .wt data (parsed Surge wavetable).
+    /// `data` = flat array of [wt_frames * wt_frame_size] samples.
+    pub fn init_wavetable_from_data(&mut self, morph: f32, data: Vec<f32>, wt_frames: usize, wt_frame_size: usize) {
+        self.wavetable_morph = morph.clamp(0.0, 1.0);
+        self.reclaim_buffers();
+        self.state = OscState::Wavetable { phase: 0.0, table: data, wt_frames, wt_frame_size };
     }
 
     fn tick_wavetable(&mut self, freq: f32) -> f32 {
-        if let OscState::Wavetable { phase, table } = &mut self.state {
+        if let OscState::Wavetable { phase, table, wt_frames, wt_frame_size } = &mut self.state {
             let dt = freq * (1.0 + self.detune) / self.sample_rate;
             let morph = self.wavetable_morph;
+            let frames = *wt_frames;
+            let fsize = *wt_frame_size;
 
-            let wt_count = Self::WT_COUNT;
-            let wt_size = Self::WT_SIZE;
-
-            // Which two tables to blend
-            let pos = morph * (wt_count - 1) as f32;
-            let t0 = (pos.floor() as usize).min(wt_count - 1);
-            let t1 = (t0 + 1).min(wt_count - 1);
+            let pos = morph * (frames - 1) as f32;
+            let t0 = (pos.floor() as usize).min(frames - 1);
+            let t1 = (t0 + 1).min(frames - 1);
             let tf = pos.fract();
 
-            // Interpolate within each table
-            let p = *phase * wt_size as f32;
-            let i0 = p as usize % wt_size;
-            let i1 = (i0 + 1) % wt_size;
+            let p = *phase * fsize as f32;
+            let i0 = p as usize % fsize;
+            let i1 = (i0 + 1) % fsize;
             let frac = p.fract();
 
-            let s0 = table[t0 * wt_size + i0] * (1.0 - frac) + table[t0 * wt_size + i1] * frac;
-            let s1 = table[t1 * wt_size + i0] * (1.0 - frac) + table[t1 * wt_size + i1] * frac;
+            let s0 = table[t0 * fsize + i0] * (1.0 - frac) + table[t0 * fsize + i1] * frac;
+            let s1 = table[t1 * fsize + i0] * (1.0 - frac) + table[t1 * fsize + i1] * frac;
 
             *phase += dt;
             *phase -= phase.floor();
