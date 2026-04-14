@@ -548,6 +548,18 @@ impl App {
                             let _ = self.config.save();
                         }
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("Sample offset:");
+                        let old = self.sf2_sample_offset_ms;
+                        ui.add(egui::Slider::new(&mut self.sf2_sample_offset_ms, 0.0..=50.0)
+                            .suffix(" ms")
+                            .fixed_decimals(1));
+                        if self.sf2_sample_offset_ms != old {
+                            let _ = self.ctrl_tx.push(ControlEvent::SetSf2SampleOffset { ms: self.sf2_sample_offset_ms });
+                            self.config.sf2.sample_offset_ms = self.sf2_sample_offset_ms;
+                            self.global_dirty = true;
+                        }
+                    });
                 }
 
                 ui.colored_label(

@@ -187,6 +187,7 @@ pub enum ControlEvent {
     SetLayerSf2Program { layer: usize, program: u8, bank: u8 },
     SetDrumsSf2Mode { enabled: bool },
     SetSf2BlockSize { size: usize },
+    SetSf2SampleOffset { ms: f32 },
     // Pitch step sequencer
     SeqSetEnabled { layer: usize, enabled: bool },
     SeqSetStep { layer: usize, step: u8, pitch: i8, gate: bool, velocity: u8 },
@@ -2154,6 +2155,9 @@ impl SynthEngine {
             }
             ControlEvent::SetSf2BlockSize { size } => {
                 self.sampler.set_block_size(size);
+            }
+            ControlEvent::SetSf2SampleOffset { ms } => {
+                self.sampler.set_sample_offset_ms(ms);
             }
             ControlEvent::SeqSetEnabled { layer, enabled } => {
                 if let Some(l) = self.layers.get_mut(layer) {

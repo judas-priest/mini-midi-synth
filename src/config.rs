@@ -45,6 +45,9 @@ pub struct Sf2Settings {
     /// SF2 internal block size (samples). Higher = less CPU, more latency.
     #[serde(default = "default_sf2_block_size")]
     pub block_size: usize,
+    /// SF2 sample start offset in ms — skip initial attack to reduce perceived latency.
+    #[serde(default)]
+    pub sample_offset_ms: f32,
 }
 
 fn default_sf2_block_size() -> usize { 8 }
@@ -146,6 +149,7 @@ impl Config {
         }
     }
 
+    #[allow(dead_code)]
     pub fn save(&self) -> Result<()> {
         let Some(path) = config_path() else {
             anyhow::bail!("Could not determine config directory");

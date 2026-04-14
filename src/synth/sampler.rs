@@ -112,6 +112,33 @@ impl SubSynth {
         }
     }
 
+    /// Render and discard `count` samples to advance internal state.
+    fn skip_samples(&mut self, count: usize, block_size: usize) {
+        let synth = match &mut self.synth {
+            Some(s) => s,
+            None => return,
+        };
+        let bs = block_size;
+        let mut remaining = count;
+        // First consume any remaining samples in the current buffer
+        let buffered = bs.saturating_sub(self.buf_pos);
+        if buffered > 0 {
+            let skip = remaining.min(buffered);
+            self.buf_pos += skip;
+            remaining -= skip;
+        }
+        // Render and discard full blocks
+        while remaining >= bs {
+            synth.render(&mut self.buf_left[..bs], &mut self.buf_right[..bs]);
+            remaining -= bs;
+        }
+        // Render one more block and position within it
+        if remaining > 0 {
+            synth.render(&mut self.buf_left[..bs], &mut self.buf_right[..bs]);
+            self.buf_pos = remaining;
+        }
+    }
+
     #[inline]
     fn tick(&mut self, block_size: usize) -> (f32, f32) {
         let synth = match &mut self.synth {
@@ -142,6 +169,9 @@ pub struct SamplerEngine {
     pub drum_volume: f32,
     /// Last GM program sent per MIDI channel for the sequencer (255 = never sent).
     seq_channel_program: [u8; 16],
+    /// Sample start offset in samples — skip this many samples after note-on
+    /// to compensate for slow SF2 attack envelopes.
+    sample_offset: usize,
 }
 
 impl SamplerEngine {
@@ -157,6 +187,7 @@ impl SamplerEngine {
             sample_rate: sample_rate as i32,
             drum_volume: 1.0,
             seq_channel_program: [255; 16], // 255 = not yet initialised
+            sample_offset: 0,
         }
     }
 
@@ -200,7 +231,7 @@ impl SamplerEngine {
             self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
             // Restore programs
             if let Some(synth) = &mut self.keys.synth {
-                for i in 0..2 {
+                for i in 0..8 {
                     if self.layer_sf2[i] {
                         synth.process_midi_message(i as i32, 0xB0, 0, self.layer_bank[i] as i32);
                         synth.process_midi_message(i as i32, 0xC0, self.layer_program[i] as i32, 0);
@@ -244,19 +275,32 @@ impl SamplerEngine {
     }
 
     pub fn set_layer_volume(&mut self, layer: usize, volume: f32) {
-        if layer >= 2 { return; }
+        if layer >= 8 { return; }
+        let ch = (layer as i32) % 16;
         let cc_val = (volume * 127.0).round().clamp(0.0, 127.0) as i32;
-        self.keys.midi(layer as i32, 0xB0, 7, cc_val);
+        self.keys.midi(ch, 0xB0, 7, cc_val);
+    }
+
+    /// Set sample start offset in milliseconds (0-50).
+    /// Skips this many ms of audio after each note-on to cut through slow SF2 attacks.
+    pub fn set_sample_offset_ms(&mut self, ms: f32) {
+        let ms = ms.clamp(0.0, 50.0);
+        self.sample_offset = ((ms / 1000.0) * self.sample_rate as f32) as usize;
     }
 
     pub fn note_on(&mut self, layer: usize, note: u8, velocity: u8) {
-        if layer >= 2 { return; }
-        self.keys.midi(layer as i32, 0x90, note as i32, velocity as i32);
+        // rustysynth uses MIDI channels 0-15; map layer to channel
+        let ch = (layer as i32) % 16;
+        self.keys.midi(ch, 0x90, note as i32, velocity as i32);
+        // Skip initial samples to reduce perceived latency from slow SF2 attacks
+        if self.sample_offset > 0 {
+            self.keys.skip_samples(self.sample_offset, self.block_size);
+        }
     }
 
     pub fn note_off(&mut self, layer: usize, note: u8) {
-        if layer >= 2 { return; }
-        self.keys.midi(layer as i32, 0x80, note as i32, 0);
+        let ch = (layer as i32) % 16;
+        self.keys.midi(ch, 0x80, note as i32, 0);
     }
 
     pub fn drum_note_on(&mut self, note: u8, velocity: u8) {
@@ -291,11 +335,12 @@ impl SamplerEngine {
     }
 
     pub fn pitch_bend(&mut self, layer: usize, value: f32) {
-        if layer >= 2 { return; }
+        if layer >= 8 { return; }
+        let ch = (layer as i32) % 16;
         let raw = ((value + 1.0) * 0.5 * 16383.0).round().clamp(0.0, 16383.0) as i32;
         let lsb = raw & 0x7F;
         let msb = (raw >> 7) & 0x7F;
-        self.keys.midi(layer as i32, 0xE0, lsb, msb);
+        self.keys.midi(ch, 0xE0, lsb, msb);
     }
 
     pub fn set_pitch_bend_range(&mut self, semitones: u8) {
@@ -305,9 +350,10 @@ impl SamplerEngine {
     }
 
     pub fn mod_wheel(&mut self, layer: usize, value: f32) {
-        if layer >= 2 { return; }
+        if layer >= 8 { return; }
+        let ch = (layer as i32) % 16;
         let cc_val = (value * 127.0).round().clamp(0.0, 127.0) as i32;
-        self.keys.midi(layer as i32, 0xB0, 1, cc_val);
+        self.keys.midi(ch, 0xB0, 1, cc_val);
     }
 
     pub fn all_notes_off(&mut self) {

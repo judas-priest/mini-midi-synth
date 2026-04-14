@@ -1,177 +1,214 @@
-# Headless Mode Implementation Plan
+# Headless / CLI Mode Implementation Plan
 
 ## Цель
 
-Запустить `mini_midi_synth` на Orange Pi / Raspberry Pi без дисплея:
+Запустить `mini_midi_synth` без GUI — как CLI-приложение с полным функционалом:
 ```
-MIDI клавиатура → SBC (headless) → USB audio → колонки
+cargo run --release --no-default-features
 ```
 
 ---
 
-## Аудит: что уже хорошо
+## Что менять
 
-- `audio.rs` — полностью независим от GUI, cpal stream в отдельном OS потоке ✓
-- `midi.rs` — полностью независим от GUI, midir callback в отдельном OS потоке ✓
-- `synth/` — не знает про GUI вообще ✓
-- Вся синхронизация через lock-free ring-buffers (rtrb) и atomics ✓
-
-## Проблема
-
-`main()` плотно связан с `eframe::run_native()` — без GUI приложение не запускается.
-`eframe` тянет за собой: winit, wgpu/glow, x11, wayland — тяжёлые зависимости, не нужные на headless SBC.
-
----
-
-## Архитектура решения
-
-### Feature flags в Cargo.toml
+### 1. Cargo.toml — eframe optional
 
 ```toml
 [features]
 default = ["gui"]
-gui = [
-    "eframe/default_fonts",
-    "eframe/glow",
-    "eframe/x11",
-    "eframe/wayland",
-    "eframe/persistence",
-]
+gui = ["eframe"]
 
 [dependencies]
-eframe = { version = "0.31", default-features = false, optional = true }
-# остальные зависимости без изменений
+eframe = { ..., optional = true }
 ```
 
-Сборка:
-- `cargo build --release` → с GUI (как сейчас)
-- `cargo build --release --no-default-features` → headless бинарник
+### 2. main.rs — разделить на run_gui() и run_headless()
+
+Общий код (строки 73-144 текущего main):
+- Config::load(), preset::load_all_presets()
+- audio host detection, sample rates
+- note_state, pad_state, ring buffers
+- SynthEngine init + все atoms
+- AudioBackend::new()
+- MIDI list_ports + connect
+- preset_idx из конфига
+
+Выносится в структуру `CommonInit` + функцию `init_common()`.
+
+`run_gui()` — текущий main() после init_common(), создаёт gui::App, eframe::run_native().
+
+`run_headless()` — после init_common():
+
+**Полный функционал без GUI:**
+1. Отправить пресеты всех 8 частей (как send_initial_presets):
+   - LoadPreset с params, mod_matrix, mseg, pitch_seq, wavetable для каждого layer
+   - SetLayerEnabled, SetLayerVolume, SetLayerRange
+   - SetGlobalParam (master_volume, master_tone, reverb_mix, delay_mix, pitch_bend_range)
+   - DrumSetVolume
+2. SF2 загрузка из конфига:
+   - Прочитать config.sf2.keys_file_path → parse SoundFont → LoadKeysSoundFont
+   - Прочитать config.sf2.drums_file_path → parse SoundFont → LoadDrumsSoundFont
+   - SetLayerSf2Mode + SetLayerSf2Program для каждого layer где sf2=true
+   - SetSf2BlockSize
+3. MIDI auto-reconnect polling (каждые 3 сек)
+4. Program Change polling (program_change_atom)
+5. SIGTERM/SIGINT → All Notes Off + exit
+
+### 3. #[cfg(feature = "gui")] gates
+
+- `mod gui;` → `#[cfg(feature = "gui")] mod gui;`
+- `make_piano_icon()` → за cfg
+- `use crate::cc_map::CcMap` и `use crate::synth::drum::NUM_DRUM_SLOTS` — только в run_gui
+- Импорты eframe — только в run_gui
 
 ---
 
-## Шаги реализации
+## Что НЕ менять
 
-### Шаг 1 — Cargo.toml: сделать eframe опциональным
-
-```toml
-[features]
-default = ["gui"]
-gui = []
-
-[dependencies]
-eframe = { version = "0.31", default-features = false,
-           features = ["default_fonts", "glow", "x11", "wayland", "persistence"],
-           optional = true }
-```
-
-### Шаг 2 — main.rs: разделить точку входа
-
-Текущая структура main():
-1. Config load
-2. Audio init
-3. MIDI init
-4. SynthEngine init
-5. App struct init (GUI state)  ← только для GUI
-6. eframe::run_native()         ← только для GUI
-
-Новая структура:
-
-```rust
-fn main() -> Result<()> {
-    #[cfg(feature = "gui")]
-    return run_gui();
-
-    #[cfg(not(feature = "gui"))]
-    return run_headless();
-}
-```
-
-### Шаг 3 — run_headless()
-
-```rust
-#[cfg(not(feature = "gui"))]
-fn run_headless() -> Result<()> {
-    // 1. Загрузка конфига (без изменений)
-    let config = Config::load();
-
-    // 2. Ring buffers (без изменений)
-    let (midi_tx, midi_rx) = rtrb::RingBuffer::new(256);
-    let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::new(256);
-    let (feedback_tx, feedback_rx) = rtrb::RingBuffer::new(64);
-
-    // 3. Note state atomics (без изменений)
-    let note_state = Arc::new(std::array::from_fn(|_| AtomicU8::new(0)));
-
-    // 4. SynthEngine (без изменений)
-    let engine = SynthEngine::new(config.sample_rate);
-
-    // 5. Audio backend (без изменений)
-    let _audio = AudioBackend::new(&config, engine, midi_rx, ctrl_rx)?;
-
-    // 6. MIDI connect (без изменений)
-    let _midi_conn = midi::connect(config.midi_port, midi_tx, note_state.clone())?;
-
-    // 7. Загрузить дефолтный пресет
-    // ctrl_tx.push(ControlEvent::LoadPreset(default_preset))?;
-
-    // 8. Просто ждём — аудио и MIDI работают в своих потоках
-    println!("mini_midi_synth running headless. Press Ctrl+C to exit.");
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        // drain feedback если нужно (можно игнорировать)
-    }
-}
-```
-
-### Шаг 4 — Обернуть GUI код в #[cfg(feature = "gui")]
-
-Файлы которые нужно обернуть:
-- `src/gui/` — весь модуль целиком
-- `src/main.rs` — `make_piano_icon()`, `run_gui()`, импорты eframe
-
-```rust
-// main.rs
-#[cfg(feature = "gui")]
-mod gui;
-
-#[cfg(feature = "gui")]
-fn make_piano_icon() -> eframe::egui::IconData { ... }
-
-#[cfg(feature = "gui")]
-fn run_gui() -> Result<()> {
-    // текущий код main() с eframe::run_native()
-}
-```
+- `src/audio.rs` — без изменений
+- `src/midi.rs` — без изменений
+- `src/synth/` — без изменений
+- `src/preset.rs` — без изменений
+- `src/config.rs` — без изменений
+- `src/gui/` — без изменений (просто за cfg gate)
 
 ---
 
-## Конфигурация для headless запуска
+## Конфигурация
 
-При старте без GUI приложение должно знать:
-- какой MIDI порт использовать
-- какой пресет загрузить
-- какое аудио устройство использовать
-
-Всё это уже есть в `~/.config/mini_midi_synth/config.json` — менять ничего не нужно.
-GUI при следующем запуске сохраняет настройки → headless их читает.
+CLI читает тот же `~/.config/mini_midi_synth/config.json`:
+- MIDI порт, аудио backend, sample rate, buffer size
+- Последний пресет, громкости, SF2 пути, SF2 mode per layer
+- GUI сохраняет настройки → CLI их читает
 
 ---
 
-## Сборка под ARM (Orange Pi / Raspberry Pi)
+## Best Practices (из ресёрча)
 
-### Кросс-компиляция с хоста (быстрее):
+### Аудио стек
+
+| Вариант | Когда использовать |
+|---|---|
+| **Direct ALSA** | Dedicated synth appliance, одно приложение, минимум overhead |
+| **PipeWire** | Нужна маршрутизация между приложениями |
+| **JACK** | Избегать на ARM — лишний overhead |
+
+Рекомендуемые буферы:
+
+| Интерфейс | Буфер (frames) | Latency @48kHz |
+|---|---|---|
+| USB Class-Compliant | 128-256 | 2.7-5.3 ms |
+| I2S HAT (Pisound, HiFiBerry) | 64-128 | 0.7-2.7 ms |
+| Встроенный BCM audio RPi | 256+ | 10.7+ ms (непригоден) |
+
+### Real-Time Linux
+
 ```bash
-# Установить target
-rustup target add aarch64-unknown-linux-gnu
+# CPU governor — самая важная оптимизация
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
 
-# Сборка headless
+# CPU isolation (в cmdline.txt)
+isolcpus=3
+
+# Запуск с приоритетом
+sudo chrt -f 80 taskset -c 3 ./mini_midi_synth
+```
+
+В коде:
+```rust
+// Memory locking — предотвращает page faults
+unsafe { libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE); }
+```
+
+`/etc/security/limits.d/audio.conf`:
+```
+@audio   -  rtprio     95
+@audio   -  memlock    unlimited
+@audio   -  nice       -20
+```
+
+PREEMPT_RT kernel нужен только для <64 фреймов. Для 128+ стоковое ядро достаточно.
+
+### Denormals на ARM (критично!)
+
+```rust
+#[cfg(target_arch = "aarch64")]
+unsafe {
+    let mut fpcr: u64;
+    std::arch::asm!("mrs {}, fpcr", out(reg) fpcr);
+    let new_fpcr = fpcr | (1 << 24); // FZ bit = flush-to-zero
+    std::arch::asm!("msr fpcr, {}", in(reg) new_fpcr);
+}
+```
+
+Без этого subnormal floats в фильтрах вызывают 10-100x CPU spike на ARM.
+
+### MIDI Hot-Plug
+
+- **udev rule**: `/etc/udev/rules.d/33-midiusb.rules` триггерит при USB MIDI подключении
+- **Polling**: каждые 2-3 сек `midi::list_ports()` — самый простой и надёжный подход
+- **Важно**: всегда `drop()` старый `MidiInputConnection` перед reconnect
+
+### NEON оптимизация (ARM)
+
+- f32 = 4-wide SIMD нативно (у нас уже f32 — ок)
+- `#[repr(align(16))]` на аудио буферах для оптимальных NEON loads
+- Cross-compile: `-C target-cpu=cortex-a72` (RPi4) / `cortex-a76` (RPi5)
+
+```toml
+# .cargo/config.toml
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+rustflags = ["-C", "target-cpu=cortex-a72"]
+```
+
+### Graceful Shutdown
+
+```rust
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+// При SIGTERM/SIGINT:
+// 1. All Notes Off (CC 123) на все каналы
+// 2. Flush pending config saves
+// 3. Drop audio stream
+```
+
+### Подводные камни
+
+1. **RPi 1/2/3**: USB и Ethernet на одной шине — сетевой трафик = xruns
+2. **SD card I/O**: stall 50-200ms — всё грузить в RAM при старте, `mlockall(MCL_FUTURE)`
+3. **Thermal throttling**: RPi 4 throttles на 80°C — радиатор + вентилятор
+4. **PipeWire**: держит ALSA эксклюзивно — либо через PipeWire, либо отключить
+5. **cpal ALSA**: known busy-spin issue (#322) — мониторить CPU
+6. **midir**: каждый `MidiInput::new()` = новый ALSA client, утечка при reconnect
+7. **`panic = "abort"`**: добавить `set_hook()` для логирования перед abort
+
+### Референсные проекты
+
+- **Zynthian** — полная synth платформа на RPi (JACK + ZynAddSubFX + FluidSynth)
+- **Elk Audio OS** — dual-kernel (Xenomai RT + Linux), sub-1ms latency
+- **Patchbox OS** (Blokas) — Debian с RT kernel + Pisound HAT
+- **FluidSynth headless** — `fluidsynth -a alsa -m alsa_seq -i soundfont.sf2`
+
+---
+
+## Сборка под ARM
+
+### Кросс-компиляция с хоста:
+```bash
+rustup target add aarch64-unknown-linux-gnu
+sudo apt install gcc-aarch64-linux-gnu
 cargo build --release --no-default-features --target aarch64-unknown-linux-gnu
 ```
 
-### Компиляция прямо на SBC (проще):
+Или через Docker:
 ```bash
-# На Orange Pi / RPi
-git clone / scp проект
+cargo install cross
+cross build --release --no-default-features --target aarch64-unknown-linux-gnu
+```
+
+### Компиляция на SBC:
+```bash
 cargo build --release --no-default-features
 ```
 
@@ -179,27 +216,34 @@ Headless бинарник не требует libGL, libX11, libwayland — то
 
 ---
 
-## Автозапуск на SBC (systemd)
+## systemd (для SBC)
 
 ```ini
-# /etc/systemd/system/synth.service
+# /etc/systemd/system/mini-midi-synth.service
 [Unit]
-Description=mini_midi_synth headless
+Description=Mini MIDI Synth
 After=sound.target
 
 [Service]
-ExecStart=/home/user/mini_midi_synth --no-default-features
-Restart=always
-User=user
-Environment=ALSA_CARD=1
+Type=simple
+User=synth
+Group=audio
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+CPUAffinity=3
+Nice=-15
+OOMScoreAdjust=-900
+ExecStart=/usr/local/bin/mini_midi_synth
+Restart=on-failure
+RestartSec=2
+WatchdogSec=30
+TimeoutStopSec=10
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-```
-
-```bash
-systemctl enable synth
-systemctl start synth
 ```
 
 ---
@@ -208,11 +252,12 @@ systemctl start synth
 
 | Файл | Изменения |
 |---|---|
-| `Cargo.toml` | Сделать eframe optional, добавить feature "gui" |
-| `src/main.rs` | Разделить на `run_gui()` и `run_headless()`, обернуть GUI код в cfg |
-| `src/gui/mod.rs` | Добавить `#[cfg(feature = "gui")]` на модуль |
+| `Cargo.toml` | eframe optional, feature "gui" |
+| `src/main.rs` | Разделить на `run_gui()` + `run_headless()`, общая `init_common()` |
+| `src/main.rs` | Signal handler, MIDI polling, Program Change polling |
+| `src/main.rs` | `#[cfg(feature = "gui")]` на gui-зависимый код |
 
-**Итого: ~50-100 строк изменений, не трогая синтезатор вообще.**
+**Итого: ~100-150 строк изменений, синтезатор не трогаем.**
 
 ---
 

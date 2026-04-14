@@ -284,6 +284,7 @@ pub struct App {
     pub sf2_keys_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
     pub sf2_drums_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
     pub sf2_block_size: usize,
+    pub sf2_sample_offset_ms: f32,
     // Pitch step sequencer
     pub pitch_seq_step_atoms: Vec<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     pub pitch_seq_enabled: [bool; 2],
@@ -860,6 +861,11 @@ impl App {
         }
         // Ensure config has global params persisted (first run migration)
         self.save_global_to_config();
+
+        // SF2 sample offset
+        if self.sf2_sample_offset_ms > 0.0 {
+            let _ = self.ctrl_tx.push(ControlEvent::SetSf2SampleOffset { ms: self.sf2_sample_offset_ms });
+        }
 
         // Load SF2 from config if set
         // Keys SF2 (fallback to legacy file_path)
