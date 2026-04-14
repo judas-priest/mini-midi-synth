@@ -21,7 +21,7 @@ pub struct Sf2Settings {
     /// Path to the loaded SF2 file (legacy, used as fallback for keys_file_path).
     #[serde(default)]
     pub file_path: Option<String>,
-    /// Path to the SF2 file for keys (layers A/B).
+    /// Path to the SF2 file for keys (parts A/B).
     #[serde(default)]
     pub keys_file_path: Option<String>,
     /// Path to the SF2 file for drums.
@@ -30,13 +30,13 @@ pub struct Sf2Settings {
     /// Layer A uses SF2 mode.
     #[serde(default)]
     pub layer_a_sf2: bool,
-    /// GM program number for layer A.
+    /// GM program number for part A.
     #[serde(default)]
     pub layer_a_program: u8,
     /// Layer B uses SF2 mode.
     #[serde(default)]
     pub layer_b_sf2: bool,
-    /// GM program number for layer B.
+    /// GM program number for part B.
     #[serde(default)]
     pub layer_b_program: u8,
     /// Drums use SF2 mode.

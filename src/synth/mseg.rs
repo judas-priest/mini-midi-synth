@@ -251,11 +251,11 @@ impl MsegState {
 }
 
 // ---------------------------------------------------------------------------
-// Preset serialization helpers
+// Patch serialization helpers
 // ---------------------------------------------------------------------------
 
 impl Mseg {
-    /// Save MSEG data to a flat param map (for preset storage).
+    /// Save MSEG data to a flat param map (for patch storage).
     #[allow(dead_code)]
     pub fn save_to_params(&self, params: &mut std::collections::BTreeMap<String, f32>) {
         params.insert("mseg_num_segments".into(), self.segments.len() as f32);

@@ -2,7 +2,7 @@
 
 use eframe::egui;
 
-use crate::preset::{self, Preset};
+use crate::preset::{self, Patch};
 use crate::synth::{ControlEvent, ParamFeedback};
 use super::{App, BUFFER_SIZES, buffer_label, scan_sf2_files, sf2_dir};
 
@@ -129,7 +129,7 @@ impl App {
                 ui.add_space(8.0);
 
                 // Preset-scoped bindings
-                ui.strong("Preset (reset on preset change, pickup mode)");
+                ui.strong("Preset (reset on patch change, pickup mode)");
                 egui::Grid::new("cc_help_preset")
                     .num_columns(3)
                     .spacing([16.0, 2.0])
@@ -137,7 +137,7 @@ impl App {
                     .show(ui, |ui| {
                         ui.strong("Control"); ui.strong("CC"); ui.strong("Parameter"); ui.end_row();
                         for (cc, binding) in self.cc_map.bindings.iter().enumerate().filter_map(|(i, b)| b.map(|b| (i as u8, b))) {
-                            if binding.scope == crate::cc_map::ParamScope::Preset {
+                            if binding.scope == crate::cc_map::ParamScope::Patch {
                                 let ctrl = crate::cc_map::cc_to_control_name(cc);
                                 let label = crate::cc_map::find_param_meta(binding.param_key)
                                     .map(|m| m.label).unwrap_or("?");
@@ -149,7 +149,7 @@ impl App {
                 ui.add_space(8.0);
 
                 // Global bindings
-                ui.strong("Global (persist across preset changes)");
+                ui.strong("Global (persist across patch changes)");
                 egui::Grid::new("cc_help_global")
                     .num_columns(3)
                     .spacing([16.0, 2.0])
@@ -235,12 +235,12 @@ impl App {
 
         for (key, value) in param_changes {
             if crate::cc_map::is_global_param(key) {
-                // Global params (volume, tone) — don't put in preset
+                // Global params (volume, tone) — don't put in patch
                 self.global_params.insert(key.to_string(), value);
                 self.global_dirty = true;
             } else {
-                // Preset params — update all layers
-                for layer_state in &mut self.layers {
+                // Patch params — update all parts
+                for layer_state in &mut self.parts {
                     layer_state.edited_params.insert(key.to_string(), value);
                     layer_state.params_dirty = true;
                 }
@@ -261,8 +261,8 @@ impl App {
         }
 
         if let Some(prog) = program {
-            if self.presets.get(prog as usize).is_some() {
-                self.layers[0].preset_idx = prog as usize;
+            if self.patches.get(prog as usize).is_some() {
+                self.parts[0].patch_idx = prog as usize;
                 self.load_edited_params(0);
             }
         }
@@ -277,8 +277,8 @@ impl App {
     }
 
     pub(super) fn param_slider(&mut self, ui: &mut egui::Ui, key: &str, label: &str, min: f32, max: f32, logarithmic: bool) -> bool {
-        let layer = self.active_layer;
-        let mut val = self.layers[layer].edited_params.get(key).copied().unwrap_or(min);
+        let part = self.active_part;
+        let mut val = self.parts[part].edited_params.get(key).copied().unwrap_or(min);
 
         // Build label with CC number and pickup indicator
         let cc_info = self.cc_map.bindings.iter().enumerate()
@@ -301,34 +301,34 @@ impl App {
             self.midi_learn_target = Some(key.to_string());
         }
         if resp.changed() {
-            self.layers[layer].edited_params.insert(key.into(), val);
+            self.parts[part].edited_params.insert(key.into(), val);
             return true;
         }
         false
     }
 
     pub(super) fn save_as_user_preset(&mut self) {
-        let layer = self.active_layer;
-        let base_name = self.presets.get(self.layers[layer].preset_idx)
+        let part = self.active_part;
+        let base_name = self.patches.get(self.parts[part].patch_idx)
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "Custom".to_string());
 
         let new_name = format!("{base_name} (user)");
-        let new_preset = Preset {
+        let new_patch = Patch {
             name: new_name.clone(),
             category: "User".to_string(),
-            params: self.layers[layer].edited_params.clone(),
+            params: self.parts[part].edited_params.clone(),
             wavetable_file: None,
             wavetable_data: None,
             wavetable_frames: 0,
             wavetable_frame_size: 0,
         };
 
-        if let Ok(path) = preset::save_preset(&new_preset) {
+        if let Ok(path) = preset::save_patch(&new_patch) {
             self.settings_status = format!("Saved: {}", path.display());
-            self.presets.push(new_preset);
-            self.layers[layer].preset_idx = self.presets.len() - 1;
-            self.layers[layer].params_dirty = false;
+            self.patches.push(new_patch);
+            self.parts[part].patch_idx = self.patches.len() - 1;
+            self.parts[part].params_dirty = false;
             self.save_config();
         }
     }

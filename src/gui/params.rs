@@ -17,7 +17,7 @@ const LFO_TRIGGER_MODE_NAMES: &[&str] = &["Free Run", "Key Trigger", "Random Sta
 
 fn draw_lfo_trigger_mode(
     ui: &mut egui::Ui,
-    layer: usize,
+    part: usize,
     lfo_num: u8,
     params: &mut std::collections::BTreeMap<String, f32>,
 ) -> bool {
@@ -27,7 +27,7 @@ fn draw_lfo_trigger_mode(
     let mut changed = false;
     ui.horizontal(|ui| {
         ui.label("Trigger:");
-        egui::ComboBox::from_id_salt(format!("lfo_trig_{layer}_{lfo_num}"))
+        egui::ComboBox::from_id_salt(format!("lfo_trig_{part}_{lfo_num}"))
             .selected_text(*LFO_TRIGGER_MODE_NAMES.get(mode).unwrap_or(&"Key Trigger"))
             .show_ui(ui, |ui| {
                 for (i, name) in LFO_TRIGGER_MODE_NAMES.iter().enumerate() {
@@ -101,15 +101,15 @@ impl App {
     }
 
     pub(super) fn draw_params_editable(&mut self, ui: &mut egui::Ui) {
-        let layer = self.active_layer;
-        let preset_idx = self.layers[layer].preset_idx;
+        let part = self.active_part;
+        let patch_idx = self.parts[part].patch_idx;
         let preset_name = self
-            .presets
-            .get(preset_idx)
+            .patches
+            .get(patch_idx)
             .map(|p| p.name.as_str())
             .unwrap_or("(none)");
 
-        let layer_label = LAYER_NAMES.get(layer).unwrap_or(&"?");
+        let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
         ui.strong(format!("{preset_name} (Layer {layer_label})"));
         ui.add_space(6.0);
 
@@ -124,28 +124,28 @@ impl App {
         // Oscillator 1
         ui.strong("Oscillator 1");
         ui.horizontal(|ui| {
-            let mut osc = self.layers[layer].edited_params.get("osc_type").copied().unwrap_or(0.0) as usize;
+            let mut osc = self.parts[part].edited_params.get("osc_type").copied().unwrap_or(0.0) as usize;
             ui.label("Type:");
-            egui::ComboBox::from_id_salt(format!("osc_type_{layer}"))
+            egui::ComboBox::from_id_salt(format!("osc_type_{part}"))
                 .selected_text(*OSC_NAMES.get(osc).unwrap_or(&"?"))
                 .show_ui(ui, |ui| {
                     for (i, name) in OSC_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut osc, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("osc_type".into(), osc as f32);
+                            self.parts[part].edited_params.insert("osc_type".into(), osc as f32);
                             changed = true;
                         }
                     }
                 });
 
-            let mut detune = self.layers[layer].edited_params.get("osc_detune").copied().unwrap_or(0.0);
+            let mut detune = self.parts[part].edited_params.get("osc_detune").copied().unwrap_or(0.0);
             ui.label("Detune:");
             if ui.add(egui::Slider::new(&mut detune, 0.0..=0.05).step_by(0.001)).changed() {
-                self.layers[layer].edited_params.insert("osc_detune".into(), detune);
+                self.parts[part].edited_params.insert("osc_detune".into(), detune);
                 changed = true;
             }
         });
 
-        let osc_type = self.layers[layer].edited_params.get("osc_type").copied().unwrap_or(0.0) as u32;
+        let osc_type = self.parts[part].edited_params.get("osc_type").copied().unwrap_or(0.0) as u32;
         let osc_is_simple = osc_type <= 4;
 
         // Noise level (for all osc types except pure Noise)
@@ -175,9 +175,9 @@ impl App {
             let drawbar_names = ["16'", "5⅓'", "8'", "4'", "2⅔'", "2'", "1⅗'", "1⅓'", "1'"];
             for (i, name) in drawbar_names.iter().enumerate() {
                 let key = format!("drawbar_{}", i + 1);
-                let mut val = self.layers[layer].edited_params.get(&key).copied().unwrap_or(0.0);
+                let mut val = self.parts[part].edited_params.get(&key).copied().unwrap_or(0.0);
                 if ui.add(egui::Slider::new(&mut val, 0.0..=8.0).step_by(1.0).text(*name)).changed() {
-                    self.layers[layer].edited_params.insert(key, val);
+                    self.parts[part].edited_params.insert(key, val);
                     changed = true;
                 }
             }
@@ -199,28 +199,28 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Bass Guitar");
             ui.horizontal(|ui| {
-                let mut style = self.layers[layer].edited_params.get("bass_style").copied().unwrap_or(0.0) as usize;
+                let mut style = self.parts[part].edited_params.get("bass_style").copied().unwrap_or(0.0) as usize;
                 ui.label("Style:");
-                egui::ComboBox::from_id_salt(format!("bass_style_{layer}"))
+                egui::ComboBox::from_id_salt(format!("bass_style_{part}"))
                     .selected_text(*BASS_STYLE_NAMES.get(style).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in BASS_STYLE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut style, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("bass_style".into(), style as f32);
+                                self.parts[part].edited_params.insert("bass_style".into(), style as f32);
                                 changed = true;
                             }
                         }
                     });
             });
             ui.horizontal(|ui| {
-                let mut pu = self.layers[layer].edited_params.get("bass_pickup").copied().unwrap_or(0.0) as usize;
+                let mut pu = self.parts[part].edited_params.get("bass_pickup").copied().unwrap_or(0.0) as usize;
                 ui.label("Pickup:");
-                egui::ComboBox::from_id_salt(format!("bass_pickup_{layer}"))
+                egui::ComboBox::from_id_salt(format!("bass_pickup_{part}"))
                     .selected_text(*BASS_PICKUP_NAMES.get(pu).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in BASS_PICKUP_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut pu, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("bass_pickup".into(), pu as f32);
+                                self.parts[part].edited_params.insert("bass_pickup".into(), pu as f32);
                                 changed = true;
                             }
                         }
@@ -235,14 +235,14 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Bowed String");
             ui.horizontal(|ui| {
-                let mut bt = self.layers[layer].edited_params.get("body_type").copied().unwrap_or(0.0) as usize;
+                let mut bt = self.parts[part].edited_params.get("body_type").copied().unwrap_or(0.0) as usize;
                 ui.label("Body:");
-                egui::ComboBox::from_id_salt(format!("body_type_{layer}"))
+                egui::ComboBox::from_id_salt(format!("body_type_{part}"))
                     .selected_text(*BOWED_BODY_NAMES.get(bt).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in BOWED_BODY_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut bt, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("body_type".into(), bt as f32);
+                                self.parts[part].edited_params.insert("body_type".into(), bt as f32);
                                 changed = true;
                             }
                         }
@@ -257,14 +257,14 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Brass");
             ui.horizontal(|ui| {
-                let mut bt = self.layers[layer].edited_params.get("bell_type").copied().unwrap_or(0.0) as usize;
+                let mut bt = self.parts[part].edited_params.get("bell_type").copied().unwrap_or(0.0) as usize;
                 ui.label("Type:");
-                egui::ComboBox::from_id_salt(format!("bell_type_{layer}"))
+                egui::ComboBox::from_id_salt(format!("bell_type_{part}"))
                     .selected_text(*BRASS_BELL_NAMES.get(bt).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in BRASS_BELL_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut bt, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("bell_type".into(), bt as f32);
+                                self.parts[part].edited_params.insert("bell_type".into(), bt as f32);
                                 changed = true;
                             }
                         }
@@ -279,14 +279,14 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Accordion");
             ui.horizontal(|ui| {
-                let mut reg = self.layers[layer].edited_params.get("accordion_register").copied().unwrap_or(0.0) as usize;
+                let mut reg = self.parts[part].edited_params.get("accordion_register").copied().unwrap_or(0.0) as usize;
                 ui.label("Register:");
-                egui::ComboBox::from_id_salt(format!("accordion_reg_{layer}"))
+                egui::ComboBox::from_id_salt(format!("accordion_reg_{part}"))
                     .selected_text(*ACCORDION_REGISTER_NAMES.get(reg).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in ACCORDION_REGISTER_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut reg, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("accordion_register".into(), reg as f32);
+                                self.parts[part].edited_params.insert("accordion_register".into(), reg as f32);
                                 changed = true;
                             }
                         }
@@ -300,14 +300,14 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Saxophone");
             ui.horizontal(|ui| {
-                let mut st = self.layers[layer].edited_params.get("sax_type").copied().unwrap_or(1.0) as usize;
+                let mut st = self.parts[part].edited_params.get("sax_type").copied().unwrap_or(1.0) as usize;
                 ui.label("Type:");
-                egui::ComboBox::from_id_salt(format!("sax_type_{layer}"))
+                egui::ComboBox::from_id_salt(format!("sax_type_{part}"))
                     .selected_text(*SAX_TYPE_NAMES.get(st).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in SAX_TYPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut st, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("sax_type".into(), st as f32);
+                                self.parts[part].edited_params.insert("sax_type".into(), st as f32);
                                 changed = true;
                             }
                         }
@@ -323,14 +323,14 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Electric Piano");
             ui.horizontal(|ui| {
-                let mut ep_t = self.layers[layer].edited_params.get("epiano_type").copied().unwrap_or(0.0) as usize;
+                let mut ep_t = self.parts[part].edited_params.get("epiano_type").copied().unwrap_or(0.0) as usize;
                 ui.label("Model:");
-                egui::ComboBox::from_id_salt(format!("epiano_type_{layer}"))
+                egui::ComboBox::from_id_salt(format!("epiano_type_{part}"))
                     .selected_text(*["Rhodes MkII", "Wurlitzer 200A", "Stage 73"].get(ep_t).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in ["Rhodes MkII", "Wurlitzer 200A", "Stage 73"].iter().enumerate() {
                             if ui.selectable_value(&mut ep_t, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("epiano_type".into(), ep_t as f32);
+                                self.parts[part].edited_params.insert("epiano_type".into(), ep_t as f32);
                                 changed = true;
                             }
                         }
@@ -345,14 +345,14 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Alias (8-bit)");
             ui.horizontal(|ui| {
-                let mut wt = self.layers[layer].edited_params.get("alias_wave_type").copied().unwrap_or(0.0) as usize;
+                let mut wt = self.parts[part].edited_params.get("alias_wave_type").copied().unwrap_or(0.0) as usize;
                 ui.label("Wave:");
-                egui::ComboBox::from_id_salt(format!("alias_wave_{layer}"))
+                egui::ComboBox::from_id_salt(format!("alias_wave_{part}"))
                     .selected_text(*ALIAS_WAVE_NAMES.get(wt).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in ALIAS_WAVE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut wt, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("alias_wave_type".into(), wt as f32);
+                                self.parts[part].edited_params.insert("alias_wave_type".into(), wt as f32);
                                 changed = true;
                             }
                         }
@@ -366,14 +366,14 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Window Oscillator");
             ui.horizontal(|ui| {
-                let mut wt = self.layers[layer].edited_params.get("window_type").copied().unwrap_or(0.0) as usize;
+                let mut wt = self.parts[part].edited_params.get("window_type").copied().unwrap_or(0.0) as usize;
                 ui.label("Window:");
-                egui::ComboBox::from_id_salt(format!("window_type_{layer}"))
+                egui::ComboBox::from_id_salt(format!("window_type_{part}"))
                     .selected_text(*WINDOW_TYPE_NAMES.get(wt).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in WINDOW_TYPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut wt, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("window_type".into(), wt as f32);
+                                self.parts[part].edited_params.insert("window_type".into(), wt as f32);
                                 changed = true;
                             }
                         }
@@ -399,15 +399,15 @@ impl App {
                 "Modal", "Bass Drum", "Snare Drum", "Hi-Hat",
             ];
             ui.horizontal(|ui| {
-                let mut eng = self.layers[layer].edited_params.get("twist_engine").copied().unwrap_or(8.0) as usize;
+                let mut eng = self.parts[part].edited_params.get("twist_engine").copied().unwrap_or(8.0) as usize;
                 ui.label("Engine:");
-                egui::ComboBox::from_id_salt(format!("twist_eng_{layer}"))
+                egui::ComboBox::from_id_salt(format!("twist_eng_{part}"))
                     .width(160.0)
                     .selected_text(*TWIST_ENGINES.get(eng).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in TWIST_ENGINES.iter().enumerate() {
                             if ui.selectable_value(&mut eng, i, *name).clicked() {
-                                self.layers[layer].edited_params.insert("twist_engine".into(), eng as f32);
+                                self.parts[part].edited_params.insert("twist_engine".into(), eng as f32);
                                 changed = true;
                             }
                         }
@@ -423,13 +423,13 @@ impl App {
 
         // Square wave — pulse width control
         if osc_type == 2 {
-            let pw = self.layers[layer].edited_params.get("pulse_width").copied().unwrap_or(0.5);
+            let pw = self.parts[part].edited_params.get("pulse_width").copied().unwrap_or(0.5);
             let mut pw_val = pw;
             ui.horizontal(|ui| {
                 ui.label("Pulse Width");
                 if ui.add(egui::Slider::new(&mut pw_val, 0.05..=0.95)).changed() {
-                    self.layers[layer].edited_params.insert("pulse_width".into(), pw_val);
-                    self.layers[layer].params_dirty = true;
+                    self.parts[part].edited_params.insert("pulse_width".into(), pw_val);
+                    self.parts[part].params_dirty = true;
                 }
             });
         }
@@ -439,14 +439,14 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Phase Distortion");
             ui.horizontal(|ui| {
-                let mut shape = self.layers[layer].edited_params.get("pd_shape").copied().unwrap_or(0.0) as usize;
+                let mut shape = self.parts[part].edited_params.get("pd_shape").copied().unwrap_or(0.0) as usize;
                 ui.label("Shape:");
-                egui::ComboBox::from_id_salt(format!("pd_shape_{layer}"))
+                egui::ComboBox::from_id_salt(format!("pd_shape_{part}"))
                     .selected_text(*PD_SHAPE_NAMES.get(shape).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in PD_SHAPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut shape, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("pd_shape".into(), shape as f32);
+                                self.parts[part].edited_params.insert("pd_shape".into(), shape as f32);
                                 changed = true;
                             }
                         }
@@ -461,14 +461,14 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Wavefolder");
             ui.horizontal(|ui| {
-                let mut src = self.layers[layer].edited_params.get("fold_source").copied().unwrap_or(0.0) as usize;
+                let mut src = self.parts[part].edited_params.get("fold_source").copied().unwrap_or(0.0) as usize;
                 ui.label("Source:");
-                egui::ComboBox::from_id_salt(format!("fold_source_{layer}"))
+                egui::ComboBox::from_id_salt(format!("fold_source_{part}"))
                     .selected_text(*FOLD_SOURCE_NAMES.get(src).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in FOLD_SOURCE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut src, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("fold_source".into(), src as f32);
+                                self.parts[part].edited_params.insert("fold_source".into(), src as f32);
                                 changed = true;
                             }
                         }
@@ -483,14 +483,14 @@ impl App {
             ui.add_space(4.0);
             ui.strong("Modal Resonator");
             ui.horizontal(|ui| {
-                let mut mat = self.layers[layer].edited_params.get("modal_material").copied().unwrap_or(0.0) as usize;
+                let mut mat = self.parts[part].edited_params.get("modal_material").copied().unwrap_or(0.0) as usize;
                 ui.label("Material:");
-                egui::ComboBox::from_id_salt(format!("modal_material_{layer}"))
+                egui::ComboBox::from_id_salt(format!("modal_material_{part}"))
                     .selected_text(*MODAL_MATERIAL_NAMES.get(mat).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in MODAL_MATERIAL_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut mat, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("modal_material".into(), mat as f32);
+                                self.parts[part].edited_params.insert("modal_material".into(), mat as f32);
                                 changed = true;
                             }
                         }
@@ -506,14 +506,14 @@ impl App {
             ui.add_space(4.0);
             ui.label("Hard Sync");
             ui.horizontal(|ui| {
-                let mut shape = self.layers[layer].edited_params.get("sync_shape").copied().unwrap_or(0.0) as usize;
+                let mut shape = self.parts[part].edited_params.get("sync_shape").copied().unwrap_or(0.0) as usize;
                 ui.label("Slave Wave:");
-                egui::ComboBox::from_id_salt(format!("sync_shape_{layer}"))
+                egui::ComboBox::from_id_salt(format!("sync_shape_{part}"))
                     .selected_text(*SYNC_SHAPE_NAMES.get(shape).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in SYNC_SHAPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut shape, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("sync_shape".into(), shape as f32);
+                                self.parts[part].edited_params.insert("sync_shape".into(), shape as f32);
                                 changed = true;
                             }
                         }
@@ -533,11 +533,11 @@ impl App {
         // Multi-osc controls (only for simple osc types)
         if osc_is_simple {
             ui.add_space(4.0);
-            let mut osc_count = self.layers[layer].edited_params.get("osc_count").copied().unwrap_or(1.0) as u32;
+            let mut osc_count = self.parts[part].edited_params.get("osc_count").copied().unwrap_or(1.0) as u32;
             ui.horizontal(|ui| {
                 ui.label("Osc Count:");
                 if ui.add(egui::Slider::new(&mut osc_count, 1..=3)).changed() {
-                    self.layers[layer].edited_params.insert("osc_count".into(), osc_count as f32);
+                    self.parts[part].edited_params.insert("osc_count".into(), osc_count as f32);
                     changed = true;
                 }
             });
@@ -550,23 +550,23 @@ impl App {
                 ui.add_space(4.0);
                 ui.strong("Oscillator 2");
                 ui.horizontal(|ui| {
-                    let mut osc2 = self.layers[layer].edited_params.get("osc2_type").copied().unwrap_or(1.0) as usize;
+                    let mut osc2 = self.parts[part].edited_params.get("osc2_type").copied().unwrap_or(1.0) as usize;
                     ui.label("Type:");
-                    egui::ComboBox::from_id_salt(format!("osc2_type_{layer}"))
+                    egui::ComboBox::from_id_salt(format!("osc2_type_{part}"))
                         .selected_text(*SIMPLE_OSC_NAMES.get(osc2).unwrap_or(&"?"))
                         .show_ui(ui, |ui| {
                             for (i, name) in SIMPLE_OSC_NAMES.iter().enumerate() {
                                 if ui.selectable_value(&mut osc2, i, *name).changed() {
-                                    self.layers[layer].edited_params.insert("osc2_type".into(), osc2 as f32);
+                                    self.parts[part].edited_params.insert("osc2_type".into(), osc2 as f32);
                                     changed = true;
                                 }
                             }
                         });
 
-                    let mut detune2 = self.layers[layer].edited_params.get("osc2_detune").copied().unwrap_or(0.0);
+                    let mut detune2 = self.parts[part].edited_params.get("osc2_detune").copied().unwrap_or(0.0);
                     ui.label("Detune:");
                     if ui.add(egui::Slider::new(&mut detune2, -0.05..=0.05).step_by(0.001)).changed() {
-                        self.layers[layer].edited_params.insert("osc2_detune".into(), detune2);
+                        self.parts[part].edited_params.insert("osc2_detune".into(), detune2);
                         changed = true;
                     }
                 });
@@ -577,23 +577,23 @@ impl App {
                 ui.add_space(4.0);
                 ui.strong("Oscillator 3");
                 ui.horizontal(|ui| {
-                    let mut osc3 = self.layers[layer].edited_params.get("osc3_type").copied().unwrap_or(1.0) as usize;
+                    let mut osc3 = self.parts[part].edited_params.get("osc3_type").copied().unwrap_or(1.0) as usize;
                     ui.label("Type:");
-                    egui::ComboBox::from_id_salt(format!("osc3_type_{layer}"))
+                    egui::ComboBox::from_id_salt(format!("osc3_type_{part}"))
                         .selected_text(*SIMPLE_OSC_NAMES.get(osc3).unwrap_or(&"?"))
                         .show_ui(ui, |ui| {
                             for (i, name) in SIMPLE_OSC_NAMES.iter().enumerate() {
                                 if ui.selectable_value(&mut osc3, i, *name).changed() {
-                                    self.layers[layer].edited_params.insert("osc3_type".into(), osc3 as f32);
+                                    self.parts[part].edited_params.insert("osc3_type".into(), osc3 as f32);
                                     changed = true;
                                 }
                             }
                         });
 
-                    let mut detune3 = self.layers[layer].edited_params.get("osc3_detune").copied().unwrap_or(0.0);
+                    let mut detune3 = self.parts[part].edited_params.get("osc3_detune").copied().unwrap_or(0.0);
                     ui.label("Detune:");
                     if ui.add(egui::Slider::new(&mut detune3, -0.05..=0.05).step_by(0.001)).changed() {
-                        self.layers[layer].edited_params.insert("osc3_detune".into(), detune3);
+                        self.parts[part].edited_params.insert("osc3_detune".into(), detune3);
                         changed = true;
                     }
                 });
@@ -610,14 +610,14 @@ impl App {
         ui.add_space(4.0);
         ui.strong("Osc Shaper");
         ui.horizontal(|ui| {
-            let mut wsm = self.layers[layer].edited_params.get("osc_ws_mode").copied().unwrap_or(0.0) as usize;
+            let mut wsm = self.parts[part].edited_params.get("osc_ws_mode").copied().unwrap_or(0.0) as usize;
             ui.label("Mode:");
-            egui::ComboBox::from_id_salt(format!("osc_ws_mode_{layer}"))
+            egui::ComboBox::from_id_salt(format!("osc_ws_mode_{part}"))
                 .selected_text(*WAVE_SHAPER_MODE_NAMES.get(wsm).unwrap_or(&"?"))
                 .show_ui(ui, |ui| {
                     for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wsm, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("osc_ws_mode".into(), wsm as f32);
+                            self.parts[part].edited_params.insert("osc_ws_mode".into(), wsm as f32);
                             changed = true;
                         }
                     }
@@ -631,47 +631,47 @@ impl App {
         // Filter 1
         ui.strong("Filter 1");
         ui.horizontal(|ui| {
-            let mut ft = self.layers[layer].edited_params.get("filter_type").copied().unwrap_or(0.0) as usize;
+            let mut ft = self.parts[part].edited_params.get("filter_type").copied().unwrap_or(0.0) as usize;
             ui.label("Type:");
-            egui::ComboBox::from_id_salt(format!("filter_type_{layer}"))
+            egui::ComboBox::from_id_salt(format!("filter_type_{part}"))
                 .selected_text(*FILTER_NAMES.get(ft).unwrap_or(&"?"))
                 .show_ui(ui, |ui| {
                     for (i, name) in FILTER_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut ft, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("filter_type".into(), ft as f32);
+                            self.parts[part].edited_params.insert("filter_type".into(), ft as f32);
                             changed = true;
                         }
                     }
                 });
         });
 
-        let filter_type = self.layers[layer].edited_params.get("filter_type").copied().unwrap_or(0.0) as u32;
+        let filter_type = self.parts[part].edited_params.get("filter_type").copied().unwrap_or(0.0) as u32;
         let is_formant = filter_type == 3;
 
         if is_formant {
             // Formant filter controls
             ui.horizontal(|ui| {
-                let mut fv = self.layers[layer].edited_params.get("formant_voice").copied().unwrap_or(0.0) as usize;
+                let mut fv = self.parts[part].edited_params.get("formant_voice").copied().unwrap_or(0.0) as usize;
                 ui.label("Voice:");
-                egui::ComboBox::from_id_salt(format!("formant_voice_{layer}"))
+                egui::ComboBox::from_id_salt(format!("formant_voice_{part}"))
                     .selected_text(*FORMANT_VOICE_NAMES.get(fv).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in FORMANT_VOICE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut fv, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("formant_voice".into(), fv as f32);
+                                self.parts[part].edited_params.insert("formant_voice".into(), fv as f32);
                                 changed = true;
                             }
                         }
                     });
 
-                let mut vw = self.layers[layer].edited_params.get("formant_vowel").copied().unwrap_or(0.0) as usize;
+                let mut vw = self.parts[part].edited_params.get("formant_vowel").copied().unwrap_or(0.0) as usize;
                 ui.label("Vowel:");
-                egui::ComboBox::from_id_salt(format!("formant_vowel_{layer}"))
+                egui::ComboBox::from_id_salt(format!("formant_vowel_{part}"))
                     .selected_text(*FORMANT_VOWEL_NAMES.get(vw).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in FORMANT_VOWEL_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut vw, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("formant_vowel".into(), vw as f32);
+                                self.parts[part].edited_params.insert("formant_vowel".into(), vw as f32);
                                 changed = true;
                             }
                         }
@@ -691,15 +691,15 @@ impl App {
         // Filter routing (not available with formant filter)
         if !is_formant {
             ui.add_space(4.0);
-            let mut routing = self.layers[layer].edited_params.get("filter_routing").copied().unwrap_or(0.0) as usize;
+            let mut routing = self.parts[part].edited_params.get("filter_routing").copied().unwrap_or(0.0) as usize;
             ui.horizontal(|ui| {
                 ui.label("Routing:");
-                egui::ComboBox::from_id_salt(format!("filter_routing_{layer}"))
+                egui::ComboBox::from_id_salt(format!("filter_routing_{part}"))
                     .selected_text(*FILTER_ROUTING_NAMES.get(routing).unwrap_or(&"Single"))
                     .show_ui(ui, |ui| {
                         for (i, name) in FILTER_ROUTING_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut routing, i, *name).changed() {
-                                self.layers[layer].edited_params.insert("filter_routing".into(), routing as f32);
+                                self.parts[part].edited_params.insert("filter_routing".into(), routing as f32);
                                 changed = true;
                             }
                         }
@@ -711,20 +711,20 @@ impl App {
                 ui.add_space(4.0);
                 ui.strong("Filter 2");
                 ui.horizontal(|ui| {
-                    let ft2 = self.layers[layer].edited_params.get("filter2_type").copied().unwrap_or(0.0) as usize;
+                    let ft2 = self.parts[part].edited_params.get("filter2_type").copied().unwrap_or(0.0) as usize;
                     ui.label("Type:");
                     // Filter 2: LP/HP/BP + Moog (skip Formant index 3)
                     let f2_names: &[&str] = &["LowPass", "HighPass", "BandPass", "Moog 24dB", "Moog 12dB", "Diode 18dB", "Comb", "Allpass", "Comb+", "Comb-"];
                     let f2_values: &[usize] = &[0, 1, 2, 4, 5, 6, 7, 8, 9, 10]; // maps to FilterType param values
                     let f2_display = f2_values.iter().position(|&v| v == ft2).unwrap_or(0);
                     let mut f2_sel = f2_display;
-                    egui::ComboBox::from_id_salt(format!("filter2_type_{layer}"))
+                    egui::ComboBox::from_id_salt(format!("filter2_type_{part}"))
                         .selected_text(*f2_names.get(f2_sel).unwrap_or(&"LowPass"))
                         .show_ui(ui, |ui| {
                             for (i, name) in f2_names.iter().enumerate() {
                                 if ui.selectable_value(&mut f2_sel, i, *name).changed() {
                                     let param_val = f2_values[f2_sel];
-                                    self.layers[layer].edited_params.insert("filter2_type".into(), param_val as f32);
+                                    self.parts[part].edited_params.insert("filter2_type".into(), param_val as f32);
                                     changed = true;
                                 }
                             }
@@ -738,14 +738,14 @@ impl App {
                     ui.add_space(4.0);
                     ui.strong("Inter-Filter Shaper");
                     ui.horizontal(|ui| {
-                        let mut wsm = self.layers[layer].edited_params.get("inter_ws_mode").copied().unwrap_or(0.0) as usize;
+                        let mut wsm = self.parts[part].edited_params.get("inter_ws_mode").copied().unwrap_or(0.0) as usize;
                         ui.label("Mode:");
-                        egui::ComboBox::from_id_salt(format!("inter_ws_mode_{layer}"))
+                        egui::ComboBox::from_id_salt(format!("inter_ws_mode_{part}"))
                             .selected_text(*WAVE_SHAPER_MODE_NAMES.get(wsm).unwrap_or(&"?"))
                             .show_ui(ui, |ui| {
                                 for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
                                     if ui.selectable_value(&mut wsm, i, *name).changed() {
-                                        self.layers[layer].edited_params.insert("inter_ws_mode".into(), wsm as f32);
+                                        self.parts[part].edited_params.insert("inter_ws_mode".into(), wsm as f32);
                                         changed = true;
                                     }
                                 }
@@ -766,7 +766,7 @@ impl App {
         changed |= self.param_slider(ui, "amp_decay",   "Decay",   0.0,   5.0, false);
         changed |= self.param_slider(ui, "amp_sustain", "Sustain", 0.0,   1.0, false);
         changed |= self.param_slider(ui, "amp_release", "Release", 0.001, 5.0, true);
-        Self::draw_adsr_curve(ui, layer, &self.layers[layer].edited_params, "amp");
+        Self::draw_adsr_curve(ui, part, &self.parts[part].edited_params, "amp");
 
         ui.add_space(6.0);
 
@@ -777,45 +777,45 @@ impl App {
         changed |= self.param_slider(ui, "filter_decay",   "Decay",   0.0,   5.0, false);
         changed |= self.param_slider(ui, "filter_sustain", "Sustain", 0.0,   1.0, false);
         changed |= self.param_slider(ui, "filter_release", "Release", 0.001, 5.0, true);
-        Self::draw_adsr_curve(ui, layer, &self.layers[layer].edited_params, "filter");
+        Self::draw_adsr_curve(ui, part, &self.parts[part].edited_params, "filter");
 
         // Envelope shapes
         ui.horizontal(|ui| {
-            let mut as_ = self.layers[layer].edited_params.get("env_attack_shape").copied().unwrap_or(0.0) as usize;
+            let mut as_ = self.parts[part].edited_params.get("env_attack_shape").copied().unwrap_or(0.0) as usize;
             ui.label("Atk Shape:");
-            egui::ComboBox::from_id_salt(format!("env_atk_shape_{layer}"))
+            egui::ComboBox::from_id_salt(format!("env_atk_shape_{part}"))
                 .selected_text(*ENV_SHAPE_NAMES.get(as_).unwrap_or(&"Sqrt"))
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut as_, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("env_attack_shape".into(), as_ as f32);
+                            self.parts[part].edited_params.insert("env_attack_shape".into(), as_ as f32);
                             changed = true;
                         }
                     }
                 });
-            let mut ds = self.layers[layer].edited_params.get("env_decay_shape").copied().unwrap_or(0.0) as usize;
+            let mut ds = self.parts[part].edited_params.get("env_decay_shape").copied().unwrap_or(0.0) as usize;
             ui.label("Dec:");
-            egui::ComboBox::from_id_salt(format!("env_dec_shape_{layer}"))
+            egui::ComboBox::from_id_salt(format!("env_dec_shape_{part}"))
                 .selected_text(*ENV_SHAPE_NAMES.get(ds).unwrap_or(&"Sqrt"))
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut ds, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("env_decay_shape".into(), ds as f32);
+                            self.parts[part].edited_params.insert("env_decay_shape".into(), ds as f32);
                             changed = true;
                         }
                     }
                 });
-            let mut rs = self.layers[layer].edited_params.get("env_release_shape").copied().unwrap_or(0.0) as usize;
+            let mut rs = self.parts[part].edited_params.get("env_release_shape").copied().unwrap_or(0.0) as usize;
             ui.label("Rel:");
-            egui::ComboBox::from_id_salt(format!("env_rel_shape_{layer}"))
+            egui::ComboBox::from_id_salt(format!("env_rel_shape_{part}"))
                 .selected_text(*ENV_SHAPE_NAMES.get(rs).unwrap_or(&"Sqrt"))
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut rs, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("env_release_shape".into(), rs as f32);
+                            self.parts[part].edited_params.insert("env_release_shape".into(), rs as f32);
                             changed = true;
                         }
                     }
@@ -823,41 +823,41 @@ impl App {
         });
         // Filter envelope shapes
         ui.horizontal(|ui| {
-            let mut fas = self.layers[layer].edited_params.get("filter_env_attack_shape").copied().unwrap_or(0.0) as usize;
+            let mut fas = self.parts[part].edited_params.get("filter_env_attack_shape").copied().unwrap_or(0.0) as usize;
             ui.label("Flt Atk:");
-            egui::ComboBox::from_id_salt(format!("fenv_atk_shape_{layer}"))
+            egui::ComboBox::from_id_salt(format!("fenv_atk_shape_{part}"))
                 .selected_text(*ENV_SHAPE_NAMES.get(fas).unwrap_or(&"Sqrt"))
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut fas, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("filter_env_attack_shape".into(), fas as f32);
+                            self.parts[part].edited_params.insert("filter_env_attack_shape".into(), fas as f32);
                             changed = true;
                         }
                     }
                 });
-            let mut fds = self.layers[layer].edited_params.get("filter_env_decay_shape").copied().unwrap_or(0.0) as usize;
+            let mut fds = self.parts[part].edited_params.get("filter_env_decay_shape").copied().unwrap_or(0.0) as usize;
             ui.label("Dec:");
-            egui::ComboBox::from_id_salt(format!("fenv_dec_shape_{layer}"))
+            egui::ComboBox::from_id_salt(format!("fenv_dec_shape_{part}"))
                 .selected_text(*ENV_SHAPE_NAMES.get(fds).unwrap_or(&"Sqrt"))
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut fds, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("filter_env_decay_shape".into(), fds as f32);
+                            self.parts[part].edited_params.insert("filter_env_decay_shape".into(), fds as f32);
                             changed = true;
                         }
                     }
                 });
-            let mut frs = self.layers[layer].edited_params.get("filter_env_release_shape").copied().unwrap_or(0.0) as usize;
+            let mut frs = self.parts[part].edited_params.get("filter_env_release_shape").copied().unwrap_or(0.0) as usize;
             ui.label("Rel:");
-            egui::ComboBox::from_id_salt(format!("fenv_rel_shape_{layer}"))
+            egui::ComboBox::from_id_salt(format!("fenv_rel_shape_{part}"))
                 .selected_text(*ENV_SHAPE_NAMES.get(frs).unwrap_or(&"Sqrt"))
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut frs, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("filter_env_release_shape".into(), frs as f32);
+                            self.parts[part].edited_params.insert("filter_env_release_shape".into(), frs as f32);
                             changed = true;
                         }
                     }
@@ -869,14 +869,14 @@ impl App {
         // Dynamics
         ui.strong("Dynamics");
         ui.horizontal(|ui| {
-            let mut vc = self.layers[layer].edited_params.get("velocity_curve").copied().unwrap_or(0.0) as usize;
+            let mut vc = self.parts[part].edited_params.get("velocity_curve").copied().unwrap_or(0.0) as usize;
             ui.label("Vel Curve:");
-            egui::ComboBox::from_id_salt(format!("vel_curve_{layer}"))
+            egui::ComboBox::from_id_salt(format!("vel_curve_{part}"))
                 .selected_text(*VELOCITY_CURVE_NAMES.get(vc).unwrap_or(&"Linear"))
                 .show_ui(ui, |ui| {
                     for (i, name) in VELOCITY_CURVE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut vc, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("velocity_curve".into(), vc as f32);
+                            self.parts[part].edited_params.insert("velocity_curve".into(), vc as f32);
                             changed = true;
                         }
                     }
@@ -889,14 +889,14 @@ impl App {
         // LFO
         ui.strong("LFO");
         ui.horizontal(|ui| {
-            let mut lw = self.layers[layer].edited_params.get("lfo_waveform").copied().unwrap_or(0.0) as usize;
+            let mut lw = self.parts[part].edited_params.get("lfo_waveform").copied().unwrap_or(0.0) as usize;
             ui.label("Waveform:");
-            egui::ComboBox::from_id_salt(format!("lfo_wf_{layer}"))
+            egui::ComboBox::from_id_salt(format!("lfo_wf_{part}"))
                 .selected_text(*LFO_WAVEFORM_NAMES.get(lw).unwrap_or(&"Sine"))
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("lfo_waveform".into(), lw as f32);
+                            self.parts[part].edited_params.insert("lfo_waveform".into(), lw as f32);
                             changed = true;
                         }
                     }
@@ -907,21 +907,21 @@ impl App {
         changed |= self.param_slider(ui, "lfo_filter_depth", "Filter Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_amp_depth", "Amp Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_deform", "Deform", -1.0, 1.0, false);
-        changed |= draw_lfo_trigger_mode(ui, layer, 1, &mut self.layers[layer].edited_params);
+        changed |= draw_lfo_trigger_mode(ui, part, 1, &mut self.parts[part].edited_params);
 
         ui.add_space(6.0);
 
         // LFO 2
         ui.strong("LFO 2");
         ui.horizontal(|ui| {
-            let mut lw2 = self.layers[layer].edited_params.get("lfo2_waveform").copied().unwrap_or(0.0) as usize;
+            let mut lw2 = self.parts[part].edited_params.get("lfo2_waveform").copied().unwrap_or(0.0) as usize;
             ui.label("Waveform:");
-            egui::ComboBox::from_id_salt(format!("lfo2_wf_{layer}"))
+            egui::ComboBox::from_id_salt(format!("lfo2_wf_{part}"))
                 .selected_text(*LFO_WAVEFORM_NAMES.get(lw2).unwrap_or(&"Sine"))
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw2, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("lfo2_waveform".into(), lw2 as f32);
+                            self.parts[part].edited_params.insert("lfo2_waveform".into(), lw2 as f32);
                             changed = true;
                         }
                     }
@@ -932,21 +932,21 @@ impl App {
         changed |= self.param_slider(ui, "lfo2_filter_depth", "Filter Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_amp_depth", "Amp Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_deform", "Deform", -1.0, 1.0, false);
-        changed |= draw_lfo_trigger_mode(ui, layer, 2, &mut self.layers[layer].edited_params);
+        changed |= draw_lfo_trigger_mode(ui, part, 2, &mut self.parts[part].edited_params);
 
         ui.add_space(6.0);
 
         // LFO 3 & 4 (mod matrix sources)
         ui.strong("LFO 3 (Mod Matrix)");
         ui.horizontal(|ui| {
-            let mut lw3 = self.layers[layer].edited_params.get("lfo3_waveform").copied().unwrap_or(0.0) as usize;
+            let mut lw3 = self.parts[part].edited_params.get("lfo3_waveform").copied().unwrap_or(0.0) as usize;
             ui.label("Waveform:");
-            egui::ComboBox::from_id_salt(format!("lfo3_wf_{layer}"))
+            egui::ComboBox::from_id_salt(format!("lfo3_wf_{part}"))
                 .selected_text(*LFO_WAVEFORM_NAMES.get(lw3).unwrap_or(&"Sine"))
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw3, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("lfo3_waveform".into(), lw3 as f32);
+                            self.parts[part].edited_params.insert("lfo3_waveform".into(), lw3 as f32);
                             changed = true;
                         }
                     }
@@ -954,18 +954,18 @@ impl App {
         });
         changed |= self.param_slider(ui, "lfo3_rate", "Rate", 0.1, 20.0, true);
         changed |= self.param_slider(ui, "lfo3_deform", "Deform", -1.0, 1.0, false);
-        changed |= draw_lfo_trigger_mode(ui, layer, 3, &mut self.layers[layer].edited_params);
+        changed |= draw_lfo_trigger_mode(ui, part, 3, &mut self.parts[part].edited_params);
 
         ui.strong("LFO 4 (Mod Matrix)");
         ui.horizontal(|ui| {
-            let mut lw4 = self.layers[layer].edited_params.get("lfo4_waveform").copied().unwrap_or(0.0) as usize;
+            let mut lw4 = self.parts[part].edited_params.get("lfo4_waveform").copied().unwrap_or(0.0) as usize;
             ui.label("Waveform:");
-            egui::ComboBox::from_id_salt(format!("lfo4_wf_{layer}"))
+            egui::ComboBox::from_id_salt(format!("lfo4_wf_{part}"))
                 .selected_text(*LFO_WAVEFORM_NAMES.get(lw4).unwrap_or(&"Sine"))
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw4, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("lfo4_waveform".into(), lw4 as f32);
+                            self.parts[part].edited_params.insert("lfo4_waveform".into(), lw4 as f32);
                             changed = true;
                         }
                     }
@@ -973,7 +973,7 @@ impl App {
         });
         changed |= self.param_slider(ui, "lfo4_rate", "Rate", 0.1, 20.0, true);
         changed |= self.param_slider(ui, "lfo4_deform", "Deform", -1.0, 1.0, false);
-        changed |= draw_lfo_trigger_mode(ui, layer, 4, &mut self.layers[layer].edited_params);
+        changed |= draw_lfo_trigger_mode(ui, part, 4, &mut self.parts[part].edited_params);
         {
         }
 
@@ -983,14 +983,14 @@ impl App {
         ui.strong("Scene LFO 1");
         ui.label(egui::RichText::new("Free-running: phase never resets on note-on").small().weak());
         ui.horizontal(|ui| {
-            let mut wf = self.layers[layer].edited_params.get("slfo1_waveform").copied().unwrap_or(0.0) as usize;
+            let mut wf = self.parts[part].edited_params.get("slfo1_waveform").copied().unwrap_or(0.0) as usize;
             ui.label("Wave:");
-            egui::ComboBox::from_id_salt(format!("slfo1_wf_{layer}"))
+            egui::ComboBox::from_id_salt(format!("slfo1_wf_{part}"))
                 .selected_text(*LFO_WAVEFORM_NAMES.get(wf).unwrap_or(&"Sine"))
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wf, i, *name).clicked() {
-                            self.layers[layer].edited_params.insert("slfo1_waveform".into(), wf as f32);
+                            self.parts[part].edited_params.insert("slfo1_waveform".into(), wf as f32);
                             changed = true;
                         }
                     }
@@ -999,15 +999,15 @@ impl App {
         changed |= self.param_slider(ui, "slfo1_rate", "Rate", 0.01, 20.0, true);
         changed |= self.param_slider(ui, "slfo1_deform", "Deform", -1.0, 1.0, false);
         {
-            let mut uni = self.layers[layer].edited_params.get("slfo1_unipolar").copied().unwrap_or(0.0) > 0.5;
-            let mut tsync = self.layers[layer].edited_params.get("slfo1_tempo_sync").copied().unwrap_or(0.0) > 0.5;
+            let mut uni = self.parts[part].edited_params.get("slfo1_unipolar").copied().unwrap_or(0.0) > 0.5;
+            let mut tsync = self.parts[part].edited_params.get("slfo1_tempo_sync").copied().unwrap_or(0.0) > 0.5;
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut uni, "Unipolar").changed() {
-                    self.layers[layer].edited_params.insert("slfo1_unipolar".into(), if uni { 1.0 } else { 0.0 });
+                    self.parts[part].edited_params.insert("slfo1_unipolar".into(), if uni { 1.0 } else { 0.0 });
                     changed = true;
                 }
                 if ui.checkbox(&mut tsync, "Tempo Sync").changed() {
-                    self.layers[layer].edited_params.insert("slfo1_tempo_sync".into(), if tsync { 1.0 } else { 0.0 });
+                    self.parts[part].edited_params.insert("slfo1_tempo_sync".into(), if tsync { 1.0 } else { 0.0 });
                     changed = true;
                 }
             });
@@ -1016,14 +1016,14 @@ impl App {
         ui.add_space(4.0);
         ui.strong("Scene LFO 2");
         ui.horizontal(|ui| {
-            let mut wf = self.layers[layer].edited_params.get("slfo2_waveform").copied().unwrap_or(0.0) as usize;
+            let mut wf = self.parts[part].edited_params.get("slfo2_waveform").copied().unwrap_or(0.0) as usize;
             ui.label("Wave:");
-            egui::ComboBox::from_id_salt(format!("slfo2_wf_{layer}"))
+            egui::ComboBox::from_id_salt(format!("slfo2_wf_{part}"))
                 .selected_text(*LFO_WAVEFORM_NAMES.get(wf).unwrap_or(&"Sine"))
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wf, i, *name).clicked() {
-                            self.layers[layer].edited_params.insert("slfo2_waveform".into(), wf as f32);
+                            self.parts[part].edited_params.insert("slfo2_waveform".into(), wf as f32);
                             changed = true;
                         }
                     }
@@ -1032,15 +1032,15 @@ impl App {
         changed |= self.param_slider(ui, "slfo2_rate", "Rate", 0.01, 20.0, true);
         changed |= self.param_slider(ui, "slfo2_deform", "Deform", -1.0, 1.0, false);
         {
-            let mut uni = self.layers[layer].edited_params.get("slfo2_unipolar").copied().unwrap_or(0.0) > 0.5;
-            let mut tsync = self.layers[layer].edited_params.get("slfo2_tempo_sync").copied().unwrap_or(0.0) > 0.5;
+            let mut uni = self.parts[part].edited_params.get("slfo2_unipolar").copied().unwrap_or(0.0) > 0.5;
+            let mut tsync = self.parts[part].edited_params.get("slfo2_tempo_sync").copied().unwrap_or(0.0) > 0.5;
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut uni, "Unipolar").changed() {
-                    self.layers[layer].edited_params.insert("slfo2_unipolar".into(), if uni { 1.0 } else { 0.0 });
+                    self.parts[part].edited_params.insert("slfo2_unipolar".into(), if uni { 1.0 } else { 0.0 });
                     changed = true;
                 }
                 if ui.checkbox(&mut tsync, "Tempo Sync").changed() {
-                    self.layers[layer].edited_params.insert("slfo2_tempo_sync".into(), if tsync { 1.0 } else { 0.0 });
+                    self.parts[part].edited_params.insert("slfo2_tempo_sync".into(), if tsync { 1.0 } else { 0.0 });
                     changed = true;
                 }
             });
@@ -1052,7 +1052,7 @@ impl App {
         ui.strong("Mod Matrix");
         {
             use crate::synth::mod_matrix::{ModSource, ModDest, MOD_SLOTS};
-            let ep = &mut self.layers[layer].edited_params;
+            let ep = &mut self.parts[part].edited_params;
             for slot_idx in 0..MOD_SLOTS {
                 let prefix = format!("mod_{slot_idx}_");
                 let src_val = ep.get(&format!("{prefix}source")).copied().unwrap_or(0.0);
@@ -1076,7 +1076,7 @@ impl App {
 
                     // Source dropdown
                     let mut src_sel = ModSource::ALL.iter().position(|&s| s == src).unwrap_or(0);
-                    egui::ComboBox::from_id_salt(format!("mod_src_{layer}_{slot_idx}"))
+                    egui::ComboBox::from_id_salt(format!("mod_src_{part}_{slot_idx}"))
                         .width(80.0)
                         .selected_text(src.name())
                         .show_ui(ui, |ui| {
@@ -1090,7 +1090,7 @@ impl App {
 
                     // Dest dropdown
                     let mut dst_sel = ModDest::ALL.iter().position(|&d| d == dst).unwrap_or(0);
-                    egui::ComboBox::from_id_salt(format!("mod_dst_{layer}_{slot_idx}"))
+                    egui::ComboBox::from_id_salt(format!("mod_dst_{part}_{slot_idx}"))
                         .width(90.0)
                         .selected_text(dst.name())
                         .show_ui(ui, |ui| {
@@ -1117,13 +1117,13 @@ impl App {
         // Play Mode
         ui.strong("Play Mode");
         ui.horizontal(|ui| {
-            let mut pmode = self.layers[layer].edited_params.get("play_mode").copied().unwrap_or(0.0) as usize;
-            egui::ComboBox::from_id_salt(format!("play_mode_{layer}"))
+            let mut pmode = self.parts[part].edited_params.get("play_mode").copied().unwrap_or(0.0) as usize;
+            egui::ComboBox::from_id_salt(format!("play_mode_{part}"))
                 .selected_text(*PLAY_MODE_NAMES.get(pmode).unwrap_or(&"Poly"))
                 .show_ui(ui, |ui| {
                     for (i, name) in PLAY_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut pmode, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("play_mode".into(), pmode as f32);
+                            self.parts[part].edited_params.insert("play_mode".into(), pmode as f32);
                             changed = true;
                         }
                     }
@@ -1133,14 +1133,14 @@ impl App {
         // Sustain Mode
         ui.horizontal(|ui| {
             ui.label("Sustain:");
-            let mut smode = self.layers[layer].edited_params.get("sustain_mode").copied().unwrap_or(0.0) as usize;
+            let mut smode = self.parts[part].edited_params.get("sustain_mode").copied().unwrap_or(0.0) as usize;
             let sustain_names = ["Hold All", "Release Others"];
-            egui::ComboBox::from_id_salt(format!("sustain_mode_{layer}"))
+            egui::ComboBox::from_id_salt(format!("sustain_mode_{part}"))
                 .selected_text(*sustain_names.get(smode).unwrap_or(&"Hold All"))
                 .show_ui(ui, |ui| {
                     for (i, name) in sustain_names.iter().enumerate() {
                         if ui.selectable_value(&mut smode, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("sustain_mode".into(), smode as f32);
+                            self.parts[part].edited_params.insert("sustain_mode".into(), smode as f32);
                             changed = true;
                         }
                     }
@@ -1152,14 +1152,14 @@ impl App {
         // Portamento
         ui.strong("Portamento");
         ui.horizontal(|ui| {
-            let mut pm = self.layers[layer].edited_params.get("portamento_mode").copied().unwrap_or(0.0) as usize;
+            let mut pm = self.parts[part].edited_params.get("portamento_mode").copied().unwrap_or(0.0) as usize;
             ui.label("Mode:");
-            egui::ComboBox::from_id_salt(format!("porta_mode_{layer}"))
+            egui::ComboBox::from_id_salt(format!("porta_mode_{part}"))
                 .selected_text(*PORTAMENTO_MODE_NAMES.get(pm).unwrap_or(&"Off"))
                 .show_ui(ui, |ui| {
                     for (i, name) in PORTAMENTO_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut pm, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("portamento_mode".into(), pm as f32);
+                            self.parts[part].edited_params.insert("portamento_mode".into(), pm as f32);
                             changed = true;
                         }
                     }
@@ -1172,9 +1172,9 @@ impl App {
         // Unison
         ui.strong("Unison");
         {
-            let mut uv = self.layers[layer].edited_params.get("unison_voices").copied().unwrap_or(1.0) as u32;
+            let mut uv = self.parts[part].edited_params.get("unison_voices").copied().unwrap_or(1.0) as u32;
             if ui.add(egui::Slider::new(&mut uv, 1..=8).text("Voices")).changed() {
-                self.layers[layer].edited_params.insert("unison_voices".into(), uv as f32);
+                self.parts[part].edited_params.insert("unison_voices".into(), uv as f32);
                 changed = true;
             }
         }
@@ -1192,14 +1192,14 @@ impl App {
         changed |= self.param_slider(ui, "ring_mod_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "ring_mod_freq", "Carrier Freq", 20.0, 8000.0, true);
         ui.horizontal(|ui| {
-            let mut rs = self.layers[layer].edited_params.get("ring_mod_shape").copied().unwrap_or(0.0) as usize;
+            let mut rs = self.parts[part].edited_params.get("ring_mod_shape").copied().unwrap_or(0.0) as usize;
             ui.label("Shape:");
-            egui::ComboBox::from_id_salt(format!("rm_shape_{layer}"))
+            egui::ComboBox::from_id_salt(format!("rm_shape_{part}"))
                 .selected_text(*RING_MOD_SHAPE_NAMES.get(rs).unwrap_or(&"Sine"))
                 .show_ui(ui, |ui| {
                     for (i, name) in RING_MOD_SHAPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut rs, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("ring_mod_shape".into(), rs as f32);
+                            self.parts[part].edited_params.insert("ring_mod_shape".into(), rs as f32);
                             changed = true;
                         }
                     }
@@ -1243,9 +1243,9 @@ impl App {
         changed |= self.param_slider(ui, "delay_feedback", "Feedback", 0.0, 0.95, false);
         changed |= self.param_slider(ui, "delay_filter", "Filter", 0.0, 0.95, false);
         {
-            let mut pp = self.layers[layer].edited_params.get("delay_ping_pong").copied().unwrap_or(0.0) > 0.5;
+            let mut pp = self.parts[part].edited_params.get("delay_ping_pong").copied().unwrap_or(0.0) > 0.5;
             if ui.checkbox(&mut pp, "Ping-Pong").changed() {
-                self.layers[layer].edited_params.insert("delay_ping_pong".into(), if pp { 1.0 } else { 0.0 });
+                self.parts[part].edited_params.insert("delay_ping_pong".into(), if pp { 1.0 } else { 0.0 });
                 changed = true;
             }
         }
@@ -1253,20 +1253,20 @@ impl App {
         ui.add_space(4.0);
         ui.strong("Reverb");
         ui.horizontal(|ui| {
-            let mut rt = self.layers[layer].edited_params.get("reverb_type").copied().unwrap_or(0.0) as usize;
+            let mut rt = self.parts[part].edited_params.get("reverb_type").copied().unwrap_or(0.0) as usize;
             ui.label("Type:");
-            egui::ComboBox::from_id_salt(format!("reverb_type_{layer}"))
+            egui::ComboBox::from_id_salt(format!("reverb_type_{part}"))
                 .selected_text(*REVERB_TYPE_NAMES.get(rt).unwrap_or(&"Plate"))
                 .show_ui(ui, |ui| {
                     for (i, name) in REVERB_TYPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut rt, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("reverb_type".into(), rt as f32);
+                            self.parts[part].edited_params.insert("reverb_type".into(), rt as f32);
                             changed = true;
                         }
                     }
                 });
         });
-        let reverb_type = self.layers[layer].edited_params.get("reverb_type").copied().unwrap_or(0.0) as usize;
+        let reverb_type = self.parts[part].edited_params.get("reverb_type").copied().unwrap_or(0.0) as usize;
         if reverb_type == 0 {
             // Plate reverb params
             changed |= self.param_slider(ui, "reverb_mix", "Mix", 0.0, 1.0, false);
@@ -1290,14 +1290,14 @@ impl App {
         changed |= self.param_slider(ui, "wave_shaper_drive", "Drive", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "wave_shaper_bias", "Bias", -1.0, 1.0, false);
         ui.horizontal(|ui| {
-            let mut wsm = self.layers[layer].edited_params.get("wave_shaper_mode").copied().unwrap_or(0.0) as usize;
+            let mut wsm = self.parts[part].edited_params.get("wave_shaper_mode").copied().unwrap_or(0.0) as usize;
             ui.label("Mode:");
-            egui::ComboBox::from_id_salt(format!("ws_mode_{layer}"))
+            egui::ComboBox::from_id_salt(format!("ws_mode_{part}"))
                 .selected_text(*WAVE_SHAPER_MODE_NAMES.get(wsm).unwrap_or(&"Tanh"))
                 .show_ui(ui, |ui| {
                     for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wsm, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("wave_shaper_mode".into(), wsm as f32);
+                            self.parts[part].edited_params.insert("wave_shaper_mode".into(), wsm as f32);
                             changed = true;
                         }
                     }
@@ -1326,14 +1326,14 @@ impl App {
                 "DubSub", "Melt", "Pop", "BitGlitter", "DeRez2", "BussColors4", "Hombre", "Slew2",
             ];
             let num_modes = airwindows_mode_names.len();
-            let mut awm = self.layers[layer].edited_params.get("airwindows_mode").copied().unwrap_or(0.0) as usize;
+            let mut awm = self.parts[part].edited_params.get("airwindows_mode").copied().unwrap_or(0.0) as usize;
             ui.label("Mode:");
-            egui::ComboBox::from_id_salt(format!("aw_mode_{layer}"))
+            egui::ComboBox::from_id_salt(format!("aw_mode_{part}"))
                 .selected_text(*airwindows_mode_names.get(awm.min(num_modes-1)).unwrap_or(&"Tape2"))
                 .show_ui(ui, |ui| {
                     for (i, name) in airwindows_mode_names.iter().enumerate() {
                         if ui.selectable_value(&mut awm, i, *name).changed() {
-                            self.layers[layer].edited_params.insert("airwindows_mode".into(), i as f32);
+                            self.parts[part].edited_params.insert("airwindows_mode".into(), i as f32);
                             changed = true;
                         }
                     }
@@ -1347,22 +1347,22 @@ impl App {
         changed |= self.param_slider(ui, "pitch_bend_down", "Range Down (st)", 0.0, 48.0, false);
 
         if changed {
-            self.layers[layer].params_dirty = true;
-            self.send_edited_params(layer);
+            self.parts[part].params_dirty = true;
+            self.send_edited_params(part);
         }
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if self.layers[layer].params_dirty {
+            if self.parts[part].params_dirty {
                 ui.colored_label(egui::Color32::YELLOW, "Modified");
                 ui.separator();
             }
             if ui.button("Save as new preset...").clicked() {
                 self.save_as_user_preset();
             }
-            if self.layers[layer].params_dirty {
+            if self.parts[part].params_dirty {
                 if ui.button("Reset").clicked() {
-                    let l = self.active_layer;
+                    let l = self.active_part;
                     self.load_edited_params(l);
                     self.send_edited_params(l);
                 }

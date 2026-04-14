@@ -19,16 +19,16 @@ const ZONE_A: std::ops::Range<usize> = 0..4;
 const ZONE_B: std::ops::Range<usize> = 4..8;
 
 impl App {
-    pub(super) fn draw_layer_tabs(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn draw_part_tabs(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             // ── Zone A part tabs ─────────────────────────────────────────
             for i in ZONE_A {
-                if !self.layers[i].enabled { continue; }
+                if !self.parts[i].enabled { continue; }
                 self.draw_part_tab(ui, i);
             }
 
             // Add to Zone A
-            let a_count = ZONE_A.into_iter().filter(|&i| self.layers[i].enabled).count();
+            let a_count = ZONE_A.into_iter().filter(|&i| self.parts[i].enabled).count();
             if a_count < 4 && ui.small_button("+ A").clicked() {
                 self.add_part_to_zone(false);
             }
@@ -36,46 +36,46 @@ impl App {
             // ── Split separator + Zone B ─────────────────────────────────
             ui.separator();
 
-            let split_on = self.layers[ZONE_B].iter().any(|l| l.enabled);
+            let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
             let mut split = split_on;
             if ui.checkbox(&mut split, "Split").changed() {
                 if split {
                     // Enable the first free B slot
-                    if let Some(i) = ZONE_B.into_iter().find(|&i| !self.layers[i].enabled) {
-                        self.layers[i].enabled = true;
-                        let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer: i, enabled: true });
+                    if let Some(i) = ZONE_B.into_iter().find(|&i| !self.parts[i].enabled) {
+                        self.parts[i].enabled = true;
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: true });
                         self.send_edited_params(i);
-                        self.send_layer_volume(i);
+                        self.send_part_volume(i);
                     }
                     self.apply_split_ranges();
                 } else {
                     // Disable all Zone B parts, restore Zone A to full range
                     for i in ZONE_B {
-                        if self.layers[i].enabled {
-                            self.layers[i].enabled = false;
-                            let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer: i, enabled: false });
+                        if self.parts[i].enabled {
+                            self.parts[i].enabled = false;
+                            let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
                         }
                     }
                     for i in ZONE_A {
-                        if self.layers[i].enabled {
-                            self.layers[i].min_note = 0;
-                            self.layers[i].max_note = 127;
-                            self.send_layer_range(i);
+                        if self.parts[i].enabled {
+                            self.parts[i].min_note = 0;
+                            self.parts[i].max_note = 127;
+                            self.send_part_range(i);
                         }
                     }
-                    // Switch active layer to Zone A if needed
-                    if self.active_layer >= 4 {
-                        self.active_layer = 0;
+                    // Switch active part to Zone A if needed
+                    if self.active_part >= 4 {
+                        self.active_part = 0;
                     }
                 }
             }
 
             if split_on {
                 for i in ZONE_B {
-                    if !self.layers[i].enabled { continue; }
+                    if !self.parts[i].enabled { continue; }
                     self.draw_part_tab(ui, i);
                 }
-                let b_count = ZONE_B.into_iter().filter(|&i| self.layers[i].enabled).count();
+                let b_count = ZONE_B.into_iter().filter(|&i| self.parts[i].enabled).count();
                 if b_count < 4 && ui.small_button("+ B").clicked() {
                     self.add_part_to_zone(true);
                 }
@@ -99,7 +99,7 @@ impl App {
         });
 
         // ── Split point slider ───────────────────────────────────────────
-        let split_on = self.layers[ZONE_B].iter().any(|l| l.enabled);
+        let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
         if split_on {
             ui.horizontal(|ui| {
                 ui.label("Split point:");
@@ -111,49 +111,49 @@ impl App {
         }
 
         // ── Per-part routing strip ───────────────────────────────────────
-        let layer = self.active_layer;
+        let part = self.active_part;
         if !self.show_drums && !self.show_midi_seq && !self.show_fx_chain
-            && self.layers.get(layer).map(|l| l.enabled).unwrap_or(false)
+            && self.parts.get(part).map(|l| l.enabled).unwrap_or(false)
         {
-            let zone_label = if layer < 4 { "A" } else { "B" };
+            let zone_label = if part < 4 { "A" } else { "B" };
             ui.horizontal(|ui| {
-                ui.strong(format!("Part {}{}: ", zone_label, (layer % 4) + 1));
+                ui.strong(format!("Part {}{}: ", zone_label, (part % 4) + 1));
 
-                let mut muted = self.layers[layer].mute;
+                let mut muted = self.parts[part].mute;
                 if ui.toggle_value(&mut muted, "Mute").changed() {
-                    self.layers[layer].mute = muted;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetLayerMute { layer, mute: muted });
+                    self.parts[part].mute = muted;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute: muted });
                 }
 
                 ui.label("Vol:");
-                let mut vol = self.layers[layer].volume;
+                let mut vol = self.parts[part].volume;
                 if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false)).changed() {
-                    self.layers[layer].volume = vol;
-                    self.send_layer_volume(layer);
+                    self.parts[part].volume = vol;
+                    self.send_part_volume(part);
                 }
 
                 ui.label("Pan:");
-                let mut pan = self.layers[layer].pan;
+                let mut pan = self.parts[part].pan;
                 if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false)).changed() {
-                    self.layers[layer].pan = pan;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetLayerPan { layer, pan });
+                    self.parts[part].pan = pan;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
                 }
 
                 ui.label("Tr:");
-                let mut tr = self.layers[layer].transpose as i32;
+                let mut tr = self.parts[part].transpose as i32;
                 if ui.add(egui::Slider::new(&mut tr, -24..=24).show_value(true)).changed() {
-                    self.layers[layer].transpose = tr as i8;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetLayerTranspose { layer, semitones: tr as i8 });
+                    self.parts[part].transpose = tr as i8;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: tr as i8 });
                 }
 
                 // Remove: not for first part of each zone
-                let is_zone_first = layer == 0 || layer == 4;
+                let is_zone_first = part == 0 || part == 4;
                 if !is_zone_first && ui.small_button("✕").clicked() {
-                    self.remove_part(layer);
+                    self.remove_part(part);
                 }
             });
 
-            draw_key_zone_map(ui, &self.layers, self.active_layer);
+            draw_key_zone_map(ui, &self.parts, self.active_part);
         }
 
         // ── Performance save/load ────────────────────────────────────────
@@ -163,11 +163,11 @@ impl App {
             ui.add(egui::TextEdit::singleline(&mut self.perf_name)
                 .desired_width(110.0).hint_text("name"));
             if ui.button("Save").clicked() && !self.perf_name.trim().is_empty() {
-                let parts: Vec<PartConfig> = self.layers.iter().enumerate().map(|(_i, l)| {
-                    let preset_name = self.presets.get(l.preset_idx)
+                let parts: Vec<PartConfig> = self.parts.iter().enumerate().map(|(_i, l)| {
+                    let patch_name = self.patches.get(l.patch_idx)
                         .map(|p| p.name.clone()).unwrap_or_default();
                     PartConfig {
-                        preset_name, enabled: l.enabled, volume: l.volume,
+                        patch_name, enabled: l.enabled, volume: l.volume,
                         key_low: l.min_note, key_high: l.max_note,
                         param_overrides: l.edited_params.clone(),
                         sf2_mode: l.sf2_mode, sf2_program: l.sf2_program,
@@ -197,30 +197,30 @@ impl App {
             if let Some(path) = load_perf {
                 if let Ok(perf) = preset::load_performance(&path) {
                     self.perf_name = perf.name.clone();
-                    for i in 0..self.layers.len() {
-                        self.layers[i].enabled = false;
-                        let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer: i, enabled: false });
+                    for i in 0..self.parts.len() {
+                        self.parts[i].enabled = false;
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
                     }
                     for (i, part) in perf.parts.iter().enumerate() {
-                        if i >= self.layers.len() { break; }
-                        let preset_idx = self.presets.iter()
-                            .position(|p| p.name == part.preset_name).unwrap_or(0);
-                        self.layers[i].preset_idx = preset_idx;
-                        self.layers[i].enabled = part.enabled;
-                        self.layers[i].volume = part.volume;
-                        self.layers[i].min_note = part.key_low;
-                        self.layers[i].max_note = part.key_high;
-                        self.layers[i].edited_params = part.param_overrides.clone();
-                        self.layers[i].sf2_mode = part.sf2_mode;
-                        self.layers[i].sf2_program = part.sf2_program;
+                        if i >= self.parts.len() { break; }
+                        let patch_idx = self.patches.iter()
+                            .position(|p| p.name == part.patch_name).unwrap_or(0);
+                        self.parts[i].patch_idx = patch_idx;
+                        self.parts[i].enabled = part.enabled;
+                        self.parts[i].volume = part.volume;
+                        self.parts[i].min_note = part.key_low;
+                        self.parts[i].max_note = part.key_high;
+                        self.parts[i].edited_params = part.param_overrides.clone();
+                        self.parts[i].sf2_mode = part.sf2_mode;
+                        self.parts[i].sf2_program = part.sf2_program;
                         self.send_edited_params(i);
-                        self.send_layer_enabled(i);
-                        self.send_layer_volume(i);
-                        self.send_layer_range(i);
-                        let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: part.sf2_mode });
+                        self.send_part_enabled(i);
+                        self.send_part_volume(i);
+                        self.send_part_range(i);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: part.sf2_mode });
                         if part.sf2_mode {
-                            let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Program {
-                                layer: i, program: part.sf2_program, bank: 0 });
+                            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                                part: i, program: part.sf2_program, bank: 0 });
                         }
                     }
                     self.perf_status = format!("Loaded: {}", perf.name);
@@ -234,12 +234,12 @@ impl App {
     }
 
     fn draw_part_tab(&mut self, ui: &mut egui::Ui, i: usize) {
-        let is_active = i == self.active_layer
+        let is_active = i == self.active_part
             && !self.show_drums && !self.show_looper
             && !self.show_midi_seq && !self.show_fx_chain;
         let zone = if i < 4 { "A" } else { "B" };
         let num = (i % 4) + 1;
-        let muted = self.layers[i].mute;
+        let muted = self.parts[i].mute;
         let label = if muted {
             format!("[{zone}{num} M]")
         } else {
@@ -247,7 +247,7 @@ impl App {
         };
         let color = if muted { egui::Color32::GRAY } else { egui::Color32::WHITE };
         if ui.add(egui::Button::new(egui::RichText::new(&label).color(color)).selected(is_active)).clicked() {
-            self.active_layer = i;
+            self.active_part = i;
             self.show_drums = false; self.show_looper = false;
             self.show_midi_seq = false; self.show_fx_chain = false;
             self.seq_target_atom.store(1, Ordering::Relaxed);
@@ -256,30 +256,30 @@ impl App {
 
     fn add_part_to_zone(&mut self, zone_b: bool) {
         let range = if zone_b { ZONE_B } else { ZONE_A };
-        if let Some(i) = range.into_iter().find(|&i| !self.layers[i].enabled) {
-            self.layers[i].enabled = true;
-            self.layers[i].mute = false;
-            self.layers[i].volume = 0.8;
-            self.layers[i].preset_idx = 0;
-            self.layers[i].sf2_mode = false;
-            let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer: i, enabled: true });
+        if let Some(i) = range.into_iter().find(|&i| !self.parts[i].enabled) {
+            self.parts[i].enabled = true;
+            self.parts[i].mute = false;
+            self.parts[i].volume = 0.8;
+            self.parts[i].patch_idx = 0;
+            self.parts[i].sf2_mode = false;
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: true });
             self.send_edited_params(i);
-            self.send_layer_volume(i);
+            self.send_part_volume(i);
             self.apply_split_ranges();
-            self.active_layer = i;
+            self.active_part = i;
             self.show_drums = false; self.show_midi_seq = false; self.show_fx_chain = false;
         }
     }
 
-    fn remove_part(&mut self, layer: usize) {
-        self.layers[layer].enabled = false;
-        self.layers[layer].mute = false;
-        let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer, enabled: false });
-        self.active_layer = if layer >= 4 { 4 } else { 0 };
+    fn remove_part(&mut self, part: usize) {
+        self.parts[part].enabled = false;
+        self.parts[part].mute = false;
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled: false });
+        self.active_part = if part >= 4 { 4 } else { 0 };
         // find first enabled in same zone
-        let zone = if layer >= 4 { ZONE_B } else { ZONE_A };
-        if let Some(i) = zone.into_iter().find(|&i| self.layers[i].enabled) {
-            self.active_layer = i;
+        let zone = if part >= 4 { ZONE_B } else { ZONE_A };
+        if let Some(i) = zone.into_iter().find(|&i| self.parts[i].enabled) {
+            self.active_part = i;
         }
     }
 
@@ -289,24 +289,24 @@ impl App {
     fn apply_split_ranges(&mut self) {
         let sp = self.split_point;
         for i in ZONE_A {
-            if self.layers[i].enabled {
-                self.layers[i].min_note = 0;
-                self.layers[i].max_note = sp.saturating_sub(1);
-                self.send_layer_range(i);
+            if self.parts[i].enabled {
+                self.parts[i].min_note = 0;
+                self.parts[i].max_note = sp.saturating_sub(1);
+                self.send_part_range(i);
             }
         }
         for i in ZONE_B {
-            if self.layers[i].enabled {
-                self.layers[i].min_note = sp;
-                self.layers[i].max_note = 127;
-                self.send_layer_range(i);
+            if self.parts[i].enabled {
+                self.parts[i].min_note = sp;
+                self.parts[i].max_note = 127;
+                self.send_part_range(i);
             }
         }
     }
 
 }
 
-fn draw_key_zone_map(ui: &mut egui::Ui, layers: &[super::LayerState], active: usize) {
+fn draw_key_zone_map(ui: &mut egui::Ui, parts: &[super::PartState], active: usize) {
     let colors = [
         egui::Color32::from_rgb(70, 130, 200),
         egui::Color32::from_rgb(70, 190, 100),
@@ -321,13 +321,13 @@ fn draw_key_zone_map(ui: &mut egui::Ui, layers: &[super::LayerState], active: us
     let (rect, _) = ui.allocate_exact_size(egui::vec2(total_w, 8.0), egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 0.0, egui::Color32::from_gray(30));
-    for (i, layer) in layers.iter().enumerate() {
-        if !layer.enabled { continue; }
+    for (i, part) in parts.iter().enumerate() {
+        if !part.enabled { continue; }
         let c = colors[i % colors.len()];
         let color = if i == active { c }
             else { egui::Color32::from_rgba_premultiplied(c.r()/2, c.g()/2, c.b()/2, 180) };
-        let lo = layer.min_note as f32 / 127.0;
-        let hi = (layer.max_note as f32 + 1.0) / 127.0;
+        let lo = part.min_note as f32 / 127.0;
+        let hi = (part.max_note as f32 + 1.0) / 127.0;
         let zone = egui::Rect::from_min_max(
             egui::pos2(rect.left() + lo * total_w, rect.top()),
             egui::pos2((rect.left() + hi * total_w).min(rect.right()), rect.bottom()),

@@ -1,4 +1,4 @@
-/// Preset loading/saving with serde + JSON.
+/// Patch loading/saving with serde + JSON.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -9,13 +9,13 @@ use std::path::PathBuf;
 use crate::synth::drum::{DrumPattern, DrumSlotParams};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Preset {
+pub struct Patch {
     pub name: String,
     #[serde(default)]
     pub category: String,
     pub params: BTreeMap<String, f32>,
     /// Path to .wt file relative to wavetable dir (e.g. "Basic/Sine.wt").
-    /// Set in converted Surge presets that use wavetable oscillator.
+    /// Set in converted Surge patches that use wavetable oscillator.
     #[serde(default)]
     pub wavetable_file: Option<String>,
     /// Parsed wavetable data (loaded at runtime, not serialized).
@@ -62,7 +62,7 @@ pub fn parse_wt(data: &[u8]) -> Option<(Vec<f32>, usize, usize)> {
     Some((samples, wave_count, wave_size))
 }
 
-/// Embedded factory presets: (category, id, json_content).
+/// Embedded factory patches: (category, id, json_content).
 const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("General", "init", include_str!("../presets/init.json")),
     // Piano
@@ -383,14 +383,14 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     // Surge XT: Winds
 ];
 
-/// Return user preset directory (~/.config/mini_midi_synth/presets/).
+/// Return user patch directory (~/.config/mini_midi_synth/presets/).
 fn user_preset_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("mini_midi_synth").join("presets"))
 }
 
 /// Load all presets from a directory recursively (subdirs = categories).
-/// Also loads .wt wavetable data if preset references one.
-fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Preset>) {
+/// Also loads .wt wavetable data if patch references one.
+fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Patch>) {
     if !dir.exists() { return; }
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -399,7 +399,7 @@ fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Preset>) {
                 load_presets_from_dir(&path, presets);
             } else if path.extension().is_some_and(|e| e == "json") {
                 if let Ok(contents) = fs::read_to_string(&path) {
-                    if let Ok(mut p) = serde_json::from_str::<Preset>(&contents) {
+                    if let Ok(mut p) = serde_json::from_str::<Patch>(&contents) {
                         if p.category.is_empty() {
                             if let Some(cat) = path.parent()
                                 .and_then(|p| p.file_name())
@@ -426,7 +426,7 @@ fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Preset>) {
     }
 }
 
-/// External preset directory: ~/.local/share/mini_midi_synth/presets/
+/// External patch directory: ~/.local/share/mini_midi_synth/presets/
 /// Place converted Surge presets here.
 pub fn external_preset_dir() -> PathBuf {
     dirs::data_dir()
@@ -444,12 +444,12 @@ pub fn wavetable_dir() -> PathBuf {
 }
 
 /// Load all available presets: factory + external + user.
-pub fn load_all_presets() -> Vec<Preset> {
+pub fn load_all_patches() -> Vec<Patch> {
     let mut presets = Vec::new();
 
     // Factory presets (compiled in)
     for (category, _, json) in FACTORY_PRESETS {
-        if let Ok(mut p) = serde_json::from_str::<Preset>(json) {
+        if let Ok(mut p) = serde_json::from_str::<Patch>(json) {
             p.category = category.to_string();
             presets.push(p);
         }
@@ -467,9 +467,9 @@ pub fn load_all_presets() -> Vec<Preset> {
     presets
 }
 
-/// Save a preset to user directory.
+/// Save a patch to user directory.
 #[allow(dead_code)]
-pub fn save_preset(preset: &Preset) -> Result<PathBuf> {
+pub fn save_patch(preset: &Patch) -> Result<PathBuf> {
     let dir = user_preset_dir().context("Could not determine config directory")?;
     fs::create_dir_all(&dir)?;
     let filename = preset.name.to_lowercase().replace(' ', "_") + ".json";
@@ -636,20 +636,20 @@ pub fn import_midi_drums(path: &std::path::Path) -> Result<(Vec<DrumPattern>, f3
 }
 
 // ---------------------------------------------------------------------------
-// Performance presets (split/layer combos)
+// Performance patches (split/part combos)
 // ---------------------------------------------------------------------------
 
 /// One part in a performance — references a preset by name + overrides.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PartConfig {
-    pub preset_name: String,
+    pub patch_name: String,
     pub enabled: bool,
     pub volume: f32,
     pub key_low: u8,
     pub key_high: u8,
     #[serde(default)]
     pub param_overrides: BTreeMap<String, f32>,
-    /// If true, this layer uses SF2 soundfont instead of DSP preset.
+    /// If true, this part uses SF2 soundfont instead of DSP patch.
     #[serde(default)]
     pub sf2_mode: bool,
     /// SF2 program number (0-127).
@@ -657,7 +657,7 @@ pub struct PartConfig {
     pub sf2_program: u8,
 }
 
-/// A saved split/layer configuration.
+/// A saved split/part configuration.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Performance {
     pub name: String,

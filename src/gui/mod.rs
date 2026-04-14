@@ -20,7 +20,7 @@ use rtrb::Producer;
 use crate::cc_map::CcMap;
 use crate::config::Config;
 use crate::midi::{self, NoteState};
-use crate::preset::{self, Preset};
+use crate::preset::{self, Patch};
 use crate::synth::{ControlEvent, ParamFeedback};
 use crate::synth::drum::{NUM_DRUM_SLOTS, DrumSlotParams, DrumPattern};
 use crate::synth::looper::LooperAtoms;
@@ -120,8 +120,8 @@ fn buffer_label(size: u32) -> String {
 }
 
 /// Per-part GUI state (one entry per part slot 0-7)
-pub struct LayerState {
-    pub preset_idx: usize,
+pub struct PartState {
+    pub patch_idx: usize,
     pub edited_params: std::collections::BTreeMap<String, f32>,
     pub params_dirty: bool,
     pub enabled: bool,   // part is in scene
@@ -141,10 +141,10 @@ pub struct LayerState {
     pub macro_names: Vec<String>,
 }
 
-impl LayerState {
+impl PartState {
     pub fn new_empty() -> Self {
         Self {
-            preset_idx: 0, edited_params: Default::default(), params_dirty: false,
+            patch_idx: 0, edited_params: Default::default(), params_dirty: false,
             enabled: false, mute: false, volume: 0.8,
             min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
             pan: 0.0, transpose: 0, sf2_mode: false, sf2_program: 0,
@@ -189,7 +189,7 @@ fn note_name(note: u8) -> String {
 
 pub struct App {
     pub _frame_count: u64,
-    pub presets: Vec<Preset>,
+    pub patches: Vec<Patch>,
     pub note_state: NoteState,
     pub pad_state: midi::PadState,
     pub ctrl_tx: Producer<ControlEvent>,
@@ -212,13 +212,13 @@ pub struct App {
     pub is_jack: bool,
 
     /// Layer states
-    pub layers: Vec<LayerState>,
-    /// Currently edited layer (0 = A, 1 = B)
-    pub active_layer: usize,
+    pub parts: Vec<PartState>,
+    /// Currently edited part (0 = A, 1 = B)
+    pub active_part: usize,
 
     pub on_midi_reconnect: Option<Box<dyn FnMut(usize) -> Result<(), String>>>,
 
-    /// Collapsed preset categories
+    /// Collapsed patch categories
     pub collapsed_categories: HashSet<String>,
 
     /// Feedback from audio thread
@@ -227,7 +227,7 @@ pub struct App {
     pub cc_map: CcMap,
     /// MIDI Learn target parameter key
     pub midi_learn_target: Option<String>,
-    /// Program change atom for preset feedback
+    /// Program change atom for patch feedback
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Show help dialog
     pub show_help: bool,
@@ -293,7 +293,7 @@ pub struct App {
     pub pitch_seq_rate: [u8; 2],
     pub pitch_seq_scale: [u8; 2],
     pub pitch_seq_swing: [f32; 2],
-    // Preset search
+    // Patch search
     pub preset_search: String,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
@@ -539,16 +539,16 @@ impl eframe::App for App {
             });
         }
 
-        // Right: preset list (for active layer) or GM instrument list (SF2 mode)
+        // Right: patch list (for active part) or GM instrument list (SF2 mode)
         egui::SidePanel::right("preset_panel")
             .resizable(true)
             .default_width(160.0)
             .min_width(120.0)
             .max_width(260.0)
             .show(ctx, |ui| {
-                let layer = self.active_layer;
-                let is_sf2 = self.layers[layer].sf2_mode && self.sf2_keys_soundfont.is_some();
-                let layer_label = LAYER_NAMES.get(layer).unwrap_or(&"?");
+                let part = self.active_part;
+                let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
+                let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
 
                 ui.add_space(4.0);
                 if is_sf2 {
@@ -556,25 +556,25 @@ impl eframe::App for App {
                 } else {
                     ui.horizontal(|ui| {
                         if ui.small_button("\u{25C0}").clicked() {
-                            // Prev preset
-                            let idx = self.layers[layer].preset_idx;
+                            // Prev patch
+                            let idx = self.parts[part].patch_idx;
                             if idx > 0 {
                                 let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                                self.layers[layer].preset_idx = idx - 1;
-                                self.load_edited_params(layer);
-                                self.send_edited_params(layer);
+                                self.parts[part].patch_idx = idx - 1;
+                                self.load_edited_params(part);
+                                self.send_edited_params(part);
                                 self.save_config();
                             }
                         }
                         ui.strong(format!("Presets ({layer_label})"));
                         if ui.small_button("\u{25B6}").clicked() {
-                            // Next preset
-                            let idx = self.layers[layer].preset_idx;
-                            if idx + 1 < self.presets.len() {
+                            // Next patch
+                            let idx = self.parts[part].patch_idx;
+                            if idx + 1 < self.patches.len() {
                                 let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                                self.layers[layer].preset_idx = idx + 1;
-                                self.load_edited_params(layer);
-                                self.send_edited_params(layer);
+                                self.parts[part].patch_idx = idx + 1;
+                                self.load_edited_params(part);
+                                self.send_edited_params(part);
                                 self.save_config();
                             }
                         }
@@ -611,7 +611,7 @@ impl eframe::App for App {
                 if is_sf2 {
                     // GM instrument list with same category style as synth presets
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
-                    let current_program = self.layers[layer].sf2_program;
+                    let current_program = self.parts[part].sf2_program;
                     let mut toggled_cat: Option<&str> = None;
 
                     let gm_categories: &[(&str, usize, usize)] = &[
@@ -662,11 +662,11 @@ impl eframe::App for App {
                                         let name = GM_PROGRAM_NAMES[i];
                                         let selected = current_program == i as u8;
                                         if ui.selectable_label(selected, format!("  {name}")).clicked() && !selected {
-                                            self.layers[layer].sf2_program = i as u8;
-                                            let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Program {
-                                                layer, program: i as u8, bank: 0,
+                                            self.parts[part].sf2_program = i as u8;
+                                            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                                                part, program: i as u8, bank: 0,
                                             });
-                                            if layer == 0 { self.config.sf2.layer_a_program = i as u8; }
+                                            if part == 0 { self.config.sf2.layer_a_program = i as u8; }
                                             else { self.config.sf2.layer_b_program = i as u8; }
                                             let _ = self.config.save();
                                         }
@@ -685,15 +685,15 @@ impl eframe::App for App {
                         self.save_collapsed_categories();
                     }
                 } else {
-                    // Synth preset list
-                    let current_preset_idx = self.layers[layer].preset_idx;
+                    // Synth patch list
+                    let current_preset_idx = self.parts[part].patch_idx;
                     let mut new_idx: Option<usize> = None;
                     let mut toggled_category: Option<String> = None;
 
                     let categories: Vec<(String, usize)> = {
                         let mut cats = Vec::new();
                         let mut last = String::new();
-                        for (i, p) in self.presets.iter().enumerate() {
+                        for (i, p) in self.patches.iter().enumerate() {
                             if p.category != last {
                                 cats.push((p.category.clone(), i));
                                 last = p.category.clone();
@@ -707,7 +707,7 @@ impl eframe::App for App {
                         .show(ui, |ui| {
                             let mut cat_idx = 0;
                             let mut shown_cat = String::new();
-                            for (i, preset) in self.presets.iter().enumerate() {
+                            for (i, patch) in self.patches.iter().enumerate() {
                                 // Track category boundaries
                                 if cat_idx < categories.len() && categories[cat_idx].1 == i {
                                     shown_cat = categories[cat_idx].0.clone();
@@ -716,12 +716,12 @@ impl eframe::App for App {
 
                                 // When searching, filter by name or category
                                 if searching {
-                                    let name_match = preset.name.to_lowercase().contains(&query);
-                                    let cat_match = preset.category.to_lowercase().contains(&query);
+                                    let name_match = patch.name.to_lowercase().contains(&query);
+                                    let cat_match = patch.category.to_lowercase().contains(&query);
                                     if !name_match && !cat_match { continue; }
 
                                     // Show category header once per group
-                                    if shown_cat != preset.category || i == categories.iter().find(|(c, _)| c == &preset.category).map(|(_, idx)| *idx).unwrap_or(usize::MAX) {
+                                    if shown_cat != patch.category || i == categories.iter().find(|(c, _)| c == &patch.category).map(|(_, idx)| *idx).unwrap_or(usize::MAX) {
                                         // We handle this below
                                     }
                                 }
@@ -736,13 +736,13 @@ impl eframe::App for App {
                                             toggled_category = Some(cat.clone());
                                         }
                                     }
-                                    if self.collapsed_categories.contains(&preset.category) {
+                                    if self.collapsed_categories.contains(&patch.category) {
                                         continue;
                                     }
                                 }
 
                                 let selected = i == current_preset_idx;
-                                if ui.selectable_label(selected, format!("  {}", preset.name)).clicked() && !selected {
+                                if ui.selectable_label(selected, format!("  {}", patch.name)).clicked() && !selected {
                                     new_idx = Some(i);
                                 }
                             }
@@ -758,9 +758,9 @@ impl eframe::App for App {
                     }
                     if let Some(idx) = new_idx {
                         let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                        self.layers[layer].preset_idx = idx;
-                        self.load_edited_params(layer);
-                        self.send_edited_params(layer);
+                        self.parts[part].patch_idx = idx;
+                        self.load_edited_params(part);
+                        self.send_edited_params(part);
                         self.save_config();
                     }
                 }
@@ -779,10 +779,10 @@ impl eframe::App for App {
             self.draw_pad_perf_window(ctx);
         }
 
-        // Central: layer tabs + parameters / drum sequencer
+        // Central: part tabs + parameters / drum sequencer
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(4.0);
-            self.draw_layer_tabs(ui);
+            self.draw_part_tabs(ui);
             ui.add_space(4.0);
             ui.separator();
             ui.add_space(6.0);
@@ -804,8 +804,8 @@ impl eframe::App for App {
                 self.draw_pitch_sequencer(ui);
                 ui.separator();
                 ui.add_space(6.0);
-                let layer = self.active_layer;
-                let is_sf2 = self.layers[layer].sf2_mode;
+                let part = self.active_part;
+                let is_sf2 = self.parts[part].sf2_mode;
                 // Synth / SF2 toggle
                 if self.sf2_keys_soundfont.is_some() {
                     ui.horizontal(|ui| {
@@ -815,10 +815,10 @@ impl eframe::App for App {
                         if ui.selectable_label(sf2, "SF2").clicked() { sf2 = true; }
                         if sf2 != is_sf2 {
                             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.layers[layer].sf2_mode = sf2;
-                            let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer, enabled: sf2 });
+                            self.parts[part].sf2_mode = sf2;
+                            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2 });
                             // Save to config
-                            if layer == 0 { self.config.sf2.layer_a_sf2 = sf2; }
+                            if part == 0 { self.config.sf2.layer_a_sf2 = sf2; }
                             else { self.config.sf2.layer_b_sf2 = sf2; }
                             let _ = self.config.save();
                         }
@@ -826,7 +826,7 @@ impl eframe::App for App {
                 }
                 if is_sf2 && self.sf2_keys_soundfont.is_some() {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
-                    let prog = self.layers[layer].sf2_program;
+                    let prog = self.parts[part].sf2_program;
                     let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
                     ui.colored_label(
                         egui::Color32::from_rgb(160, 160, 160),
@@ -843,9 +843,9 @@ impl eframe::App for App {
 }
 
 impl App {
-    /// Send initial presets to all layers at startup
+    /// Send initial patches to all parts at startup
     pub fn send_initial_presets(&mut self) {
-        for i in 0..self.layers.len() {
+        for i in 0..self.parts.len() {
             self.send_edited_params(i);
         }
         // Send global params (volume, tone) to engine
@@ -854,10 +854,10 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: static_key, value: *val });
             }
         }
-        // Send drum and layer volumes to engine
+        // Send drum and part volumes to engine
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
-        for i in 0..self.layers.len() {
-            self.send_layer_volume(i);
+        for i in 0..self.parts.len() {
+            self.send_part_volume(i);
         }
         // Ensure config has global params persisted (first run migration)
         self.save_global_to_config();
@@ -913,57 +913,57 @@ impl App {
         self.config.ui.fader_delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
         self.config.ui.pitch_bend_range = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as u8;
         self.config.ui.drum_volume = self.drum_volume;
-        if let Some(l) = self.layers.get(0) { self.config.ui.layer_a_volume = l.volume; }
-        if let Some(l) = self.layers.get(1) { self.config.ui.layer_b_volume = l.volume; }
+        if let Some(l) = self.parts.get(0) { self.config.ui.layer_a_volume = l.volume; }
+        if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
         let _ = self.config.save();
         self.last_config_save = std::time::Instant::now();
     }
 
-    /// Load edited_params from the current preset for a given layer.
-    /// Preserves global params (effects, volume) so they don't reset on preset change.
-    pub fn load_edited_params(&mut self, layer: usize) {
-        let preset_idx = self.layers[layer].preset_idx;
-        if let Some(p) = self.presets.get(preset_idx) {
-            self.layers[layer].edited_params = p.params.clone();
+    /// Load edited_params from the current patch for a given part.
+    /// Preserves global params (effects, volume) so they don't reset on patch change.
+    pub fn load_edited_params(&mut self, part: usize) {
+        let patch_idx = self.parts[part].patch_idx;
+        if let Some(p) = self.patches.get(patch_idx) {
+            self.parts[part].edited_params = p.params.clone();
         }
         // Global params (volume, tone) are NOT in presets — don't insert them
-        self.layers[layer].params_dirty = false;
+        self.parts[part].params_dirty = false;
     }
 
-    /// Send edited params to synth engine for a given layer
-    fn send_edited_params(&mut self, layer: usize) {
-        let params = crate::synth::PresetParams::from_map(&self.layers[layer].edited_params);
+    /// Send edited params to synth engine for a given part
+    fn send_edited_params(&mut self, part: usize) {
+        let params = crate::synth::PatchParams::from_map(&self.parts[part].edited_params);
         let mut mod_matrix = crate::synth::mod_matrix::ModMatrix::default();
-        mod_matrix.load_from_params(&self.layers[layer].edited_params);
-        let mseg1 = if self.layers[layer].edited_params.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
-            Some(crate::synth::mseg::Mseg::load_from_params(&self.layers[layer].edited_params))
+        mod_matrix.load_from_params(&self.parts[part].edited_params);
+        let mseg1 = if self.parts[part].edited_params.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
+            Some(crate::synth::mseg::Mseg::load_from_params(&self.parts[part].edited_params))
         } else { None };
         let mut pitch_seq = crate::synth::step_seq::PitchSequencer::new();
-        pitch_seq.load_from_params(&self.layers[layer].edited_params);
-        let lfo_step_params = Some(self.layers[layer].edited_params.clone());
-        // Pass wavetable data if preset has one loaded
-        let wavetable = self.presets.get(self.layers[layer].preset_idx)
+        pitch_seq.load_from_params(&self.parts[part].edited_params);
+        let lfo_step_params = Some(self.parts[part].edited_params.clone());
+        // Pass wavetable data if patch has one loaded
+        let wavetable = self.patches.get(self.parts[part].patch_idx)
             .and_then(|p| p.wavetable_data.as_ref().map(|d| {
                 (d.clone(), p.wavetable_frames, p.wavetable_frame_size)
             }));
-        let _ = self.ctrl_tx.push(ControlEvent::LoadPreset { layer, params, mod_matrix, mseg1, mseg2: None, pitch_seq: Some(pitch_seq), lfo_step_params, wavetable });
+        let _ = self.ctrl_tx.push(ControlEvent::LoadPatch { part, params, mod_matrix, mseg1, mseg2: None, pitch_seq: Some(pitch_seq), lfo_step_params, wavetable });
     }
 
-    fn send_layer_enabled(&mut self, layer: usize) {
-        let enabled = self.layers[layer].enabled;
-        let _ = self.ctrl_tx.push(ControlEvent::SetLayerEnabled { layer, enabled });
+    fn send_part_enabled(&mut self, part: usize) {
+        let enabled = self.parts[part].enabled;
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled });
     }
 
-    fn send_layer_volume(&mut self, layer: usize) {
-        let volume = self.layers[layer].volume;
-        let _ = self.ctrl_tx.push(ControlEvent::SetLayerVolume { layer, volume });
+    fn send_part_volume(&mut self, part: usize) {
+        let volume = self.parts[part].volume;
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartVolume { part, volume });
     }
 
-    fn send_layer_range(&mut self, layer: usize) {
-        let min_note = self.layers[layer].min_note;
-        let max_note = self.layers[layer].max_note;
-        let _ = self.ctrl_tx.push(ControlEvent::SetLayerRange { layer, min_note, max_note });
+    fn send_part_range(&mut self, part: usize) {
+        let min_note = self.parts[part].min_note;
+        let max_note = self.parts[part].max_note;
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartRange { part, min_note, max_note });
     }
 
     /// Parse an SF2 file and return the Arc<SoundFont>, or set sf2_status on error.
@@ -1004,12 +1004,12 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
         self.sf2_keys_loaded_name = name;
         self.sf2_status = "Keys SF2 loaded".to_string();
-        // Apply per-layer SF2 modes
+        // Apply per-part SF2 modes
         for i in 0..2 {
-            if self.layers[i].sf2_mode {
-                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: true });
-                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Program {
-                    layer: i, program: self.layers[i].sf2_program, bank: 0,
+            if self.parts[i].sf2_mode {
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                    part: i, program: self.parts[i].sf2_program, bank: 0,
                 });
             }
         }
@@ -1052,8 +1052,8 @@ impl App {
         self.sf2_keys_soundfont = None;
         self.sf2_keys_loaded_name.clear();
         for i in 0..2 {
-            self.layers[i].sf2_mode = false;
-            let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: false });
+            self.parts[i].sf2_mode = false;
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: false });
         }
         let _ = self.ctrl_tx.push(ControlEvent::UnloadKeysSoundFont);
         self.config.sf2.keys_file_path = None;
@@ -1073,8 +1073,8 @@ impl App {
 
     fn save_config(&mut self) {
         self.config.ui.last_preset = self
-            .presets
-            .get(self.layers[0].preset_idx)
+            .patches
+            .get(self.parts[0].patch_idx)
             .map(|p| p.name.clone());
         let _ = self.config.save();
     }
@@ -1091,27 +1091,27 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
         self.perf_name = perf.name.clone();
         for (i, part) in perf.parts.iter().enumerate() {
-            if i >= self.layers.len() { break; }
-            let preset_idx = self.presets.iter()
-                .position(|p| p.name == part.preset_name)
+            if i >= self.parts.len() { break; }
+            let patch_idx = self.patches.iter()
+                .position(|p| p.name == part.patch_name)
                 .unwrap_or(0);
-            self.layers[i].preset_idx = preset_idx;
-            self.layers[i].enabled = part.enabled;
-            self.layers[i].volume = part.volume;
-            self.layers[i].min_note = part.key_low;
-            self.layers[i].max_note = part.key_high;
-            self.layers[i].edited_params = part.param_overrides.clone();
-            self.layers[i].sf2_mode = part.sf2_mode;
-            self.layers[i].sf2_program = part.sf2_program;
+            self.parts[i].patch_idx = patch_idx;
+            self.parts[i].enabled = part.enabled;
+            self.parts[i].volume = part.volume;
+            self.parts[i].min_note = part.key_low;
+            self.parts[i].max_note = part.key_high;
+            self.parts[i].edited_params = part.param_overrides.clone();
+            self.parts[i].sf2_mode = part.sf2_mode;
+            self.parts[i].sf2_program = part.sf2_program;
             self.send_edited_params(i);
-            self.send_layer_enabled(i);
-            self.send_layer_volume(i);
-            self.send_layer_range(i);
-            // Restore SF2 mode for this layer
-            let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Mode { layer: i, enabled: part.sf2_mode });
+            self.send_part_enabled(i);
+            self.send_part_volume(i);
+            self.send_part_range(i);
+            // Restore SF2 mode for this part
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: part.sf2_mode });
             if part.sf2_mode {
-                let _ = self.ctrl_tx.push(ControlEvent::SetLayerSf2Program {
-                    layer: i, program: part.sf2_program, bank: 0,
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                    part: i, program: part.sf2_program, bank: 0,
                 });
             }
         }

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 /// MIDI looper: records note events with sample-accurate timing,
-/// plays them back in a loop. Overdub support with per-layer undo.
+/// plays them back in a loop. Overdub support with per-part undo.
 /// Zero heap allocation in the audio path.
 
 use std::sync::Arc;
@@ -53,7 +53,7 @@ struct LoopEvent {
     tick: u32,      // sample offset from loop start
     note: u8,       // MIDI note 0-127
     velocity: u8,   // 0 = note-off, 1-127 = note-on
-    layer_id: u8,   // overdub layer (for undo)
+    layer_id: u8,   // overdub part (for undo)
     _pad: u8,
 }
 
@@ -240,7 +240,7 @@ impl MidiLooper {
         }
     }
 
-    /// Undo last overdub layer.
+    /// Undo last overdub part.
     pub fn undo(&mut self) {
         if self.current_layer == 0 { return; }
         let target = self.current_layer;

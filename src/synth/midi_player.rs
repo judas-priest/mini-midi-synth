@@ -44,7 +44,7 @@ pub struct MidiSeqData {
 /// How a track's notes are played.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum TrackInstrument {
-    /// Use the DSP synth layer 0 voice pool.
+    /// Use the DSP synth part 0 voice pool.
     DspLayer0,
     /// Use the SF2 keys sampler with this GM program.
     Sf2 { program: u8 },

@@ -1,7 +1,7 @@
 /// Modulation Matrix — sparse slot-based routing from any source to any destination.
-/// Max 16 slots per layer, evaluated once per sample (control rate).
+/// Max 16 slots per part, evaluated once per sample (control rate).
 
-/// Number of modulation slots per layer.
+/// Number of modulation slots per part.
 pub const MOD_SLOTS: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -559,7 +559,7 @@ impl ModMatrix {
         offsets
     }
 
-    /// Load from flat param map (preset serialization).
+    /// Load from flat param map (patch serialization).
     pub fn load_from_params(&mut self, params: &std::collections::BTreeMap<String, f32>) {
         for i in 0..MOD_SLOTS {
             let src = params.get(MOD_SOURCE_KEYS[i]).copied().unwrap_or(0.0);

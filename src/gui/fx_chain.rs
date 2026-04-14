@@ -5,7 +5,7 @@ use crate::synth::fx_chain::{FxChain, FxSlot, FxSlotType, FX_SLOTS};
 
 impl App {
     pub(super) fn draw_fx_chain(&mut self, ui: &mut egui::Ui) {
-        let layer = self.active_layer;
+        let part = self.active_part;
 
         ui.horizontal(|ui| {
             ui.strong("FX Chain");
@@ -14,22 +14,22 @@ impl App {
             if ui.small_button("Сбросить").clicked() {
                 let mut chain = FxChain::default();
                 chain.active = true;
-                flush_fx_chain(&chain, layer, &mut self.layers[layer].edited_params);
-                self.send_edited_params(layer);
+                flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
+                self.send_edited_params(part);
             }
             if ui.small_button("Из пресета").clicked() {
                 let chain = FxChain::from_legacy_preset_active(
-                    &self.layers[layer].edited_params
+                    &self.parts[part].edited_params
                 );
-                flush_fx_chain(&chain, layer, &mut self.layers[layer].edited_params);
-                self.send_edited_params(layer);
+                flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
+                self.send_edited_params(part);
             }
         });
         ui.add_space(4.0);
 
         // Read current chain
-        let mut chain = if self.layers[layer].edited_params.contains_key("fx0_type") {
-            FxChain::from_map(&self.layers[layer].edited_params)
+        let mut chain = if self.parts[part].edited_params.contains_key("fx0_type") {
+            FxChain::from_map(&self.parts[part].edited_params)
         } else {
             let mut c = FxChain::default();
             c.active = true;
@@ -39,13 +39,13 @@ impl App {
         let mut swap: Option<(usize, usize)> = None;
         let mut changed = false;
 
-        egui::Grid::new(format!("fx_chain_{layer}"))
+        egui::Grid::new(format!("fx_chain_{part}"))
             .num_columns(1)
             .striped(true)
             .spacing([4.0, 2.0])
             .show(ui, |ui| {
                 for i in 0..FX_SLOTS {
-                    changed |= draw_slot(ui, layer, i, &mut chain.slots[i]);
+                    changed |= draw_slot(ui, part, i, &mut chain.slots[i]);
 
                     // Swap buttons (outside closure so we can act on the chain)
                     ui.horizontal(|ui| {
@@ -68,8 +68,8 @@ impl App {
 
         if changed {
             chain.active = true;
-            flush_fx_chain(&chain, layer, &mut self.layers[layer].edited_params);
-            self.send_edited_params(layer);
+            flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
+            self.send_edited_params(part);
         }
     }
 }
@@ -82,7 +82,7 @@ fn flush_fx_chain(
     chain.to_map(params);
 }
 
-fn draw_slot(ui: &mut egui::Ui, layer: usize, idx: usize, slot: &mut FxSlot) -> bool {
+fn draw_slot(ui: &mut egui::Ui, part: usize, idx: usize, slot: &mut FxSlot) -> bool {
     let mut changed = false;
 
     ui.horizontal(|ui| {
@@ -98,7 +98,7 @@ fn draw_slot(ui: &mut egui::Ui, layer: usize, idx: usize, slot: &mut FxSlot) -> 
         // Type selector
         let cur = FxSlotType::ALL.iter().position(|&t| t == slot.slot_type).unwrap_or(0);
         let mut sel = cur;
-        egui::ComboBox::from_id_salt(format!("fxt_{layer}_{idx}"))
+        egui::ComboBox::from_id_salt(format!("fxt_{part}_{idx}"))
             .width(115.0)
             .selected_text(slot.slot_type.name())
             .show_ui(ui, |ui| {

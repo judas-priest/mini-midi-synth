@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ParamScope {
     Global,
-    Preset,
+    Patch,
 }
 
 /// Metadata for a mappable parameter.
@@ -22,41 +22,41 @@ pub struct ParamMeta {
 
 /// All mappable parameters.
 pub const PARAM_REGISTRY: &[ParamMeta] = &[
-    // Global params (persist across preset changes — only volume and tone)
+    // Global params (persist across patch changes — only volume and tone)
     ParamMeta { key: "master_volume", label: "Volume", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Global },
     ParamMeta { key: "master_tone", label: "Tone", min: 200.0, max: 20000.0, logarithmic: true, scope: ParamScope::Global },
-    // Preset params (reset on preset change)
-    ParamMeta { key: "filter_cutoff", label: "Filter Cutoff", min: 20.0, max: 20000.0, logarithmic: true, scope: ParamScope::Preset },
-    ParamMeta { key: "filter_resonance", label: "Filter Resonance", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "filter_env_amount", label: "Filter Env Amt", min: 0.0, max: 15000.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "amp_attack", label: "Amp Attack", min: 0.001, max: 5.0, logarithmic: true, scope: ParamScope::Preset },
-    ParamMeta { key: "amp_decay", label: "Amp Decay", min: 0.0, max: 5.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "amp_sustain", label: "Amp Sustain", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "amp_release", label: "Amp Release", min: 0.001, max: 5.0, logarithmic: true, scope: ParamScope::Preset },
-    ParamMeta { key: "filter_attack", label: "Filter Attack", min: 0.001, max: 5.0, logarithmic: true, scope: ParamScope::Preset },
-    ParamMeta { key: "filter_decay", label: "Filter Decay", min: 0.0, max: 5.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "filter_sustain", label: "Filter Sustain", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "filter_release", label: "Filter Release", min: 0.001, max: 5.0, logarithmic: true, scope: ParamScope::Preset },
-    ParamMeta { key: "lfo_rate", label: "LFO Rate", min: 0.1, max: 20.0, logarithmic: true, scope: ParamScope::Preset },
-    ParamMeta { key: "lfo_pitch_depth", label: "LFO Pitch", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "lfo_filter_depth", label: "LFO Filter", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "lfo_amp_depth", label: "LFO Amp", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "vel_to_filter", label: "Vel->Filter", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "noise_level", label: "Noise Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "osc_detune", label: "Osc Detune", min: 0.0, max: 0.05, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "portamento_time", label: "Portamento", min: 0.0, max: 2.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "unison_detune", label: "Unison Detune", min: 0.0, max: 50.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "chorus_mix", label: "Chorus", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "delay_mix", label: "Delay Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "delay_time_l", label: "Delay Time L", min: 0.01, max: 2.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "delay_time_r", label: "Delay Time R", min: 0.01, max: 2.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "delay_feedback", label: "Delay Feedback", min: 0.0, max: 0.95, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "delay_filter", label: "Delay Filter", min: 0.0, max: 0.95, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "reverb_mix", label: "Reverb Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "reverb_room_size", label: "Reverb Room", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "reverb_damping", label: "Reverb Damp", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "reverb_width", label: "Reverb Width", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Preset },
-    ParamMeta { key: "reverb_pre_delay", label: "Reverb Pre-Delay", min: 0.0, max: 0.1, logarithmic: false, scope: ParamScope::Preset },
+    // Patch params (reset on patch change)
+    ParamMeta { key: "filter_cutoff", label: "Filter Cutoff", min: 20.0, max: 20000.0, logarithmic: true, scope: ParamScope::Patch },
+    ParamMeta { key: "filter_resonance", label: "Filter Resonance", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "filter_env_amount", label: "Filter Env Amt", min: 0.0, max: 15000.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "amp_attack", label: "Amp Attack", min: 0.001, max: 5.0, logarithmic: true, scope: ParamScope::Patch },
+    ParamMeta { key: "amp_decay", label: "Amp Decay", min: 0.0, max: 5.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "amp_sustain", label: "Amp Sustain", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "amp_release", label: "Amp Release", min: 0.001, max: 5.0, logarithmic: true, scope: ParamScope::Patch },
+    ParamMeta { key: "filter_attack", label: "Filter Attack", min: 0.001, max: 5.0, logarithmic: true, scope: ParamScope::Patch },
+    ParamMeta { key: "filter_decay", label: "Filter Decay", min: 0.0, max: 5.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "filter_sustain", label: "Filter Sustain", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "filter_release", label: "Filter Release", min: 0.001, max: 5.0, logarithmic: true, scope: ParamScope::Patch },
+    ParamMeta { key: "lfo_rate", label: "LFO Rate", min: 0.1, max: 20.0, logarithmic: true, scope: ParamScope::Patch },
+    ParamMeta { key: "lfo_pitch_depth", label: "LFO Pitch", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "lfo_filter_depth", label: "LFO Filter", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "lfo_amp_depth", label: "LFO Amp", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "vel_to_filter", label: "Vel->Filter", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "noise_level", label: "Noise Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "osc_detune", label: "Osc Detune", min: 0.0, max: 0.05, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "portamento_time", label: "Portamento", min: 0.0, max: 2.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "unison_detune", label: "Unison Detune", min: 0.0, max: 50.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "chorus_mix", label: "Chorus", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "delay_mix", label: "Delay Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "delay_time_l", label: "Delay Time L", min: 0.01, max: 2.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "delay_time_r", label: "Delay Time R", min: 0.01, max: 2.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "delay_feedback", label: "Delay Feedback", min: 0.0, max: 0.95, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "delay_filter", label: "Delay Filter", min: 0.0, max: 0.95, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "reverb_mix", label: "Reverb Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "reverb_room_size", label: "Reverb Room", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "reverb_damping", label: "Reverb Damp", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "reverb_width", label: "Reverb Width", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "reverb_pre_delay", label: "Reverb Pre-Delay", min: 0.0, max: 0.1, logarithmic: false, scope: ParamScope::Patch },
     ParamMeta { key: "pitch_bend_range", label: "Pitch Bend Range (st)", min: 1.0, max: 24.0, logarithmic: false, scope: ParamScope::Global },
 ];
 
@@ -115,30 +115,30 @@ impl Default for CcMap {
 impl CcMap {
     pub fn default_map() -> Self {
         let mut bindings = [None; 128];
-        // SMK-37 Pro: Knobs K1-K8 = CC 48-55 (all preset-scoped)
+        // SMK-37 Pro: Knobs K1-K8 = CC 48-55 (all patch-scoped)
         bindings[48] = Some(CcBinding {
-            param_key: "filter_cutoff", min_val: 20.0, max_val: 20000.0, logarithmic: true, scope: ParamScope::Preset,
+            param_key: "filter_cutoff", min_val: 20.0, max_val: 20000.0, logarithmic: true, scope: ParamScope::Patch,
         });
         bindings[49] = Some(CcBinding {
-            param_key: "filter_resonance", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Preset,
+            param_key: "filter_resonance", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Patch,
         });
         bindings[50] = Some(CcBinding {
-            param_key: "filter_env_amount", min_val: 0.0, max_val: 15000.0, logarithmic: false, scope: ParamScope::Preset,
+            param_key: "filter_env_amount", min_val: 0.0, max_val: 15000.0, logarithmic: false, scope: ParamScope::Patch,
         });
         bindings[51] = Some(CcBinding {
-            param_key: "amp_release", min_val: 0.001, max_val: 5.0, logarithmic: true, scope: ParamScope::Preset,
+            param_key: "amp_release", min_val: 0.001, max_val: 5.0, logarithmic: true, scope: ParamScope::Patch,
         });
         bindings[52] = Some(CcBinding {
-            param_key: "amp_attack", min_val: 0.001, max_val: 5.0, logarithmic: true, scope: ParamScope::Preset,
+            param_key: "amp_attack", min_val: 0.001, max_val: 5.0, logarithmic: true, scope: ParamScope::Patch,
         });
         bindings[53] = Some(CcBinding {
-            param_key: "portamento_time", min_val: 0.0, max_val: 2.0, logarithmic: false, scope: ParamScope::Preset,
+            param_key: "portamento_time", min_val: 0.0, max_val: 2.0, logarithmic: false, scope: ParamScope::Patch,
         });
         bindings[54] = Some(CcBinding {
-            param_key: "lfo_filter_depth", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Preset,
+            param_key: "lfo_filter_depth", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Patch,
         });
         bindings[55] = Some(CcBinding {
-            param_key: "chorus_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Preset,
+            param_key: "chorus_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Patch,
         });
         // SMK-37 Pro: Faders F1-F4 = CC 64-67 (all global — persist across presets)
         bindings[64] = Some(CcBinding {
@@ -166,7 +166,7 @@ impl CcMap {
             let cc = *cc_str;
             if (cc as usize) < 128 {
                 if let Some(static_key) = resolve_key(&raw_binding.param_key) {
-                    let scope = find_param_meta(static_key).map(|m| m.scope).unwrap_or(ParamScope::Preset);
+                    let scope = find_param_meta(static_key).map(|m| m.scope).unwrap_or(ParamScope::Patch);
                     map.bindings[cc as usize] = Some(CcBinding {
                         param_key: static_key,
                         min_val: raw_binding.min_val,
@@ -217,7 +217,7 @@ pub struct CcBindingRaw {
     pub scope: ParamScope,
 }
 
-fn default_scope() -> ParamScope { ParamScope::Preset }
+fn default_scope() -> ParamScope { ParamScope::Patch }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CcMapRaw {

@@ -765,7 +765,7 @@ impl Voice {
     }
 }
 
-/// Parameters extracted from preset, passed to voice on note-on.
+/// Parameters extracted from patch, passed to voice on note-on.
 pub struct VoiceParams {
     pub osc_type: f32,
     pub osc_detune: f32,

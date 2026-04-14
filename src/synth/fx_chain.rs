@@ -1,6 +1,6 @@
 /// 16-slot configurable FX chain (Surge XT style).
 /// Each slot selects an effect type, has a mix and up to 4 parameters.
-/// Serialized as `fx{i}_type`, `fx{i}_en`, `fx{i}_mix`, `fx{i}_p0..p3` in preset BTreeMap.
+/// Serialized as `fx{i}_type`, `fx{i}_en`, `fx{i}_mix`, `fx{i}_p0..p3` in patch BTreeMap.
 
 pub const FX_SLOTS: usize = 16;
 
@@ -307,7 +307,7 @@ impl FxChain {
     }
 
     /// Create a new chain pre-populated to replicate the current hardcoded order.
-    /// Call this when converting a legacy preset to the new format.
+    /// Call this when converting a legacy patch to the new format.
     pub fn from_legacy_preset_active(map: &std::collections::BTreeMap<String, f32>) -> Self {
         let get = |k: &str, d: f32| map.get(k).copied().unwrap_or(d);
         let mut chain = Self::default();

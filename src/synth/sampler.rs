@@ -161,9 +161,9 @@ pub struct SamplerEngine {
     keys: SubSynth,
     drums: SubSynth,
     pub block_size: usize,
-    layer_sf2: [bool; 8],
-    layer_program: [u8; 8],
-    layer_bank: [u8; 8],
+    part_sf2: [bool; 8],
+    part_program: [u8; 8],
+    part_bank: [u8; 8],
     drums_sf2: bool,
     sample_rate: i32,
     pub drum_volume: f32,
@@ -180,9 +180,9 @@ impl SamplerEngine {
             keys: SubSynth::new(),
             drums: SubSynth::new(),
             block_size: DEFAULT_BLOCK_SIZE,
-            layer_sf2: [false; 8],
-            layer_program: [0; 8],
-            layer_bank: [0; 8],
+            part_sf2: [false; 8],
+            part_program: [0; 8],
+            part_bank: [0; 8],
             drums_sf2: false,
             sample_rate: sample_rate as i32,
             drum_volume: 1.0,
@@ -191,16 +191,16 @@ impl SamplerEngine {
         }
     }
 
-    /// Load SF2 for keys (layers A/B).
+    /// Load SF2 for keys (parts A/B).
     pub fn load_keys_soundfont(&mut self, sf: Arc<SoundFont>) {
         self.seq_channel_program = [255; 16]; // new synth instance — reset program cache
         self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
         // Restore programs on new synth
         if let Some(synth) = &mut self.keys.synth {
             for i in 0..8 {
-                if self.layer_sf2[i] {
-                    synth.process_midi_message(i as i32, 0xB0, 0, self.layer_bank[i] as i32);
-                    synth.process_midi_message(i as i32, 0xC0, self.layer_program[i] as i32, 0);
+                if self.part_sf2[i] {
+                    synth.process_midi_message(i as i32, 0xB0, 0, self.part_bank[i] as i32);
+                    synth.process_midi_message(i as i32, 0xC0, self.part_program[i] as i32, 0);
                 }
             }
         }
@@ -232,9 +232,9 @@ impl SamplerEngine {
             // Restore programs
             if let Some(synth) = &mut self.keys.synth {
                 for i in 0..8 {
-                    if self.layer_sf2[i] {
-                        synth.process_midi_message(i as i32, 0xB0, 0, self.layer_bank[i] as i32);
-                        synth.process_midi_message(i as i32, 0xC0, self.layer_program[i] as i32, 0);
+                    if self.part_sf2[i] {
+                        synth.process_midi_message(i as i32, 0xB0, 0, self.part_bank[i] as i32);
+                        synth.process_midi_message(i as i32, 0xC0, self.part_program[i] as i32, 0);
                     }
                 }
             }
@@ -254,16 +254,16 @@ impl SamplerEngine {
         }
     }
 
-    pub fn set_layer_mode(&mut self, layer: usize, enabled: bool) {
-        if layer < 8 { self.layer_sf2[layer] = enabled; }
+    pub fn set_part_mode(&mut self, part: usize, enabled: bool) {
+        if part < 8 { self.part_sf2[part] = enabled; }
     }
 
-    pub fn set_layer_program(&mut self, layer: usize, program: u8, bank: u8) {
-        if layer >= 8 { return; }
-        self.layer_program[layer] = program;
-        self.layer_bank[layer] = bank;
-        self.keys.midi(layer as i32, 0xB0, 0, bank as i32);
-        self.keys.midi(layer as i32, 0xC0, program as i32, 0);
+    pub fn set_part_program(&mut self, part: usize, program: u8, bank: u8) {
+        if part >= 8 { return; }
+        self.part_program[part] = program;
+        self.part_bank[part] = bank;
+        self.keys.midi(part as i32, 0xB0, 0, bank as i32);
+        self.keys.midi(part as i32, 0xC0, program as i32, 0);
     }
 
     pub fn set_drums_enabled(&mut self, enabled: bool) {
@@ -274,9 +274,9 @@ impl SamplerEngine {
         self.drums_sf2
     }
 
-    pub fn set_layer_volume(&mut self, layer: usize, volume: f32) {
-        if layer >= 8 { return; }
-        let ch = (layer as i32) % 16;
+    pub fn set_layer_volume(&mut self, part: usize, volume: f32) {
+        if part >= 8 { return; }
+        let ch = (part as i32) % 16;
         let cc_val = (volume * 127.0).round().clamp(0.0, 127.0) as i32;
         self.keys.midi(ch, 0xB0, 7, cc_val);
     }
@@ -288,9 +288,9 @@ impl SamplerEngine {
         self.sample_offset = ((ms / 1000.0) * self.sample_rate as f32) as usize;
     }
 
-    pub fn note_on(&mut self, layer: usize, note: u8, velocity: u8) {
-        // rustysynth uses MIDI channels 0-15; map layer to channel
-        let ch = (layer as i32) % 16;
+    pub fn note_on(&mut self, part: usize, note: u8, velocity: u8) {
+        // rustysynth uses MIDI channels 0-15; map part to channel
+        let ch = (part as i32) % 16;
         self.keys.midi(ch, 0x90, note as i32, velocity as i32);
         // Skip initial samples to reduce perceived latency from slow SF2 attacks
         if self.sample_offset > 0 {
@@ -298,8 +298,8 @@ impl SamplerEngine {
         }
     }
 
-    pub fn note_off(&mut self, layer: usize, note: u8) {
-        let ch = (layer as i32) % 16;
+    pub fn note_off(&mut self, part: usize, note: u8) {
+        let ch = (part as i32) % 16;
         self.keys.midi(ch, 0x80, note as i32, 0);
     }
 
@@ -334,9 +334,9 @@ impl SamplerEngine {
         }
     }
 
-    pub fn pitch_bend(&mut self, layer: usize, value: f32) {
-        if layer >= 8 { return; }
-        let ch = (layer as i32) % 16;
+    pub fn pitch_bend(&mut self, part: usize, value: f32) {
+        if part >= 8 { return; }
+        let ch = (part as i32) % 16;
         let raw = ((value + 1.0) * 0.5 * 16383.0).round().clamp(0.0, 16383.0) as i32;
         let lsb = raw & 0x7F;
         let msb = (raw >> 7) & 0x7F;
@@ -349,9 +349,9 @@ impl SamplerEngine {
         }
     }
 
-    pub fn mod_wheel(&mut self, layer: usize, value: f32) {
-        if layer >= 8 { return; }
-        let ch = (layer as i32) % 16;
+    pub fn mod_wheel(&mut self, part: usize, value: f32) {
+        if part >= 8 { return; }
+        let ch = (part as i32) % 16;
         let cc_val = (value * 127.0).round().clamp(0.0, 127.0) as i32;
         self.keys.midi(ch, 0xB0, 1, cc_val);
     }

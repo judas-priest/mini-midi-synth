@@ -746,7 +746,7 @@ impl Oscillator {
 
         // ── Loss filter coefficient ──
         // Higher notes decay faster, lower brightness = more damping
-        let base_loss = feedback; // from preset (ks_feedback)
+        let base_loss = feedback; // from patch (ks_feedback)
         let freq_loss = 1.0 - (freq / (sr * 0.5)).min(0.3); // reduce at high freq
         let loss_coeff = (base_loss * freq_loss).clamp(0.8, 0.9999);
 

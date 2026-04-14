@@ -48,7 +48,7 @@ fn find_midi_port(port_names: &[String], saved_name: &str) -> Option<usize> {
 /// Common initialization shared by GUI and headless modes.
 struct CommonInit {
     config: Config,
-    presets: Vec<preset::Preset>,
+    patches: Vec<preset::Patch>,
     #[cfg(feature = "gui")]
     available_hosts: Vec<(HostId, &'static str)>,
     #[cfg(feature = "gui")]
@@ -88,13 +88,13 @@ struct CommonInit {
     midi_port_names: Vec<String>,
     midi_conn: Option<MidiInputConnection<()>>,
     midi_connected_name: Option<String>,
-    preset_idx: usize,
+    patch_idx: usize,
     _audio_handle: audio::AudioBackend,
 }
 
 fn init_common() -> Result<CommonInit> {
     let config = Config::load();
-    let presets = preset::load_all_presets();
+    let patches = preset::load_all_patches();
     let available_hosts = audio::available_hosts();
 
     let host_idx = find_host_idx(&available_hosts, &config.audio.backend);
@@ -119,7 +119,7 @@ fn init_common() -> Result<CommonInit> {
     let program_change_atom = Arc::new(AtomicU8::new(255));
 
     let mut engine = synth::SynthEngine::new(config.audio.sample_rate as f32);
-    engine.set_presets(presets.clone());
+    engine.set_patches(patches.clone());
     engine.set_feedback_tx(feedback_tx);
     engine.set_program_change_atom(program_change_atom.clone());
     #[cfg(feature = "gui")]
@@ -167,16 +167,16 @@ fn init_common() -> Result<CommonInit> {
         .filter(|_| midi_conn.is_some())
         .cloned();
 
-    let preset_idx = config
+    let patch_idx = config
         .ui
         .last_preset
         .as_deref()
-        .and_then(|name| presets.iter().position(|p| p.name == name))
+        .and_then(|name| patches.iter().position(|p| p.name == name))
         .unwrap_or(0);
 
     Ok(CommonInit {
         config,
-        presets,
+        patches,
         #[cfg(feature = "gui")]
         available_hosts,
         #[cfg(feature = "gui")]
@@ -215,7 +215,7 @@ fn init_common() -> Result<CommonInit> {
         midi_port_names,
         midi_conn,
         midi_connected_name,
-        preset_idx,
+        patch_idx,
         _audio_handle: audio_backend,
     })
 }
@@ -256,13 +256,13 @@ fn run_headless() -> Result<()> {
 
     // --- Send full state to engine (same as gui::App::send_initial_presets) ---
 
-    // Load preset params for all layers
+    // Load patch params for all parts
     let layer_configs: Vec<(usize, bool, f32, u8, u8, bool, u8)> = vec![
-        (c.preset_idx, true,  c.config.ui.layer_a_volume, 0, 127, c.config.sf2.layer_a_sf2, c.config.sf2.layer_a_program),
+        (c.patch_idx, true,  c.config.ui.layer_a_volume, 0, 127, c.config.sf2.layer_a_sf2, c.config.sf2.layer_a_program),
         (0,            false, c.config.ui.layer_b_volume, 60, 127, c.config.sf2.layer_b_sf2, c.config.sf2.layer_b_program),
     ];
 
-    for i in 0..synth::MAX_LAYERS {
+    for i in 0..synth::MAX_PARTS {
         let (pidx, enabled, volume, min_note, max_note, sf2_mode, sf2_program) =
             if i < layer_configs.len() {
                 layer_configs[i].clone()
@@ -271,34 +271,34 @@ fn run_headless() -> Result<()> {
             };
 
         // Send preset with full params
-        if let Some(preset) = c.presets.get(pidx) {
-            let params = synth::PresetParams::from_map(&preset.params);
+        if let Some(patch) = c.patches.get(pidx) {
+            let params = synth::PatchParams::from_map(&patch.params);
             let mut mod_matrix = synth::mod_matrix::ModMatrix::default();
-            mod_matrix.load_from_params(&preset.params);
-            let mseg1 = if preset.params.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
-                Some(synth::mseg::Mseg::load_from_params(&preset.params))
+            mod_matrix.load_from_params(&patch.params);
+            let mseg1 = if patch.params.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
+                Some(synth::mseg::Mseg::load_from_params(&patch.params))
             } else {
                 None
             };
             let mut pitch_seq = synth::step_seq::PitchSequencer::new();
-            pitch_seq.load_from_params(&preset.params);
-            let lfo_step_params = Some(preset.params.clone());
-            let wavetable = preset.wavetable_data.as_ref().map(|d| {
-                (d.clone(), preset.wavetable_frames, preset.wavetable_frame_size)
+            pitch_seq.load_from_params(&patch.params);
+            let lfo_step_params = Some(patch.params.clone());
+            let wavetable = patch.wavetable_data.as_ref().map(|d| {
+                (d.clone(), patch.wavetable_frames, patch.wavetable_frame_size)
             });
-            let _ = c.ctrl_tx.push(synth::ControlEvent::LoadPreset {
-                layer: i, params, mod_matrix, mseg1, mseg2: None,
+            let _ = c.ctrl_tx.push(synth::ControlEvent::LoadPatch {
+                part: i, params, mod_matrix, mseg1, mseg2: None,
                 pitch_seq: Some(pitch_seq), lfo_step_params, wavetable,
             });
         }
 
-        let _ = c.ctrl_tx.push(synth::ControlEvent::SetLayerEnabled { layer: i, enabled });
-        let _ = c.ctrl_tx.push(synth::ControlEvent::SetLayerVolume { layer: i, volume });
-        let _ = c.ctrl_tx.push(synth::ControlEvent::SetLayerRange { layer: i, min_note, max_note });
+        let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartEnabled { part: i, enabled });
+        let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartVolume { part: i, volume });
+        let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartRange { part: i, min_note, max_note });
 
         if sf2_mode {
-            let _ = c.ctrl_tx.push(synth::ControlEvent::SetLayerSf2Mode { layer: i, enabled: true });
-            let _ = c.ctrl_tx.push(synth::ControlEvent::SetLayerSf2Program { layer: i, program: sf2_program, bank: 0 });
+            let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartSf2Mode { part: i, enabled: true });
+            let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartSf2Program { part: i, program: sf2_program, bank: 0 });
         }
     }
 
@@ -357,8 +357,8 @@ fn run_headless() -> Result<()> {
     } else {
         eprintln!("[cli] MIDI: not connected");
     }
-    if let Some(preset) = c.presets.get(c.preset_idx) {
-        eprintln!("[cli] Preset: {}", preset.name);
+    if let Some(patch) = c.patches.get(c.patch_idx) {
+        eprintln!("[cli] Preset: {}", patch.name);
     }
     eprintln!("[cli] Press Ctrl+C to exit.");
 
@@ -399,27 +399,27 @@ fn run_headless() -> Result<()> {
         let pc = c.program_change_atom.swap(255, Ordering::SeqCst);
         if pc != 255 {
             let idx = pc as usize;
-            if idx < c.presets.len() {
-                if let Some(preset) = c.presets.get(idx) {
-                    let params = synth::PresetParams::from_map(&preset.params);
+            if idx < c.patches.len() {
+                if let Some(patch) = c.patches.get(idx) {
+                    let params = synth::PatchParams::from_map(&patch.params);
                     let mut mod_matrix = synth::mod_matrix::ModMatrix::default();
-                    mod_matrix.load_from_params(&preset.params);
-                    let mseg1 = if preset.params.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
-                        Some(synth::mseg::Mseg::load_from_params(&preset.params))
+                    mod_matrix.load_from_params(&patch.params);
+                    let mseg1 = if patch.params.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
+                        Some(synth::mseg::Mseg::load_from_params(&patch.params))
                     } else {
                         None
                     };
                     let mut pitch_seq = synth::step_seq::PitchSequencer::new();
-                    pitch_seq.load_from_params(&preset.params);
-                    let lfo_step_params = Some(preset.params.clone());
-                    let wavetable = preset.wavetable_data.as_ref().map(|d| {
-                        (d.clone(), preset.wavetable_frames, preset.wavetable_frame_size)
+                    pitch_seq.load_from_params(&patch.params);
+                    let lfo_step_params = Some(patch.params.clone());
+                    let wavetable = patch.wavetable_data.as_ref().map(|d| {
+                        (d.clone(), patch.wavetable_frames, patch.wavetable_frame_size)
                     });
-                    let _ = c.ctrl_tx.push(synth::ControlEvent::LoadPreset {
-                        layer: 0, params, mod_matrix, mseg1, mseg2: None,
+                    let _ = c.ctrl_tx.push(synth::ControlEvent::LoadPatch {
+                        part: 0, params, mod_matrix, mseg1, mseg2: None,
                         pitch_seq: Some(pitch_seq), lfo_step_params, wavetable,
                     });
-                    eprintln!("[cli] Program Change → {}: {}", idx, preset.name);
+                    eprintln!("[cli] Program Change → {}: {}", idx, patch.name);
                 }
             }
         }
@@ -503,19 +503,19 @@ fn run_gui() -> Result<()> {
 
     let make_part = |pidx: usize, en: bool, vol: f32, lo: u8, hi: u8,
                      sf2: bool, prog: u8| {
-        let mut s = gui::LayerState::new_empty();
-        s.preset_idx = pidx; s.enabled = en; s.volume = vol;
+        let mut s = gui::PartState::new_empty();
+        s.patch_idx = pidx; s.enabled = en; s.volume = vol;
         s.min_note = lo; s.max_note = hi; s.sf2_mode = sf2; s.sf2_program = prog;
         s
     };
-    let layer_a = make_part(c.preset_idx, true,  c.config.ui.layer_a_volume, 0,   127, c.config.sf2.layer_a_sf2, c.config.sf2.layer_a_program);
+    let layer_a = make_part(c.patch_idx, true,  c.config.ui.layer_a_volume, 0,   127, c.config.sf2.layer_a_sf2, c.config.sf2.layer_a_program);
     let layer_b = make_part(0,          false, c.config.ui.layer_b_volume, 60,  127, c.config.sf2.layer_b_sf2, c.config.sf2.layer_b_program);
     let empty_part = |_i: usize| make_part(0, false, 0.8, 0, 127, false, 0);
-    let parts_extra: Vec<gui::LayerState> = (2..crate::synth::MAX_LAYERS).map(empty_part).collect();
+    let parts_extra: Vec<gui::PartState> = (2..crate::synth::MAX_PARTS).map(empty_part).collect();
 
     let mut app = gui::App {
         _frame_count: 0,
-        presets: c.presets,
+        patches: c.patches,
         note_state: c.note_state,
         pad_state: c.pad_state,
         ctrl_tx: c.ctrl_tx,
@@ -533,8 +533,8 @@ fn run_gui() -> Result<()> {
         selected_midi_port: c.config.midi.port_name.clone(),
         settings_status: String::new(),
         is_jack: c.is_jack,
-        layers: std::iter::once(layer_a).chain(std::iter::once(layer_b)).chain(parts_extra).collect(),
-        active_layer: 0,
+        parts: std::iter::once(layer_a).chain(std::iter::once(layer_b)).chain(parts_extra).collect(),
+        active_part: 0,
         on_midi_reconnect: Some(on_midi_reconnect),
         collapsed_categories: c.config.ui.collapsed_categories.iter().cloned().collect(),
         feedback_rx: Some(c.feedback_rx),

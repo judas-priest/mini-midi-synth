@@ -353,10 +353,10 @@ impl App {
 
     pub(super) fn draw_pitch_sequencer(&mut self, ui: &mut egui::Ui) {
         use crate::synth::step_seq::{StepRate, ScaleType};
-        let layer = self.active_layer;
-        if layer >= 2 { return; }
+        let part = self.active_part;
+        if part >= 2 { return; }
 
-        let enabled = self.pitch_seq_enabled[layer];
+        let enabled = self.pitch_seq_enabled[part];
 
         egui::CollapsingHeader::new("Step Sequencer")
             .default_open(enabled)
@@ -365,69 +365,69 @@ impl App {
                 ui.horizontal(|ui| {
                     let mut en = enabled;
                     if ui.checkbox(&mut en, "Enable").changed() {
-                        self.pitch_seq_enabled[layer] = en;
-                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetEnabled { layer, enabled: en });
+                        self.pitch_seq_enabled[part] = en;
+                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetEnabled { part, enabled: en });
                     }
 
                     ui.separator();
 
                     // Rate
-                    let rate = StepRate::from_index(self.pitch_seq_rate[layer]);
+                    let rate = StepRate::from_index(self.pitch_seq_rate[part]);
                     let rate_name = rate.name();
-                    egui::ComboBox::from_id_salt(format!("seq_rate_{layer}"))
+                    egui::ComboBox::from_id_salt(format!("seq_rate_{part}"))
                         .selected_text(rate_name)
                         .width(50.0)
                         .show_ui(ui, |ui| {
                             for i in 0..6u8 {
                                 let r = StepRate::from_index(i);
-                                if ui.selectable_label(i == self.pitch_seq_rate[layer], r.name()).clicked() {
-                                    self.pitch_seq_rate[layer] = i;
-                                    let _ = self.ctrl_tx.push(ControlEvent::SeqSetRate { layer, rate: i });
+                                if ui.selectable_label(i == self.pitch_seq_rate[part], r.name()).clicked() {
+                                    self.pitch_seq_rate[part] = i;
+                                    let _ = self.ctrl_tx.push(ControlEvent::SeqSetRate { part, rate: i });
                                 }
                             }
                         });
 
                     // Scale
-                    let scale = ScaleType::from_index(self.pitch_seq_scale[layer]);
-                    egui::ComboBox::from_id_salt(format!("seq_scale_{layer}"))
+                    let scale = ScaleType::from_index(self.pitch_seq_scale[part]);
+                    egui::ComboBox::from_id_salt(format!("seq_scale_{part}"))
                         .selected_text(scale.name())
                         .width(80.0)
                         .show_ui(ui, |ui| {
                             for i in 0..7u8 {
                                 let s = ScaleType::from_index(i);
-                                if ui.selectable_label(i == self.pitch_seq_scale[layer], s.name()).clicked() {
-                                    self.pitch_seq_scale[layer] = i;
-                                    let _ = self.ctrl_tx.push(ControlEvent::SeqSetScale { layer, scale: i });
+                                if ui.selectable_label(i == self.pitch_seq_scale[part], s.name()).clicked() {
+                                    self.pitch_seq_scale[part] = i;
+                                    let _ = self.ctrl_tx.push(ControlEvent::SeqSetScale { part, scale: i });
                                 }
                             }
                         });
 
                     // Length
                     ui.label("Len:");
-                    let mut len = self.pitch_seq_length[layer] as i32;
+                    let mut len = self.pitch_seq_length[part] as i32;
                     let len_resp = ui.add(egui::DragValue::new(&mut len).range(1..=16).speed(0.1));
                     if len_resp.changed() {
-                        self.pitch_seq_length[layer] = len as u8;
-                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetLength { layer, length: len as u8 });
+                        self.pitch_seq_length[part] = len as u8;
+                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetLength { part, length: len as u8 });
                     }
 
                     // Swing
                     ui.label("Swing:");
-                    let mut sw = self.pitch_seq_swing[layer];
+                    let mut sw = self.pitch_seq_swing[part];
                     if ui.add(egui::DragValue::new(&mut sw).range(0.0..=0.66).speed(0.005).fixed_decimals(2)).changed() {
-                        self.pitch_seq_swing[layer] = sw;
-                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetSwing { layer, swing: sw });
+                        self.pitch_seq_swing[part] = sw;
+                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetSwing { part, swing: sw });
                     }
                 });
 
                 if !enabled { return; }
 
                 // Current step from audio thread
-                let current_step = if layer < self.pitch_seq_step_atoms.len() {
-                    self.pitch_seq_step_atoms[layer].load(std::sync::atomic::Ordering::Relaxed)
+                let current_step = if part < self.pitch_seq_step_atoms.len() {
+                    self.pitch_seq_step_atoms[part].load(std::sync::atomic::Ordering::Relaxed)
                 } else { 0 };
 
-                let length = self.pitch_seq_length[layer] as usize;
+                let length = self.pitch_seq_length[part] as usize;
 
                 // Step grid: pitch bars + gate toggles
                 let avail_w = ui.available_width();
@@ -454,7 +454,7 @@ impl App {
 
                 for i in 0..length {
                     let x = rect.left() + i as f32 * step_w;
-                    let step = &self.pitch_seq_steps[layer][i];
+                    let step = &self.pitch_seq_steps[part][i];
                     let is_current = i == current_step as usize && enabled;
 
                     // Step separator
@@ -541,19 +541,19 @@ impl App {
                                 let normalized = 1.0 - (rel_y / bar_h); // 0 = bottom, 1 = top
                                 let pitch = ((normalized - 0.5) * 2.0 * 24.0).round() as i8;
                                 let pitch = pitch.clamp(-24, 24);
-                                self.pitch_seq_steps[layer][step_idx].pitch = pitch;
-                                let step = &self.pitch_seq_steps[layer][step_idx];
+                                self.pitch_seq_steps[part][step_idx].pitch = pitch;
+                                let step = &self.pitch_seq_steps[part][step_idx];
                                 let _ = self.ctrl_tx.push(ControlEvent::SeqSetStep {
-                                    layer, step: step_idx as u8,
+                                    part, step: step_idx as u8,
                                     pitch, gate: step.gate, velocity: step.velocity,
                                 });
                             } else if response.clicked() {
                                 // Clicking gate area
-                                let gate = !self.pitch_seq_steps[layer][step_idx].gate;
-                                self.pitch_seq_steps[layer][step_idx].gate = gate;
-                                let step = &self.pitch_seq_steps[layer][step_idx];
+                                let gate = !self.pitch_seq_steps[part][step_idx].gate;
+                                self.pitch_seq_steps[part][step_idx].gate = gate;
+                                let step = &self.pitch_seq_steps[part][step_idx];
                                 let _ = self.ctrl_tx.push(ControlEvent::SeqSetStep {
-                                    layer, step: step_idx as u8,
+                                    part, step: step_idx as u8,
                                     pitch: step.pitch, gate, velocity: step.velocity,
                                 });
                             }

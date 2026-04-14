@@ -396,7 +396,7 @@ impl Lfo {
         if self.unipolar { (val + 1.0) * 0.5 } else { val }
     }
 
-    /// Load step sequencer data from preset params.
+    /// Load step sequencer data from patch params.
     pub fn load_step_seq_from_params(&mut self, lfo_idx: u8, params: &std::collections::BTreeMap<String, f32>) {
         let prefix = format!("lfo{}", lfo_idx + 1);
         for i in 0..STEP_SEQ_LEN {

@@ -1,4 +1,4 @@
-/// Per-layer pitch step sequencer.
+/// Per-part pitch step sequencer.
 /// Synced to BPM, modulates pitch by semitone offsets, retriggers envelopes on each step.
 /// Mirrors the drum StepSequencer's phase accumulator approach for drift-free timing.
 
@@ -288,7 +288,7 @@ impl PitchSequencer {
         (octave * 12 + best) as f32
     }
 
-    /// Load from preset params map.
+    /// Load from patch params map.
     #[allow(dead_code)]
     pub fn load_from_params(&mut self, params: &std::collections::BTreeMap<String, f32>) {
         self.enabled = params.get("seq_enabled").copied().unwrap_or(0.0) > 0.5;
@@ -310,7 +310,7 @@ impl PitchSequencer {
         }
     }
 
-    /// Save to preset params map.
+    /// Save to patch params map.
     #[allow(dead_code)]
     pub fn save_to_params(&self, params: &mut std::collections::BTreeMap<String, f32>) {
         params.insert("seq_enabled".into(), if self.enabled { 1.0 } else { 0.0 });

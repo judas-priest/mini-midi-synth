@@ -53,7 +53,7 @@ pub mod voice;
 pub mod wave_shaper;
 
 use crate::cc_map::{CcMap, ParamScope};
-use crate::preset::Preset;
+use crate::preset::Patch;
 use bbd_ensemble::BbdEnsemble;
 use bitcrusher::Bitcrusher;
 use bonsai::Bonsai;
@@ -145,15 +145,15 @@ pub enum MidiEvent {
 /// Control events sent from GUI to the audio thread.
 #[allow(dead_code)]
 pub enum ControlEvent {
-    LoadPreset { layer: usize, params: PresetParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_params: Option<std::collections::BTreeMap<String, f32>>, wavetable: Option<(Vec<f32>, usize, usize)> },
-    SetLayerEnabled { layer: usize, enabled: bool },
-    SetLayerMute { layer: usize, mute: bool },
-    SetLayerVolume { layer: usize, volume: f32 },
-    SetLayerRange { layer: usize, min_note: u8, max_note: u8 },
-    SetLayerVelRange { layer: usize, vel_min: u8, vel_max: u8 },
-    SetLayerPan { layer: usize, pan: f32 },
-    SetLayerTranspose { layer: usize, semitones: i8 },
-    SetMacro { layer: usize, index: usize, value: f32 },
+    LoadPatch { part: usize, params: PatchParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_params: Option<std::collections::BTreeMap<String, f32>>, wavetable: Option<(Vec<f32>, usize, usize)> },
+    SetPartEnabled { part: usize, enabled: bool },
+    SetPartMute { part: usize, mute: bool },
+    SetPartVolume { part: usize, volume: f32 },
+    SetPartRange { part: usize, min_note: u8, max_note: u8 },
+    SetPartVelRange { part: usize, vel_min: u8, vel_max: u8 },
+    SetPartPan { part: usize, pan: f32 },
+    SetPartTranspose { part: usize, semitones: i8 },
+    SetMacro { part: usize, index: usize, value: f32 },
     SetCcMap { map: CcMap },
     SetGlobalParam { key: &'static str, value: f32 },
     // Drum engine controls
@@ -183,18 +183,18 @@ pub enum ControlEvent {
     LoadDrumsSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
     UnloadKeysSoundFont,
     UnloadDrumsSoundFont,
-    SetLayerSf2Mode { layer: usize, enabled: bool },
-    SetLayerSf2Program { layer: usize, program: u8, bank: u8 },
+    SetPartSf2Mode { part: usize, enabled: bool },
+    SetPartSf2Program { part: usize, program: u8, bank: u8 },
     SetDrumsSf2Mode { enabled: bool },
     SetSf2BlockSize { size: usize },
     SetSf2SampleOffset { ms: f32 },
     // Pitch step sequencer
-    SeqSetEnabled { layer: usize, enabled: bool },
-    SeqSetStep { layer: usize, step: u8, pitch: i8, gate: bool, velocity: u8 },
-    SeqSetLength { layer: usize, length: u8 },
-    SeqSetRate { layer: usize, rate: u8 },
-    SeqSetScale { layer: usize, scale: u8 },
-    SeqSetSwing { layer: usize, swing: f32 },
+    SeqSetEnabled { part: usize, enabled: bool },
+    SeqSetStep { part: usize, step: u8, pitch: i8, gate: bool, velocity: u8 },
+    SeqSetLength { part: usize, length: u8 },
+    SeqSetRate { part: usize, rate: u8 },
+    SeqSetScale { part: usize, scale: u8 },
+    SeqSetSwing { part: usize, swing: f32 },
     // MIDI file sequencer
     MidiSeqLoad { data: Box<midi_player::MidiSeqData> },
     MidiSeqPlay { playing: bool },
@@ -228,7 +228,7 @@ pub enum ParamFeedback {
     NavigateRelease,
 }
 
-/// Modulation state computed per-layer, passed to voices.
+/// Modulation state computed per-part, passed to voices.
 #[derive(Clone, Copy)]
 pub struct ModulationState {
     pub pitch_mult: f32,
@@ -237,7 +237,7 @@ pub struct ModulationState {
     pub amp_mod: f32,
 }
 
-pub const MAX_LAYERS: usize = 8;
+pub const MAX_PARTS: usize = 8;
 const VOICES_PER_LAYER: usize = 8;
 pub const BLOCK_SIZE: usize = 32;
 
@@ -245,7 +245,7 @@ pub const BLOCK_SIZE: usize = 32;
 struct GlobalParams {
     master_volume: f32,
     master_tone: f32, // simple LP cutoff (20-20000 Hz), post-effects
-    // Fader-controlled global (persist across preset changes)
+    // Fader-controlled global (persist across patch changes)
     reverb_mix: Option<f32>,       // None = use preset value
     delay_mix: Option<f32>,        // None = use preset value
     pitch_bend_range: f32,         // semitones, default 2 (used when up/down not set)
@@ -298,7 +298,7 @@ impl GlobalParams {
     }
 }
 
-/// Pickup state for a single CC — prevents jumps on preset change.
+/// Pickup state for a single CC — prevents jumps on patch change.
 #[derive(Clone, Copy)]
 struct PickupState {
     last_cc_value: Option<u8>,
@@ -311,11 +311,11 @@ impl Default for PickupState {
     }
 }
 
-struct Layer {
+struct Part {
     voices: Vec<Voice>,
     age_counter: u64,
     volume: f32,
-    enabled: bool,   // part is in scene (has preset, receives MIDI)
+    enabled: bool,   // part is in scene (has patch, receives MIDI)
     mute: bool,      // temporary silence without removing from scene
     min_note: u8,
     max_note: u8,
@@ -323,13 +323,13 @@ struct Layer {
     vel_max: u8,
     pan: f32,        // -1.0 (L) .. 0.0 (C) .. +1.0 (R)
     transpose: i8,   // semitone offset per part (-24..+24)
-    params: PresetParams,
+    params: PatchParams,
     lfos: [Lfo; 4],
     /// Scene LFOs — free-running, never reset on note-on (unlike voice LFOs).
     /// tick every block regardless of note activity.
     scene_lfos: [Lfo; 2],
     scene_lfo_routed: [bool; 2],  // true when used in mod matrix
-    /// External wavetable loaded from .wt file (set via LoadPreset)
+    /// External wavetable loaded from .wt file (set via LoadPatch)
     wavetable_data: Option<Vec<f32>>,
     wavetable_frames: usize,
     wavetable_frame_size: usize,
@@ -365,7 +365,7 @@ struct Layer {
     // Cached mod sources (control-rate, with poly_aftertouch=0) for per-voice re-evaluation
     cached_mod_sources: mod_matrix::ModSources,
     poly_at_in_matrix: bool,  // true if any mod slot uses PolyAftertouch
-    // Cached routing flags — updated on preset load, not per-block
+    // Cached routing flags — updated on patch load, not per-block
     lfo2_routed: bool,
     lfo3_routed: bool,
     lfo4_routed: bool,
@@ -375,14 +375,14 @@ struct Layer {
     cached_lfo_amp_base: f32,      // (1 - lfo1_amp) * (1 - lfo2_amp) * seq_amp
 }
 
-impl Layer {
+impl Part {
     fn new(sample_rate: f32) -> Self {
         let voices = (0..VOICES_PER_LAYER).map(|_| Voice::new(sample_rate)).collect();
         Self {
             voices, age_counter: 0, volume: 0.8, enabled: false, mute: false,
             min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
             pan: 0.0, transpose: 0,
-            params: PresetParams::default(),
+            params: PatchParams::default(),
             lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate)],
             scene_lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate)],
             scene_lfo_routed: [false; 2],
@@ -425,19 +425,19 @@ impl Layer {
     }
 
     #[allow(dead_code)]
-    fn load_preset(&mut self, preset: &Preset) {
-        self.params = PresetParams::from_map(&preset.params);
+    fn load_patch(&mut self, patch: &Patch) {
+        self.params = PatchParams::from_map(&patch.params);
         self.min_note = self.params.min_note as u8;
         self.max_note = self.params.max_note as u8;
-        self.pitch_seq.load_from_params(&preset.params);
-        self.mod_matrix.load_from_params(&preset.params);
+        self.pitch_seq.load_from_params(&patch.params);
+        self.mod_matrix.load_from_params(&patch.params);
         for i in 0..4u8 {
-            self.lfos[i as usize].load_step_seq_from_params(i, &preset.params);
+            self.lfos[i as usize].load_step_seq_from_params(i, &patch.params);
         }
         self.update_routing_cache();
     }
 
-    /// Update cached routing flags from mod matrix slots. Call after loading a preset
+    /// Update cached routing flags from mod matrix slots. Call after loading a patch
     /// or changing mod matrix routing to avoid per-block scanning.
     fn update_routing_cache(&mut self) {
         self.lfo2_routed = self.mod_matrix.slots.iter()
@@ -586,7 +586,7 @@ impl Layer {
         self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
         self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
         self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
-        // Trigger MSEGs on note-on (per-layer, not per-voice)
+        // Trigger MSEGs on note-on (per-part, not per-voice)
         if self.params.mseg_enabled > 0.5 {
             self.mseg1_state.trigger();
             self.mseg2_state.trigger();
@@ -906,7 +906,7 @@ impl Layer {
 }
 
 #[derive(Clone, Copy)]
-pub struct PresetParams {
+pub struct PatchParams {
     osc_type: f32, osc_detune: f32, fm_ratio: f32, fm_index: f32, fm_env_amount: f32,
     osc_count: f32, osc1_level: f32,
     osc2_type: f32, osc2_detune: f32, osc2_level: f32,
@@ -982,7 +982,7 @@ pub struct PresetParams {
     // Twist / Plaits
     twist_engine: f32, twist_harmonics: f32, twist_timbre: f32, twist_morph: f32,
     twist_lpg_decay: f32, twist_lpg_colour: f32, twist_aux_mix: f32,
-    // Effects (per-preset)
+    // Effects (per-patch)
     chorus_mix: f32,
     delay_mix: f32, delay_time_l: f32, delay_time_r: f32,
     delay_feedback: f32, delay_ping_pong: f32, delay_filter: f32,
@@ -1013,7 +1013,7 @@ pub struct PresetParams {
     mseg_enabled: f32,
     // Step sequencer pitch contribution (1.0 = normal, 0.0 = use seq only for mod matrix)
     seq_pitch_depth: f32,
-    // Note range for split/layer mode (0..127)
+    // Note range for split/part mode (0..127)
     pub min_note: f32,
     pub max_note: f32,
     // Filter env amount in semitones (Surge-style, applied exponentially)
@@ -1067,7 +1067,7 @@ pub struct PresetParams {
     pub fx_chain: FxChain,
 }
 
-impl Default for PresetParams {
+impl Default for PatchParams {
     fn default() -> Self {
         Self {
             osc_type: 0.0, osc_detune: 0.0, fm_ratio: 3.5, fm_index: 5.0, fm_env_amount: 0.0,
@@ -1172,7 +1172,7 @@ impl Default for PresetParams {
     }
 }
 
-impl PresetParams {
+impl PatchParams {
     pub fn from_map(params: &std::collections::BTreeMap<String, f32>) -> Self {
         let p = |key: &str, default: f32| -> f32 {
             params.get(key).copied().unwrap_or(default)
@@ -1353,7 +1353,7 @@ impl PresetParams {
 }
 
 pub struct SynthEngine {
-    layers: Vec<Layer>,
+    parts: Vec<Part>,
     pub drum_engine: DrumEngine,
     pub sampler: SamplerEngine,
     pitch_bend_semitones: f32,
@@ -1399,8 +1399,8 @@ pub struct SynthEngine {
     pub spring_reverb: SpringReverb,
     pub looper: MidiLooper,
     cc_map: CcMap,
-    presets: Vec<Preset>,
-    preset_params_cache: Vec<PresetParams>,
+    patches: Vec<Patch>,
+    preset_params_cache: Vec<PatchParams>,
     feedback_tx: Option<rtrb::Producer<ParamFeedback>>,
     program_change: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     global_params: GlobalParams,
@@ -1416,7 +1416,7 @@ pub struct SynthEngine {
     midi_seq_buf: Vec<(u8, midi_player::SeqEventData)>,
 }
 
-/// Cached effect parameters — extracted once per block from PresetParams.
+/// Cached effect parameters — extracted once per block from PatchParams.
 #[derive(Clone, Copy)]
 struct CachedFxParams {
     // Tape
@@ -1485,7 +1485,7 @@ struct CachedFxParams {
 }
 
 impl CachedFxParams {
-    fn from_preset(p: Option<&PresetParams>, global: &GlobalParams) -> Self {
+    fn from_preset(p: Option<&PatchParams>, global: &GlobalParams) -> Self {
         Self {
             tape_drive: p.map(|p| p.tape_drive).unwrap_or(0.0),
             tape_saturation: p.map(|p| p.tape_saturation).unwrap_or(0.5),
@@ -1606,11 +1606,11 @@ impl CachedFxParams {
 
 impl SynthEngine {
     pub fn new(sample_rate: f32) -> Self {
-        // All 8 layers pre-allocated; only layer 0 enabled by default
-        let mut layers: Vec<Layer> = (0..MAX_LAYERS).map(|_| Layer::new(sample_rate)).collect();
-        layers[0].enabled = true; // parts 1-7 start disabled (zero CPU cost)
+        // All 8 parts pre-allocated; only part 0 enabled by default
+        let mut parts: Vec<Part> = (0..MAX_PARTS).map(|_| Part::new(sample_rate)).collect();
+        parts[0].enabled = true; // parts 1-7 start disabled (zero CPU cost)
         Self {
-            layers, drum_engine: DrumEngine::new(sample_rate),
+            parts, drum_engine: DrumEngine::new(sample_rate),
             sampler: SamplerEngine::new(sample_rate),
             pitch_bend_semitones: 0.0, mod_wheel: 0.0, vibrato_phase: 0.0,
             aftertouch: 0.0, aftertouch_smooth: 0.0,
@@ -1650,11 +1650,11 @@ impl SynthEngine {
             reverb: Reverb::new(sample_rate),
             spring_reverb: SpringReverb::new(sample_rate),
             cc_map: CcMap::default(),
-            presets: Vec::new(), preset_params_cache: Vec::new(),
+            patches: Vec::new(), preset_params_cache: Vec::new(),
             feedback_tx: None, program_change: None,
             global_params: GlobalParams::default(),
             pickup_states: [PickupState::default(); 128],
-            seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth layer shown at start)
+            seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
             scope_write: 0,
             midi_player: midi_player::MidiPlayer::new(),
@@ -1667,7 +1667,7 @@ impl SynthEngine {
     }
 
     pub fn pitch_seq_step_atoms(&self) -> Vec<std::sync::Arc<std::sync::atomic::AtomicU8>> {
-        self.layers.iter().map(|l| l.pitch_seq.step_atom()).collect()
+        self.parts.iter().map(|l| l.pitch_seq.step_atom()).collect()
     }
 
     pub fn midi_player_play_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
@@ -1678,9 +1678,9 @@ impl SynthEngine {
         self.midi_player.position_atom.clone()
     }
 
-    pub fn set_presets(&mut self, presets: Vec<Preset>) {
-        self.preset_params_cache = presets.iter().map(|p| PresetParams::from_map(&p.params)).collect();
-        self.presets = presets;
+    pub fn set_patches(&mut self, patches: Vec<Patch>) {
+        self.preset_params_cache = patches.iter().map(|p| PatchParams::from_map(&p.params)).collect();
+        self.patches = patches;
     }
     pub fn set_feedback_tx(&mut self, tx: rtrb::Producer<ParamFeedback>) { self.feedback_tx = Some(tx); }
     pub fn scope_buffer(&self) -> std::sync::Arc<ScopeBuffer> { self.scope_buf.clone() }
@@ -1689,26 +1689,26 @@ impl SynthEngine {
     }
 
     #[allow(dead_code)]
-    pub fn load_preset(&mut self, layer: usize, preset: &Preset) {
-        if let Some(l) = self.layers.get_mut(layer) { l.load_preset(preset); }
+    pub fn load_patch(&mut self, part: usize, patch: &Patch) {
+        if let Some(l) = self.parts.get_mut(part) { l.load_patch(patch); }
     }
 
     fn send_feedback(&mut self, fb: ParamFeedback) {
         if let Some(tx) = &mut self.feedback_tx { let _ = tx.push(fb); }
     }
 
-    /// Reset pickup for preset-scoped CCs (call after preset change).
+    /// Reset pickup for patch-scoped CCs (call after patch change).
     fn reset_preset_pickups(&mut self) {
         for (cc, state) in self.pickup_states.iter_mut().enumerate() {
             if let Some(binding) = self.cc_map.bindings[cc] {
-                if binding.scope == ParamScope::Preset {
+                if binding.scope == ParamScope::Patch {
                     state.picked_up = false;
                 }
             }
         }
     }
 
-    /// Check if a preset-scoped CC has "picked up" the current value (crossed over it).
+    /// Check if a patch-scoped CC has "picked up" the current value (crossed over it).
     /// binding is Copy — no heap allocation.
     fn check_pickup(&mut self, cc: u8, new_cc_value: u8, binding: crate::cc_map::CcBinding) -> bool {
         if binding.scope == ParamScope::Global {
@@ -1720,7 +1720,7 @@ impl SynthEngine {
             return true;
         }
         // Get current param value and convert to CC equivalent
-        let current_val = self.layers.first()
+        let current_val = self.parts.first()
             .and_then(|l| match binding.param_key {
                 "filter_cutoff" => Some(l.params.filter_cutoff),
                 "filter_resonance" => Some(l.params.filter_resonance),
@@ -1813,26 +1813,26 @@ impl SynthEngine {
                         }
                     }
                 } else if velocity == 0 {
-                    for (i, layer) in self.layers.iter_mut().enumerate() {
-                        if !layer.enabled { continue; }
-                        if layer.sf2_mode {
+                    for (i, part) in self.parts.iter_mut().enumerate() {
+                        if !part.enabled { continue; }
+                        if part.sf2_mode {
                             self.sampler.note_off(i, note);
                         } else {
-                            layer.note_off(note);
+                            part.note_off(note);
                         }
                     }
                     self.looper.record_event(note, 0);
                 } else {
-                    for (i, layer) in self.layers.iter_mut().enumerate() {
-                        if !layer.enabled || layer.mute { continue; }
+                    for (i, part) in self.parts.iter_mut().enumerate() {
+                        if !part.enabled || part.mute { continue; }
                         // Key range + velocity range check
-                        let transposed = (note as i16 + layer.transpose as i16).clamp(0, 127) as u8;
-                        if note < layer.min_note || note > layer.max_note { continue; }
-                        if velocity < layer.vel_min || velocity > layer.vel_max { continue; }
-                        if layer.sf2_mode {
+                        let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
+                        if note < part.min_note || note > part.max_note { continue; }
+                        if velocity < part.vel_min || velocity > part.vel_max { continue; }
+                        if part.sf2_mode {
                             self.sampler.note_on(i, transposed, velocity);
                         } else {
-                            layer.note_on(transposed, velocity);
+                            part.note_on(transposed, velocity);
                         }
                     }
                     self.looper.record_event(note, velocity);
@@ -1846,20 +1846,20 @@ impl SynthEngine {
                         self.drum_engine.note_off(note);
                     }
                 } else {
-                    for (i, layer) in self.layers.iter_mut().enumerate() {
-                        if layer.sf2_mode {
+                    for (i, part) in self.parts.iter_mut().enumerate() {
+                        if part.sf2_mode {
                             self.sampler.note_off(i, note);
                         } else {
-                            layer.note_off(note);
+                            part.note_off(note);
                         }
                     }
                     self.looper.record_event(note, 0);
                 }
             }
             MidiEvent::PitchBend { value, .. } => {
-                // Asymmetric bend: per-layer preset overrides global range
-                let layer_up   = self.layers.iter().find(|l| l.enabled).map(|l| l.params.pitch_bend_up).unwrap_or(0.0);
-                let layer_down = self.layers.iter().find(|l| l.enabled).map(|l| l.params.pitch_bend_down).unwrap_or(0.0);
+                // Asymmetric bend: per-part patch overrides global range
+                let layer_up   = self.parts.iter().find(|l| l.enabled).map(|l| l.params.pitch_bend_up).unwrap_or(0.0);
+                let layer_down = self.parts.iter().find(|l| l.enabled).map(|l| l.params.pitch_bend_down).unwrap_or(0.0);
                 self.pitch_bend_semitones = if value >= 0.0 {
                     let up = if layer_up > 0.0 { layer_up }
                         else if self.global_params.pitch_bend_up > 0.0 { self.global_params.pitch_bend_up }
@@ -1872,30 +1872,30 @@ impl SynthEngine {
                     value * down
                 };
                 for i in 0..2 {
-                    if self.layers.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
+                    if self.parts.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
                         self.sampler.pitch_bend(i, value);
                     }
                 }
             }
             MidiEvent::ModWheel { value, .. } => {
                 self.mod_wheel = value;
-                // Forward to SF2 sampler as CC1 on active SF2 layers
+                // Forward to SF2 sampler as CC1 on active SF2 parts
                 for i in 0..2 {
-                    if self.layers.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
+                    if self.parts.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
                         self.sampler.mod_wheel(i, value);
                     }
                 }
             }
             MidiEvent::ProgramChange { program, .. } => {
-                // In SF2 mode, change the SF2 program; in synth mode, change the synth preset
-                if self.layers.first().map(|l| l.sf2_mode).unwrap_or(false) {
-                    self.sampler.set_layer_program(0, program, 0);
+                // In SF2 mode, change the SF2 program; in synth mode, change the synth patch
+                if self.parts.first().map(|l| l.sf2_mode).unwrap_or(false) {
+                    self.sampler.set_part_program(0, program, 0);
                 } else if let Some(&params) = self.preset_params_cache.get(program as usize) {
-                    if let Some(l) = self.layers.get_mut(0) {
+                    if let Some(l) = self.parts.get_mut(0) {
                         l.params = params;
-                        if let Some(preset) = self.presets.get(program as usize) {
-                            l.mod_matrix.load_from_params(&preset.params);
-                            l.pitch_seq.load_from_params(&preset.params);
+                        if let Some(patch) = self.patches.get(program as usize) {
+                            l.mod_matrix.load_from_params(&patch.params);
+                            l.pitch_seq.load_from_params(&patch.params);
                         }
                         l.update_routing_cache();
                     }
@@ -1911,8 +1911,8 @@ impl SynthEngine {
             }
             MidiEvent::PolyAftertouch { channel, note, pressure } => {
                 if channel != 9 {
-                    for layer in &mut self.layers {
-                        for voice in &mut layer.voices {
+                    for part in &mut self.parts {
+                        for voice in &mut part.voices {
                             if voice.note == note && voice.active {
                                 voice.poly_aftertouch = pressure;
                             }
@@ -1928,23 +1928,23 @@ impl SynthEngine {
                     }
                 }
                 // Dedicated mod sources: Breath (CC2), Expression (CC11), Sustain (CC64)
-                for layer in &mut self.layers {
+                for part in &mut self.parts {
                     match cc {
-                        2  => layer.breath = value as f32 / 127.0,
-                        11 => layer.expression = value as f32 / 127.0,
+                        2  => part.breath = value as f32 / 127.0,
+                        11 => part.expression = value as f32 / 127.0,
                         64 => {
-                            let was_held = layer.sustain_pedal > 0.5;
-                            layer.sustain_pedal = if value >= 64 { 1.0 } else { 0.0 };
+                            let was_held = part.sustain_pedal > 0.5;
+                            part.sustain_pedal = if value >= 64 { 1.0 } else { 0.0 };
                             // When pedal is released, release only voices that were held by sustain
-                            if was_held && layer.sustain_pedal < 0.5 {
-                                for voice in &mut layer.voices {
+                            if was_held && part.sustain_pedal < 0.5 {
+                                for voice in &mut part.voices {
                                     if voice.active && !voice.is_releasing()
-                                        && layer.sustained_notes[voice.note as usize]
+                                        && part.sustained_notes[voice.note as usize]
                                     {
                                         voice.note_off();
                                     }
                                 }
-                                layer.sustained_notes = [false; 128];
+                                part.sustained_notes = [false; 128];
                             }
                         }
                         _ => {}
@@ -1957,7 +1957,7 @@ impl SynthEngine {
                         if binding.scope == ParamScope::Global {
                             self.global_params.set(binding.param_key, param_val);
                         } else {
-                            for layer in &mut self.layers { layer.set_param(binding.param_key, param_val); }
+                            for part in &mut self.parts { part.set_param(binding.param_key, param_val); }
                         }
                         self.send_feedback(ParamFeedback::ParamChanged { key: binding.param_key, value: param_val });
                     }
@@ -1976,11 +1976,11 @@ impl SynthEngine {
 
     pub fn handle_control(&mut self, event: ControlEvent) {
         match event {
-            ControlEvent::LoadPreset { layer, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_params, wavetable } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::LoadPatch { part, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_params, wavetable } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
-                    // Sync macro values from preset into live layer state
+                    // Sync macro values from preset into live part state
                     // Load wavetable data if provided
                     if let Some((data, frames, fsize)) = wavetable {
                         l.wavetable_data = Some(data);
@@ -2004,8 +2004,8 @@ impl SynthEngine {
                 }
                 self.reset_preset_pickups();
             }
-            ControlEvent::SetLayerEnabled { layer, enabled } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::SetPartEnabled { part, enabled } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     l.enabled = enabled;
                     if !enabled {
                         // Graceful note-off all voices
@@ -2015,32 +2015,32 @@ impl SynthEngine {
                     }
                 }
             }
-            ControlEvent::SetLayerMute { layer, mute } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::SetPartMute { part, mute } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     l.mute = mute;
                     if mute {
                         for v in &mut l.voices { if v.active { v.note_off(); } }
                     }
                 }
             }
-            ControlEvent::SetLayerVolume { layer, volume } => {
-                if let Some(l) = self.layers.get_mut(layer) { l.volume = volume; }
-                self.sampler.set_layer_volume(layer, volume);
+            ControlEvent::SetPartVolume { part, volume } => {
+                if let Some(l) = self.parts.get_mut(part) { l.volume = volume; }
+                self.sampler.set_layer_volume(part, volume);
             }
-            ControlEvent::SetLayerRange { layer, min_note, max_note } => {
-                if let Some(l) = self.layers.get_mut(layer) { l.min_note = min_note; l.max_note = max_note; }
+            ControlEvent::SetPartRange { part, min_note, max_note } => {
+                if let Some(l) = self.parts.get_mut(part) { l.min_note = min_note; l.max_note = max_note; }
             }
-            ControlEvent::SetLayerVelRange { layer, vel_min, vel_max } => {
-                if let Some(l) = self.layers.get_mut(layer) { l.vel_min = vel_min; l.vel_max = vel_max; }
+            ControlEvent::SetPartVelRange { part, vel_min, vel_max } => {
+                if let Some(l) = self.parts.get_mut(part) { l.vel_min = vel_min; l.vel_max = vel_max; }
             }
-            ControlEvent::SetLayerPan { layer, pan } => {
-                if let Some(l) = self.layers.get_mut(layer) { l.pan = pan.clamp(-1.0, 1.0); }
+            ControlEvent::SetPartPan { part, pan } => {
+                if let Some(l) = self.parts.get_mut(part) { l.pan = pan.clamp(-1.0, 1.0); }
             }
-            ControlEvent::SetLayerTranspose { layer, semitones } => {
-                if let Some(l) = self.layers.get_mut(layer) { l.transpose = semitones; }
+            ControlEvent::SetPartTranspose { part, semitones } => {
+                if let Some(l) = self.parts.get_mut(part) { l.transpose = semitones; }
             }
-            ControlEvent::SetMacro { layer, index, value } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::SetMacro { part, index, value } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     if index < 8 {
                         l.macro_vals[index] = value.clamp(0.0, 1.0);
                         l.params.macro_vals[index] = value.clamp(0.0, 1.0);
@@ -2114,16 +2114,16 @@ impl SynthEngine {
                 self.looper.quantize = looper::Quantize::from_index(quantize);
             }
             ControlEvent::AllNotesOff => {
-                for layer in &mut self.layers {
+                for part in &mut self.parts {
                     // Kill all active voices immediately
-                    for v in &mut layer.voices {
+                    for v in &mut part.voices {
                         if v.active { v.note_off(); }
                     }
                     // Clear held-note state so retriggering doesn't ghost
-                    layer.note_stack.clear();
-                    layer.latch_held.clear();
-                    layer.sustain_pedal = 0.0;
-                    layer.sustained_notes = [false; 128];
+                    part.note_stack.clear();
+                    part.latch_held.clear();
+                    part.sustain_pedal = 0.0;
+                    part.sustained_notes = [false; 128];
                 }
                 self.sampler.all_notes_off();
             }
@@ -2140,14 +2140,14 @@ impl SynthEngine {
             ControlEvent::UnloadDrumsSoundFont => {
                 self.sampler.unload_drums();
             }
-            ControlEvent::SetLayerSf2Mode { layer, enabled } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::SetPartSf2Mode { part, enabled } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     l.sf2_mode = enabled;
                 }
-                self.sampler.set_layer_mode(layer, enabled);
+                self.sampler.set_part_mode(part, enabled);
             }
-            ControlEvent::SetLayerSf2Program { layer, program, bank } => {
-                self.sampler.set_layer_program(layer, program, bank);
+            ControlEvent::SetPartSf2Program { part, program, bank } => {
+                self.sampler.set_part_program(part, program, bank);
             }
             ControlEvent::SetDrumsSf2Mode { enabled } => {
                 self.sampler.set_drums_enabled(enabled);
@@ -2159,36 +2159,36 @@ impl SynthEngine {
             ControlEvent::SetSf2SampleOffset { ms } => {
                 self.sampler.set_sample_offset_ms(ms);
             }
-            ControlEvent::SeqSetEnabled { layer, enabled } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::SeqSetEnabled { part, enabled } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     l.pitch_seq.enabled = enabled;
                     if enabled { l.pitch_seq.reset(); }
                 }
             }
-            ControlEvent::SeqSetStep { layer, step, pitch, gate, velocity } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::SeqSetStep { part, step, pitch, gate, velocity } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     if (step as usize) < step_seq::MAX_STEPS {
                         l.pitch_seq.steps[step as usize] = step_seq::PitchStep { pitch, gate, velocity };
                     }
                 }
             }
-            ControlEvent::SeqSetLength { layer, length } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::SeqSetLength { part, length } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     l.pitch_seq.length = length.clamp(1, 16);
                 }
             }
-            ControlEvent::SeqSetRate { layer, rate } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::SeqSetRate { part, rate } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     l.pitch_seq.rate = step_seq::StepRate::from_index(rate);
                 }
             }
-            ControlEvent::SeqSetScale { layer, scale } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::SeqSetScale { part, scale } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     l.pitch_seq.scale = step_seq::ScaleType::from_index(scale);
                 }
             }
-            ControlEvent::SeqSetSwing { layer, swing } => {
-                if let Some(l) = self.layers.get_mut(layer) {
+            ControlEvent::SeqSetSwing { part, swing } => {
+                if let Some(l) = self.parts.get_mut(part) {
                     l.pitch_seq.swing = swing;
                 }
             }
@@ -2202,8 +2202,8 @@ impl SynthEngine {
                     self.midi_player.reset_position();
                     // All notes off on all engines
                     self.sampler.all_notes_off();
-                    for layer in &mut self.layers {
-                        for voice in &mut layer.voices {
+                    for part in &mut self.parts {
+                        for voice in &mut part.voices {
                             if voice.active { voice.note_off(); }
                         }
                     }
@@ -2234,7 +2234,7 @@ impl SynthEngine {
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
-        for layer in &mut self.layers { layer.set_sample_rate(sample_rate); }
+        for part in &mut self.parts { part.set_sample_rate(sample_rate); }
         self.drum_engine.set_sample_rate(sample_rate);
         self.sampler.set_sample_rate(sample_rate);
         self.eq.set_sample_rate(sample_rate);
@@ -2280,7 +2280,7 @@ impl SynthEngine {
         let at_alpha = 1.0 - (-(block_len as f32) / (0.010 * self.sample_rate)).exp();
         self.aftertouch_smooth += at_alpha * (self.aftertouch - self.aftertouch_smooth);
 
-        let active_layer_params = self.layers.iter()
+        let active_layer_params = self.parts.iter()
             .find(|l| l.enabled)
             .map(|l| &l.params);
         let lfo_rate = active_layer_params.map(|p| p.lfo_rate).unwrap_or(5.0);
@@ -2297,85 +2297,85 @@ impl SynthEngine {
 
         let seq_bpm = self.drum_engine.sequencer.bpm;
 
-        // Pre-compute modulation state for each layer (control rate)
+        // Pre-compute modulation state for each part (control rate)
         let mut layer_mods: Vec<ModulationState> = vec![ModulationState {
             pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
-        }; self.layers.len()];
+        }; self.parts.len()];
 
-        for (li, layer) in self.layers.iter_mut().enumerate() {
-            if !layer.enabled { continue; }
+        for (li, part) in self.parts.iter_mut().enumerate() {
+            if !part.enabled { continue; }
 
             // Step sequencer (control rate)
-            let seq_evt = layer.pitch_seq.tick(self.sample_rate, seq_bpm, block_len);
+            let seq_evt = part.pitch_seq.tick(self.sample_rate, seq_bpm, block_len);
             if seq_evt.stepped && seq_evt.gate {
-                for voice in &mut layer.voices {
+                for voice in &mut part.voices {
                     if voice.active && !voice.is_releasing() {
                         voice.retrigger_envelope();
                     }
                 }
             }
             if seq_evt.stepped && !seq_evt.gate {
-                for voice in &mut layer.voices {
+                for voice in &mut part.voices {
                     if voice.active && !voice.is_releasing() {
                         voice.note_off();
                     }
                 }
             }
-            let seq_raw = if layer.pitch_seq.enabled { seq_evt.pitch_offset / 24.0 } else { 0.0 };
-            let seq_pitch = seq_raw * 24.0 * layer.params.seq_pitch_depth;
-            let seq_amp = if layer.pitch_seq.enabled && !seq_evt.gate { 0.0 } else { 1.0 };
+            let seq_raw = if part.pitch_seq.enabled { seq_evt.pitch_offset / 24.0 } else { 0.0 };
+            let seq_pitch = seq_raw * 24.0 * part.params.seq_pitch_depth;
+            let seq_amp = if part.pitch_seq.enabled && !seq_evt.gate { 0.0 } else { 1.0 };
 
             let bl = block_len as f32;
 
             // Set BPM, tempo sync, unipolar on all LFOs
-            let lfo_tempo_syncs = [layer.params.lfo1_tempo_sync, layer.params.lfo2_tempo_sync,
-                                   layer.params.lfo3_tempo_sync, layer.params.lfo4_tempo_sync];
-            let lfo_unipolars = [layer.params.lfo1_unipolar, layer.params.lfo2_unipolar,
-                                 layer.params.lfo3_unipolar, layer.params.lfo4_unipolar];
+            let lfo_tempo_syncs = [part.params.lfo1_tempo_sync, part.params.lfo2_tempo_sync,
+                                   part.params.lfo3_tempo_sync, part.params.lfo4_tempo_sync];
+            let lfo_unipolars = [part.params.lfo1_unipolar, part.params.lfo2_unipolar,
+                                 part.params.lfo3_unipolar, part.params.lfo4_unipolar];
             for i in 0..4 {
-                layer.lfos[i].set_bpm(seq_bpm);
-                layer.lfos[i].tempo_sync = lfo_tempo_syncs[i] > 0.5;
-                layer.lfos[i].unipolar = lfo_unipolars[i] > 0.5;
+                part.lfos[i].set_bpm(seq_bpm);
+                part.lfos[i].tempo_sync = lfo_tempo_syncs[i] > 0.5;
+                part.lfos[i].unipolar = lfo_unipolars[i] > 0.5;
             }
 
             // LFO 1
-            let lfo1_wf = LfoWaveform::from_param(layer.params.lfo_waveform);
+            let lfo1_wf = LfoWaveform::from_param(part.params.lfo_waveform);
             let lfo1_active = lfo1_wf == LfoWaveform::StepSeq
-                || layer.params.lfo_pitch_depth > 0.001
-                || layer.params.lfo_filter_depth > 0.001
-                || layer.params.lfo_amp_depth > 0.001
+                || part.params.lfo_pitch_depth > 0.001
+                || part.params.lfo_filter_depth > 0.001
+                || part.params.lfo_amp_depth > 0.001
                 || self.aftertouch_smooth > 0.001;
             let lfo1_val = if lfo1_active {
-                layer.lfos[0].tick_with_deform(lfo_rate * bl, lfo1_wf, layer.params.lfo_deform)
+                part.lfos[0].tick_with_deform(lfo_rate * bl, lfo1_wf, part.params.lfo_deform)
             } else { 0.0 };
 
             // LFO 2 — also active when routed through mod matrix or in StepSeq mode
-            let lfo2_wf = LfoWaveform::from_param(layer.params.lfo2_waveform);
-            let lfo2_active = lfo2_wf == LfoWaveform::StepSeq || layer.lfo2_routed
-                || layer.params.lfo2_pitch_depth > 0.001
-                || layer.params.lfo2_filter_depth > 0.001
-                || layer.params.lfo2_amp_depth > 0.001;
+            let lfo2_wf = LfoWaveform::from_param(part.params.lfo2_waveform);
+            let lfo2_active = lfo2_wf == LfoWaveform::StepSeq || part.lfo2_routed
+                || part.params.lfo2_pitch_depth > 0.001
+                || part.params.lfo2_filter_depth > 0.001
+                || part.params.lfo2_amp_depth > 0.001;
             let lfo2_val = if lfo2_active {
-                layer.lfos[1].tick_with_deform(layer.params.lfo2_rate * bl, lfo2_wf, layer.params.lfo2_deform)
+                part.lfos[1].tick_with_deform(part.params.lfo2_rate * bl, lfo2_wf, part.params.lfo2_deform)
             } else { 0.0 };
 
             // LFO 3 & 4 — tick when routed or in StepSeq mode
-            let lfo3_wf = LfoWaveform::from_param(layer.params.lfo3_waveform);
-            let lfo3_val = if lfo3_wf == LfoWaveform::StepSeq || layer.lfo3_routed {
-                layer.lfos[2].tick_with_deform(layer.params.lfo3_rate * bl, lfo3_wf, layer.params.lfo3_deform)
+            let lfo3_wf = LfoWaveform::from_param(part.params.lfo3_waveform);
+            let lfo3_val = if lfo3_wf == LfoWaveform::StepSeq || part.lfo3_routed {
+                part.lfos[2].tick_with_deform(part.params.lfo3_rate * bl, lfo3_wf, part.params.lfo3_deform)
             } else { 0.0 };
-            let lfo4_wf = LfoWaveform::from_param(layer.params.lfo4_waveform);
-            let lfo4_val = if lfo4_wf == LfoWaveform::StepSeq || layer.lfo4_routed {
-                layer.lfos[3].tick_with_deform(layer.params.lfo4_rate * bl, lfo4_wf, layer.params.lfo4_deform)
+            let lfo4_wf = LfoWaveform::from_param(part.params.lfo4_waveform);
+            let lfo4_val = if lfo4_wf == LfoWaveform::StepSeq || part.lfo4_routed {
+                part.lfos[3].tick_with_deform(part.params.lfo4_rate * bl, lfo4_wf, part.params.lfo4_deform)
             } else { 0.0 };
 
             // Step sequencer envelope retrigger from any LFO in StepSeq mode
             let lfo_wfs = [lfo1_wf, lfo2_wf, lfo3_wf, lfo4_wf];
             for (i, &wf) in lfo_wfs.iter().enumerate() {
                 if wf == LfoWaveform::StepSeq {
-                    let evt = layer.lfos[i].last_step_event();
+                    let evt = part.lfos[i].last_step_event();
                     if evt.stepped && (evt.retrigger_aeg || evt.retrigger_feg) {
-                        for voice in &mut layer.voices {
+                        for voice in &mut part.voices {
                             if voice.active && !voice.is_releasing() {
                                 if evt.retrigger_aeg && evt.retrigger_feg {
                                     voice.retrigger_envelope();
@@ -2391,73 +2391,73 @@ impl SynthEngine {
             }
 
             // Scene LFOs — always tick regardless of note state, never retrigger
-            let slfo1_wf = LfoWaveform::from_param(layer.params.slfo1_waveform);
-            layer.scene_lfos[0].set_bpm(seq_bpm);
-            layer.scene_lfos[0].tempo_sync = layer.params.slfo1_tempo_sync > 0.5;
-            layer.scene_lfos[0].unipolar  = layer.params.slfo1_unipolar  > 0.5;
-            let slfo1_val = if layer.scene_lfo_routed[0] || slfo1_wf == LfoWaveform::StepSeq {
-                let rate = if layer.scene_lfos[0].tempo_sync {
-                    layer.params.slfo1_rate
+            let slfo1_wf = LfoWaveform::from_param(part.params.slfo1_waveform);
+            part.scene_lfos[0].set_bpm(seq_bpm);
+            part.scene_lfos[0].tempo_sync = part.params.slfo1_tempo_sync > 0.5;
+            part.scene_lfos[0].unipolar  = part.params.slfo1_unipolar  > 0.5;
+            let slfo1_val = if part.scene_lfo_routed[0] || slfo1_wf == LfoWaveform::StepSeq {
+                let rate = if part.scene_lfos[0].tempo_sync {
+                    part.params.slfo1_rate
                 } else {
-                    layer.params.slfo1_rate * bl
+                    part.params.slfo1_rate * bl
                 };
-                layer.scene_lfos[0].tick_with_deform(rate, slfo1_wf, layer.params.slfo1_deform)
+                part.scene_lfos[0].tick_with_deform(rate, slfo1_wf, part.params.slfo1_deform)
             } else { 0.0 };
 
-            let slfo2_wf = LfoWaveform::from_param(layer.params.slfo2_waveform);
-            layer.scene_lfos[1].set_bpm(seq_bpm);
-            layer.scene_lfos[1].tempo_sync = layer.params.slfo2_tempo_sync > 0.5;
-            layer.scene_lfos[1].unipolar  = layer.params.slfo2_unipolar  > 0.5;
-            let slfo2_val = if layer.scene_lfo_routed[1] || slfo2_wf == LfoWaveform::StepSeq {
-                let rate = if layer.scene_lfos[1].tempo_sync {
-                    layer.params.slfo2_rate
+            let slfo2_wf = LfoWaveform::from_param(part.params.slfo2_waveform);
+            part.scene_lfos[1].set_bpm(seq_bpm);
+            part.scene_lfos[1].tempo_sync = part.params.slfo2_tempo_sync > 0.5;
+            part.scene_lfos[1].unipolar  = part.params.slfo2_unipolar  > 0.5;
+            let slfo2_val = if part.scene_lfo_routed[1] || slfo2_wf == LfoWaveform::StepSeq {
+                let rate = if part.scene_lfos[1].tempo_sync {
+                    part.params.slfo2_rate
                 } else {
-                    layer.params.slfo2_rate * bl
+                    part.params.slfo2_rate * bl
                 };
-                layer.scene_lfos[1].tick_with_deform(rate, slfo2_wf, layer.params.slfo2_deform)
+                part.scene_lfos[1].tick_with_deform(rate, slfo2_wf, part.params.slfo2_deform)
             } else { 0.0 };
 
             // MSEGs
-            let mseg1_val = if layer.params.mseg_enabled > 0.5 {
-                layer.mseg1_state.tick(&layer.mseg1)
+            let mseg1_val = if part.params.mseg_enabled > 0.5 {
+                part.mseg1_state.tick(&part.mseg1)
             } else { 0.0 };
-            let mseg2_val = if layer.params.mseg_enabled > 0.5 {
-                layer.mseg2_state.tick(&layer.mseg2)
+            let mseg2_val = if part.params.mseg_enabled > 0.5 {
+                part.mseg2_state.tick(&part.mseg2)
             } else { 0.0 };
 
             // Mod matrix
-            let key_track = (layer.last_note as f32 - 60.0) / 48.0;
+            let key_track = (part.last_note as f32 - 60.0) / 48.0;
             let mod_sources = mod_matrix::ModSources {
                 lfo_outputs: [lfo1_val, lfo2_val, lfo3_val, lfo4_val],
                 scene_lfo_outputs: [slfo1_val, slfo2_val],
-                macro_vals: layer.macro_vals,
+                macro_vals: part.macro_vals,
                 amp_env: 0.0, filter_env: 0.0,
                 mseg_outputs: [mseg1_val, mseg2_val],
                 mod_wheel: self.mod_wheel,
                 aftertouch: self.aftertouch_smooth,
-                velocity: layer.last_velocity,
+                velocity: part.last_velocity,
                 key_track,
                 step_seq: seq_raw,
-                random_bipolar: layer.rand_bipolar,
-                random_unipolar: layer.rand_unipolar,
-                alt_bipolar: layer.alt_bipolar,
-                alt_unipolar: layer.alt_unipolar,
-                release_vel: layer.release_vel,
+                random_bipolar: part.rand_bipolar,
+                random_unipolar: part.rand_unipolar,
+                alt_bipolar: part.alt_bipolar,
+                alt_unipolar: part.alt_unipolar,
+                release_vel: part.release_vel,
                 pitch_bend: self.pitch_bend_semitones / 2.0, // normalize -1..+1
                 cc: self.cc_values,
-                breath: layer.breath,
-                expression: layer.expression,
-                sustain_pedal: layer.sustain_pedal,
-                lowest_key: (layer.lowest_held as f32 - 60.0) / 48.0,
-                highest_key: (layer.highest_held as f32 - 60.0) / 48.0,
-                latest_key: (layer.last_note as f32 - 60.0) / 48.0,
-                poly_aftertouch: 0.0, // per-voice; 0 for layer-level evaluation
+                breath: part.breath,
+                expression: part.expression,
+                sustain_pedal: part.sustain_pedal,
+                lowest_key: (part.lowest_held as f32 - 60.0) / 48.0,
+                highest_key: (part.highest_held as f32 - 60.0) / 48.0,
+                latest_key: (part.last_note as f32 - 60.0) / 48.0,
+                poly_aftertouch: 0.0, // per-voice; 0 for part-level evaluation
             };
-            let mod_offsets = layer.mod_matrix.evaluate(&mod_sources);
+            let mod_offsets = part.mod_matrix.evaluate(&mod_sources);
 
             let lfo_pitch_offset_base = self.pitch_bend_semitones
-                + lfo1_val * layer.params.lfo_pitch_depth * 2.0
-                + lfo2_val * layer.params.lfo2_pitch_depth * 2.0
+                + lfo1_val * part.params.lfo_pitch_depth * 2.0
+                + lfo2_val * part.params.lfo2_pitch_depth * 2.0
                 + self.mod_wheel * 0.5 * vibrato_val
                 + self.aftertouch_smooth * 0.3 * lfo1_val
                 + seq_pitch;
@@ -2465,19 +2465,19 @@ impl SynthEngine {
             let pitch_mult = if pitch_offset.abs() < 0.001 { 1.0 } else { (pitch_offset / 12.0).exp2() };
             // filter_offset is Hz-only (LFO direct routing, aftertouch)
             // filter_offset_semis is exponential (mod matrix)
-            let filter_offset = lfo1_val * layer.params.lfo_filter_depth * 4000.0
-                + lfo2_val * layer.params.lfo2_filter_depth * 4000.0
+            let filter_offset = lfo1_val * part.params.lfo_filter_depth * 4000.0
+                + lfo2_val * part.params.lfo2_filter_depth * 4000.0
                 + self.aftertouch_smooth * 2000.0;
-            let lfo_amp_base = (1.0 - layer.params.lfo_amp_depth * 0.5 * (1.0 - lfo1_val))
-                * (1.0 - layer.params.lfo2_amp_depth * 0.5 * (1.0 - lfo2_val))
+            let lfo_amp_base = (1.0 - part.params.lfo_amp_depth * 0.5 * (1.0 - lfo1_val))
+                * (1.0 - part.params.lfo2_amp_depth * 0.5 * (1.0 - lfo2_val))
                 * seq_amp;
             let amp_mod = lfo_amp_base * (1.0 + mod_offsets.amplitude).max(0.0);
 
             // Cache mod sources and base values for per-voice poly AT re-evaluation
-            layer.cached_mod_sources = mod_sources;
-            layer.cached_lfo_pitch_offset = lfo_pitch_offset_base;
-            layer.cached_filter_offset = filter_offset;
-            layer.cached_lfo_amp_base = lfo_amp_base;
+            part.cached_mod_sources = mod_sources;
+            part.cached_lfo_pitch_offset = lfo_pitch_offset_base;
+            part.cached_filter_offset = filter_offset;
+            part.cached_lfo_amp_base = lfo_amp_base;
 
             layer_mods[li] = ModulationState {
                 pitch_mult, filter_offset, filter_offset_semis: mod_offsets.filter_cutoff, amp_mod,
@@ -2485,7 +2485,7 @@ impl SynthEngine {
         }
 
         // Cache effect params (once per block)
-        let ep = self.layers.iter().find(|l| l.enabled).map(|l| &l.params);
+        let ep = self.parts.iter().find(|l| l.enabled).map(|l| &l.params);
         let fx = CachedFxParams::from_preset(ep, &self.global_params);
         let fx_chain = ep.map(|p| p.fx_chain).unwrap_or_default();
 
@@ -2508,8 +2508,8 @@ impl SynthEngine {
                             }
                         }
                         midi_player::TrackInstrument::DspLayer0 => {
-                            if let Some(layer) = self.layers.get_mut(0) {
-                                layer.note_on(note, velocity);
+                            if let Some(part) = self.parts.get_mut(0) {
+                                part.note_on(note, velocity);
                             }
                         }
                         midi_player::TrackInstrument::Sf2 { program } => {
@@ -2523,8 +2523,8 @@ impl SynthEngine {
                             if sf2 { self.sampler.drum_note_off(note); }
                         }
                         midi_player::TrackInstrument::DspLayer0 => {
-                            if let Some(layer) = self.layers.get_mut(0) {
-                                layer.note_off(note);
+                            if let Some(part) = self.parts.get_mut(0) {
+                                part.note_off(note);
                             }
                         }
                         midi_player::TrackInstrument::Sf2 { .. } => {
@@ -2549,19 +2549,19 @@ impl SynthEngine {
             for &(note, vel) in &looper_events {
                 if note == 0 && vel == 0 { break; }
                 if vel > 0 {
-                    for (i, layer) in self.layers.iter_mut().enumerate() {
-                        if layer.sf2_mode {
+                    for (i, part) in self.parts.iter_mut().enumerate() {
+                        if part.sf2_mode {
                             self.sampler.note_on(i, note, vel);
                         } else {
-                            layer.note_on(note, vel);
+                            part.note_on(note, vel);
                         }
                     }
                 } else {
-                    for (i, layer) in self.layers.iter_mut().enumerate() {
-                        if layer.sf2_mode {
+                    for (i, part) in self.parts.iter_mut().enumerate() {
+                        if part.sf2_mode {
                             self.sampler.note_off(i, note);
                         } else {
-                            layer.note_off(note);
+                            part.note_off(note);
                         }
                     }
                 }
@@ -2570,11 +2570,11 @@ impl SynthEngine {
             let (mut out_l, mut out_r) = (0.0_f32, 0.0_f32);
 
             // Voice ticks (audio rate, using cached modulation)
-            for (li, layer) in self.layers.iter_mut().enumerate() {
-                if !layer.enabled { continue; }
-                let (l, r) = layer.tick(&layer_mods[li]);
+            for (li, part) in self.parts.iter_mut().enumerate() {
+                if !part.enabled { continue; }
+                let (l, r) = part.tick(&layer_mods[li]);
                 // Apply per-part pan (constant-power: sqrt of (0.5 ± pan*0.5))
-                let pan = layer.pan.clamp(-1.0, 1.0);
+                let pan = part.pan.clamp(-1.0, 1.0);
                 let gain_l = ((0.5 - pan * 0.5) as f64).sqrt() as f32;
                 let gain_r = ((0.5 + pan * 0.5) as f64).sqrt() as f32;
                 out_l += l * gain_l;
@@ -3157,15 +3157,15 @@ mod tests {
         let mut synth_a = SynthEngine::new(44100.0);
         let mut synth_b = SynthEngine::new(44100.0);
 
-        let presets = crate::preset::load_all_presets();
-        let params = PresetParams::from_map(&presets[0].params);
+        let patches = crate::preset::load_all_patches();
+        let params = PatchParams::from_map(&patches[0].params);
         let params2 = params.clone();
 
-        synth_a.handle_control(ControlEvent::LoadPreset {
-            layer: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None,
+        synth_a.handle_control(ControlEvent::LoadPatch {
+            part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None, wavetable: None,
         });
-        synth_b.handle_control(ControlEvent::LoadPreset {
-            layer: 0, params: params2, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None,
+        synth_b.handle_control(ControlEvent::LoadPatch {
+            part: 0, params: params2, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None, wavetable: None,
         });
 
         synth_a.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
@@ -3199,13 +3199,13 @@ mod tests {
 
     fn run_preset_chain(preset_name: &str) {
         let mut synth = SynthEngine::new(44100.0);
-        let presets = crate::preset::load_all_presets();
-        let idx = presets.iter().position(|p| p.name == preset_name)
+        let patches = crate::preset::load_all_patches();
+        let idx = patches.iter().position(|p| p.name == preset_name)
             .unwrap_or_else(|| panic!("No preset '{preset_name}'"));
-        let params = PresetParams::from_map(&presets[idx].params);
-        synth.set_presets(presets);
-        synth.handle_control(ControlEvent::LoadPreset {
-            layer: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None,
+        let params = PatchParams::from_map(&patches[idx].params);
+        synth.set_patches(patches);
+        synth.handle_control(ControlEvent::LoadPatch {
+            part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None, wavetable: None,
         });
         synth.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
         let mut max_val = 0.0_f32;
@@ -3229,20 +3229,21 @@ mod tests {
 
     #[test]
     fn all_presets_no_nan_no_silence() {
-        let presets = crate::preset::load_all_presets();
+        let patches = crate::preset::load_all_patches();
         let mut failures = Vec::new();
 
-        for preset in &presets {
+        for patch in &patches {
             let mut synth = SynthEngine::new(44100.0);
-            let params = PresetParams::from_map(&preset.params);
-            synth.handle_control(ControlEvent::LoadPreset {
-                layer: 0,
+            let params = PatchParams::from_map(&patch.params);
+            synth.handle_control(ControlEvent::LoadPatch {
+                part: 0,
                 params,
                 mod_matrix: ModMatrix::default(),
                 mseg1: None,
                 mseg2: None,
                 pitch_seq: None,
                 lfo_step_params: None,
+                wavetable: None,
             });
             synth.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
 
@@ -3259,15 +3260,15 @@ mod tests {
             }
 
             if has_nan {
-                failures.push(format!("{}: NaN/Inf", preset.name));
+                failures.push(format!("{}: NaN/Inf", patch.name));
             } else if max_val < 0.0001 {
                 // Some presets (like FX/risers) may be very quiet with static note — warn but don't fail
-                eprintln!("WARNING: '{}' very quiet (max={max_val})", preset.name);
+                eprintln!("WARNING: '{}' very quiet (max={max_val})", patch.name);
             }
             if max_val > 50.0 {
-                failures.push(format!("{}: output explosion (max={max_val})", preset.name));
+                failures.push(format!("{}: output explosion (max={max_val})", patch.name));
             } else if max_val > 10.0 {
-                eprintln!("WARNING: '{}' output is hot (max={max_val})", preset.name);
+                eprintln!("WARNING: '{}' output is hot (max={max_val})", patch.name);
             }
         }
 
@@ -3278,13 +3279,13 @@ mod tests {
 
     #[test]
     fn no_notes_produces_silence() {
-        let presets = crate::preset::load_all_presets();
+        let patches = crate::preset::load_all_patches();
         // Test with ALL presets that have ring_mod_mix > 0 — they should be silent without notes
-        for preset in &presets {
+        for patch in &patches {
             let mut synth = SynthEngine::new(44100.0);
-            let params = PresetParams::from_map(&preset.params);
-            synth.handle_control(ControlEvent::LoadPreset {
-                layer: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None,
+            let params = PatchParams::from_map(&patch.params);
+            synth.handle_control(ControlEvent::LoadPatch {
+                part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None, wavetable: None,
             });
             // No notes — should be completely silent
             let mut max_val = 0.0_f32;
@@ -3296,7 +3297,7 @@ mod tests {
                     max_val = max_val.max(buf_l[i].abs()).max(buf_r[i].abs());
                 }
             }
-            assert!(max_val < 0.0001, "preset '{}' hums without notes: max={max_val}", preset.name);
+            assert!(max_val < 0.0001, "preset '{}' hums without notes: max={max_val}", patch.name);
         }
     }
 

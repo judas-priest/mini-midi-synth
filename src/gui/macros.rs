@@ -6,7 +6,7 @@ use super::App;
 impl App {
     /// Draw the macro panel (called from params.rs, near top of synth params).
     pub(super) fn draw_macros(&mut self, ui: &mut egui::Ui) {
-        let layer = self.active_layer;
+        let part = self.active_part;
 
         ui.horizontal(|ui| {
             ui.strong("Macros");
@@ -15,13 +15,13 @@ impl App {
         ui.add_space(2.0);
 
         // 8 macros in a 4×2 grid
-        egui::Grid::new(format!("macros_{layer}"))
+        egui::Grid::new(format!("macros_{part}"))
             .num_columns(4)
             .spacing([8.0, 4.0])
             .show(ui, |ui| {
                 for i in 0..8 {
-                    let val = self.layers[layer].macro_vals[i];
-                    let name = self.layers[layer].macro_names.get(i)
+                    let val = self.parts[part].macro_vals[i];
+                    let name = self.parts[part].macro_names.get(i)
                         .cloned()
                         .unwrap_or_else(|| format!("Macro {}", i + 1));
 
@@ -35,7 +35,7 @@ impl App {
                                 .hint_text(format!("Macro {}", i + 1))
                         );
                         if resp.changed() {
-                            if let Some(n) = self.layers[layer].macro_names.get_mut(i) {
+                            if let Some(n) = self.parts[part].macro_names.get_mut(i) {
                                 *n = name_edit.clone();
                             }
                             // Persist name into edited_params as a special float key
@@ -50,14 +50,14 @@ impl App {
                                 .show_value(true)
                                 .text("")
                         ).changed() {
-                            self.layers[layer].macro_vals[i] = v;
-                            // Update edited_params so it's saved in preset
-                            self.layers[layer].edited_params.insert(
+                            self.parts[part].macro_vals[i] = v;
+                            // Update edited_params so it's saved in patch
+                            self.parts[part].edited_params.insert(
                                 format!("macro_{i}"), v
                             );
                             // Send to audio engine immediately (real-time)
                             let _ = self.ctrl_tx.push(ControlEvent::SetMacro {
-                                layer, index: i, value: v,
+                                part, index: i, value: v,
                             });
                         }
                     });
