@@ -3414,7 +3414,7 @@ mod tests {
             rms_clean += c * c;
             rms_driven += d * d;
         }
-        assert!(rms_driven != rms_clean, "Drive had no effect on output");
+        assert!(rms_driven > rms_clean, "Drive should increase RMS (adds harmonics), clean={rms_clean}, driven={rms_driven}");
     }
 }
 
