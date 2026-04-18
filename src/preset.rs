@@ -190,6 +190,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Lead", "aw_hardvac_lead", include_str!("../presets/aw_hardvac_lead.json")),
     ("Lead", "twist_wavetable", include_str!("../presets/twist_wavetable.json")),
     ("Lead", "polivoks_lead", include_str!("../presets/polivoks_lead.json")),
+    ("Lead", "mick_gordon_doom", include_str!("../presets/mick_gordon_doom.json")),
     // Pad
     ("Pad", "warm_pad", include_str!("../presets/warm_pad.json")),
     ("Pad", "warm_pad_v2",       include_str!("../presets/warm_pad_v2.json")),
