@@ -45,6 +45,8 @@ pub enum FilterType {
     ResWarpAP,     // 34 — SVF with tanh on resonance feedback (Allpass)
     VintageLadderLP, // 35 — Moog ladder with tanh only at input (warmer, linear integrators)
     SVFMorph,      // 36 — SVF with LP/BP/HP morphing via svf_morph parameter
+    PolivoksLP,    // 37 — Polivoks К140УД12 op-amp SVF, lowpass
+    PolivoksBP,    // 38 — Polivoks К140УД12 op-amp SVF, bandpass
 }
 
 impl FilterType {
@@ -87,6 +89,8 @@ impl FilterType {
             34 => Self::ResWarpAP,
             35 => Self::VintageLadderLP,
             36 => Self::SVFMorph,
+            37 => Self::PolivoksLP,
+            38 => Self::PolivoksBP,
             _ => Self::LowPass,
         }
     }
@@ -105,6 +109,10 @@ impl FilterType {
 
     pub fn is_allpass(self) -> bool {
         matches!(self, Self::Allpass)
+    }
+
+    pub fn is_polivoks(self) -> bool {
+        matches!(self, Self::PolivoksLP | Self::PolivoksBP)
     }
 
     #[allow(dead_code)]
@@ -179,6 +187,15 @@ pub struct Filter {
     snh_held: f32,   // held sample value
     // SVF Morph parameter (0=LP, 0.5=BP, 1=HP)
     pub svf_morph: f32,
+    // Polivoks state
+    pv_s1: f32,      // integrator 1 state (bandpass)
+    pv_s2: f32,      // integrator 2 state (lowpass)
+    pv_delay: f32,   // z^-1 for half-sample resonance feedback delay
+    pv_tune: f32,    // frequency coefficient
+    pv_res: f32,     // resonance feedback amount
+    // Polivoks external parameters (set from VoiceParams)
+    pub pv_drive: f32,   // 0..1 input drive
+    pub pv_starve: f32,  // 0..1 power-supply starvation
     // Control-rate coefficient update
     coeff_counter: u8,          // wrapping counter, update every 32 samples
 }
@@ -240,6 +257,13 @@ impl Filter {
             snh_phase: 0.0,
             snh_held: 0.0,
             svf_morph: 0.0,
+            pv_s1: 0.0,
+            pv_s2: 0.0,
+            pv_delay: 0.0,
+            pv_tune: 0.0,
+            pv_res: 0.0,
+            pv_drive: 0.0,
+            pv_starve: 0.0,
             coeff_counter: 7, // so first tick after set_cutoff/set_resonance triggers update
         };
         f.update_coefficients();
@@ -291,6 +315,9 @@ impl Filter {
         self.comb_write = 0;
         self.allpass_x1 = 0.0;
         self.allpass_y1 = 0.0;
+        self.pv_s1 = 0.0;
+        self.pv_s2 = 0.0;
+        self.pv_delay = 0.0;
     }
 
     fn update_coefficients(&mut self) {
@@ -302,6 +329,8 @@ impl Filter {
             self.update_comb_coefficients();
         } else if self.filter_type.is_allpass() {
             self.update_allpass_coefficients();
+        } else if self.filter_type.is_polivoks() {
+            self.update_polivoks_coefficients();
         } else {
             // SVF, Notch, LP24/HP24/BP24/Notch24, K35, OBXd, Tripole, Warp filters
             // all use SVF g/k/a1/a2/a3 coefficients.
@@ -390,6 +419,8 @@ impl Filter {
             FilterType::ResWarpAP => self.tick_resonance_warp(input, 4),
             FilterType::VintageLadderLP => self.tick_vintage_ladder(input),
             FilterType::SVFMorph => self.tick_svf_morph(input),
+            FilterType::PolivoksLP => self.tick_polivoks(input, false),
+            FilterType::PolivoksBP => self.tick_polivoks(input, true),
             _ => self.tick_svf(input),
         }
     }
