@@ -193,8 +193,7 @@ pub struct Filter {
     pv_delay: f32,   // z^-1 for half-sample resonance feedback delay
     pv_tune: f32,    // frequency coefficient
     pv_res: f32,     // resonance feedback amount
-    // Polivoks external parameters (set from VoiceParams)
-    pub pv_drive: f32,   // 0..1 input drive
+    pub pv_drive: f32,   // 0..1 input drive (set from VoiceParams)
     pub pv_starve: f32,  // 0..1 power-supply starvation
     // Control-rate coefficient update
     coeff_counter: u8,          // wrapping counter, update every 32 samples
