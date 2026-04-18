@@ -686,6 +686,11 @@ impl App {
             if filter_type == 36 {
                 changed |= self.param_slider(ui, "svf_morph", "LP\u{2194}HP", 0.0, 1.0, false);
             }
+            // Polivoks sliders: only shown when filter type is PolivoksLP (37) or PolivoksBP (38)
+            if filter_type == 37 || filter_type == 38 {
+                changed |= self.param_slider(ui, "filter_drive", "Drive", 0.0, 1.0, false);
+                changed |= self.param_slider(ui, "filter_starve", "Starve", 0.0, 1.0, false);
+            }
         }
 
         // Filter routing (not available with formant filter)
