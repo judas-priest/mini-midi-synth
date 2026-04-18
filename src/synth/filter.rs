@@ -533,13 +533,13 @@ impl Filter {
 
     fn update_polivoks_coefficients(&mut self) {
         use std::f32::consts::PI;
-        // Normalized frequency at 2x oversampled rate (tick runs 2x per host sample)
-        let fc = (self.cutoff / (self.sample_rate * 2.0)).min(0.45);
-        // Same exponential integrator formula as Moog tune
-        let fcr = 1.0 - (-2.0 * PI * fc).exp();
-        self.pv_tune = fcr / VT_INV;
-        // Resonance: 0..1 → 0..0.95 (self-oscillation at top but unmapped to musical scale)
-        self.pv_res = self.resonance * 0.95;
+        // Slew rate per sample at 2x oversampled rate.
+        // К140УД12 bandwidth is directly proportional to bias current → linear slew limit.
+        // max_slew = 2π * fc / oversample_rate
+        let fc = self.cutoff.min(self.sample_rate * 0.45);
+        self.pv_tune = 2.0 * PI * fc / (self.sample_rate * 2.0);
+        // Resonance: 0..1 → 0..1.8 (self-oscillation starts ~0.9, trapezoidal above that)
+        self.pv_res = self.resonance * 1.8;
     }
 
     fn update_diode_coefficients(&mut self) {
@@ -794,45 +794,51 @@ impl Filter {
         self.moog_stage[3] * self.moog_gain_comp
     }
 
-    /// Polivoks — К140УД12 op-amp state-variable filter with 2x oversampling.
+    /// Polivoks — К140УД12 slew-rate limiting filter, 2x oversampled.
     ///
-    /// Key behaviors vs clean SVF:
-    /// - Asymmetric clipping at input (op-amp slew asymmetry)
-    /// - Resonance suppression at high signal levels (authentic hardware behavior)
-    /// - g modulated by Starve (power-supply-starved slew rate limiting)
-    /// - "Bubble" effect emerges naturally from the nonlinear feedback loop
+    /// The К140УД12 is a current-controlled programmable op-amp used as a slew limiter,
+    /// not an exponential integrator. This is the fundamental difference from all other
+    /// filters here: the integrator step is clamped (linear rate limit), not multiplied
+    /// (exponential decay). This produces trapezoidal self-oscillation at high resonance —
+    /// the defining sound of the Polivoks.
+    ///
+    /// Asymmetric slew: rising edge is ~30% faster than falling (FET output stage asymmetry
+    /// in the original circuit — T15 low impedance sourcing vs T16 high impedance sinking).
+    ///
+    /// Starve = reduced supply current → reduced max slew at large signal amplitudes →
+    /// the characteristic "bubble" instability when resonance meets power-supply sag.
     fn tick_polivoks(&mut self, input: f32, bandpass: bool) -> f32 {
-        let tune = self.pv_tune;
-        let base_res = self.pv_res;
-        // Drive: 0..1 → 1..4x input gain
+        let max_slew = self.pv_tune;
+        let res = self.pv_res;
         let drive_gain = 1.0 + self.pv_drive * 3.0;
         let starve = self.pv_starve;
 
-        let mut v1 = 0.0_f32;
-        let mut v2 = 0.0_f32;
-
         for _ in 0..2 {
-            // Half-sample feedback delay (same trick as Moog for stability)
+            // Resonance feedback from LP output (half-sample delay for stability)
             let feedback = (self.pv_s2 + self.pv_delay) * 0.5;
             self.pv_delay = self.pv_s2;
 
-            // Resonance suppression at high input levels — authentic К140УД12 behavior
-            let eff_res = base_res * (1.0 - starve * input.abs() * 0.5).max(0.0);
+            let x = (input * drive_gain) - res * feedback;
 
-            // Asymmetric clip on driven input (models op-amp slew asymmetry)
-            let x = asym_clip((input - eff_res * feedback) * drive_gain);
+            // Stage 1: slew-rate limited integrator — asymmetric rise/fall (FET output stage)
+            // Starve reduces max slew when signal is large (power-supply sag behavior)
+            let sag = (1.0 - starve * self.pv_s1.abs() * 0.4).max(0.2);
+            let delta1 = x - self.pv_s1;
+            let slew1_up   = max_slew * 1.3 * sag;  // faster rise
+            let slew1_down = max_slew * sag;          // slower fall
+            self.pv_s1 += if delta1 > 0.0 {
+                delta1.min(slew1_up)
+            } else {
+                delta1.max(-slew1_down)
+            };
 
-            // Starve modulates integrator gain — slew rate limiting under power starvation
-            let g_eff = tune * (1.0 - starve * self.pv_s1.abs() * 0.3).clamp(0.1, 1.0);
-
-            // Two one-pole integrators (SVF topology)
-            v1 = self.pv_s1 + g_eff * (x - self.pv_s1);      // bandpass
-            v2 = self.pv_s2 + g_eff * (v1 - self.pv_s2);     // lowpass
-            self.pv_s1 = (2.0 * v1 - self.pv_s1).clamp(-4.0, 4.0);
-            self.pv_s2 = (2.0 * v2 - self.pv_s2).clamp(-4.0, 4.0);
+            // Stage 2: second slew-rate limited integrator (symmetric — no output FET asymmetry)
+            let delta2 = self.pv_s1 - self.pv_s2;
+            let slew2 = max_slew * (1.0 - starve * self.pv_s2.abs() * 0.2).max(0.2);
+            self.pv_s2 += delta2.clamp(-slew2, slew2);
         }
 
-        if bandpass { v1 } else { v2 }
+        if bandpass { self.pv_s1 } else { self.pv_s2 }
     }
 
     /// SVF Morph — SVF with LP/BP/HP morphing via svf_morph parameter.
@@ -936,17 +942,6 @@ impl Filter {
         // Mix: mostly stage 3 with a touch of stage 4 for smoothness
         let raw = self.diode_stage[2] * 0.8 + self.diode_stage[3] * 0.2;
         raw * gain_comp
-    }
-}
-
-/// Asymmetric soft clipper modeling К140УД12 op-amp slew asymmetry.
-/// Positive half clips harder (forward saturation), negative softer.
-#[inline(always)]
-fn asym_clip(x: f32) -> f32 {
-    if x >= 0.0 {
-        fast_tanh(x * 1.2) * 0.9
-    } else {
-        fast_tanh(x * 0.7)
     }
 }
 
