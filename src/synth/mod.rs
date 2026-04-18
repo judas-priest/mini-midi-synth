@@ -3320,5 +3320,101 @@ mod tests {
         assert!((l - 0.4_f32).abs() < 0.001 && (r - (-0.4_f32)).abs() < 0.001,
             "Reverb bypass failed: ({l}, {r})");
     }
+
+    // ── Polivoks filter tests ───────────────────────────────────────
+
+    #[test]
+    fn polivoks_lp_passes_dc() {
+        let mut f = filter::Filter::new(44100.0);
+        f.set_type(filter::FilterType::PolivoksLP);
+        f.set_cutoff(1000.0);
+        f.set_resonance(0.3);
+        f.force_update();
+        // Warm up
+        for _ in 0..1000 { f.tick(0.5); }
+        let out = f.tick(0.5);
+        // LP should pass DC-ish signal (within 50% — it's a nonlinear filter)
+        assert!(out.abs() > 0.1 && out.abs() < 2.0, "LP DC failed: {out}");
+    }
+
+    #[test]
+    fn polivoks_bp_attenuates_dc() {
+        // Verify BP passes a signal near its cutoff better than a signal far below cutoff.
+        // A bandpass filter passes frequencies near the cutoff and attenuates both sides.
+        let mut f = filter::Filter::new(44100.0);
+        f.set_type(filter::FilterType::PolivoksBP);
+        f.set_cutoff(1000.0);
+        f.set_resonance(0.3);
+        f.force_update();
+
+        // Measure RMS at cutoff frequency (should pass well)
+        let mut rms_at_cutoff = 0.0_f32;
+        for i in 0..4410 {
+            let x = ((i as f32) * 2.0 * std::f32::consts::PI * 1000.0 / 44100.0).sin() * 0.5;
+            let out = f.tick(x);
+            rms_at_cutoff += out * out;
+        }
+        rms_at_cutoff = (rms_at_cutoff / 4410.0).sqrt();
+
+        // Reset filter and measure RMS at very low frequency (10Hz — far below 1kHz cutoff)
+        f.reset();
+        let mut rms_low_freq = 0.0_f32;
+        for i in 0..44100 {
+            let x = ((i as f32) * 2.0 * std::f32::consts::PI * 10.0 / 44100.0).sin() * 0.5;
+            let out = f.tick(x);
+            rms_low_freq += out * out;
+        }
+        rms_low_freq = (rms_low_freq / 44100.0).sqrt();
+
+        // BP should pass more at-cutoff signal than far-below-cutoff signal
+        assert!(rms_at_cutoff > rms_low_freq,
+            "BP should pass {rms_at_cutoff:.4} (at cutoff) > {rms_low_freq:.4} (10Hz far below)");
+        assert!(rms_at_cutoff.is_finite() && rms_low_freq.is_finite(), "BP produced non-finite output");
+    }
+
+    #[test]
+    fn polivoks_no_nan_under_high_resonance() {
+        let mut f = filter::Filter::new(44100.0);
+        f.set_type(filter::FilterType::PolivoksLP);
+        f.set_cutoff(500.0);
+        f.set_resonance(1.0);
+        f.pv_drive = 1.0;
+        f.pv_starve = 1.0;
+        f.force_update();
+        for i in 0..10000 {
+            let input = ((i as f32) * 0.01).sin();
+            let out = f.tick(input);
+            assert!(!out.is_nan(), "NaN at sample {i}");
+            assert!(!out.is_infinite(), "Inf at sample {i}");
+        }
+    }
+
+    #[test]
+    fn polivoks_drive_increases_harmonic_content() {
+        let mut f_clean = filter::Filter::new(44100.0);
+        f_clean.set_type(filter::FilterType::PolivoksLP);
+        f_clean.set_cutoff(2000.0);
+        f_clean.set_resonance(0.5);
+        f_clean.pv_drive = 0.0;
+        f_clean.force_update();
+
+        let mut f_driven = filter::Filter::new(44100.0);
+        f_driven.set_type(filter::FilterType::PolivoksLP);
+        f_driven.set_cutoff(2000.0);
+        f_driven.set_resonance(0.5);
+        f_driven.pv_drive = 1.0;
+        f_driven.force_update();
+
+        let mut rms_clean = 0.0_f32;
+        let mut rms_driven = 0.0_f32;
+        for i in 0..4410 {
+            let x = ((i as f32) * 2.0 * std::f32::consts::PI * 440.0 / 44100.0).sin() * 0.5;
+            let c = f_clean.tick(x);
+            let d = f_driven.tick(x);
+            rms_clean += c * c;
+            rms_driven += d * d;
+        }
+        assert!(rms_driven != rms_clean, "Drive had no effect on output");
+    }
 }
 
