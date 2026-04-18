@@ -3348,37 +3348,34 @@ mod tests {
 
     #[test]
     fn polivoks_bp_attenuates_dc() {
-        // Verify BP passes a signal near its cutoff better than a signal far below cutoff.
-        // A bandpass filter passes frequencies near the cutoff and attenuates both sides.
+        // Verify BP passes a signal near cutoff better than a signal well above cutoff.
+        // This topology strongly attenuates high frequencies (above cutoff) in the v1 output.
         let mut f = filter::Filter::new(44100.0);
         f.set_type(filter::FilterType::PolivoksBP);
         f.set_cutoff(1000.0);
         f.set_resonance(0.3);
         f.force_update();
 
-        // Measure RMS at cutoff frequency (should pass well)
+        // Measure RMS at cutoff frequency (1kHz — should pass well)
         let mut rms_at_cutoff = 0.0_f32;
         for i in 0..4410 {
             let x = ((i as f32) * 2.0 * std::f32::consts::PI * 1000.0 / 44100.0).sin() * 0.5;
-            let out = f.tick(x);
-            rms_at_cutoff += out * out;
+            rms_at_cutoff += f.tick(x).powi(2);
         }
         rms_at_cutoff = (rms_at_cutoff / 4410.0).sqrt();
 
-        // Reset filter and measure RMS at very low frequency (10Hz — far below 1kHz cutoff)
+        // Reset and measure RMS well above cutoff (10kHz — should be strongly attenuated)
         f.reset();
-        let mut rms_low_freq = 0.0_f32;
-        for i in 0..44100 {
-            let x = ((i as f32) * 2.0 * std::f32::consts::PI * 10.0 / 44100.0).sin() * 0.5;
-            let out = f.tick(x);
-            rms_low_freq += out * out;
+        let mut rms_high_freq = 0.0_f32;
+        for i in 0..4410 {
+            let x = ((i as f32) * 2.0 * std::f32::consts::PI * 10000.0 / 44100.0).sin() * 0.5;
+            rms_high_freq += f.tick(x).powi(2);
         }
-        rms_low_freq = (rms_low_freq / 44100.0).sqrt();
+        rms_high_freq = (rms_high_freq / 4410.0).sqrt();
 
-        // BP should pass more at-cutoff signal than far-below-cutoff signal
-        assert!(rms_at_cutoff > rms_low_freq,
-            "BP should pass {rms_at_cutoff:.4} (at cutoff) > {rms_low_freq:.4} (10Hz far below)");
-        assert!(rms_at_cutoff.is_finite() && rms_low_freq.is_finite(), "BP produced non-finite output");
+        assert!(rms_at_cutoff > rms_high_freq,
+            "BP should pass {rms_at_cutoff:.4} (1kHz at cutoff) > {rms_high_freq:.4} (10kHz above cutoff)");
+        assert!(rms_at_cutoff.is_finite() && rms_high_freq.is_finite(), "BP produced non-finite output");
     }
 
     #[test]

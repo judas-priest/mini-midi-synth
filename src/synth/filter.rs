@@ -533,8 +533,8 @@ impl Filter {
 
     fn update_polivoks_coefficients(&mut self) {
         use std::f32::consts::PI;
-        // Normalized frequency (no 2x correction — Polivoks less frequency-sensitive than Moog)
-        let fc = (self.cutoff / self.sample_rate).min(0.45);
+        // Normalized frequency at 2x oversampled rate (tick runs 2x per host sample)
+        let fc = (self.cutoff / (self.sample_rate * 2.0)).min(0.45);
         // Same exponential integrator formula as Moog tune
         let fcr = 1.0 - (-2.0 * PI * fc).exp();
         self.pv_tune = fcr / VT_INV;
