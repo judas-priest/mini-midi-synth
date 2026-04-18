@@ -1,0 +1,27 @@
+{
+  "name": "Polivoks Lead",
+  "category": "Lead",
+  "params": {
+    "osc1_type": 1,
+    "osc1_level": 0.7,
+    "osc1_detune": 0.0,
+    "osc2_type": 2,
+    "osc2_level": 0.5,
+    "osc2_detune": -7.0,
+    "num_oscs": 2,
+    "filter_type": 37,
+    "filter_cutoff": 1200.0,
+    "filter_resonance": 0.65,
+    "filter_drive": 0.4,
+    "filter_starve": 0.2,
+    "filter_env_amount": 0.4,
+    "amp_attack": 0.002,
+    "amp_decay": 0.08,
+    "amp_sustain": 0.7,
+    "amp_release": 0.2,
+    "filter_attack": 0.001,
+    "filter_decay": 0.12,
+    "filter_sustain": 0.0,
+    "filter_release": 0.1
+  }
+}
