@@ -665,6 +665,8 @@ impl Part {
             inter_ws_drive: self.params.inter_ws_drive * 4.0 + 0.5,
             inter_ws_mix: self.params.inter_ws_mix,
             svf_morph: self.params.svf_morph,
+            filter_drive: self.params.filter_drive,
+            filter_starve: self.params.filter_starve,
         }
     }
 
@@ -1059,6 +1061,9 @@ pub struct PatchParams {
     inter_ws_mode: f32, inter_ws_drive: f32, inter_ws_mix: f32,
     // SVF Morph filter parameter (0=LP, 0.5=BP, 1=HP)
     pub svf_morph: f32,
+    // Polivoks filter parameters
+    pub filter_drive: f32,
+    pub filter_starve: f32,
     // Airwindows
     airwindows_mode: f32,
     airwindows_drive: f32,
@@ -1166,6 +1171,8 @@ impl Default for PatchParams {
             osc_ws_mode: 0.0, osc_ws_drive: 0.5, osc_ws_mix: 0.0,
             inter_ws_mode: 0.0, inter_ws_drive: 0.5, inter_ws_mix: 0.0,
             svf_morph: 0.0,
+            filter_drive: 0.0,
+            filter_starve: 0.0,
             airwindows_mode: 0.0, airwindows_drive: 0.5, airwindows_mix: 0.0,
             fx_chain: FxChain::default(),
         }
@@ -1340,6 +1347,8 @@ impl PatchParams {
             inter_ws_mode: p("inter_ws_mode", 0.0), inter_ws_drive: p("inter_ws_drive", 0.5),
             inter_ws_mix: p("inter_ws_mix", 0.0),
             svf_morph: p("svf_morph", 0.0),
+            filter_drive: p("filter_drive", 0.0),
+            filter_starve: p("filter_starve", 0.0),
             airwindows_mode: p("airwindows_mode", 0.0),
             airwindows_drive: p("airwindows_drive", 0.5),
             airwindows_mix: p("airwindows_mix", 0.0),

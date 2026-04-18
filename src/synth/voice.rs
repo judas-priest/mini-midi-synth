@@ -388,6 +388,8 @@ impl Voice {
             self.filter.set_type(filter_type);
             self.filter.set_resonance(params.filter_resonance);
             self.filter.svf_morph = params.svf_morph;
+            self.filter.pv_drive = params.filter_drive;
+            self.filter.pv_starve = params.filter_starve;
             self.filter.reset();
 
             // Filter routing + filter 2
@@ -913,6 +915,9 @@ pub struct VoiceParams {
     pub inter_ws_mix: f32,
     // SVF Morph filter parameter
     pub svf_morph: f32,
+    // Polivoks filter parameters
+    pub filter_drive: f32,
+    pub filter_starve: f32,
 }
 
 fn midi_to_freq(note: u8) -> f32 {
