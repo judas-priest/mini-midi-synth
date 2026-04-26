@@ -1,6 +1,8 @@
 //! Airwindows-inspired DSP algorithms, modes 0-32.
 #![allow(dead_code)]
 
+const HALF_PI_64: f64 = std::f64::consts::FRAC_PI_2;
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 #[inline(always)]
@@ -203,7 +205,7 @@ impl AirwindowsHardVacuum {
         if multistage > 1.0 { multistage *= multistage; }
         let warmth: f64 = 0.2;
         let inv_warmth = 1.0 - warmth;
-        let warmth_div = warmth / 1.57079633;
+        let warmth_div = warmth / std::f64::consts::FRAC_PI_2;
         let aura: f64 = 0.4 * std::f64::consts::PI;
 
         let mut sl = in_l as f64;
@@ -231,14 +233,14 @@ impl AirwindowsHardVacuum {
             let positive = drv - warmth_div;
             let negative = drv + warmth_div;
 
-            let mut brl = (sl.abs() + skew_l).min(1.57079633);
+            let mut brl = (sl.abs() + skew_l).min(HALF_PI_64);
             brl = brl.sin() * drv;
-            brl = (brl + skew_l).min(1.57079633);
+            brl = (brl + skew_l).min(HALF_PI_64);
             brl = brl.sin();
 
-            let mut brr = (sr.abs() + skew_r).min(1.57079633);
+            let mut brr = (sr.abs() + skew_r).min(HALF_PI_64);
             brr = brr.sin() * drv;
-            brr = (brr + skew_r).min(1.57079633);
+            brr = (brr + skew_r).min(HALF_PI_64);
             brr = brr.sin();
 
             if sl > 0.0 {
@@ -469,11 +471,11 @@ impl AirwindowsIronOxide5 {
         self.flip = !self.flip;
 
         // bridge rectifier sin saturation
-        let mut br = sl.abs().min(1.57079633);
+        let mut br = sl.abs().min(HALF_PI_64);
         br = br.sin();
         sl = if sl > 0.0 { br } else { -br };
 
-        br = sr.abs().min(1.57079633);
+        br = sr.abs().min(HALF_PI_64);
         br = br.sin();
         sr = if sr > 0.0 { br } else { -br };
 
@@ -724,12 +726,12 @@ impl AirwindowsChromeOxide {
         // skip interpolation noise for simplicity
 
         let mut br = sl.abs() * density_a;
-        if br > 1.57079633 { br = 1.57079633; }
+        if br > HALF_PI_64 { br = HALF_PI_64; }
         br = br.sin();
         sl = if sl > 0.0 { br / density_a } else { -br / density_a };
 
         br = sr.abs() * density_a;
-        if br > 1.57079633 { br = 1.57079633; }
+        if br > HALF_PI_64 { br = HALF_PI_64; }
         br = br.sin();
         sr = if sr > 0.0 { br / density_a } else { -br / density_a };
 
@@ -807,10 +809,10 @@ impl AirwindowsPressure4 {
         self.flip = !self.flip;
 
         // bridge rectifier limiter
-        let mut br = sl.abs().min(1.57079633);
+        let mut br = sl.abs().min(HALF_PI_64);
         br = br.sin();
         sl = if sl > 0.0 { br } else { -br };
-        br = sr.abs().min(1.57079633);
+        br = sr.abs().min(HALF_PI_64);
         br = br.sin();
         sr = if sr > 0.0 { br } else { -br };
 
@@ -1089,7 +1091,7 @@ impl AirwindowsPowerSag {
         if clamp_l < 0.5 { clamp_l = 0.5; }
         let thickness_l = (1.0 - self.control_l) * 2.0 - 1.0;
         let out_l = thickness_l.abs();
-        let mut br_l = sl.abs().min(1.57079633);
+        let mut br_l = sl.abs().min(HALF_PI_64);
         br_l = if thickness_l > 0.0 { br_l.sin() } else { 1.0 - br_l.cos() };
         sl = if sl > 0.0 { sl * (1.0 - out_l) + br_l * out_l } else { sl * (1.0 - out_l) - br_l * out_l };
         sl *= clamp_l;
@@ -1105,7 +1107,7 @@ impl AirwindowsPowerSag {
         if clamp_r < 0.5 { clamp_r = 0.5; }
         let thickness_r = (1.0 - self.control_r) * 2.0 - 1.0;
         let out_r = thickness_r.abs();
-        let mut br_r = sr.abs().min(1.57079633);
+        let mut br_r = sr.abs().min(HALF_PI_64);
         br_r = if thickness_r > 0.0 { br_r.sin() } else { 1.0 - br_r.cos() };
         sr = if sr > 0.0 { sr * (1.0 - out_r) + br_r * out_r } else { sr * (1.0 - out_r) - br_r * out_r };
         sr *= clamp_r;
@@ -2336,12 +2338,12 @@ impl AirwindowsBussColors4 {
 
         // sin saturation
         let mut br = sl.abs() * density;
-        if br > 1.57079633 { br = 1.57079633; }
+        if br > HALF_PI_64 { br = HALF_PI_64; }
         br = br.sin();
         sl = if sl > 0.0 { br / density } else { -br / density };
 
         br = sr.abs() * density;
-        if br > 1.57079633 { br = 1.57079633; }
+        if br > HALF_PI_64 { br = HALF_PI_64; }
         br = br.sin();
         sr = if sr > 0.0 { br / density } else { -br / density };
 

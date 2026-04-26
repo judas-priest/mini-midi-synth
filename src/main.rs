@@ -243,13 +243,16 @@ fn main() -> Result<()> {
 fn run_headless() -> Result<()> {
     static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
-    // Signal handler for graceful shutdown
-    unsafe {
-        libc::signal(libc::SIGINT, signal_handler as *const () as usize);
-        libc::signal(libc::SIGTERM, signal_handler as *const () as usize);
-    }
+    // Signal handler for graceful shutdown (sigaction is MT-safe, unlike signal)
     extern "C" fn signal_handler(_sig: i32) {
         SHUTDOWN.store(true, Ordering::SeqCst);
+    }
+    unsafe {
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = signal_handler as *const () as usize;
+        sa.sa_flags = libc::SA_RESTART;
+        libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
+        libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
     }
 
     let mut c = init_common()?;
@@ -272,24 +275,7 @@ fn run_headless() -> Result<()> {
 
         // Send preset with full params
         if let Some(patch) = c.patches.get(pidx) {
-            let params = synth::PatchParams::from_map(&patch.params);
-            let mut mod_matrix = synth::mod_matrix::ModMatrix::default();
-            mod_matrix.load_from_params(&patch.params);
-            let mseg1 = if patch.params.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
-                Some(synth::mseg::Mseg::load_from_params(&patch.params))
-            } else {
-                None
-            };
-            let mut pitch_seq = synth::step_seq::PitchSequencer::new();
-            pitch_seq.load_from_params(&patch.params);
-            let lfo_step_params = Some(patch.params.clone());
-            let wavetable = patch.wavetable_data.as_ref().map(|d| {
-                (d.clone(), patch.wavetable_frames, patch.wavetable_frame_size)
-            });
-            let _ = c.ctrl_tx.push(synth::ControlEvent::LoadPatch {
-                part: i, params, mod_matrix, mseg1, mseg2: None,
-                pitch_seq: Some(pitch_seq), lfo_step_params, wavetable,
-            });
+            let _ = c.ctrl_tx.push(synth::ControlEvent::load_patch_from(i, patch));
         }
 
         let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartEnabled { part: i, enabled });
@@ -401,24 +387,7 @@ fn run_headless() -> Result<()> {
             let idx = pc as usize;
             if idx < c.patches.len() {
                 if let Some(patch) = c.patches.get(idx) {
-                    let params = synth::PatchParams::from_map(&patch.params);
-                    let mut mod_matrix = synth::mod_matrix::ModMatrix::default();
-                    mod_matrix.load_from_params(&patch.params);
-                    let mseg1 = if patch.params.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
-                        Some(synth::mseg::Mseg::load_from_params(&patch.params))
-                    } else {
-                        None
-                    };
-                    let mut pitch_seq = synth::step_seq::PitchSequencer::new();
-                    pitch_seq.load_from_params(&patch.params);
-                    let lfo_step_params = Some(patch.params.clone());
-                    let wavetable = patch.wavetable_data.as_ref().map(|d| {
-                        (d.clone(), patch.wavetable_frames, patch.wavetable_frame_size)
-                    });
-                    let _ = c.ctrl_tx.push(synth::ControlEvent::LoadPatch {
-                        part: 0, params, mod_matrix, mseg1, mseg2: None,
-                        pitch_seq: Some(pitch_seq), lfo_step_params, wavetable,
-                    });
+                    let _ = c.ctrl_tx.push(synth::ControlEvent::load_patch_from(0, patch));
                     eprintln!("[cli] Program Change → {}: {}", idx, patch.name);
                 }
             }

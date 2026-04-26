@@ -19,6 +19,7 @@ fn semitones_to_ratio(semis: f32) -> f32 {
     // 2^xi via bit manipulation (exact for |xi| < 127)
     let int_part = f32::from_bits(((xi + 127).clamp(1, 254) as u32) << 23);
     // 2^xf via minimax polynomial on [0,1)
+    #[allow(clippy::approx_constant)]
     let frac_part = 1.0 + xf * (0.693_147_2 + xf * (0.240_226_5 + xf * (0.055_504_1 + xf * 0.009_618_1)));
     int_part * frac_part
 }

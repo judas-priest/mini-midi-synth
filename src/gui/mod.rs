@@ -933,21 +933,10 @@ impl App {
 
     /// Send edited params to synth engine for a given part
     fn send_edited_params(&mut self, part: usize) {
-        let params = crate::synth::PatchParams::from_map(&self.parts[part].edited_params);
-        let mut mod_matrix = crate::synth::mod_matrix::ModMatrix::default();
-        mod_matrix.load_from_params(&self.parts[part].edited_params);
-        let mseg1 = if self.parts[part].edited_params.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
-            Some(crate::synth::mseg::Mseg::load_from_params(&self.parts[part].edited_params))
-        } else { None };
-        let mut pitch_seq = crate::synth::step_seq::PitchSequencer::new();
-        pitch_seq.load_from_params(&self.parts[part].edited_params);
-        let lfo_step_params = Some(self.parts[part].edited_params.clone());
-        // Pass wavetable data if patch has one loaded
-        let wavetable = self.patches.get(self.parts[part].patch_idx)
-            .and_then(|p| p.wavetable_data.as_ref().map(|d| {
-                (d.clone(), p.wavetable_frames, p.wavetable_frame_size)
-            }));
-        let _ = self.ctrl_tx.push(ControlEvent::LoadPatch { part, params, mod_matrix, mseg1, mseg2: None, pitch_seq: Some(pitch_seq), lfo_step_params, wavetable });
+        let original = self.patches.get(self.parts[part].patch_idx);
+        let _ = self.ctrl_tx.push(ControlEvent::load_patch_from_edited(
+            part, &self.parts[part].edited_params, original,
+        ));
     }
 
     fn send_part_enabled(&mut self, part: usize) {

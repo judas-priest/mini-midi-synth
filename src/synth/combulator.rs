@@ -142,8 +142,8 @@ impl Combulator {
         // comb1 (center): equal L+R
         // comb2 (left):   L only
         // comb3 (right):  R only
-        let wet_l = (out1 * 0.7071 + out2).clamp(-2.0, 2.0);
-        let wet_r = (out1 * 0.7071 + out3).clamp(-2.0, 2.0);
+        let wet_l = (out1 * std::f32::consts::FRAC_1_SQRT_2 + out2).clamp(-2.0, 2.0);
+        let wet_r = (out1 * std::f32::consts::FRAC_1_SQRT_2 + out3).clamp(-2.0, 2.0);
 
         // Wet/dry mix
         let out_l = in_l * (1.0 - mix) + wet_l * mix;

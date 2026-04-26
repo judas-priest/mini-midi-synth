@@ -15,6 +15,31 @@ use super::{
 
 const LFO_TRIGGER_MODE_NAMES: &[&str] = &["Free Run", "Key Trigger", "Random Start", "Random Unipolar"];
 
+fn env_shape_combo(
+    ui: &mut egui::Ui,
+    part: usize,
+    label: &str,
+    param_key: &str,
+    id_salt: &str,
+    params: &mut std::collections::BTreeMap<String, f32>,
+) -> bool {
+    let mut val = params.get(param_key).copied().unwrap_or(0.0) as usize;
+    let mut changed = false;
+    ui.label(label);
+    egui::ComboBox::from_id_salt(format!("{id_salt}_{part}"))
+        .selected_text(*ENV_SHAPE_NAMES.get(val).unwrap_or(&"Sqrt"))
+        .width(90.0)
+        .show_ui(ui, |ui| {
+            for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
+                if ui.selectable_value(&mut val, i, *name).changed() {
+                    params.insert(param_key.into(), val as f32);
+                    changed = true;
+                }
+            }
+        });
+    changed
+}
+
 fn draw_lfo_trigger_mode(
     ui: &mut egui::Ui,
     part: usize,
@@ -786,87 +811,15 @@ impl App {
 
         // Envelope shapes
         ui.horizontal(|ui| {
-            let mut as_ = self.parts[part].edited_params.get("env_attack_shape").copied().unwrap_or(0.0) as usize;
-            ui.label("Atk Shape:");
-            egui::ComboBox::from_id_salt(format!("env_atk_shape_{part}"))
-                .selected_text(*ENV_SHAPE_NAMES.get(as_).unwrap_or(&"Sqrt"))
-                .width(90.0)
-                .show_ui(ui, |ui| {
-                    for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
-                        if ui.selectable_value(&mut as_, i, *name).changed() {
-                            self.parts[part].edited_params.insert("env_attack_shape".into(), as_ as f32);
-                            changed = true;
-                        }
-                    }
-                });
-            let mut ds = self.parts[part].edited_params.get("env_decay_shape").copied().unwrap_or(0.0) as usize;
-            ui.label("Dec:");
-            egui::ComboBox::from_id_salt(format!("env_dec_shape_{part}"))
-                .selected_text(*ENV_SHAPE_NAMES.get(ds).unwrap_or(&"Sqrt"))
-                .width(90.0)
-                .show_ui(ui, |ui| {
-                    for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
-                        if ui.selectable_value(&mut ds, i, *name).changed() {
-                            self.parts[part].edited_params.insert("env_decay_shape".into(), ds as f32);
-                            changed = true;
-                        }
-                    }
-                });
-            let mut rs = self.parts[part].edited_params.get("env_release_shape").copied().unwrap_or(0.0) as usize;
-            ui.label("Rel:");
-            egui::ComboBox::from_id_salt(format!("env_rel_shape_{part}"))
-                .selected_text(*ENV_SHAPE_NAMES.get(rs).unwrap_or(&"Sqrt"))
-                .width(90.0)
-                .show_ui(ui, |ui| {
-                    for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
-                        if ui.selectable_value(&mut rs, i, *name).changed() {
-                            self.parts[part].edited_params.insert("env_release_shape".into(), rs as f32);
-                            changed = true;
-                        }
-                    }
-                });
+            changed |= env_shape_combo(ui, part, "Atk Shape:", "env_attack_shape", "env_atk_shape", &mut self.parts[part].edited_params);
+            changed |= env_shape_combo(ui, part, "Dec:", "env_decay_shape", "env_dec_shape", &mut self.parts[part].edited_params);
+            changed |= env_shape_combo(ui, part, "Rel:", "env_release_shape", "env_rel_shape", &mut self.parts[part].edited_params);
         });
         // Filter envelope shapes
         ui.horizontal(|ui| {
-            let mut fas = self.parts[part].edited_params.get("filter_env_attack_shape").copied().unwrap_or(0.0) as usize;
-            ui.label("Flt Atk:");
-            egui::ComboBox::from_id_salt(format!("fenv_atk_shape_{part}"))
-                .selected_text(*ENV_SHAPE_NAMES.get(fas).unwrap_or(&"Sqrt"))
-                .width(90.0)
-                .show_ui(ui, |ui| {
-                    for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
-                        if ui.selectable_value(&mut fas, i, *name).changed() {
-                            self.parts[part].edited_params.insert("filter_env_attack_shape".into(), fas as f32);
-                            changed = true;
-                        }
-                    }
-                });
-            let mut fds = self.parts[part].edited_params.get("filter_env_decay_shape").copied().unwrap_or(0.0) as usize;
-            ui.label("Dec:");
-            egui::ComboBox::from_id_salt(format!("fenv_dec_shape_{part}"))
-                .selected_text(*ENV_SHAPE_NAMES.get(fds).unwrap_or(&"Sqrt"))
-                .width(90.0)
-                .show_ui(ui, |ui| {
-                    for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
-                        if ui.selectable_value(&mut fds, i, *name).changed() {
-                            self.parts[part].edited_params.insert("filter_env_decay_shape".into(), fds as f32);
-                            changed = true;
-                        }
-                    }
-                });
-            let mut frs = self.parts[part].edited_params.get("filter_env_release_shape").copied().unwrap_or(0.0) as usize;
-            ui.label("Rel:");
-            egui::ComboBox::from_id_salt(format!("fenv_rel_shape_{part}"))
-                .selected_text(*ENV_SHAPE_NAMES.get(frs).unwrap_or(&"Sqrt"))
-                .width(90.0)
-                .show_ui(ui, |ui| {
-                    for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
-                        if ui.selectable_value(&mut frs, i, *name).changed() {
-                            self.parts[part].edited_params.insert("filter_env_release_shape".into(), frs as f32);
-                            changed = true;
-                        }
-                    }
-                });
+            changed |= env_shape_combo(ui, part, "Flt Atk:", "filter_env_attack_shape", "fenv_atk_shape", &mut self.parts[part].edited_params);
+            changed |= env_shape_combo(ui, part, "Dec:", "filter_env_decay_shape", "fenv_dec_shape", &mut self.parts[part].edited_params);
+            changed |= env_shape_combo(ui, part, "Rel:", "filter_env_release_shape", "fenv_rel_shape", &mut self.parts[part].edited_params);
         });
 
         ui.add_space(6.0);

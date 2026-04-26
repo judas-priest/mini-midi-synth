@@ -265,7 +265,15 @@ impl App {
             let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: true });
             self.send_edited_params(i);
             self.send_part_volume(i);
-            self.apply_split_ranges();
+            let split_on = self.parts[ZONE_B].iter().any(|p| p.enabled);
+            if split_on {
+                self.apply_split_ranges();
+            } else {
+                // No split — new part gets full range
+                self.parts[i].min_note = 0;
+                self.parts[i].max_note = 127;
+                self.send_part_range(i);
+            }
             self.active_part = i;
             self.show_drums = false; self.show_midi_seq = false; self.show_fx_chain = false;
         }

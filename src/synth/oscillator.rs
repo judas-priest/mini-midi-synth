@@ -2127,6 +2127,7 @@ impl Oscillator {
 const MODAL_MATERIALS: usize = 10;
 
 /// 10 materials × 16 modes. Ratios relative to fundamental.
+#[allow(clippy::approx_constant)]
 const MODAL_RATIOS: [[f32; 16]; MODAL_MATERIALS] = [
     // 0: Steel Bar
     [1.0, 2.756, 5.404, 8.933, 13.344, 18.637, 24.812, 31.869,
