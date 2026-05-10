@@ -7,6 +7,9 @@ use super::oscillator::{OscType, Oscillator};
 use super::wave_shaper::shape_sample;
 use super::ModulationState;
 
+/// DC blocker coefficient (~6 Hz pole at 48 kHz).
+const DC_BLOCKER_R: f32 = 0.9997;
+
 /// Fast 2^(semitones/12) — replaces expensive libm powf() in the per-sample hot path.
 /// Uses integer trick + 4th-order minimax polynomial for 2^frac.
 /// Max error < 0.00004 (0.004%) across the full audio range.
@@ -52,11 +55,11 @@ fn apply_velocity_curve(v: f32, curve: u8) -> f32 {
 
 #[derive(Clone)]
 pub struct Voice {
-    pub note: u8,
-    pub active: bool,
+    pub(crate) note: u8,
+    pub(crate) active: bool,
     /// Monotonic counter set at note-on for voice-stealing (oldest first).
-    pub age: u64,
-    pub poly_aftertouch: f32,  // 0..1, updated per-note via MIDI 0xA0
+    pub(crate) age: u64,
+    pub(crate) poly_aftertouch: f32,  // 0..1, updated per-note via MIDI 0xA0
     oscs: [Oscillator; 3],
     num_oscs: u8,
     osc_levels: [f32; 3],
@@ -653,7 +656,7 @@ impl Voice {
         if self.osc_ws_mix > 0.001 {
             let mono = (sum_l + sum_r) * 0.5;
             let shaped = shape_sample(mono, self.osc_ws_mode, self.osc_ws_drive);
-            let r = 0.9997_f32;
+            let r = DC_BLOCKER_R;
             let dc_out = shaped - self.osc_ws_dc_x1 + r * self.osc_ws_dc_y1;
             self.osc_ws_dc_x1 = shaped;
             self.osc_ws_dc_y1 = dc_out;
@@ -720,7 +723,7 @@ impl Voice {
         if self.osc_ws_mix > 0.001 {
             let shaped = shape_sample(mix, self.osc_ws_mode, self.osc_ws_drive);
             // DC blocker (~6 Hz pole at typical sample rates)
-            let r = 0.9997_f32;
+            let r = DC_BLOCKER_R;
             let dc_out = shaped - self.osc_ws_dc_x1 + r * self.osc_ws_dc_y1;
             self.osc_ws_dc_x1 = shaped;
             self.osc_ws_dc_y1 = dc_out;

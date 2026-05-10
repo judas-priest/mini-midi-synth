@@ -1,5 +1,8 @@
 /// MIDI input handling via midir + wmidi.
 
+const PITCH_BEND_CENTER: f32 = 8192.0;
+const MIDI_MAX_VAL: f32 = 127.0;
+
 use anyhow::{Context, Result};
 use midir::{MidiInput, MidiInputConnection};
 use rtrb::Producer;
@@ -82,7 +85,7 @@ pub fn connect(
                         }
                         MidiMessage::PitchBendChange(ch, bend) => {
                             let raw = u16::from(bend) as f32;
-                            let normalized = (raw - 8192.0) / 8192.0;
+                            let normalized = (raw - PITCH_BEND_CENTER) / PITCH_BEND_CENTER;
                             Some(MidiEvent::PitchBend { channel: ch.index(), value: normalized })
                         }
                         MidiMessage::ControlChange(ch, cc, val) => {
@@ -90,7 +93,7 @@ pub fn connect(
                             let cc_num = u8::from(cc);
                             let v = u8::from(val);
                             if cc_num == 1 {
-                                Some(MidiEvent::ModWheel { channel, value: v as f32 / 127.0 })
+                                Some(MidiEvent::ModWheel { channel, value: v as f32 / MIDI_MAX_VAL })
                             } else if cc_num >= 1 && cc_num <= 119
                                 && cc_num != 0 && cc_num != 32
                             {
@@ -103,13 +106,13 @@ pub fn connect(
                             Some(MidiEvent::ProgramChange { channel: ch.index(), program: u8::from(program) })
                         }
                         MidiMessage::ChannelPressure(ch, pressure) => {
-                            Some(MidiEvent::Aftertouch { channel: ch.index(), value: u8::from(pressure) as f32 / 127.0 })
+                            Some(MidiEvent::Aftertouch { channel: ch.index(), value: u8::from(pressure) as f32 / MIDI_MAX_VAL })
                         }
                         MidiMessage::PolyphonicKeyPressure(ch, note, pressure) => {
                             Some(MidiEvent::PolyAftertouch {
                                 channel: ch.index(),
                                 note: u8::from(note),
-                                pressure: u8::from(pressure) as f32 / 127.0,
+                                pressure: u8::from(pressure) as f32 / MIDI_MAX_VAL,
                             })
                         }
                         MidiMessage::SysEx(payload) => {
