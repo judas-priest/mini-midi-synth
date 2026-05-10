@@ -1,6 +1,7 @@
 /// Flanger: short modulated delay line with feedback.
 
 use std::f32::consts::PI;
+use super::dsp_utils::advance_phase;
 
 const FLANGER_SIZE: usize = 2048; // ~42ms at 48kHz
 const FLANGER_MASK: usize = FLANGER_SIZE - 1;
@@ -62,8 +63,7 @@ impl Flanger {
 
         // LFO
         let lfo = (self.lfo_phase * 2.0 * PI).sin();
-        self.lfo_phase += self.rate / self.sample_rate;
-        if self.lfo_phase >= 1.0 { self.lfo_phase -= 1.0; }
+        advance_phase(&mut self.lfo_phase, self.rate, self.sample_rate);
 
         let base_samples = self.delay_ms * 0.001 * self.sample_rate;
         let mod_samples = base_samples * self.depth * lfo;

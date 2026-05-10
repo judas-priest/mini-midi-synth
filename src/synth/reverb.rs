@@ -2,6 +2,8 @@
 /// Figure-8 recirculating allpass network with modulated tank for smooth,
 /// dense reverb with excellent stereo image.
 
+use super::dsp_utils::advance_phase;
+
 /// Fast sin approximation for LFO use (Bhaskara I formula). Max error ~0.17%.
 #[inline(always)]
 fn fast_sin(x: f32) -> f32 {
@@ -349,10 +351,8 @@ impl Reverb {
         let damp = damping * 0.9; // 0..0.9
 
         // --- LFO (two independent LFOs with irrational rate ratio) ---
-        self.lfo_phase_l += LFO_RATE_L_HZ / self.sample_rate;
-        if self.lfo_phase_l >= 1.0 { self.lfo_phase_l -= 1.0; }
-        self.lfo_phase_r += LFO_RATE_R_HZ / self.sample_rate;
-        if self.lfo_phase_r >= 1.0 { self.lfo_phase_r -= 1.0; }
+        advance_phase(&mut self.lfo_phase_l, LFO_RATE_L_HZ, self.sample_rate);
+        advance_phase(&mut self.lfo_phase_r, LFO_RATE_R_HZ, self.sample_rate);
         let lfo_sin = fast_sin(self.lfo_phase_l);
         let lfo_cos = fast_sin(self.lfo_phase_r);
 

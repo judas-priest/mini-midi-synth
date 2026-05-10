@@ -4,6 +4,8 @@
 /// ~40–350 RPM) with modulated delay lines for Doppler shift and AM for tremolo.
 /// A one-pole crossover splits the signal between horn and rotor paths.
 
+use super::dsp_utils::buf_read_linear;
+
 const BUF_SIZE: usize = 2048; // covers up to ~46ms delay at 44100 Hz
 
 pub struct RotarySpeaker {
@@ -91,7 +93,7 @@ impl RotarySpeaker {
         self.horn_buf[self.horn_write] = treble;
         self.horn_write = (self.horn_write + 1) % BUF_SIZE;
 
-        let horn_wet = read_linear(&self.horn_buf, self.horn_write, horn_delay);
+        let horn_wet = buf_read_linear(&*self.horn_buf, self.horn_write, horn_delay);
         // AM tremolo (Doppler causes both AM and FM; we add a small AM component)
         let horn_am = 1.0 + 0.15 * horn_lfo;
         let horn_out = horn_wet * horn_am;
@@ -107,7 +109,7 @@ impl RotarySpeaker {
         self.rotor_buf[self.rotor_write] = bass;
         self.rotor_write = (self.rotor_write + 1) % BUF_SIZE;
 
-        let rotor_wet = read_linear(&self.rotor_buf, self.rotor_write, rotor_delay);
+        let rotor_wet = buf_read_linear(&*self.rotor_buf, self.rotor_write, rotor_delay);
         let rotor_am = 1.0 + 0.10 * rotor_lfo;
         let rotor_out = rotor_wet * rotor_am;
         let rotor_l = rotor_out * (1.0 + 0.3 * rotor_lfo);
@@ -121,12 +123,3 @@ impl RotarySpeaker {
     }
 }
 
-fn read_linear(buf: &[f32; BUF_SIZE], write_pos: usize, delay: f32) -> f32 {
-    let delay = delay.clamp(1.0, (BUF_SIZE - 2) as f32);
-    let read_f = write_pos as f32 - delay;
-    let read_f = if read_f < 0.0 { read_f + BUF_SIZE as f32 } else { read_f };
-    let i0 = read_f as usize % BUF_SIZE;
-    let i1 = (i0 + 1) % BUF_SIZE;
-    let frac = read_f.fract();
-    buf[i0] * (1.0 - frac) + buf[i1] * frac
-}

@@ -4,6 +4,8 @@
 /// Three chorus voices with slightly different delay times and LFO rates.
 /// Anti-aliasing LP filters at each tap (BBD clock noise emulation).
 
+use super::dsp_utils::buf_read_linear;
+
 const BUF: usize = 4096;
 
 pub struct BbdEnsemble {
@@ -81,8 +83,8 @@ impl BbdEnsemble {
             let delay_l = center_samp + depth_samp * lfo;
             let delay_r = center_samp - depth_samp * lfo; // opposite phase for stereo
 
-            let wet_l = read_linear(&self.buf, self.write, delay_l);
-            let wet_r = read_linear(&self.buf, self.write, delay_r);
+            let wet_l = buf_read_linear(&self.buf, self.write, delay_l);
+            let wet_r = buf_read_linear(&self.buf, self.write, delay_r);
 
             // BBD output LP per tap (~8 kHz), SR-independent
             let bbd_out = 1.0 - (-2.0 * std::f32::consts::PI * 8000.0 / sr).exp();
@@ -103,13 +105,3 @@ impl BbdEnsemble {
     }
 }
 
-fn read_linear(buf: &[f32], write_pos: usize, delay: f32) -> f32 {
-    let n = buf.len();
-    let delay = delay.clamp(1.0, (n - 2) as f32);
-    let read_f = write_pos as f32 - delay;
-    let read_f = if read_f < 0.0 { read_f + n as f32 } else { read_f };
-    let i0 = read_f as usize % n;
-    let i1 = (i0 + 1) % n;
-    let frac = read_f.fract();
-    buf[i0] * (1.0 - frac) + buf[i1] * frac
-}

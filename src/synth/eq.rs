@@ -1,7 +1,7 @@
 /// 3-band parametric EQ using RBJ biquad filters.
 /// Low shelf + parametric mid + high shelf.
 
-use std::f32::consts::PI;
+use super::dsp_utils::{rbj_low_shelf, rbj_high_shelf, rbj_peaking};
 
 #[derive(Clone, Copy)]
 struct Biquad {
@@ -16,47 +16,15 @@ impl Biquad {
     }
 
     fn set_low_shelf(&mut self, freq: f32, gain_db: f32, sr: f32) {
-        let a = 10.0_f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * PI * freq / sr;
-        let (sin_w, cos_w) = (w0.sin(), w0.cos());
-        let alpha = sin_w / 2.0 * (2.0_f32).sqrt();
-        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
-
-        let a0 = (a + 1.0) + (a - 1.0) * cos_w + two_sqrt_a_alpha;
-        self.b0 = (a * ((a + 1.0) - (a - 1.0) * cos_w + two_sqrt_a_alpha)) / a0;
-        self.b1 = (2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w)) / a0;
-        self.b2 = (a * ((a + 1.0) - (a - 1.0) * cos_w - two_sqrt_a_alpha)) / a0;
-        self.a1 = (-2.0 * ((a - 1.0) + (a + 1.0) * cos_w)) / a0;
-        self.a2 = ((a + 1.0) + (a - 1.0) * cos_w - two_sqrt_a_alpha) / a0;
+        (self.b0, self.b1, self.b2, self.a1, self.a2) = rbj_low_shelf(freq, gain_db, sr);
     }
 
     fn set_high_shelf(&mut self, freq: f32, gain_db: f32, sr: f32) {
-        let a = 10.0_f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * PI * freq / sr;
-        let (sin_w, cos_w) = (w0.sin(), w0.cos());
-        let alpha = sin_w / 2.0 * (2.0_f32).sqrt();
-        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
-
-        let a0 = (a + 1.0) - (a - 1.0) * cos_w + two_sqrt_a_alpha;
-        self.b0 = (a * ((a + 1.0) + (a - 1.0) * cos_w + two_sqrt_a_alpha)) / a0;
-        self.b1 = (-2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w)) / a0;
-        self.b2 = (a * ((a + 1.0) + (a - 1.0) * cos_w - two_sqrt_a_alpha)) / a0;
-        self.a1 = (2.0 * ((a - 1.0) - (a + 1.0) * cos_w)) / a0;
-        self.a2 = ((a + 1.0) - (a - 1.0) * cos_w - two_sqrt_a_alpha) / a0;
+        (self.b0, self.b1, self.b2, self.a1, self.a2) = rbj_high_shelf(freq, gain_db, sr);
     }
 
     fn set_peaking(&mut self, freq: f32, gain_db: f32, q: f32, sr: f32) {
-        let a = 10.0_f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * PI * freq / sr;
-        let (sin_w, cos_w) = (w0.sin(), w0.cos());
-        let alpha = sin_w / (2.0 * q);
-
-        let a0 = 1.0 + alpha / a;
-        self.b0 = (1.0 + alpha * a) / a0;
-        self.b1 = (-2.0 * cos_w) / a0;
-        self.b2 = (1.0 - alpha * a) / a0;
-        self.a1 = self.b1;
-        self.a2 = (1.0 - alpha / a) / a0;
+        (self.b0, self.b1, self.b2, self.a1, self.a2) = rbj_peaking(freq, gain_db, q, sr);
     }
 
     #[inline(always)]
