@@ -5,6 +5,7 @@
 /// Great for metallic sounds, pitched reverb tails, and formant shaping.
 
 use std::f32::consts::PI;
+use super::dsp_utils::fast_tan;
 
 const MAX_COMB: usize = 4096; // ~93ms at 44100 Hz
 
@@ -108,9 +109,3 @@ impl Resonator {
     }
 }
 
-#[inline(always)]
-fn fast_tan(x: f32) -> f32 {
-    let x2 = x * x;
-    x * (1.0 + x2 * (1.0 / 3.0 + x2 * 2.0 / 15.0))
-        / (1.0 - x2 * (1.0 / 3.0 - x2 * 1.0 / 21.0))
-}

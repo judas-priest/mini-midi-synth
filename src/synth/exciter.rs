@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Exciter — harmonic exciter for adding brightness and "air".
 ///
 /// Algorithm:

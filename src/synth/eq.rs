@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// 3-band parametric EQ using RBJ biquad filters.
 /// Low shelf + parametric mid + high shelf.
 

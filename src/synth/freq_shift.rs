@@ -2,6 +2,7 @@
 /// Algorithm inspired by Surge XT FrequencyShifterEffect.
 
 use std::f32::consts::{PI, TAU};
+use super::dsp_utils::DcBlocker;
 
 /// Simple 2-stage allpass for Hilbert-like quadrature approximation.
 struct QuadAllpass {
@@ -53,11 +54,7 @@ pub struct FreqShift {
     delay_buf_l: [f32; 256],
     delay_buf_r: [f32; 256],
     delay_pos: usize,
-    // DC blocker
-    dc_l: f32,
-    dc_r: f32,
-    dc_prev_l: f32,
-    dc_prev_r: f32,
+    dc: DcBlocker,
     dc_coeff: f32,
 }
 
@@ -73,8 +70,8 @@ impl FreqShift {
             delay_buf_l: [0.0; 256],
             delay_buf_r: [0.0; 256],
             delay_pos: 0,
-            dc_l: 0.0, dc_r: 0.0, dc_prev_l: 0.0, dc_prev_r: 0.0,
-            dc_coeff: 1.0 - (PI * 35.0 / sample_rate),
+            dc: DcBlocker::new(),
+            dc_coeff: DcBlocker::coeff_for(35.0, sample_rate),
         }
     }
 
@@ -86,9 +83,8 @@ impl FreqShift {
         self.allpass_r.reset();
         self.delay_buf_l = [0.0; 256];
         self.delay_buf_r = [0.0; 256];
-        self.dc_l = 0.0; self.dc_r = 0.0;
-        self.dc_prev_l = 0.0; self.dc_prev_r = 0.0;
-        self.dc_coeff = 1.0 - (PI * 35.0 / sr);
+        self.dc.reset();
+        self.dc_coeff = DcBlocker::coeff_for(35.0, sr);
         self.prev_shift_hz = f32::NAN;
     }
 
@@ -148,14 +144,7 @@ impl FreqShift {
         self.delay_buf_r[self.delay_pos] = wet_r;
         self.delay_pos = (self.delay_pos + 1) & 255;
 
-        // DC blocker (35 Hz HP)
-        let dc_coeff = self.dc_coeff;
-        let out_l = wet_l - self.dc_prev_l + dc_coeff * self.dc_l;
-        self.dc_prev_l = wet_l;
-        self.dc_l = out_l;
-        let out_r = wet_r - self.dc_prev_r + dc_coeff * self.dc_r;
-        self.dc_prev_r = wet_r;
-        self.dc_r = out_r;
+        let (out_l, out_r) = self.dc.process(wet_l, wet_r, self.dc_coeff);
 
         let m = mix;
         (in_l * (1.0 - m) + out_l * m, in_r * (1.0 - m) + out_r * m)

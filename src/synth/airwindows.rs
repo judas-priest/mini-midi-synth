@@ -1,5 +1,5 @@
 //! Airwindows-inspired DSP algorithms, modes 0-32.
-#![allow(dead_code)]
+#![allow(dead_code)] // Ported 1:1 from Airwindows C — unused fields are kept for algorithmic completeness.
 
 const HALF_PI_64: f64 = std::f64::consts::FRAC_PI_2;
 

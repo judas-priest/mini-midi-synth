@@ -1,6 +1,7 @@
-#![allow(dead_code)]
 /// Overdrive/Distortion with pre-filter, waveshaping, tone control.
 /// Includes simple 2x oversampling to reduce aliasing.
+
+use super::dsp_utils::DcBlocker;
 
 /// Cheap soft-clip: x / (1 + |x|)
 #[inline(always)]
@@ -20,6 +21,7 @@ fn tube_clip(x: f32, drive: f32) -> f32 {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum DistortionType {
     SoftClip,  // 0
     Tube,      // 1
@@ -28,6 +30,7 @@ pub enum DistortionType {
 }
 
 impl DistortionType {
+    #[allow(dead_code)]
     pub fn from_param(v: f32) -> Self {
         match v as u32 {
             0 => Self::SoftClip,
@@ -48,11 +51,7 @@ pub struct Overdrive {
     // Tone LP filter state (post-distortion)
     tone_l: f32,
     tone_r: f32,
-    // DC blocker state
-    dc_l: f32,
-    dc_r: f32,
-    dc_prev_in_l: f32,
-    dc_prev_in_r: f32,
+    dc: DcBlocker,
     // 2x oversampling: previous input for interpolation
     os_prev_l: f32,
     os_prev_r: f32,
@@ -68,7 +67,7 @@ impl Overdrive {
         Self {
             hp_l: 0.0, hp_r: 0.0, prev_l: 0.0, prev_r: 0.0,
             tone_l: 0.0, tone_r: 0.0,
-            dc_l: 0.0, dc_r: 0.0, dc_prev_in_l: 0.0, dc_prev_in_r: 0.0,
+            dc: DcBlocker::new(),
             os_prev_l: 0.0, os_prev_r: 0.0,
             sample_rate,
             drive: 1.0, tone: 0.5, dist_type: DistortionType::SoftClip, mix: 0.0,
@@ -80,8 +79,7 @@ impl Overdrive {
         self.hp_l = 0.0; self.hp_r = 0.0;
         self.prev_l = 0.0; self.prev_r = 0.0;
         self.tone_l = 0.0; self.tone_r = 0.0;
-        self.dc_l = 0.0; self.dc_r = 0.0;
-        self.dc_prev_in_l = 0.0; self.dc_prev_in_r = 0.0;
+        self.dc.reset();
         self.os_prev_l = 0.0; self.os_prev_r = 0.0;
     }
 
@@ -117,9 +115,6 @@ impl Overdrive {
         let shaped_l = (shaped_l1 + shaped_l2) * 0.5;  // decimate
         self.tone_l += tone_coeff * (shaped_l - self.tone_l);
         let toned_l = self.tone_l * (1.0 - tone_param * 0.3) + shaped_l * tone_param * 0.3;
-        let dc_out_l = toned_l - self.dc_prev_in_l + 0.997 * self.dc_l;
-        self.dc_prev_in_l = toned_l;
-        self.dc_l = dc_out_l;
 
         // Right channel — 2x oversampled waveshaping
         self.hp_r += hp_coeff * (in_r - self.hp_r);
@@ -131,9 +126,8 @@ impl Overdrive {
         let shaped_r = (shaped_r1 + shaped_r2) * 0.5;
         self.tone_r += tone_coeff * (shaped_r - self.tone_r);
         let toned_r = self.tone_r * (1.0 - tone_param * 0.3) + shaped_r * tone_param * 0.3;
-        let dc_out_r = toned_r - self.dc_prev_in_r + 0.997 * self.dc_r;
-        self.dc_prev_in_r = toned_r;
-        self.dc_r = dc_out_r;
+
+        let (dc_out_l, dc_out_r) = self.dc.process(toned_l, toned_r, 0.997);
 
         let m = self.mix;
         (in_l * (1.0 - m) + dc_out_l * m, in_r * (1.0 - m) + dc_out_r * m)

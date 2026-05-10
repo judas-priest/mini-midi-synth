@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// MS Tool — Mid/Side processor.
 /// Encodes stereo to M/S, applies per-channel gain, optionally rotates the
 /// M/S plane, then decodes back to L/R.

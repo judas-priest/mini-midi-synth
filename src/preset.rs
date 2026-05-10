@@ -1,10 +1,53 @@
 /// Patch loading/saving with serde + JSON.
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+
+// ---------------------------------------------------------------------------
+// Generic JSON save/load/list helpers
+// ---------------------------------------------------------------------------
+
+fn save_json<T: Serialize>(obj: &T, dir: Option<PathBuf>, name: &str) -> Result<PathBuf> {
+    let dir = dir.context("Could not determine config directory")?;
+    fs::create_dir_all(&dir)?;
+    let filename = name.to_lowercase().replace(' ', "_") + ".json";
+    let path = dir.join(filename);
+    let json = serde_json::to_string_pretty(obj)?;
+    fs::write(&path, json)?;
+    Ok(path)
+}
+
+fn load_json<T: DeserializeOwned>(path: &std::path::Path, label: &str) -> Result<T> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {label} file"))?;
+    serde_json::from_str(&contents)
+        .with_context(|| format!("Failed to parse {label} JSON"))
+}
+
+fn list_json<T: DeserializeOwned>(dir: Option<PathBuf>, get_name: fn(&T) -> String) -> Vec<(String, PathBuf)> {
+    let mut items = Vec::new();
+    if let Some(dir) = dir {
+        if dir.exists() {
+            if let Ok(entries) = fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(contents) = fs::read_to_string(&path) {
+                            if let Ok(obj) = serde_json::from_str::<T>(&contents) {
+                                items.push((get_name(&obj), path));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    items.sort_by(|a, b| a.0.cmp(&b.0));
+    items
+}
 
 use crate::synth::drum::{DrumPattern, DrumSlotParams};
 
@@ -500,41 +543,15 @@ fn drum_kit_dir() -> Option<PathBuf> {
 }
 
 pub fn save_drum_kit(kit: &DrumKit) -> Result<PathBuf> {
-    let dir = drum_kit_dir().context("Could not determine config directory")?;
-    fs::create_dir_all(&dir)?;
-    let filename = kit.name.to_lowercase().replace(' ', "_") + ".json";
-    let path = dir.join(filename);
-    let json = serde_json::to_string_pretty(kit)?;
-    fs::write(&path, json)?;
-    Ok(path)
+    save_json(kit, drum_kit_dir(), &kit.name)
 }
 
 pub fn load_drum_kit(path: &std::path::Path) -> Result<DrumKit> {
-    let contents = fs::read_to_string(path).context("Failed to read drum kit file")?;
-    let kit: DrumKit = serde_json::from_str(&contents).context("Failed to parse drum kit JSON")?;
-    Ok(kit)
+    load_json(path, "drum kit")
 }
 
 pub fn list_drum_kits() -> Vec<(String, PathBuf)> {
-    let mut kits = Vec::new();
-    if let Some(dir) = drum_kit_dir() {
-        if dir.exists() {
-            if let Ok(entries) = fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "json") {
-                        if let Ok(contents) = fs::read_to_string(&path) {
-                            if let Ok(kit) = serde_json::from_str::<DrumKit>(&contents) {
-                                kits.push((kit.name, path));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    kits.sort_by(|a, b| a.0.cmp(&b.0));
-    kits
+    list_json(drum_kit_dir(), |k: &DrumKit| k.name.clone())
 }
 
 // ---------------------------------------------------------------------------
@@ -673,96 +690,14 @@ fn performance_dir() -> Option<PathBuf> {
 }
 
 pub fn save_performance(perf: &Performance) -> Result<PathBuf> {
-    let dir = performance_dir().context("Could not determine config directory")?;
-    fs::create_dir_all(&dir)?;
-    let filename = perf.name.to_lowercase().replace(' ', "_") + ".json";
-    let path = dir.join(filename);
-    let json = serde_json::to_string_pretty(perf)?;
-    fs::write(&path, json)?;
-    Ok(path)
+    save_json(perf, performance_dir(), &perf.name)
 }
 
 pub fn load_performance(path: &std::path::Path) -> Result<Performance> {
-    let contents = fs::read_to_string(path).context("Failed to read performance file")?;
-    let perf: Performance = serde_json::from_str(&contents).context("Failed to parse performance JSON")?;
-    Ok(perf)
+    load_json(path, "performance")
 }
 
 pub fn list_performances() -> Vec<(String, PathBuf)> {
-    let mut perfs = Vec::new();
-    if let Some(dir) = performance_dir() {
-        if dir.exists() {
-            if let Ok(entries) = fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "json") {
-                        if let Ok(contents) = fs::read_to_string(&path) {
-                            if let Ok(p) = serde_json::from_str::<Performance>(&contents) {
-                                perfs.push((p.name, path));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    perfs.sort_by(|a, b| a.0.cmp(&b.0));
-    perfs
+    list_json(performance_dir(), |p: &Performance| p.name.clone())
 }
 
-// ---------------------------------------------------------------------------
-// Set lists (ordered performance sequences)
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-#[derive(Clone, Serialize, Deserialize)]
-pub struct SetList {
-    pub name: String,
-    pub entries: Vec<String>, // performance names, in order
-}
-
-#[allow(dead_code)]
-fn setlist_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("mini_midi_synth").join("setlists"))
-}
-
-#[allow(dead_code)]
-pub fn save_setlist(setlist: &SetList) -> Result<PathBuf> {
-    let dir = setlist_dir().context("Could not determine config directory")?;
-    fs::create_dir_all(&dir)?;
-    let filename = setlist.name.to_lowercase().replace(' ', "_") + ".json";
-    let path = dir.join(filename);
-    let json = serde_json::to_string_pretty(setlist)?;
-    fs::write(&path, json)?;
-    Ok(path)
-}
-
-#[allow(dead_code)]
-pub fn load_setlist(path: &std::path::Path) -> Result<SetList> {
-    let contents = fs::read_to_string(path).context("Failed to read setlist file")?;
-    let sl: SetList = serde_json::from_str(&contents).context("Failed to parse setlist JSON")?;
-    Ok(sl)
-}
-
-#[allow(dead_code)]
-pub fn list_setlists() -> Vec<(String, PathBuf)> {
-    let mut lists = Vec::new();
-    if let Some(dir) = setlist_dir() {
-        if dir.exists() {
-            if let Ok(entries) = fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "json") {
-                        if let Ok(contents) = fs::read_to_string(&path) {
-                            if let Ok(sl) = serde_json::from_str::<SetList>(&contents) {
-                                lists.push((sl.name, path));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    lists.sort_by(|a, b| a.0.cmp(&b.0));
-    lists
-}

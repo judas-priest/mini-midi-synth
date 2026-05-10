@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Phaser: chain of first-order allpass filters with LFO-modulated frequency.
 
 use std::f32::consts::PI;

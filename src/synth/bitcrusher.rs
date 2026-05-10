@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Bitcrusher: bit depth reduction + sample rate reduction.
 /// Includes anti-aliasing lowpass filter and triangular PDF dithering.
 

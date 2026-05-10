@@ -5,6 +5,7 @@
 /// Cutoff Warp and Resonance Warp variants.
 
 use std::f32::consts::PI;
+use super::dsp_utils::{fast_tan, fast_tanh};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FilterType {
@@ -958,22 +959,3 @@ fn diode_clip(x: f32) -> f32 {
     }
 }
 
-/// Fast tan approximation using Padé approximant. Good for x in [0, ~1.5].
-#[inline(always)]
-fn fast_tan(x: f32) -> f32 {
-    let x2 = x * x;
-    x * (1.0 + x2 * (1.0 / 3.0 + x2 * 2.0 / 15.0))
-        / (1.0 - x2 * (1.0 / 3.0 - x2 * 1.0 / 21.0))
-}
-
-/// Fast tanh approximation (Padé 7th order). More accurate than 3rd order for filter use.
-/// Max error ~0.001 for |x| < 5.
-#[inline(always)]
-fn fast_tanh(x: f32) -> f32 {
-    // Clamp to avoid NaN and keep polynomial well-behaved
-    let x = x.clamp(-5.0, 5.0);
-    let x2 = x * x;
-    // Padé [3,3]: tanh(x) ≈ x(135 + 17x²) / (135 + 62x²)
-    // More accurate than the simpler (27+x²)/(27+9x²) version
-    x * (135.0 + 17.0 * x2) / (135.0 + 62.0 * x2)
-}

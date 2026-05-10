@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// MIDI looper: records note events with sample-accurate timing,
 /// plays them back in a loop. Overdub support with per-part undo.
 /// Zero heap allocation in the audio path.
@@ -89,6 +88,7 @@ impl Quantize {
         }
     }
 
+    #[allow(dead_code)]
     pub fn index(self) -> u8 {
         match self {
             Self::Off => 0,
@@ -154,6 +154,7 @@ impl MidiLooper {
         self.atoms.clone()
     }
 
+    #[allow(dead_code)]
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
         self.clear();

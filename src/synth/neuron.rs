@@ -2,6 +2,7 @@
 /// Algorithm inspired by Surge XT chowdsp NeuronEffect.
 
 use std::f32::consts::PI;
+use super::dsp_utils::DcBlocker;
 
 pub struct Neuron {
     sample_rate: f32,
@@ -15,11 +16,7 @@ pub struct Neuron {
     // 2x oversampling previous
     os_prev_l: f32,
     os_prev_r: f32,
-    // DC blocker
-    dc_l: f32,
-    dc_r: f32,
-    dc_prev_l: f32,
-    dc_prev_r: f32,
+    dc: DcBlocker,
 }
 
 impl Neuron {
@@ -31,8 +28,7 @@ impl Neuron {
             comb_buf_r: [0.0; 4096],
             comb_pos: 0,
             os_prev_l: 0.0, os_prev_r: 0.0,
-            dc_l: 0.0, dc_r: 0.0,
-            dc_prev_l: 0.0, dc_prev_r: 0.0,
+            dc: DcBlocker::new(),
         }
     }
 
@@ -43,8 +39,7 @@ impl Neuron {
         self.comb_buf_r = [0.0; 4096];
         self.comb_pos = 0;
         self.os_prev_l = 0.0; self.os_prev_r = 0.0;
-        self.dc_l = 0.0; self.dc_r = 0.0;
-        self.dc_prev_l = 0.0; self.dc_prev_r = 0.0;
+        self.dc.reset();
     }
 
     /// Fast sigmoid approximation
@@ -135,14 +130,8 @@ impl Neuron {
         let wet_l = comb_l * makeup * 0.5;
         let wet_r = comb_r * makeup * 0.5;
 
-        // DC blocker
-        let dc_coeff = 1.0 - (PI * 35.0 / self.sample_rate);
-        let out_l = wet_l - self.dc_prev_l + dc_coeff * self.dc_l;
-        self.dc_prev_l = wet_l;
-        self.dc_l = out_l;
-        let out_r = wet_r - self.dc_prev_r + dc_coeff * self.dc_r;
-        self.dc_prev_r = wet_r;
-        self.dc_r = out_r;
+        let dc_coeff = DcBlocker::coeff_for(35.0, self.sample_rate);
+        let (out_l, out_r) = self.dc.process(wet_l, wet_r, dc_coeff);
 
         let m = mix;
         (in_l * (1.0 - m) + out_l * m, in_r * (1.0 - m) + out_r * m)

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Feed-forward compressor with peak detection, attack/release, knee.
 
 pub struct Compressor {
@@ -39,17 +38,13 @@ impl Compressor {
         self.release_coeff = 1.0 - (-1.0 / (self.release * self.sample_rate)).exp();
     }
 
-    pub fn set_attack(&mut self, v: f32) {
-        self.attack = v;
-        self.update_coeffs();
-    }
-
-    pub fn set_release(&mut self, v: f32) {
-        self.release = v;
-        self.update_coeffs();
-    }
-
+    #[allow(dead_code)]
+    pub fn set_attack(&mut self, v: f32) { self.attack = v; self.update_coeffs(); }
+    #[allow(dead_code)]
+    pub fn set_release(&mut self, v: f32) { self.release = v; self.update_coeffs(); }
+    #[allow(dead_code)]
     pub fn attack(&self) -> f32 { self.attack }
+    #[allow(dead_code)]
     pub fn release(&self) -> f32 { self.release }
 
     pub fn set_sample_rate(&mut self, sr: f32) {

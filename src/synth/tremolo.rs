@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Tremolo: amplitude modulation by LFO. Stereo mode offsets L/R phase.
 
 use std::f32::consts::PI;

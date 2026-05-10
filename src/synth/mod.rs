@@ -1,5 +1,6 @@
 /// Synth engine: layered polyphonic voice pools + MIDI event dispatch.
 
+pub mod dsp_utils;
 mod airwindows;
 use airwindows::Airwindows;
 pub mod fx_chain;

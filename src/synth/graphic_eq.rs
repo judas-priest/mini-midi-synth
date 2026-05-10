@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Graphic EQ — 11-band parametric equalizer.
 ///
 /// Fixed center frequencies: 31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz
@@ -179,6 +178,7 @@ impl GraphicEq {
     /// Call this once per block (not per sample) when gains change; the
     /// coefficients are recomputed only when the gains array differs from
     /// the last call.
+    #[allow(dead_code)]
     pub fn update_gains(&mut self, gains: &[f32; 11]) {
         if gains != &self.last_gains {
             self.rebuild_all(gains);

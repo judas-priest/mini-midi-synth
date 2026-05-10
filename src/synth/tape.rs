@@ -2,6 +2,7 @@
 /// Algorithm inspired by Surge XT chowdsp TapeEffect.
 
 use std::f32::consts::PI;
+use super::dsp_utils::DcBlocker;
 
 pub struct Tape {
     sample_rate: f32,
@@ -15,11 +16,7 @@ pub struct Tape {
     // Loss filter (one-pole LP per channel)
     loss_l: f32,
     loss_r: f32,
-    // DC blocker
-    dc_l: f32,
-    dc_r: f32,
-    dc_prev_l: f32,
-    dc_prev_r: f32,
+    dc: DcBlocker,
     // 2x oversampling: previous input
     os_prev_l: f32,
     os_prev_r: f32,
@@ -33,8 +30,7 @@ impl Tape {
             m_prev_l: 0.0, m_prev_r: 0.0,
             h_prev_l: 0.0, h_prev_r: 0.0,
             loss_l: 0.0, loss_r: 0.0,
-            dc_l: 0.0, dc_r: 0.0,
-            dc_prev_l: 0.0, dc_prev_r: 0.0,
+            dc: DcBlocker::new(),
             os_prev_l: 0.0, os_prev_r: 0.0,
         }
     }
@@ -45,8 +41,7 @@ impl Tape {
         self.m_prev_l = 0.0; self.m_prev_r = 0.0;
         self.h_prev_l = 0.0; self.h_prev_r = 0.0;
         self.loss_l = 0.0; self.loss_r = 0.0;
-        self.dc_l = 0.0; self.dc_r = 0.0;
-        self.dc_prev_l = 0.0; self.dc_prev_r = 0.0;
+        self.dc.reset();
         self.os_prev_l = 0.0; self.os_prev_r = 0.0;
     }
 
@@ -102,8 +97,7 @@ impl Tape {
         let loss_freq = 2000.0 + speed * 16000.0 + tone * 4000.0;
         let loss_coeff = (PI * loss_freq / (self.sample_rate * 2.0)).sin().min(0.999);
 
-        // DC blocker coefficient
-        let dc_coeff = 1.0 - (PI * 35.0 / self.sample_rate);
+        let dc_coeff = DcBlocker::coeff_for(35.0, self.sample_rate);
 
         // Process left channel (2x oversampled)
         let input_l = in_l * drv;
@@ -126,11 +120,6 @@ impl Tape {
         let makeup = 2.8 / (1.0 + drive * 1.5);
         let wet_l = wet_l * makeup;
 
-        // DC blocker
-        let dc_out_l = wet_l - self.dc_prev_l + dc_coeff * self.dc_l;
-        self.dc_prev_l = wet_l;
-        self.dc_l = dc_out_l;
-
         // Process right channel (2x oversampled)
         let input_r = in_r * drv;
         let mid_r = (input_r + self.os_prev_r) * 0.5;
@@ -146,9 +135,7 @@ impl Tape {
         self.loss_r += loss_coeff * (self.m_r - self.loss_r);
         let wet_r = self.loss_r * makeup;
 
-        let dc_out_r = wet_r - self.dc_prev_r + dc_coeff * self.dc_r;
-        self.dc_prev_r = wet_r;
-        self.dc_r = dc_out_r;
+        let (dc_out_l, dc_out_r) = self.dc.process(wet_l, wet_r, dc_coeff);
 
         let m = mix;
         (in_l * (1.0 - m) + dc_out_l * m, in_r * (1.0 - m) + dc_out_r * m)

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Flanger: short modulated delay line with feedback.
 
 use std::f32::consts::PI;

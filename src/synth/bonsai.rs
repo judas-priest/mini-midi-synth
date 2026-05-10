@@ -4,6 +4,7 @@
 /// adjustable asymmetry, and a pre/post tone filter.
 
 use std::f32::consts::PI;
+use super::dsp_utils::fast_tanh;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BonsaiMode {
@@ -159,9 +160,3 @@ fn fold(x: f32) -> f32 {
     x * 2.0 - 1.0 // shift back to [-1,1]
 }
 
-#[inline(always)]
-fn fast_tanh(x: f32) -> f32 {
-    let x = x.clamp(-5.0, 5.0);
-    let x2 = x * x;
-    x * (135.0 + 17.0 * x2) / (135.0 + 62.0 * x2)
-}

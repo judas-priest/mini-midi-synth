@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Wave Shaper — multi-mode waveshaping distortion.
 /// Modes: Tanh, HardClip, Asymmetric, SinFold, TriFold, Digital, Diode, Rectify,
 ///        Harm2, Harm3, Harm4, Harm5,
@@ -8,6 +7,7 @@
 ///
 /// Inspired by Surge XT's Wave Shaper effect.
 use std::f32::consts::PI;
+use super::dsp_utils::fast_tanh;
 
 pub struct WaveShaper {
     sample_rate: f32,
@@ -19,22 +19,6 @@ pub struct WaveShaper {
     dc_coeff: f32, // R = 1 - 2*pi*f/fs
 }
 
-pub struct WaveShaperMode;
-
-impl WaveShaperMode {
-    pub const COUNT: u32 = 25;
-
-    pub fn from_param(v: f32) -> u32 {
-        v.round().clamp(0.0, (Self::COUNT - 1) as f32) as u32
-    }
-}
-
-#[inline(always)]
-fn fast_tanh(x: f32) -> f32 {
-    let x = x.clamp(-5.0, 5.0);
-    let x2 = x * x;
-    x * (135.0 + 17.0 * x2) / (135.0 + 62.0 * x2)
-}
 
 /// Triangle wave fold: reflects x to stay in [-1, 1] with tri-fold shape.
 #[inline(always)]

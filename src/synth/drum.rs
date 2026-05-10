@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Dedicated drum engine for MIDI channel 10 (GM drum map notes 36-51).
 /// Lightweight per-instrument voices, choke groups, velocity-to-timbre,
 /// and a built-in step sequencer. Zero heap allocation in the audio path.
@@ -1023,6 +1022,7 @@ impl DrumEngine {
         ((out_l * vol, out_r * vol), sf2_triggers)
     }
 
+    #[allow(dead_code)]
     pub fn slot_name(slot: usize) -> &'static str {
         if slot < NUM_DRUM_SLOTS { DRUM_NAMES[slot] } else { "?" }
     }

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Conditioner — mastering-style signal conditioner.
 ///
 /// Combines:
