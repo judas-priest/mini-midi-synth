@@ -80,7 +80,7 @@ use drum::{DrumEngine, DrumPattern, DrumSlotParams, NUM_DRUM_SLOTS};
 use eq::ParametricEq;
 use flanger::Flanger;
 use freq_shift::FreqShift;
-use lfo::{Lfo, LfoWaveform};
+use lfo::{Lfo, LfoStepSeqData, LfoWaveform};
 use looper::MidiLooper;
 use neuron::Neuron;
 use sampler::SamplerEngine;
@@ -148,7 +148,7 @@ pub enum MidiEvent {
 /// Control events sent from GUI to the audio thread.
 #[allow(dead_code)]
 pub enum ControlEvent {
-    LoadPatch { part: usize, params: PatchParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_params: Option<std::collections::BTreeMap<String, f32>>, wavetable: Option<(Arc<Vec<f32>>, usize, usize)> },
+    LoadPatch { part: usize, params: PatchParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_seq: Option<[LfoStepSeqData; 4]>, wavetable: Option<(Arc<Vec<f32>>, usize, usize)> },
     SetPartEnabled { part: usize, enabled: bool },
     SetPartMute { part: usize, mute: bool },
     SetPartVolume { part: usize, volume: f32 },
@@ -221,13 +221,18 @@ impl ControlEvent {
         };
         let mut pitch_seq = step_seq::PitchSequencer::new();
         pitch_seq.load_from_params(&patch.params);
-        let lfo_step_params = Some(patch.params.clone());
+        let lfo_step_seq = Some([
+            LfoStepSeqData::from_params(0, &patch.params),
+            LfoStepSeqData::from_params(1, &patch.params),
+            LfoStepSeqData::from_params(2, &patch.params),
+            LfoStepSeqData::from_params(3, &patch.params),
+        ]);
         let wavetable = patch.wavetable_data.as_ref().map(|d| {
             (d.clone(), patch.wavetable_frames, patch.wavetable_frame_size)
         });
         Self::LoadPatch {
             part, params, mod_matrix, mseg1, mseg2: None,
-            pitch_seq: Some(pitch_seq), lfo_step_params, wavetable,
+            pitch_seq: Some(pitch_seq), lfo_step_seq, wavetable,
         }
     }
 
@@ -247,13 +252,18 @@ impl ControlEvent {
         };
         let mut pitch_seq = step_seq::PitchSequencer::new();
         pitch_seq.load_from_params(edited);
-        let lfo_step_params = Some(edited.clone());
+        let lfo_step_seq = Some([
+            LfoStepSeqData::from_params(0, edited),
+            LfoStepSeqData::from_params(1, edited),
+            LfoStepSeqData::from_params(2, edited),
+            LfoStepSeqData::from_params(3, edited),
+        ]);
         let wavetable = original_patch.and_then(|p| {
             p.wavetable_data.as_ref().map(|d| (d.clone(), p.wavetable_frames, p.wavetable_frame_size))
         });
         Self::LoadPatch {
             part, params, mod_matrix, mseg1, mseg2: None,
-            pitch_seq: Some(pitch_seq), lfo_step_params, wavetable,
+            pitch_seq: Some(pitch_seq), lfo_step_seq, wavetable,
         }
     }
 }
@@ -486,7 +496,8 @@ impl Part {
         self.pitch_seq.load_from_params(&patch.params);
         self.mod_matrix.load_from_params(&patch.params);
         for i in 0..4u8 {
-            self.lfos[i as usize].load_step_seq_from_params(i, &patch.params);
+            let data = LfoStepSeqData::from_params(i, &patch.params);
+            self.lfos[i as usize].apply_step_seq(&data);
         }
         self.update_routing_cache();
     }
@@ -1591,7 +1602,7 @@ impl SynthEngine {
 
     pub fn handle_control(&mut self, event: ControlEvent) {
         match event {
-            ControlEvent::LoadPatch { part, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_params, wavetable } => {
+            ControlEvent::LoadPatch { part, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_seq, wavetable } => {
                 if let Some(l) = self.parts.get_mut(part) {
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
@@ -1610,9 +1621,9 @@ impl SynthEngine {
                     if let Some(m) = mseg1 { l.mseg1 = m; }
                     if let Some(m) = mseg2 { l.mseg2 = m; }
                     if let Some(sq) = pitch_seq { l.pitch_seq = sq; }
-                    if let Some(ref sp) = lfo_step_params {
-                        for i in 0..4u8 {
-                            l.lfos[i as usize].load_step_seq_from_params(i, sp);
+                    if let Some(ref sp) = lfo_step_seq {
+                        for i in 0..4 {
+                            l.lfos[i].apply_step_seq(&sp[i]);
                         }
                     }
                     l.update_routing_cache();

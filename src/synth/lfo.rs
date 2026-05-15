@@ -89,6 +89,57 @@ pub struct StepSeqEvent {
 
 pub const STEP_SEQ_LEN: usize = 16;
 
+/// Pre-extracted step-sequencer payload for a single LFO.
+/// Built once on the GUI side (from a preset's `BTreeMap`) and shipped
+/// through `ControlEvent::LoadPatch` — avoids cloning the whole BTreeMap
+/// onto the audio thread just to read ~21 keys per LFO.
+#[derive(Clone, Copy)]
+pub struct LfoStepSeqData {
+    pub step_values: [f32; STEP_SEQ_LEN],
+    pub step_count: u8,
+    pub loop_start: u8,
+    pub loop_end: u8,
+    pub trigmask_aeg: u16,
+    pub trigmask_feg: u16,
+}
+
+impl Default for LfoStepSeqData {
+    fn default() -> Self {
+        Self {
+            step_values: [0.0; STEP_SEQ_LEN],
+            step_count: 16,
+            loop_start: 0,
+            loop_end: 15,
+            trigmask_aeg: 0,
+            trigmask_feg: 0,
+        }
+    }
+}
+
+impl LfoStepSeqData {
+    /// Extract step-seq data for LFO `lfo_idx` (0..=3) from a preset map.
+    /// Called on the GUI/preset-load side; never on the audio thread.
+    pub fn from_params(lfo_idx: u8, params: &std::collections::BTreeMap<String, f32>) -> Self {
+        let prefix = format!("lfo{}", lfo_idx + 1);
+        let mut data = Self::default();
+        for i in 0..STEP_SEQ_LEN {
+            data.step_values[i] = params.get(&format!("{prefix}_step_{i}"))
+                .copied().unwrap_or(0.0);
+        }
+        data.step_count = params.get(&format!("{prefix}_step_count"))
+            .copied().unwrap_or(16.0).clamp(1.0, 16.0) as u8;
+        data.loop_start = params.get(&format!("{prefix}_loop_start"))
+            .copied().unwrap_or(0.0).clamp(0.0, 15.0) as u8;
+        data.loop_end = params.get(&format!("{prefix}_loop_end"))
+            .copied().unwrap_or(15.0).clamp(0.0, 15.0) as u8;
+        data.trigmask_aeg = params.get(&format!("{prefix}_trigmask_aeg"))
+            .copied().unwrap_or(0.0) as u16;
+        data.trigmask_feg = params.get(&format!("{prefix}_trigmask_feg"))
+            .copied().unwrap_or(0.0) as u16;
+        data
+    }
+}
+
 #[derive(Clone)]
 pub struct Lfo {
     phase: f32,
@@ -397,21 +448,14 @@ impl Lfo {
     }
 
     /// Load step sequencer data from patch params.
-    pub fn load_step_seq_from_params(&mut self, lfo_idx: u8, params: &std::collections::BTreeMap<String, f32>) {
-        let prefix = format!("lfo{}", lfo_idx + 1);
-        for i in 0..STEP_SEQ_LEN {
-            self.step_values[i] = params.get(&format!("{prefix}_step_{i}"))
-                .copied().unwrap_or(0.0);
-        }
-        self.step_count = params.get(&format!("{prefix}_step_count"))
-            .copied().unwrap_or(16.0).clamp(1.0, 16.0) as u8;
-        self.loop_start = params.get(&format!("{prefix}_loop_start"))
-            .copied().unwrap_or(0.0).clamp(0.0, 15.0) as u8;
-        self.loop_end = params.get(&format!("{prefix}_loop_end"))
-            .copied().unwrap_or(15.0).clamp(0.0, 15.0) as u8;
-        self.trigmask_aeg = params.get(&format!("{prefix}_trigmask_aeg"))
-            .copied().unwrap_or(0.0) as u16;
-        self.trigmask_feg = params.get(&format!("{prefix}_trigmask_feg"))
-            .copied().unwrap_or(0.0) as u16;
+    /// Apply pre-extracted step-seq data to this LFO. Cheap field copy —
+    /// safe to call from the audio thread.
+    pub fn apply_step_seq(&mut self, data: &LfoStepSeqData) {
+        self.step_values = data.step_values;
+        self.step_count = data.step_count;
+        self.loop_start = data.loop_start;
+        self.loop_end = data.loop_end;
+        self.trigmask_aeg = data.trigmask_aeg;
+        self.trigmask_feg = data.trigmask_feg;
     }
 }

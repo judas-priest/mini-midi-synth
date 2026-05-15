@@ -282,10 +282,10 @@ fn tick_block_matches_tick() {
     let params2 = params.clone();
 
     synth_a.handle_control(ControlEvent::LoadPatch {
-        part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None, wavetable: None,
+        part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_seq: None, wavetable: None,
     });
     synth_b.handle_control(ControlEvent::LoadPatch {
-        part: 0, params: params2, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None, wavetable: None,
+        part: 0, params: params2, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_seq: None, wavetable: None,
     });
 
     synth_a.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
@@ -325,7 +325,7 @@ fn run_preset_chain(preset_name: &str) {
     let params = PatchParams::from_map(&patches[idx].params);
     synth.set_patches(patches);
     synth.handle_control(ControlEvent::LoadPatch {
-        part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None, wavetable: None,
+        part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_seq: None, wavetable: None,
     });
     synth.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     let mut max_val = 0.0_f32;
@@ -362,7 +362,7 @@ fn all_presets_no_nan_no_silence() {
             mseg1: None,
             mseg2: None,
             pitch_seq: None,
-            lfo_step_params: None,
+            lfo_step_seq: None,
             wavetable: None,
         });
         synth.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
@@ -405,7 +405,7 @@ fn no_notes_produces_silence() {
         let mut synth = SynthEngine::new(44100.0);
         let params = PatchParams::from_map(&patch.params);
         synth.handle_control(ControlEvent::LoadPatch {
-            part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_params: None, wavetable: None,
+            part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_seq: None, wavetable: None,
         });
         // No notes — should be completely silent
         let mut max_val = 0.0_f32;
