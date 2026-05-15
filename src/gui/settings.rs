@@ -273,7 +273,7 @@ impl App {
     pub(super) fn save_cc_map(&mut self) {
         self.config.cc_map = Some(crate::cc_map::CcMapRaw::from_cc_map(&self.cc_map));
         let _ = self.config.save();
-        let _ = self.ctrl_tx.push(ControlEvent::SetCcMap { map: self.cc_map });
+        let _ = self.ctrl_tx.push(ControlEvent::SetCcMap { map: Box::new(self.cc_map) });
     }
 
     pub(super) fn param_slider(&mut self, ui: &mut egui::Ui, key: &str, label: &str, min: f32, max: f32, logarithmic: bool) -> bool {

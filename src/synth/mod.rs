@@ -147,8 +147,22 @@ pub enum MidiEvent {
 
 /// Control events sent from GUI to the audio thread.
 #[allow(dead_code)]
+/// Heavyweight payload for `ControlEvent::LoadPatch`, boxed to keep the
+/// `ControlEvent` enum slot small (~2 KB → ~32 B). Built on the GUI thread,
+/// shipped through the SPSC queue, consumed once by the audio thread.
+pub struct LoadPatchEvent {
+    pub part: usize,
+    pub params: PatchParams,
+    pub mod_matrix: ModMatrix,
+    pub mseg1: Option<Mseg>,
+    pub mseg2: Option<Mseg>,
+    pub pitch_seq: Option<step_seq::PitchSequencer>,
+    pub lfo_step_seq: Option<[LfoStepSeqData; 4]>,
+    pub wavetable: Option<(Arc<Vec<f32>>, usize, usize)>,
+}
+
 pub enum ControlEvent {
-    LoadPatch { part: usize, params: PatchParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_seq: Option<[LfoStepSeqData; 4]>, wavetable: Option<(Arc<Vec<f32>>, usize, usize)> },
+    LoadPatch(Box<LoadPatchEvent>),
     SetPartEnabled { part: usize, enabled: bool },
     SetPartMute { part: usize, mute: bool },
     SetPartVolume { part: usize, volume: f32 },
@@ -157,7 +171,7 @@ pub enum ControlEvent {
     SetPartPan { part: usize, pan: f32 },
     SetPartTranspose { part: usize, semitones: i8 },
     SetMacro { part: usize, index: usize, value: f32 },
-    SetCcMap { map: CcMap },
+    SetCcMap { map: Box<CcMap> },
     SetGlobalParam { key: &'static str, value: f32 },
     // Drum engine controls
     DrumSetStep { slot: u8, step: u8, velocity: u8 },
@@ -230,10 +244,10 @@ impl ControlEvent {
         let wavetable = patch.wavetable_data.as_ref().map(|d| {
             (d.clone(), patch.wavetable_frames, patch.wavetable_frame_size)
         });
-        Self::LoadPatch {
+        Self::LoadPatch(Box::new(LoadPatchEvent {
             part, params, mod_matrix, mseg1, mseg2: None,
             pitch_seq: Some(pitch_seq), lfo_step_seq, wavetable,
-        }
+        }))
     }
 
     /// Build a LoadPatch from edited params (BTreeMap) + optional wavetable from original Patch.
@@ -261,10 +275,10 @@ impl ControlEvent {
         let wavetable = original_patch.and_then(|p| {
             p.wavetable_data.as_ref().map(|d| (d.clone(), p.wavetable_frames, p.wavetable_frame_size))
         });
-        Self::LoadPatch {
+        Self::LoadPatch(Box::new(LoadPatchEvent {
             part, params, mod_matrix, mseg1, mseg2: None,
             pitch_seq: Some(pitch_seq), lfo_step_seq, wavetable,
-        }
+        }))
     }
 }
 
@@ -967,7 +981,12 @@ impl Part {
             "lfo4_deform" => self.params.lfo4_deform = value,
             "fm_cross_depth" => self.params.fm_cross_depth = value,
             "seq_pitch_depth" => self.params.seq_pitch_depth = value,
-            _ => {}
+            // In debug builds, fail loud on unknown keys so typos are caught
+            // by tests instead of silently no-op'ing live parameter updates.
+            // In release builds, ignore (cheap, no audio-thread side effects).
+            _ => {
+                debug_assert!(false, "GlobalParams::set: unknown key '{key}'");
+            }
         }
     }
 }
@@ -1602,7 +1621,8 @@ impl SynthEngine {
 
     pub fn handle_control(&mut self, event: ControlEvent) {
         match event {
-            ControlEvent::LoadPatch { part, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_seq, wavetable } => {
+            ControlEvent::LoadPatch(ev) => {
+                let LoadPatchEvent { part, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_seq, wavetable } = *ev;
                 if let Some(l) = self.parts.get_mut(part) {
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
@@ -1673,7 +1693,7 @@ impl SynthEngine {
                     }
                 }
             }
-            ControlEvent::SetCcMap { map } => { self.cc_map = map; }
+            ControlEvent::SetCcMap { map } => { self.cc_map = *map; }
             ControlEvent::SetGlobalParam { key, value } => {
                 self.global_params.set(&key, value);
                 if key == "pitch_bend_range" {
