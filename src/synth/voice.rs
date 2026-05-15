@@ -6,6 +6,7 @@ use super::formant::{FormantFilter, VoiceType, Vowel};
 use super::oscillator::{OscType, Oscillator};
 use super::wave_shaper::shape_sample;
 use super::ModulationState;
+use std::sync::Arc;
 
 /// DC blocker coefficient (~6 Hz pole at 48 kHz).
 const DC_BLOCKER_R: f32 = 0.9997;
@@ -876,8 +877,9 @@ pub struct VoiceParams {
     pub window_type: f32,
     pub window_morph: f32,
     pub window_formant: f32,
-    // External wavetable data (from .wt file, None = use built-in)
-    pub wavetable_data: Option<Vec<f32>>,
+    // External wavetable data (from .wt file, None = use built-in).
+    // Shared via `Arc` so per-voice note-on does not deep-copy the buffer.
+    pub wavetable_data: Option<Arc<Vec<f32>>>,
     pub wavetable_frames: usize,
     pub wavetable_frame_size: usize,
     // Twist / Plaits (Mutable Instruments Plaits port)

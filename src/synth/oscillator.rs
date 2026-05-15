@@ -1,6 +1,7 @@
 /// Oscillator with multiple waveform types.
 
 use std::f32::consts::PI;
+use std::sync::Arc;
 
 use super::bass::BassModel;
 use super::epiano::ElectricPianoModel;
@@ -327,8 +328,8 @@ pub enum OscState {
         formant: f32,     // formant shift in semitones
     },
     Wavetable {
-        phase: f32,       // 0..1 oscillator phase
-        table: Vec<f32>,  // wt_frames * wt_frame_size samples
+        phase: f32,                // 0..1 oscillator phase
+        table: Arc<Vec<f32>>,      // wt_frames * wt_frame_size samples; shared (cheap clone on note-on)
         wt_frames: usize,
         wt_frame_size: usize,
     },
@@ -465,9 +466,9 @@ impl Oscillator {
             OscState::Saxophone { delay, .. } => {
                 Self::return_buf(&mut self.pool_a, delay);
             }
-            OscState::Wavetable { table, .. } => {
-                Self::return_buf(&mut self.pool_a, table);
-            }
+            // Wavetable storage is Arc-shared; let Drop free it when the
+            // last reference goes away (cannot recycle into the pool).
+            OscState::Wavetable { .. } => {}
             _ => {}
         }
     }
@@ -636,7 +637,7 @@ impl Oscillator {
             },
             OscType::Wavetable => OscState::Wavetable {
                 phase: 0.0,
-                table: Vec::new(),
+                table: Arc::new(Vec::new()),
                 wt_frames: Self::WT_COUNT,
                 wt_frame_size: Self::WT_SIZE,
             },
@@ -2567,12 +2568,13 @@ impl Oscillator {
             }
         }
 
-        self.state = OscState::Wavetable { phase: 0.0, table, wt_frames, wt_frame_size };
+        self.state = OscState::Wavetable { phase: 0.0, table: Arc::new(table), wt_frames, wt_frame_size };
     }
 
     /// Initialize wavetable from external .wt data (parsed Surge wavetable).
     /// `data` = flat array of [wt_frames * wt_frame_size] samples.
-    pub fn init_wavetable_from_data(&mut self, morph: f32, data: Vec<f32>, wt_frames: usize, wt_frame_size: usize) {
+    /// Takes `Arc` so the (potentially MB-sized) buffer is shared, not copied.
+    pub fn init_wavetable_from_data(&mut self, morph: f32, data: Arc<Vec<f32>>, wt_frames: usize, wt_frame_size: usize) {
         self.wavetable_morph = morph.clamp(0.0, 1.0);
         self.reclaim_buffers();
         self.state = OscState::Wavetable { phase: 0.0, table: data, wt_frames, wt_frame_size };

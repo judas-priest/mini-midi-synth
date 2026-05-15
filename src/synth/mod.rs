@@ -94,6 +94,7 @@ use tremolo::Tremolo;
 use mod_matrix::ModMatrix;
 use mseg::{Mseg, MsegState};
 use voice::{Voice, VoiceParams};
+use std::sync::Arc;
 
 /// Lock-free oscilloscope buffer shared between audio and GUI threads.
 /// Audio writes samples; GUI reads them for display. Uses atomic f32 encoding.
@@ -147,7 +148,7 @@ pub enum MidiEvent {
 /// Control events sent from GUI to the audio thread.
 #[allow(dead_code)]
 pub enum ControlEvent {
-    LoadPatch { part: usize, params: PatchParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_params: Option<std::collections::BTreeMap<String, f32>>, wavetable: Option<(Vec<f32>, usize, usize)> },
+    LoadPatch { part: usize, params: PatchParams, mod_matrix: ModMatrix, mseg1: Option<Mseg>, mseg2: Option<Mseg>, pitch_seq: Option<step_seq::PitchSequencer>, lfo_step_params: Option<std::collections::BTreeMap<String, f32>>, wavetable: Option<(Arc<Vec<f32>>, usize, usize)> },
     SetPartEnabled { part: usize, enabled: bool },
     SetPartMute { part: usize, mute: bool },
     SetPartVolume { part: usize, volume: f32 },
@@ -383,7 +384,7 @@ struct Part {
     scene_lfos: [Lfo; 2],
     scene_lfo_routed: [bool; 2],  // true when used in mod matrix
     /// External wavetable loaded from .wt file (set via LoadPatch)
-    wavetable_data: Option<Vec<f32>>,
+    wavetable_data: Option<Arc<Vec<f32>>>,
     wavetable_frames: usize,
     wavetable_frame_size: usize,
     /// Current macro knob values (0..1). Updated by SetMacro event.

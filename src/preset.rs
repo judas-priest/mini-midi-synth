@@ -5,6 +5,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Generic JSON save/load/list helpers
@@ -62,8 +63,10 @@ pub struct Patch {
     #[serde(default)]
     pub wavetable_file: Option<String>,
     /// Parsed wavetable data (loaded at runtime, not serialized).
+    /// `Arc` allows cheap sharing across Patch → Part → VoiceParams → OscState
+    /// (avoids deep-copy of the entire wavetable on each note-on).
     #[serde(skip)]
-    pub wavetable_data: Option<Vec<f32>>,
+    pub wavetable_data: Option<Arc<Vec<f32>>>,
     /// Frames in the wavetable (loaded at runtime).
     #[serde(skip)]
     pub wavetable_frames: usize,
@@ -457,7 +460,7 @@ fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Patch>) {
                             let wt_path = wavetable_dir().join(wt_rel);
                             if let Ok(bytes) = fs::read(&wt_path) {
                                 if let Some((data, frames, frame_size)) = parse_wt(&bytes) {
-                                    p.wavetable_data = Some(data);
+                                    p.wavetable_data = Some(Arc::new(data));
                                     p.wavetable_frames = frames;
                                     p.wavetable_frame_size = frame_size;
                                 }
