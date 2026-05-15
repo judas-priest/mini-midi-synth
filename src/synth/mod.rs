@@ -1023,6 +1023,9 @@ pub struct SynthEngine {
     pub midi_player: midi_player::MidiPlayer,
     /// Reusable event buffer for midi_player.process_block (avoids per-block allocation)
     midi_seq_buf: Vec<(u8, midi_player::SeqEventData)>,
+    /// Per-part modulation state, refilled each block in `tick_block`.
+    /// Held as a struct field to avoid per-block `Vec` allocation.
+    layer_mods: [ModulationState; MAX_PARTS],
 }
 
 /// Cached effect parameters — extracted once per block from PatchParams.
@@ -1268,6 +1271,9 @@ impl SynthEngine {
             scope_write: 0,
             midi_player: midi_player::MidiPlayer::new(),
             midi_seq_buf: Vec::new(),
+            layer_mods: [ModulationState {
+                pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
+            }; MAX_PARTS],
         }
     }
 
@@ -1906,11 +1912,10 @@ impl SynthEngine {
 
         let seq_bpm = self.drum_engine.sequencer.bpm;
 
-        // Pre-compute modulation state for each part (control rate)
-        let mut layer_mods: Vec<ModulationState> = vec![ModulationState {
-            pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
-        }; self.parts.len()];
-
+        // Pre-compute modulation state for each part (control rate).
+        // `layer_mods` lives on the engine (zero-alloc); disabled parts retain
+        // whatever previous-block values they had — never read while disabled.
+        { let layer_mods = &mut self.layer_mods;
         for (li, part) in self.parts.iter_mut().enumerate() {
             if !part.enabled { continue; }
 
@@ -2092,6 +2097,13 @@ impl SynthEngine {
                 pitch_mult, filter_offset, filter_offset_semis: mod_offsets.filter_cutoff, amp_mod,
             };
         }
+        } // end of layer_mods borrow scope
+
+        // Snapshot of per-part modulation for the voice tick loop below.
+        // `ModulationState` is `Copy` and the array is small (8 × 16 B);
+        // this stack copy lets us iterate `self.parts.iter_mut()` without
+        // a borrow conflict on `self.layer_mods`.
+        let layer_mods_snapshot = self.layer_mods;
 
         // Cache effect params (once per block)
         let ep = self.parts.iter().find(|l| l.enabled).map(|l| &l.params);
@@ -2181,7 +2193,7 @@ impl SynthEngine {
             // Voice ticks (audio rate, using cached modulation)
             for (li, part) in self.parts.iter_mut().enumerate() {
                 if !part.enabled { continue; }
-                let (l, r) = part.tick(&layer_mods[li]);
+                let (l, r) = part.tick(&layer_mods_snapshot[li]);
                 // Apply per-part pan (constant-power: sqrt of (0.5 ± pan*0.5))
                 let pan = part.pan.clamp(-1.0, 1.0);
                 let gain_l = ((0.5 - pan * 0.5) as f64).sqrt() as f32;
