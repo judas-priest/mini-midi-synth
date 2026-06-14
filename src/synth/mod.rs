@@ -194,6 +194,7 @@ pub enum ControlEvent {
     LooperClear,
     LooperSetBars { bars: u8 },
     LooperSetQuantize { quantize: u8 },
+    LooperSetBpm { bpm: f32 },
     AllNotesOff,
     // SF2 sampler controls
     LoadKeysSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
@@ -1046,6 +1047,8 @@ pub struct SynthEngine {
     pickup_states: [PickupState; 128],
     /// 0 = SEQ buttons target drums, 1 = SEQ buttons target looper
     seq_target: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Active part index (0-7), shared with GUI for looper part recording
+    active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Oscilloscope ring buffer: 256 mono samples shared with GUI via atomics
     scope_buf: std::sync::Arc<ScopeBuffer>,
     scope_write: usize,
@@ -1297,6 +1300,7 @@ impl SynthEngine {
             global_params: GlobalParams::default(),
             pickup_states: [PickupState::default(); 128],
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
+            active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
             scope_write: 0,
             midi_player: midi_player::MidiPlayer::new(),
@@ -1309,6 +1313,10 @@ impl SynthEngine {
 
     pub fn seq_target_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
         self.seq_target.clone()
+    }
+
+    pub fn active_part_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
+        self.active_part.clone()
     }
 
     pub fn pitch_seq_step_atoms(&self) -> Vec<std::sync::Arc<std::sync::atomic::AtomicU8>> {
@@ -1466,8 +1474,10 @@ impl SynthEngine {
                             part.note_off(note);
                         }
                     }
-                    self.looper.record_event(note, 0);
+                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
+                    self.looper.record_event(note, 0, ap);
                 } else {
+                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         if !part.enabled || part.mute { continue; }
                         // Key range + velocity range check
@@ -1480,7 +1490,7 @@ impl SynthEngine {
                             part.note_on(transposed, velocity);
                         }
                     }
-                    self.looper.record_event(note, velocity);
+                    self.looper.record_event(note, velocity, ap);
                 }
             }
             MidiEvent::NoteOff { channel, note } => {
@@ -1498,7 +1508,8 @@ impl SynthEngine {
                             part.note_off(note);
                         }
                     }
-                    self.looper.record_event(note, 0);
+                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
+                    self.looper.record_event(note, 0, ap);
                 }
             }
             MidiEvent::PitchBend { value, .. } => {
@@ -1759,6 +1770,7 @@ impl SynthEngine {
             ControlEvent::LooperSetQuantize { quantize } => {
                 self.looper.quantize = looper::Quantize::from_index(quantize);
             }
+            ControlEvent::LooperSetBpm { bpm } => { self.looper.bpm = bpm; }
             ControlEvent::AllNotesOff => {
                 for part in &mut self.parts {
                     // Kill all active voices immediately
@@ -2196,24 +2208,25 @@ impl SynthEngine {
 
         // --- Audio rate (per sample) ---
         for s in 0..block_len {
-            // Looper: replay recorded events
+            // Looper: replay recorded events (routed to specific part)
             let looper_events = self.looper.tick();
-            for &(note, vel) in &looper_events {
-                if note == 0 && vel == 0 { break; }
-                if vel > 0 {
-                    for (i, part) in self.parts.iter_mut().enumerate() {
+            for &(note, vel, part_id) in &looper_events {
+                if note == 0 && vel == 0 && part_id == 255 { break; }
+                let pi = part_id as usize;
+                if let Some(part) = self.parts.get_mut(pi) {
+                    if !part.enabled { continue; }
+                    let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
+                    if vel > 0 {
                         if part.sf2_mode {
-                            self.sampler.note_on(i, note, vel);
+                            self.sampler.note_on(pi, transposed, vel);
                         } else {
-                            part.note_on(note, vel);
+                            part.note_on(transposed, vel);
                         }
-                    }
-                } else {
-                    for (i, part) in self.parts.iter_mut().enumerate() {
+                    } else {
                         if part.sf2_mode {
-                            self.sampler.note_off(i, note);
+                            self.sampler.note_off(pi, transposed);
                         } else {
-                            part.note_off(note);
+                            part.note_off(transposed);
                         }
                     }
                 }
@@ -2401,6 +2414,7 @@ impl SynthEngine {
             FxSlotType::Overdrive => {
                 self.overdrive.drive = p[0] * 48.0 + 1.0;
                 self.overdrive.tone  = p[1];
+                self.overdrive.dist_type = overdrive::DistortionType::from_param(p[2]);
                 self.overdrive.mix   = 1.0;
                 self.overdrive.tick(in_l, in_r)
             }

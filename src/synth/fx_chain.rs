@@ -129,7 +129,7 @@ impl FxSlotType {
     pub fn param_labels(self) -> [Option<&'static str>; 4] {
         match self {
             Self::None         => [None; 4],
-            Self::Overdrive    => [Some("Drive"), Some("Tone"), None, None],
+            Self::Overdrive    => [Some("Drive"), Some("Tone"), Some("Type 0-3"), None],
             Self::Tape         => [Some("Drive"), Some("Saturation"), Some("Bias"), Some("Tone")],
             Self::Neuron       => [Some("Drive"), Some("Squash"), Some("Stab"), Some("Comb Hz")],
             Self::Bonsai       => [Some("Drive"), Some("Tone"), Some("Asymm"), Some("Mode 0-4")],
@@ -168,6 +168,7 @@ impl FxSlotType {
         match (self, idx) {
             (Self::Overdrive,  0) => (0.0, 1.0),
             (Self::Overdrive,  1) => (0.0, 1.0),
+            (Self::Overdrive,  2) => (0.0, 3.9),
             (Self::Delay,      0) => (0.01, 2.0),
             (Self::Delay,      1) => (0.01, 2.0),
             (Self::Delay,      2) => (0.0, 0.98),

@@ -92,7 +92,15 @@ pub struct UiSettings {
     /// Pad performance map: 16 slots (notes 36-51) → performance name.
     #[serde(default)]
     pub pad_perf_map: Vec<Option<String>>,
+    /// Sync looper BPM with drum sequencer BPM.
+    #[serde(default = "default_looper_sync_bpm")]
+    pub looper_sync_bpm: bool,
+    /// Keybindings: egui key name → action string.
+    #[serde(default)]
+    pub keybinds: std::collections::HashMap<String, String>,
 }
+
+fn default_looper_sync_bpm() -> bool { true }
 
 fn default_master_volume() -> f32 { 0.8 }
 fn default_master_tone() -> f32 { 20000.0 }
@@ -129,6 +137,8 @@ impl Default for Config {
                 layer_a_volume: 0.8,
                 layer_b_volume: 0.5,
                 pad_perf_map: Vec::new(),
+                looper_sync_bpm: true,
+                keybinds: std::collections::HashMap::new(),
             },
         }
     }

@@ -75,7 +75,11 @@ struct CommonInit {
     #[cfg(feature = "gui")]
     looper_atoms: Arc<synth::looper::LooperAtoms>,
     #[cfg(feature = "gui")]
+    looper_display: Arc<std::sync::Mutex<synth::looper::LooperDisplay>>,
+    #[cfg(feature = "gui")]
     seq_target_atom: Arc<AtomicU8>,
+    #[cfg(feature = "gui")]
+    active_part_atom: Arc<AtomicU8>,
     #[cfg(feature = "gui")]
     pitch_seq_step_atoms: Vec<Arc<AtomicU8>>,
     #[cfg(feature = "gui")]
@@ -131,7 +135,11 @@ fn init_common() -> Result<CommonInit> {
     #[cfg(feature = "gui")]
     let looper_atoms = engine.looper.atoms();
     #[cfg(feature = "gui")]
+    let looper_display = engine.looper.display();
+    #[cfg(feature = "gui")]
     let seq_target_atom = engine.seq_target_atom();
+    #[cfg(feature = "gui")]
+    let active_part_atom = engine.active_part_atom();
     #[cfg(feature = "gui")]
     let pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
     #[cfg(feature = "gui")]
@@ -203,7 +211,11 @@ fn init_common() -> Result<CommonInit> {
         #[cfg(feature = "gui")]
         looper_atoms,
         #[cfg(feature = "gui")]
+        looper_display,
+        #[cfg(feature = "gui")]
         seq_target_atom,
+        #[cfg(feature = "gui")]
+        active_part_atom,
         #[cfg(feature = "gui")]
         pitch_seq_step_atoms,
         #[cfg(feature = "gui")]
@@ -539,8 +551,17 @@ fn run_gui() -> Result<()> {
         drum_kit_status: String::new(),
         drum_midi_import_path: String::new(),
         looper_atoms: c.looper_atoms,
+        looper_display: c.looper_display,
         looper_bars: 4,
+        looper_quantize: 0,
+        looper_sync_bpm: c.config.ui.looper_sync_bpm,
+        looper_bpm: 120.0,
+        looper_clear_confirm: None,
         seq_target_atom: c.seq_target_atom,
+        active_part_atom: c.active_part_atom,
+        keybinds: gui::keybinds::Keybinds::from_config(&c.config.ui.keybinds),
+        show_keybinds_window: false,
+        keybind_capturing: None,
         perf_name: String::new(),
         perf_list: preset::list_performances(),
         perf_status: String::new(),
@@ -574,7 +595,6 @@ fn run_gui() -> Result<()> {
         pitch_seq_swing: [0.0; 2],
         preset_search: String::new(),
         scope_buf: c.scope_buf,
-        split_enabled: false,
         split_point: 60,
         show_fx_chain: false,
         show_midi_seq: false,

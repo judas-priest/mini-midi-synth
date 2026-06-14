@@ -1,7 +1,6 @@
 /// Neuron Distortion — GRU (Gated Recurrent Unit) nonlinearity with comb filters.
 /// Algorithm inspired by Surge XT chowdsp NeuronEffect.
 
-use std::f32::consts::PI;
 use super::dsp_utils::DcBlocker;
 
 pub struct Neuron {

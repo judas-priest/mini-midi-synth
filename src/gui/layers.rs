@@ -65,7 +65,7 @@ impl App {
                     }
                     // Switch active part to Zone A if needed
                     if self.active_part >= 4 {
-                        self.active_part = 0;
+                        self.set_active_part(0);
                     }
                 }
             }
@@ -144,6 +144,22 @@ impl App {
                 if ui.add(egui::Slider::new(&mut tr, -24..=24).show_value(true)).changed() {
                     self.parts[part].transpose = tr as i8;
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: tr as i8 });
+                }
+
+                ui.label("Vel:");
+                let mut vmin = self.parts[part].vel_min as i32;
+                let mut vmax = self.parts[part].vel_max as i32;
+                let vel_changed;
+                let c1 = ui.add(egui::DragValue::new(&mut vmin).range(1..=127).speed(1)).changed();
+                ui.label("-");
+                let c2 = ui.add(egui::DragValue::new(&mut vmax).range(1..=127).speed(1)).changed();
+                vel_changed = c1 || c2;
+                if vel_changed {
+                    let vmin = (vmin as u8).max(1);
+                    let vmax = (vmax as u8).max(vmin);
+                    self.parts[part].vel_min = vmin;
+                    self.parts[part].vel_max = vmax;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange { part, vel_min: vmin, vel_max: vmax });
                 }
 
                 // Remove: not for first part of each zone
@@ -247,7 +263,7 @@ impl App {
         };
         let color = if muted { egui::Color32::GRAY } else { egui::Color32::WHITE };
         if ui.add(egui::Button::new(egui::RichText::new(&label).color(color)).selected(is_active)).clicked() {
-            self.active_part = i;
+            self.set_active_part(i);
             self.show_drums = false; self.show_looper = false;
             self.show_midi_seq = false; self.show_fx_chain = false;
             self.seq_target_atom.store(1, Ordering::Relaxed);
@@ -274,7 +290,7 @@ impl App {
                 self.parts[i].max_note = 127;
                 self.send_part_range(i);
             }
-            self.active_part = i;
+            self.set_active_part(i);
             self.show_drums = false; self.show_midi_seq = false; self.show_fx_chain = false;
         }
     }
@@ -283,11 +299,11 @@ impl App {
         self.parts[part].enabled = false;
         self.parts[part].mute = false;
         let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled: false });
-        self.active_part = if part >= 4 { 4 } else { 0 };
+        self.set_active_part(if part >= 4 { 4 } else { 0 });
         // find first enabled in same zone
         let zone = if part >= 4 { ZONE_B } else { ZONE_A };
         if let Some(i) = zone.into_iter().find(|&i| self.parts[i].enabled) {
-            self.active_part = i;
+            self.set_active_part(i);
         }
     }
 

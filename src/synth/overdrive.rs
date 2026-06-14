@@ -21,7 +21,6 @@ fn tube_clip(x: f32, drive: f32) -> f32 {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-#[allow(dead_code)]
 pub enum DistortionType {
     SoftClip,  // 0
     Tube,      // 1
@@ -30,7 +29,6 @@ pub enum DistortionType {
 }
 
 impl DistortionType {
-    #[allow(dead_code)]
     pub fn from_param(v: f32) -> Self {
         match v as u32 {
             0 => Self::SoftClip,

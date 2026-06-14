@@ -13,11 +13,7 @@ impl App {
         let current_step = self.drum_step_atom.load(Ordering::Relaxed);
         let pat_idx = self.drum_current_pattern as usize;
 
-        // Spacebar = play/pause
-        if self.show_drums && ui.input(|i| i.key_pressed(egui::Key::Space)) {
-            self.drum_playing = !self.drum_playing;
-            let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPlay { playing: self.drum_playing });
-        }
+
 
         // Transport controls — same layout as looper
         ui.horizontal(|ui| {
@@ -50,6 +46,10 @@ impl App {
             ui.label("BPM:");
             if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_bpm });
+                if self.looper_sync_bpm {
+                    self.looper_bpm = self.drum_bpm;
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.drum_bpm });
+                }
             }
 
             ui.separator();
@@ -145,6 +145,10 @@ impl App {
                             swing: kit.swing,
                             volume: kit.volume,
                         });
+                        if self.looper_sync_bpm {
+                            self.looper_bpm = kit.bpm;
+                            let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: kit.bpm });
+                        }
                     }
                     Err(e) => { self.drum_kit_status = format!("Error: {e}"); }
                 }
@@ -182,6 +186,10 @@ impl App {
                             swing: self.drum_swing,
                             volume: self.drum_volume,
                         });
+                        if self.looper_sync_bpm {
+                            self.looper_bpm = bpm;
+                            let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm });
+                        }
                     }
                     Err(e) => { self.drum_kit_status = format!("Import error: {e}"); }
                 }
@@ -577,8 +585,20 @@ impl App {
         let layer_count = self.looper_atoms.layer_count.load(Ordering::Relaxed);
         let state = LooperState::from_u8(state_u8);
 
+        // Part colors (same as key zone map in layers.rs)
+        let part_colors = [
+            egui::Color32::from_rgb(70, 130, 200),
+            egui::Color32::from_rgb(70, 190, 100),
+            egui::Color32::from_rgb(220, 150, 50),
+            egui::Color32::from_rgb(200, 70, 70),
+            egui::Color32::from_rgb(160, 80, 200),
+            egui::Color32::from_rgb(50, 190, 190),
+            egui::Color32::from_rgb(220, 200, 50),
+            egui::Color32::from_rgb(190, 100, 150),
+        ];
+
         ui.horizontal(|ui| {
-            // Play/Stop — same style as drum sequencer
+            // Play/Stop
             let play_label = match state {
                 LooperState::Playing | LooperState::Overdubbing => "\u{23F9} Stop",
                 _ => "\u{25B6} Play",
@@ -587,7 +607,7 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::LooperTogglePlay);
             }
 
-            // Record button — same style as drum sequencer
+            // Record
             let is_rec = matches!(state, LooperState::Recording | LooperState::Overdubbing);
             let rec_label = if is_rec { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
             let rec_color = if is_rec { egui::Color32::RED } else { egui::Color32::GRAY };
@@ -602,20 +622,77 @@ impl App {
                 }
             }
 
-            if ui.button("Undo").clicked() {
+            // Undo — show which layer will be removed
+            let undo_label = if layer_count > 1 {
+                format!("Undo L{layer_count}")
+            } else {
+                "Undo".into()
+            };
+            let undo_btn = ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new(undo_label));
+            if undo_btn.clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
             }
-            if ui.button("Clear").clicked() {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
+
+            // Clear with confirmation
+            let clear_pending = self.looper_clear_confirm
+                .map(|t| t.elapsed().as_secs_f32() < 2.0)
+                .unwrap_or(false);
+            let clear_label = if clear_pending { "Sure?" } else { "Clear" };
+            let clear_color = if clear_pending { egui::Color32::RED } else { ui.visuals().text_color() };
+            let clear_btn = ui.add_enabled(
+                event_count > 0 || state != LooperState::Idle,
+                egui::Button::new(egui::RichText::new(clear_label).color(clear_color)),
+            );
+            if clear_btn.clicked() {
+                if clear_pending {
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
+                    self.looper_clear_confirm = None;
+                } else {
+                    self.looper_clear_confirm = Some(std::time::Instant::now());
+                }
+            }
+            // Reset confirm if expired
+            if self.looper_clear_confirm.map(|t| t.elapsed().as_secs_f32() >= 2.0).unwrap_or(false) {
+                self.looper_clear_confirm = None;
             }
 
             ui.separator();
 
-            // Bars
+            // Bars (with label)
+            ui.label(egui::RichText::new("Bars").weak().small());
             for &b in &[1u8, 2, 4, 8] {
                 if ui.selectable_label(self.looper_bars == b, format!("{b}")).clicked() {
                     self.looper_bars = b;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: b });
+                }
+            }
+
+            ui.separator();
+
+            // Quantize (with label)
+            ui.label(egui::RichText::new("Q").weak().small());
+            let q_labels = ["Off", "1/4", "1/8", "1/16"];
+            for (idx, &label) in q_labels.iter().enumerate() {
+                let idx = idx as u8;
+                if ui.selectable_label(self.looper_quantize == idx, label).clicked() {
+                    self.looper_quantize = idx;
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: idx });
+                }
+            }
+
+            ui.separator();
+
+            // BPM sync
+            if ui.selectable_label(self.looper_sync_bpm, "Sync").on_hover_text("Sync BPM with drum sequencer").clicked() {
+                self.looper_sync_bpm = !self.looper_sync_bpm;
+                if self.looper_sync_bpm {
+                    self.looper_bpm = self.drum_bpm;
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.drum_bpm });
+                }
+            }
+            if !self.looper_sync_bpm {
+                if ui.add(egui::DragValue::new(&mut self.looper_bpm).range(40.0..=300.0).speed(0.5).prefix("BPM ")).changed() {
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
                 }
             }
 
@@ -646,5 +723,124 @@ impl App {
                 ui.add(egui::ProgressBar::new(frac).desired_width(80.0));
             }
         });
+
+        // Timeline visualization — show recorded notes as colored dots
+        if event_count > 0 {
+            self.draw_looper_timeline(ui, state, position, &part_colors);
+        }
+    }
+
+    fn draw_looper_timeline(
+        &self,
+        ui: &mut egui::Ui,
+        state: crate::synth::looper::LooperState,
+        position: u8,
+        part_colors: &[egui::Color32; 8],
+    ) {
+        use crate::synth::looper::LooperState;
+
+        // Snapshot display data under lock, then release immediately
+        let (events, current_layer) = {
+            let display = match self.looper_display.try_lock() {
+                Ok(d) => d,
+                Err(_) => return,
+            };
+            if display.events.is_empty() { return; }
+            (display.events.clone(), display.current_layer)
+        };
+
+        let total_w = ui.available_width().min(600.0);
+        let height = 40.0;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(total_w, height), egui::Sense::hover());
+        let painter = ui.painter_at(rect);
+
+        // Background
+        painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
+
+        // Beat grid lines
+        let beats = self.looper_bars as u32 * 4;
+        for beat in 1..beats {
+            let x = rect.left() + (beat as f32 / beats as f32) * total_w;
+            let color = if beat % 4 == 0 {
+                egui::Color32::from_gray(70)
+            } else {
+                egui::Color32::from_gray(40)
+            };
+            painter.line_segment(
+                [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+                egui::Stroke::new(1.0, color),
+            );
+        }
+
+        // Find note range for vertical mapping
+        let (mut min_note, mut max_note) = (127u8, 0u8);
+        for ev in &events {
+            if ev.velocity > 0 {
+                min_note = min_note.min(ev.note);
+                max_note = max_note.max(ev.note);
+            }
+        }
+        if min_note > max_note { return; }
+        // Add padding
+        let range = (max_note - min_note).max(12) as f32;
+        let mid = (min_note + max_note) as f32 / 2.0;
+        let note_lo = (mid - range / 2.0 - 2.0).max(0.0);
+        let note_hi = (mid + range / 2.0 + 2.0).min(127.0);
+        let note_span = (note_hi - note_lo).max(1.0);
+
+        // Draw note-on events as small rectangles
+        let dot_w = (total_w / (self.looper_bars as f32 * 16.0)).max(2.0).min(6.0);
+        let dot_h = (height / (note_span / 2.0)).max(2.0).min(5.0);
+        for ev in &events {
+            if ev.velocity == 0 { continue; } // skip note-offs
+            let x = rect.left() + ev.position * total_w;
+            let y = rect.bottom() - ((ev.note as f32 - note_lo) / note_span) * height;
+            let color = part_colors[ev.part_id as usize % 8];
+            // Dim older layers slightly
+            let alpha = if ev.layer_id == current_layer { 255 } else {
+                180u8.saturating_sub(current_layer.saturating_sub(ev.layer_id) * 30)
+            };
+            let c = egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
+            painter.rect_filled(
+                egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(dot_w, dot_h)),
+                1.0, c,
+            );
+        }
+
+        // Playhead
+        if state != LooperState::Idle {
+            let px = rect.left() + (position as f32 / 255.0) * total_w;
+            painter.line_segment(
+                [egui::pos2(px, rect.top()), egui::pos2(px, rect.bottom())],
+                egui::Stroke::new(1.5, egui::Color32::WHITE),
+            );
+        }
+
+        // Layer legend (which parts used per layer)
+        let mut layer_parts: Vec<(u8, Vec<u8>)> = Vec::new();
+        for ev in &events {
+            if ev.velocity == 0 { continue; }
+            let entry = layer_parts.iter_mut().find(|(l, _)| *l == ev.layer_id);
+            match entry {
+                Some((_, parts)) => {
+                    if !parts.contains(&ev.part_id) { parts.push(ev.part_id); }
+                }
+                None => { layer_parts.push((ev.layer_id, vec![ev.part_id])); }
+            }
+        }
+        if !layer_parts.is_empty() {
+            layer_parts.sort_by_key(|(l, _)| *l);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Layers:").weak().small());
+                for (layer_id, parts) in &layer_parts {
+                    let l = layer_id + 1;
+                    for &pid in parts {
+                        let c = part_colors[pid as usize % 8];
+                        let name = format!("L{l}:A{}", pid + 1);
+                        ui.colored_label(c, egui::RichText::new(name).small());
+                    }
+                }
+            });
+        }
     }
 }

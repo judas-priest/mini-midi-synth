@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU16, Ordering};
+use std::sync::Mutex;
 
 const MAX_LOOP_EVENTS: usize = 4096;
 const MAX_SIMULTANEOUS: usize = 16;
@@ -24,6 +25,31 @@ impl LooperAtoms {
             event_count: AtomicU16::new(0),
             layer_count: AtomicU8::new(0),
         })
+    }
+}
+
+/// Compact event snapshot for GUI timeline visualization.
+#[derive(Clone, Copy)]
+pub struct LooperDisplayEvent {
+    pub position: f32,   // 0.0..1.0 fraction of loop
+    pub note: u8,
+    pub velocity: u8,    // 0 = note-off
+    pub layer_id: u8,
+    pub part_id: u8,
+}
+
+/// Shared display state for GUI (updated on record/undo/clear, not every sample).
+pub struct LooperDisplay {
+    pub events: Vec<LooperDisplayEvent>,
+    pub current_layer: u8,
+}
+
+impl LooperDisplay {
+    pub fn new() -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(Self {
+            events: Vec::new(),
+            current_layer: 0,
+        }))
     }
 }
 
@@ -52,13 +78,13 @@ struct LoopEvent {
     tick: u32,      // sample offset from loop start
     note: u8,       // MIDI note 0-127
     velocity: u8,   // 0 = note-off, 1-127 = note-on
-    layer_id: u8,   // overdub part (for undo)
-    _pad: u8,
+    layer_id: u8,   // overdub layer (for undo)
+    part_id: u8,    // which synth part this was recorded on
 }
 
 impl Default for LoopEvent {
     fn default() -> Self {
-        Self { tick: 0, note: 0, velocity: 0, layer_id: 0, _pad: 0 }
+        Self { tick: 0, note: 0, velocity: 0, layer_id: 0, part_id: 0 }
     }
 }
 
@@ -120,12 +146,13 @@ pub struct MidiLooper {
     pub bars: u8,           // loop length in bars (1,2,4,8)
     pub quantize: Quantize,
     pub sample_rate: f32,
-    // Track active notes for boundary note-off
-    active_notes: [bool; 128],
+    // Track active notes for boundary note-off (255 = inactive, 0-7 = part_id)
+    active_notes: [u8; 128],
     needs_note_offs: bool,  // true when stop() was called with active notes
     recording_start_tick: u64, // global tick when recording started
     global_tick: u64,
     atoms: Arc<LooperAtoms>,
+    display: Arc<Mutex<LooperDisplay>>,
 }
 
 impl MidiLooper {
@@ -142,16 +169,21 @@ impl MidiLooper {
             bars: 4,
             quantize: Quantize::Off,
             sample_rate,
-            active_notes: [false; 128],
+            active_notes: [255; 128],
             needs_note_offs: false,
             recording_start_tick: 0,
             global_tick: 0,
             atoms: LooperAtoms::new(),
+            display: LooperDisplay::new(),
         }
     }
 
     pub fn atoms(&self) -> Arc<LooperAtoms> {
         self.atoms.clone()
+    }
+
+    pub fn display(&self) -> Arc<Mutex<LooperDisplay>> {
+        self.display.clone()
     }
 
     #[allow(dead_code)]
@@ -236,7 +268,7 @@ impl MidiLooper {
     fn stop(&mut self) {
         self.state = LooperState::Idle;
         // Signal tick() to emit note-offs for any still-active notes
-        if self.active_notes.iter().any(|&a| a) {
+        if self.active_notes.iter().any(|&a| a != 255) {
             self.needs_note_offs = true;
         }
     }
@@ -257,6 +289,7 @@ impl MidiLooper {
         // Reset cursor to safe position
         self.playback_cursor = self.events[..self.len as usize]
             .partition_point(|e| e.tick < self.playback_tick);
+        self.update_display();
     }
 
     /// Clear everything.
@@ -267,12 +300,14 @@ impl MidiLooper {
         self.playback_cursor = 0;
         self.current_layer = 0;
         self.state = LooperState::Idle;
-        self.active_notes = [false; 128];
+        self.active_notes = [255; 128];
         self.needs_note_offs = false;
+        self.update_display();
     }
 
     /// Record a MIDI event. Called from audio thread when a note event arrives.
-    pub fn record_event(&mut self, note: u8, velocity: u8) {
+    /// `part` is the synth part index that was active when this note was played.
+    pub fn record_event(&mut self, note: u8, velocity: u8, part: u8) {
         if self.state != LooperState::Recording && self.state != LooperState::Overdubbing {
             return;
         }
@@ -287,7 +322,7 @@ impl MidiLooper {
             note,
             velocity,
             layer_id: self.current_layer,
-            _pad: 0,
+            part_id: part,
         };
 
         // Insert sorted by tick
@@ -305,13 +340,14 @@ impl MidiLooper {
         if pos <= self.playback_cursor && self.playback_cursor < self.len as usize {
             self.playback_cursor += 1;
         }
+        self.update_display();
     }
 
-    /// Advance one sample. Returns events to fire: (note, velocity) pairs.
+    /// Advance one sample. Returns events to fire: (note, velocity, part_id) triples.
     /// velocity=0 means note-off.
     #[inline]
-    pub fn tick(&mut self) -> [(u8, u8); MAX_SIMULTANEOUS] {
-        let mut out = [(0u8, 0u8); MAX_SIMULTANEOUS];
+    pub fn tick(&mut self) -> [(u8, u8, u8); MAX_SIMULTANEOUS] {
+        let mut out = [(0u8, 0u8, 255u8); MAX_SIMULTANEOUS];
         self.global_tick += 1;
 
         if self.state == LooperState::Idle || self.loop_length_ticks == 0 {
@@ -319,9 +355,10 @@ impl MidiLooper {
             if self.needs_note_offs {
                 let mut count = 0;
                 for note in 0..128u8 {
-                    if self.active_notes[note as usize] && count < MAX_SIMULTANEOUS {
-                        out[count] = (note, 0);
-                        self.active_notes[note as usize] = false;
+                    let part = self.active_notes[note as usize];
+                    if part != 255 && count < MAX_SIMULTANEOUS {
+                        out[count] = (note, 0, part);
+                        self.active_notes[note as usize] = 255;
                         count += 1;
                     }
                 }
@@ -352,12 +389,12 @@ impl MidiLooper {
             && count < MAX_SIMULTANEOUS
         {
             let e = self.events[self.playback_cursor];
-            out[count] = (e.note, e.velocity);
+            out[count] = (e.note, e.velocity, e.part_id);
             // Track active notes
             if e.velocity > 0 {
-                self.active_notes[e.note as usize] = true;
+                self.active_notes[e.note as usize] = e.part_id;
             } else {
-                self.active_notes[e.note as usize] = false;
+                self.active_notes[e.note as usize] = 255;
             }
             count += 1;
             self.playback_cursor += 1;
@@ -369,9 +406,10 @@ impl MidiLooper {
         if self.playback_tick >= self.loop_length_ticks {
             // Force note-off for any still-active notes
             for note in 0..128u8 {
-                if self.active_notes[note as usize] && count < MAX_SIMULTANEOUS {
-                    out[count] = (note, 0);
-                    self.active_notes[note as usize] = false;
+                let part = self.active_notes[note as usize];
+                if part != 255 && count < MAX_SIMULTANEOUS {
+                    out[count] = (note, 0, part);
+                    self.active_notes[note as usize] = 255;
                     count += 1;
                 }
             }
@@ -381,6 +419,26 @@ impl MidiLooper {
 
         self.update_atoms();
         out
+    }
+
+    fn update_display(&self) {
+        if let Ok(mut d) = self.display.try_lock() {
+            d.events.clear();
+            if self.loop_length_ticks > 0 {
+                let inv = 1.0 / self.loop_length_ticks as f32;
+                for i in 0..self.len as usize {
+                    let e = &self.events[i];
+                    d.events.push(LooperDisplayEvent {
+                        position: e.tick as f32 * inv,
+                        note: e.note,
+                        velocity: e.velocity,
+                        layer_id: e.layer_id,
+                        part_id: e.part_id,
+                    });
+                }
+            }
+            d.current_layer = self.current_layer;
+        }
     }
 
     fn update_atoms(&self) {
@@ -393,16 +451,4 @@ impl MidiLooper {
         self.atoms.layer_count.store(self.current_layer + 1, Ordering::Relaxed);
     }
 
-    pub fn is_recording(&self) -> bool {
-        self.state == LooperState::Recording || self.state == LooperState::Overdubbing
-    }
-
-    pub fn event_count(&self) -> u16 { self.len }
-    pub fn layer_count(&self) -> u8 { self.current_layer + 1 }
-
-    /// Current position as fraction 0..1 for GUI progress indicator.
-    pub fn position_fraction(&self) -> f32 {
-        if self.loop_length_ticks == 0 { return 0.0; }
-        self.playback_tick as f32 / self.loop_length_ticks as f32
-    }
 }

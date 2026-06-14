@@ -56,14 +56,6 @@ impl DcBlocker {
         (out_l, out_r)
     }
 
-    /// Process a single (mono) sample.
-    #[inline(always)]
-    pub fn process_mono(&mut self, input: f32, coeff: f32) -> f32 {
-        let out = input - self.x1_l + coeff * self.y1_l;
-        self.x1_l = input;
-        self.y1_l = out;
-        out
-    }
 }
 
 /// Advance a normalized phase [0, 1) by rate_hz / sample_rate.
@@ -75,12 +67,6 @@ pub fn advance_phase(phase: &mut f32, rate_hz: f32, sample_rate: f32) {
     }
 }
 
-/// Linear wet/dry mix for a stereo signal.
-#[inline(always)]
-pub fn mix_stereo(dry_l: f32, dry_r: f32, wet_l: f32, wet_r: f32, mix: f32) -> (f32, f32) {
-    let inv = 1.0 - mix;
-    (dry_l * inv + wet_l * mix, dry_r * inv + wet_r * mix)
-}
 
 // ---------------------------------------------------------------------------
 // Circular buffer interpolated reads

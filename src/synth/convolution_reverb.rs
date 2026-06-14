@@ -3,7 +3,7 @@
 /// For longer reverb, use the reverb or reverb2 effects.
 ///
 /// The built-in IR approximates a small-medium room with:
-/// - Early reflections at ~3ms, ~7ms, ~11ms (samples 132, 308, 485 at 44.1kHz)
+/// - Early reflections at ~3ms, ~7ms, ~11ms (scaled to current sample rate)
 /// - Exponential decay envelope
 /// - Bandpass character (low-cut ~100Hz, high-cut ~6kHz)
 ///
@@ -14,7 +14,7 @@
 /// - `mix` (0..1): wet/dry
 
 const IR_LEN: usize = 512;
-/// Maximum pre-delay: 40ms at 44.1kHz
+/// Maximum pre-delay buffer: 40ms at up to 192kHz
 const MAX_PRE_DELAY: usize = 7680;
 
 pub struct ConvolutionReverb {
@@ -67,8 +67,9 @@ impl ConvolutionReverb {
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
-        // IR is defined in samples relative to 44100 Hz, so no need to regenerate
-        // unless the caller wants SR-dependent scaling (not implemented here).
+        self.rng_state = 0xDEADBEEFCAFEBABEu64; // reset PRNG for deterministic IR
+        self.generate_ir();
+        self.cached_damping = -1.0; // force damped IR rebuild on next tick
     }
 
     fn next_rand(&mut self) -> f32 {
@@ -82,12 +83,13 @@ impl ConvolutionReverb {
     ///
     /// Steps:
     /// 1. Decaying bandpass noise via LCG
-    /// 2. Early reflection spikes at 132, 308, 485 samples (~3ms, ~7ms, ~11ms at 44.1kHz)
+    /// 2. Early reflection spikes at ~3ms, ~7ms, ~11ms (scaled to current sample rate)
     /// 3. Exponential decay envelope: exp(-6 * n / N)
     /// 4. 1-pole bandpass shaping (low-cut 100Hz, high-cut 6kHz)
     /// 5. Normalise peak to 0.1
     fn generate_ir(&mut self) {
         let n = IR_LEN;
+        let sr = self.sample_rate;
 
         // Step 1: generate raw noise with exponential decay
         let mut raw = [0.0_f32; IR_LEN];
@@ -97,14 +99,13 @@ impl ConvolutionReverb {
             raw[i] = noise * decay;
         }
 
-        // Step 2: early reflection spikes
-        // Use amplitude matching the local noise level at those positions
-        const REFLECTIONS: [(usize, f32); 3] = [
-            (132, 0.8),  // ~3ms
-            (308, 0.55), // ~7ms
-            (485, 0.30), // ~11ms
+        // Step 2: early reflection spikes (timed in ms, converted to samples)
+        let reflections: [(usize, f32); 3] = [
+            (((3.0 * sr / 1000.0) as usize).min(n - 1), 0.8),
+            (((7.0 * sr / 1000.0) as usize).min(n - 1), 0.55),
+            (((11.0 * sr / 1000.0) as usize).min(n - 1), 0.30),
         ];
-        for (tap, amp) in REFLECTIONS.iter() {
+        for (tap, amp) in reflections.iter() {
             if *tap < n {
                 let decay = (-6.0 * *tap as f32 / n as f32).exp();
                 raw[*tap] += amp * decay;
@@ -115,9 +116,7 @@ impl ConvolutionReverb {
 
         // Step 4a: high-pass filter at ~100Hz (removes DC / low rumble)
         // 1-pole HP: y[n] = alpha * (y[n-1] + x[n] - x[n-1])
-        // alpha = 1 / (1 + 2*pi*fc/sr)  — bilinear-ish, use constant for 44.1kHz
-        // at 44100: alpha_hp ≈ 0.9857 for 100Hz
-        let alpha_hp = 0.9857_f32;
+        let alpha_hp = 1.0 / (1.0 + 2.0 * std::f32::consts::PI * 100.0 / sr);
         let mut hp_prev_in = 0.0_f32;
         let mut hp_prev_out = 0.0_f32;
         for i in 0..n {
@@ -130,8 +129,7 @@ impl ConvolutionReverb {
 
         // Step 4b: low-pass filter at ~6kHz (softens the IR)
         // 1-pole LP: y[n] = (1-alpha)*x[n] + alpha*y[n-1]
-        // at 44100: alpha_lp ≈ 0.5560 for 6000Hz (alpha = exp(-2*pi*fc/sr))
-        let alpha_lp = (-2.0 * std::f32::consts::PI * 6000.0_f32 / 44100.0_f32).exp();
+        let alpha_lp = (-2.0 * std::f32::consts::PI * 6000.0_f32 / sr).exp();
         let mut lp_prev = 0.0_f32;
         for i in 0..n {
             let y = (1.0 - alpha_lp) * raw[i] + alpha_lp * lp_prev;

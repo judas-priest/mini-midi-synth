@@ -8,6 +8,7 @@ mod keyboard;
 mod layers;
 mod fx_chain;
 mod macros;
+pub mod keybinds;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -23,7 +24,7 @@ use crate::midi::{self, NoteState};
 use crate::preset::{self, Patch};
 use crate::synth::{ControlEvent, ParamFeedback};
 use crate::synth::drum::{NUM_DRUM_SLOTS, DrumSlotParams, DrumPattern};
-use crate::synth::looper::LooperAtoms;
+use crate::synth::looper::{LooperAtoms, LooperDisplay};
 
 const VELOCITY_CURVE_NAMES: &[&str] = &["Linear", "Exponential", "Logarithmic", "Fixed"];
 const LFO_WAVEFORM_NAMES: &[&str] = &["Sine", "Triangle", "Square", "Sample & Hold", "Sawtooth", "Envelope", "Noise", "Smooth Noise"];
@@ -129,8 +130,8 @@ pub struct PartState {
     pub volume: f32,
     pub min_note: u8,
     pub max_note: u8,
-    #[allow(dead_code)] pub vel_min: u8,
-    #[allow(dead_code)] pub vel_max: u8,
+    pub vel_min: u8,
+    pub vel_max: u8,
     pub pan: f32,        // -1..+1
     pub transpose: i8,   // semitones
     pub sf2_mode: bool,
@@ -257,9 +258,19 @@ pub struct App {
     // Looper
     pub show_looper: bool,
     pub looper_atoms: std::sync::Arc<LooperAtoms>,
+    pub looper_display: std::sync::Arc<std::sync::Mutex<LooperDisplay>>,
     pub looper_bars: u8,
+    pub looper_quantize: u8,
+    pub looper_sync_bpm: bool,
+    pub looper_bpm: f32,
+    pub looper_clear_confirm: Option<std::time::Instant>,
     /// 0 = SEQ buttons → drums, 1 = SEQ buttons → looper
     pub seq_target_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub active_part_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    // Keybindings
+    pub keybinds: keybinds::Keybinds,
+    pub show_keybinds_window: bool,
+    pub keybind_capturing: Option<keybinds::KeyAction>,
     // Performance save/load
     pub perf_name: String,
     pub perf_list: Vec<(String, std::path::PathBuf)>,
@@ -298,7 +309,6 @@ pub struct App {
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
     // Split mode
-    #[allow(dead_code)] pub split_enabled: bool,
     pub split_point: u8,   // MIDI note where right zone starts (default 60 = C4)
     // FX Chain panel
     pub show_fx_chain: bool,
@@ -374,6 +384,22 @@ impl eframe::App for App {
             self.global_dirty = false;
         }
 
+        // Keybind processing (skip when text fields have focus or capturing a rebind)
+        let text_editing = ctx.memory(|m| m.focused().is_some());
+        if self.keybind_capturing.is_some() {
+            if let Some(key) = keybinds::detect_key_press(ctx) {
+                if key == egui::Key::Escape {
+                    self.keybind_capturing = None;
+                } else {
+                    let action = self.keybind_capturing.take().unwrap();
+                    self.keybinds.set_key_for_action(&action, key);
+                    self.config.ui.keybinds = self.keybinds.to_config();
+                }
+            }
+        } else if !text_editing {
+            self.process_keybinds(ctx);
+        }
+
         // Sync drum play/rec state from engine (for MIDI-triggered changes)
         self.drum_playing = self.drum_play_atom.load(Ordering::Relaxed) != 0;
         self.drum_recording = self.drum_rec_atom.load(Ordering::Relaxed) != 0;
@@ -406,6 +432,10 @@ impl eframe::App for App {
                 }
                 if ui.button("?").on_hover_text("CC Mapping Help").clicked() {
                     self.show_help = !self.show_help;
+                }
+                if ui.button("\u{2328}").on_hover_text("Keybindings").clicked() {
+                    self.show_keybinds_window = !self.show_keybinds_window;
+                    self.keybind_capturing = None;
                 }
 
                 ui.separator();
@@ -778,6 +808,10 @@ impl eframe::App for App {
         if self.show_pad_perf {
             self.draw_pad_perf_window(ctx);
         }
+        // Keybindings window
+        if self.show_keybinds_window {
+            self.draw_keybinds_window(ctx);
+        }
 
         // Central: part tabs + parameters / drum sequencer
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -916,6 +950,8 @@ impl App {
         if let Some(l) = self.parts.get(0) { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
+        self.config.ui.looper_sync_bpm = self.looper_sync_bpm;
+        self.config.ui.keybinds = self.keybinds.to_config();
         let _ = self.config.save();
         self.last_config_save = std::time::Instant::now();
     }
@@ -932,6 +968,97 @@ impl App {
     }
 
     /// Send edited params to synth engine for a given part
+    fn process_keybinds(&mut self, ctx: &egui::Context) {
+        use keybinds::KeyAction;
+        // Collect triggered actions to avoid borrow conflict
+        let triggered: Vec<KeyAction> = self.keybinds.binds().iter()
+            .filter(|(key, _)| ctx.input(|i| i.key_pressed(*key)))
+            .map(|(_, action)| action.clone())
+            .collect();
+        for action in triggered {
+            match &action {
+                KeyAction::SwitchPart(p) => {
+                    let p = *p as usize;
+                    if p < self.parts.len() && self.parts[p].enabled {
+                        self.set_active_part(p);
+                        self.show_drums = false;
+                        self.show_midi_seq = false;
+                        self.show_fx_chain = false;
+                        self.seq_target_atom.store(1, Ordering::Relaxed);
+                    }
+                }
+                KeyAction::LooperRecord => {
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperRecord);
+                }
+                KeyAction::LooperTogglePlay => {
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperTogglePlay);
+                }
+                KeyAction::LooperUndo => {
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
+                }
+                KeyAction::LooperClear => {
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
+                }
+                KeyAction::DrumTogglePlay => {
+                    self.drum_playing = !self.drum_playing;
+                    let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPlay { playing: self.drum_playing });
+                }
+                KeyAction::ToggleDrumsSynth => {
+                    self.show_drums = !self.show_drums;
+                    self.show_looper = false;
+                    if !self.show_drums {
+                        self.seq_target_atom.store(1, Ordering::Relaxed);
+                    } else {
+                        self.seq_target_atom.store(0, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn draw_keybinds_window(&mut self, ctx: &egui::Context) {
+        use keybinds::{KeyAction, key_to_str};
+        let mut open = self.show_keybinds_window;
+        egui::Window::new("Keybindings")
+            .open(&mut open)
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::Grid::new("keybinds_grid").striped(true).show(ui, |ui| {
+                    ui.strong("Action");
+                    ui.strong("Key");
+                    ui.strong("");
+                    ui.end_row();
+
+                    for action in KeyAction::all() {
+                        ui.label(action.label());
+                        let key_label = self.keybinds.key_for_action(&action)
+                            .map(|k| key_to_str(k))
+                            .unwrap_or("---");
+                        let is_capturing = self.keybind_capturing.as_ref() == Some(&action);
+                        let btn_text = if is_capturing { "Press key..." } else { key_label };
+                        if ui.button(btn_text).clicked() {
+                            self.keybind_capturing = Some(action.clone());
+                        }
+                        if ui.small_button("x").clicked() {
+                            // Unbind
+                            if let Some(key) = self.keybinds.key_for_action(&action) {
+                                self.keybinds.binds_mut().retain(|(k, _)| *k != key);
+                                self.config.ui.keybinds = self.keybinds.to_config();
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+                ui.add_space(5.0);
+                if ui.button("Reset Defaults").clicked() {
+                    self.keybinds = keybinds::Keybinds::defaults();
+                    self.config.ui.keybinds = self.keybinds.to_config();
+                    self.keybind_capturing = None;
+                }
+            });
+        self.show_keybinds_window = open;
+    }
+
     fn send_edited_params(&mut self, part: usize) {
         let original = self.patches.get(self.parts[part].patch_idx);
         let _ = self.ctrl_tx.push(ControlEvent::load_patch_from_edited(
@@ -947,6 +1074,11 @@ impl App {
     fn send_part_volume(&mut self, part: usize) {
         let volume = self.parts[part].volume;
         let _ = self.ctrl_tx.push(ControlEvent::SetPartVolume { part, volume });
+    }
+
+    fn set_active_part(&mut self, part: usize) {
+        self.active_part = part;
+        self.active_part_atom.store(part as u8, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn send_part_range(&mut self, part: usize) {
