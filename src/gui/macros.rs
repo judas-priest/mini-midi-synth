@@ -89,9 +89,8 @@ impl App {
             ui.add_space(12.0);
 
             ui.label("X:");
-            let x_label = macro_labels[self.parts[part].xy_macro_x].clone();
             egui::ComboBox::from_id_salt(format!("xy_x_{part}"))
-                .selected_text(&x_label)
+                .selected_text(macro_labels[self.parts[part].xy_macro_x].as_str())
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     for i in 0..8 {
@@ -105,9 +104,8 @@ impl App {
 
             ui.add_space(8.0);
             ui.label("Y:");
-            let y_label = macro_labels[self.parts[part].xy_macro_y].clone();
             egui::ComboBox::from_id_salt(format!("xy_y_{part}"))
-                .selected_text(&y_label)
+                .selected_text(macro_labels[self.parts[part].xy_macro_y].as_str())
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     for i in 0..8 {
@@ -124,8 +122,11 @@ impl App {
 
         let xi = self.parts[part].xy_macro_x;
         let yi = self.parts[part].xy_macro_y;
-        let x_name = macro_labels[xi].clone();
-        let y_name = macro_labels[yi].clone();
+        if xi == yi {
+            ui.colored_label(egui::Color32::YELLOW, egui::RichText::new("X and Y use the same macro").small());
+        }
+        let x_name = &macro_labels[xi];
+        let y_name = &macro_labels[yi];
 
         // Pad area
         let size = egui::vec2(200.0, 200.0);
