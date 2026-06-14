@@ -176,7 +176,7 @@ impl App {
 
     pub(super) fn drain_feedback(&mut self) {
         let mut param_changes: Vec<(&str, f32)> = Vec::new();
-        let mut learned_cc: Option<(u8, String)> = None;
+        let mut learned_cc: Option<(u8, &'static str)> = None;
         let mut program: Option<u8> = None;
         let nav_delta: Option<i32> = None;
 
@@ -248,7 +248,7 @@ impl App {
         }
 
         if let Some((cc, target)) = learned_cc {
-            if let Some(meta) = crate::cc_map::find_param_meta(&target) {
+            if let Some(meta) = crate::cc_map::find_param_meta(target) {
                 self.cc_map.bindings[cc as usize] = Some(crate::cc_map::CcBinding {
                     param_key: meta.key,
                     min_val: meta.min,
@@ -297,9 +297,28 @@ impl App {
             .text(&display_label)
             .logarithmic(logarithmic);
         let resp = ui.add(slider);
-        if resp.secondary_clicked() {
-            self.midi_learn_target = Some(key.to_string());
-        }
+        resp.context_menu(|ui| {
+            // Show current CC assignment
+            if let Some(cc) = cc_info {
+                ui.label(format!("Assigned: CC {cc}"));
+                ui.separator();
+            }
+            if ui.button("MIDI Learn").clicked() {
+                if let Some(static_key) = crate::cc_map::resolve_key(key) {
+                    self.midi_learn_target = Some(static_key);
+                }
+                ui.close_menu();
+            }
+            if cc_info.is_some() {
+                if ui.button("Clear MIDI").clicked() {
+                    if let Some(cc) = cc_info {
+                        self.cc_map.bindings[cc] = None;
+                        self.save_cc_map();
+                    }
+                    ui.close_menu();
+                }
+            }
+        });
         if resp.changed() {
             self.parts[part].edited_params.insert(key.into(), val);
             return true;

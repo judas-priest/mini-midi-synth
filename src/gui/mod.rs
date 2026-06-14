@@ -233,7 +233,7 @@ pub struct App {
     /// CC mapping
     pub cc_map: CcMap,
     /// MIDI Learn target parameter key
-    pub midi_learn_target: Option<String>,
+    pub midi_learn_target: Option<&'static str>,
     /// Program change atom for patch feedback
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Show help dialog
@@ -411,13 +411,12 @@ impl eframe::App for App {
         self.drum_recording = self.drum_rec_atom.load(Ordering::Relaxed) != 0;
 
         // MIDI Learn indicator
-        if self.midi_learn_target.is_some() {
-            let target_name = self.midi_learn_target.clone().unwrap_or_default();
+        if let Some(target_name) = self.midi_learn_target {
             egui::TopBottomPanel::top("midi_learn_bar").show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.colored_label(egui::Color32::YELLOW, format!("MIDI Learn: move a CC for '{target_name}'..."));
-                    if ui.button("Cancel").clicked() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        // handled below
+                    ui.colored_label(egui::Color32::YELLOW, format!("MIDI Learn: turn a knob to assign CC to '{target_name}'..."));
+                    if ui.button("Cancel").clicked() {
+                        self.midi_learn_target = None;
                     }
                 });
             });
