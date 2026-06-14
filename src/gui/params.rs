@@ -1141,6 +1141,68 @@ impl App {
 
         ui.add_space(6.0);
 
+        // Arpeggiator
+        ui.strong("Arpeggiator");
+        {
+            let arp_mode_names = ["Up", "Down", "UpDown", "Random", "Order"];
+            let arp_rate_names = ["1/4", "1/8", "1/16", "1/32", "1/4T", "1/8T"];
+
+            ui.horizontal(|ui| {
+                let mut enabled = self.parts[part].edited_params.get("arp_enabled").copied().unwrap_or(0.0) > 0.5;
+                if ui.checkbox(&mut enabled, "Enabled").changed() {
+                    self.parts[part].edited_params.insert("arp_enabled".into(), if enabled { 1.0 } else { 0.0 });
+                    changed = true;
+                    // Send immediate arp param update
+                    let mode = self.parts[part].edited_params.get("arp_mode").copied().unwrap_or(0.0) as u8;
+                    let rate = self.parts[part].edited_params.get("arp_rate").copied().unwrap_or(1.0) as u8;
+                    let octaves = self.parts[part].edited_params.get("arp_octaves").copied().unwrap_or(1.0) as u8;
+                    let gate = self.parts[part].edited_params.get("arp_gate").copied().unwrap_or(0.5);
+                    let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetArpParams {
+                        enabled, mode, rate, octaves, gate,
+                    });
+                }
+
+                let mut amode = self.parts[part].edited_params.get("arp_mode").copied().unwrap_or(0.0) as usize;
+                ui.label("Mode:");
+                egui::ComboBox::from_id_salt(format!("arp_mode_{part}"))
+                    .selected_text(*arp_mode_names.get(amode).unwrap_or(&"Up"))
+                    .width(70.0)
+                    .show_ui(ui, |ui| {
+                        for (i, name) in arp_mode_names.iter().enumerate() {
+                            if ui.selectable_value(&mut amode, i, *name).changed() {
+                                self.parts[part].edited_params.insert("arp_mode".into(), amode as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+
+                let mut arate = self.parts[part].edited_params.get("arp_rate").copied().unwrap_or(1.0) as usize;
+                ui.label("Rate:");
+                egui::ComboBox::from_id_salt(format!("arp_rate_{part}"))
+                    .selected_text(*arp_rate_names.get(arate).unwrap_or(&"1/8"))
+                    .width(50.0)
+                    .show_ui(ui, |ui| {
+                        for (i, name) in arp_rate_names.iter().enumerate() {
+                            if ui.selectable_value(&mut arate, i, *name).changed() {
+                                self.parts[part].edited_params.insert("arp_rate".into(), arate as f32);
+                                changed = true;
+                            }
+                        }
+                    });
+            });
+
+            ui.horizontal(|ui| {
+                let mut oct = self.parts[part].edited_params.get("arp_octaves").copied().unwrap_or(1.0) as u32;
+                if ui.add(egui::Slider::new(&mut oct, 1..=4).text("Octaves")).changed() {
+                    self.parts[part].edited_params.insert("arp_octaves".into(), oct as f32);
+                    changed = true;
+                }
+            });
+            changed |= self.param_slider(ui, "arp_gate", "Gate", 0.1, 1.0, false);
+        }
+
+        ui.add_space(6.0);
+
         // Effects
         ui.strong("Effects");
         changed |= self.param_slider(ui, "chorus_mix", "Chorus", 0.0, 1.0, false);

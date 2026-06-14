@@ -22,6 +22,7 @@ pub mod formant;
 pub mod freq_shift;
 pub mod graphic_eq;
 pub mod lfo;
+pub mod arpeggiator;
 pub mod looper;
 pub mod mod_matrix;
 pub mod ms_tool;
@@ -81,6 +82,7 @@ use eq::ParametricEq;
 use flanger::Flanger;
 use freq_shift::FreqShift;
 use lfo::{Lfo, LfoStepSeqData, LfoWaveform};
+use arpeggiator::Arpeggiator;
 use looper::MidiLooper;
 use neuron::Neuron;
 use sampler::SamplerEngine;
@@ -220,6 +222,8 @@ pub enum ControlEvent {
     MidiSeqSetLooping { looping: bool },
     MidiSeqSetTrackInstrument { track_idx: usize, instrument: midi_player::TrackInstrument },
     MidiSeqSetTrackMute { track_idx: usize, muted: bool },
+    // Arpeggiator
+    SetArpParams { enabled: bool, mode: u8, rate: u8, octaves: u8, gate: f32 },
 }
 
 impl ControlEvent {
@@ -1037,6 +1041,7 @@ pub struct SynthEngine {
     delay: StereoDelay,
     reverb: Reverb,
     pub spring_reverb: SpringReverb,
+    pub arpeggiator: Arpeggiator,
     pub looper: MidiLooper,
     cc_map: CcMap,
     patches: Vec<Patch>,
@@ -1272,6 +1277,7 @@ impl SynthEngine {
             bitcrusher: Bitcrusher::new(sample_rate),
             ring_mod: RingMod::new(sample_rate),
             freq_shift: FreqShift::new(sample_rate),
+            arpeggiator: Arpeggiator::new(sample_rate),
             looper: MidiLooper::new(sample_rate),
             chorus: Chorus::new(sample_rate),
             rotary: RotarySpeaker::new(sample_rate),
@@ -1465,6 +1471,13 @@ impl SynthEngine {
                             self.drum_engine.note_off(note);
                         }
                     }
+                } else if self.arpeggiator.enabled {
+                    // Route through arpeggiator — it generates notes in tick_block
+                    if velocity == 0 {
+                        self.arpeggiator.note_off(note);
+                    } else {
+                        self.arpeggiator.note_on(note, velocity);
+                    }
                 } else if velocity == 0 {
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         if !part.enabled { continue; }
@@ -1500,6 +1513,8 @@ impl SynthEngine {
                     } else {
                         self.drum_engine.note_off(note);
                     }
+                } else if self.arpeggiator.enabled {
+                    self.arpeggiator.note_off(note);
                 } else {
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         if part.sf2_mode {
@@ -1658,6 +1673,14 @@ impl SynthEngine {
                         }
                     }
                     l.update_routing_cache();
+                    // Sync arpeggiator params from loaded patch
+                    self.arpeggiator.set_params(
+                        params.arp_enabled > 0.5,
+                        params.arp_mode as u8,
+                        params.arp_rate as u8,
+                        params.arp_octaves as u8,
+                        params.arp_gate,
+                    );
                 }
                 self.reset_preset_pickups();
             }
@@ -1784,6 +1807,15 @@ impl SynthEngine {
                     part.sustained_notes = [false; 128];
                 }
                 self.sampler.all_notes_off();
+                // Clear arpeggiator held notes
+                if let Some(off_note) = self.arpeggiator.flush_current_note() {
+                    for (i, part) in self.parts.iter_mut().enumerate() {
+                        if !part.enabled { continue; }
+                        if part.sf2_mode { self.sampler.note_off(i, off_note); }
+                        else { part.note_off(off_note); }
+                    }
+                }
+                self.arpeggiator.clear();
             }
             ControlEvent::LoadKeysSoundFont { soundfont } => {
                 self.sampler.load_keys_soundfont(soundfont);
@@ -1887,6 +1919,19 @@ impl SynthEngine {
                     track.muted = muted;
                 }
             }
+            ControlEvent::SetArpParams { enabled, mode, rate, octaves, gate } => {
+                // If disabling, send note-off for current arp note
+                if !enabled {
+                    if let Some(off_note) = self.arpeggiator.flush_current_note() {
+                        for (i, part) in self.parts.iter_mut().enumerate() {
+                            if !part.enabled { continue; }
+                            if part.sf2_mode { self.sampler.note_off(i, off_note); }
+                            else { part.note_off(off_note); }
+                        }
+                    }
+                }
+                self.arpeggiator.set_params(enabled, mode, rate, octaves, gate);
+            }
         }
     }
 
@@ -1954,6 +1999,7 @@ impl SynthEngine {
         };
 
         let seq_bpm = self.drum_engine.sequencer.bpm;
+        self.arpeggiator.set_bpm(seq_bpm);
 
         // Pre-compute modulation state for each part (control rate).
         // `layer_mods` lives on the engine (zero-alloc); disabled parts retain
@@ -2208,6 +2254,32 @@ impl SynthEngine {
 
         // --- Audio rate (per sample) ---
         for s in 0..block_len {
+            // Arpeggiator: generate note events from held notes
+            {
+                let (arp_on, arp_off) = self.arpeggiator.tick();
+                if let Some(off_note) = arp_off {
+                    for (i, part) in self.parts.iter_mut().enumerate() {
+                        if !part.enabled { continue; }
+                        if part.sf2_mode { self.sampler.note_off(i, off_note); }
+                        else { part.note_off(off_note); }
+                    }
+                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
+                    self.looper.record_event(off_note, 0, ap);
+                }
+                if let Some((note, vel)) = arp_on {
+                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
+                    for (i, part) in self.parts.iter_mut().enumerate() {
+                        if !part.enabled || part.mute { continue; }
+                        let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
+                        if note < part.min_note || note > part.max_note { continue; }
+                        if vel < part.vel_min || vel > part.vel_max { continue; }
+                        if part.sf2_mode { self.sampler.note_on(i, transposed, vel); }
+                        else { part.note_on(transposed, vel); }
+                    }
+                    self.looper.record_event(note, vel, ap);
+                }
+            }
+
             // Looper: replay recorded events (routed to specific part)
             let looper_events = self.looper.tick();
             for &(note, vel, part_id) in &looper_events {

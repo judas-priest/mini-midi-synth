@@ -163,6 +163,12 @@ pub struct PatchParams {
     pub(super) airwindows_mode: f32,
     pub(super) airwindows_drive: f32,
     pub(super) airwindows_mix: f32,
+    // Arpeggiator
+    pub(super) arp_enabled: f32,
+    pub(super) arp_mode: f32,
+    pub(super) arp_rate: f32,
+    pub(super) arp_octaves: f32,
+    pub(super) arp_gate: f32,
     // 16-slot FX chain (new style — takes precedence when active)
     pub fx_chain: FxChain,
 }
@@ -269,6 +275,7 @@ impl Default for PatchParams {
             filter_drive: 0.0,
             filter_starve: 0.0,
             airwindows_mode: 0.0, airwindows_drive: 0.5, airwindows_mix: 0.0,
+            arp_enabled: 0.0, arp_mode: 0.0, arp_rate: 1.0, arp_octaves: 1.0, arp_gate: 0.5,
             fx_chain: FxChain::default(),
         }
     }
@@ -447,6 +454,11 @@ impl PatchParams {
             airwindows_mode: p("airwindows_mode", 0.0),
             airwindows_drive: p("airwindows_drive", 0.5),
             airwindows_mix: p("airwindows_mix", 0.0),
+            arp_enabled: p("arp_enabled", 0.0),
+            arp_mode: p("arp_mode", 0.0),
+            arp_rate: p("arp_rate", 1.0),
+            arp_octaves: p("arp_octaves", 1.0),
+            arp_gate: p("arp_gate", 0.5),
             fx_chain: if params.contains_key("fx0_type") {
                 FxChain::from_map(params)
             } else {
@@ -594,6 +606,8 @@ impl PatchParams {
         s!("svf_morph", self.svf_morph);
         s!("filter_drive", self.filter_drive); s!("filter_starve", self.filter_starve);
         s!("airwindows_mode", self.airwindows_mode); s!("airwindows_drive", self.airwindows_drive); s!("airwindows_mix", self.airwindows_mix);
+        s!("arp_enabled", self.arp_enabled); s!("arp_mode", self.arp_mode); s!("arp_rate", self.arp_rate);
+        s!("arp_octaves", self.arp_octaves); s!("arp_gate", self.arp_gate);
         self.fx_chain.to_map(&mut m);
         m
     }
