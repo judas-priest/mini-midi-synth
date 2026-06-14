@@ -1,127 +1,124 @@
-# План: Live Looper + Keybindings
+# План: UX и звуковые улучшения
 
-## Цель
-
-Дать возможность одному человеку с MIDI клавиатурой (SMK-37 Pro, 37 клавиш, без velocity) играть живой бит: drums (секвенсор) + bass (looper layer 1) + keys (looper layer 2). Переключение part и управление looper — с компьютерной клавиатуры.
+Предыдущий план (Looper + Keybindings) выполнен полностью.
 
 ---
 
-## Блок 1: Looper BPM sync (опциональная синхронизация)
+## Блок 1: Init Preset + Randomize
 
-### Проблема
-`looper.bpm` = 120.0 (хардкод при создании), `drum_engine.sequencer.bpm` — отдельное значение. При quantize looper считает grid по своему BPM, не совпадающему с драмами.
+### Init Preset
+- Кнопка "Init" рядом с preset selector
+- Загружает `PatchParams::default()` в текущий part
+- Отправляет `ControlEvent::load_patch_from(part, &init_patch)` с дефолтным Patch
+- Сбрасывает `edited_params` в GUI
 
-### Решение
-- Добавить флаг `looper_sync_bpm: bool` в GUI state + config (default: true)
-- Добавить `ControlEvent::LooperSetBpm { bpm: f32 }`
-- При `looper_sync_bpm == true`: каждый раз когда GUI меняет drum BPM, также отправлять `LooperSetBpm` с тем же значением
-- При `looper_sync_bpm == false`: показывать отдельный DragValue для looper BPM
-- Engine handler: `self.looper.bpm = bpm`
+### Randomize
+- Кнопка "Rnd" рядом с Init
+- Случайные значения для ключевых параметров: osc_type, filter_cutoff/resonance, ADSR, LFO rate/depth, noise_level, detune, FX mixes (малые значения)
+- Остальное — default (чтобы не генерить мусор)
+- Отправляет как обычный LoadPatch
 
 ### Файлы
-- `src/gui/mod.rs` — поле `looper_sync_bpm: bool`
-- `src/gui/drums.rs` — UI toggle + логика sync
-- `src/synth/mod.rs` — новый вариант `ControlEvent::LooperSetBpm`, handler
-- `src/config.rs` — `UiSettings::looper_sync_bpm` (persist)
-- `src/main.rs` — init
+- `src/gui/mod.rs` или `src/gui/params.rs` — кнопки Init/Rnd
+- `src/synth/patch_params.rs` — `PatchParams::random()` метод
+- `src/preset.rs` — хелпер для создания init Patch
 
 ### Риск: минимальный
 
 ---
 
-## Блок 2: Part ID в LoopEvent
+## Блок 2: XY Pad
 
-### Проблема
-`LoopEvent._pad: u8` не используется. При playback (mod.rs:2200-2219) looper шлёт ноты во **все** parts — переключение пресета между overdub слоями бесполезно, всё играет текущим тембром.
-
-### Решение
-
-**Запись:**
-- Переименовать `LoopEvent._pad` → `LoopEvent.part_id`
-- `record_event()` получает дополнительный аргумент `part: u8`
-- В `handle_event` (mod.rs:1483) передавать текущий `active_part` (новое поле engine или атомик из GUI)
-
-**Воспроизведение:**
-- `looper.tick()` возвращает `[(u8, u8, u8); MAX_SIMULTANEOUS]` → `(note, velocity, part_id)`
-- В tick_block (mod.rs:2200) вместо цикла по всем parts — note_on только в `parts[part_id]`
-- Проверять `part.enabled`, `min_note/max_note`, `vel_min/vel_max` как при обычном MIDI input
-
-**Active part tracking:**
-- Добавить `active_part: Arc<AtomicU8>` в engine, shared с GUI
-- GUI обновляет при переключении part (через keybind или клик)
-- Engine читает при `record_event` для `part_id`
+### Дизайн
+- egui виджет: прямоугольник ~200x200, drag = изменение двух макросов
+- X → Macro 1 (0..1), Y → Macro 2 (0..1)
+- Вся цепочка уже работает: `SetMacro` → `macro_vals` → Mod Matrix → параметры
+- Отображение: точка текущей позиции, подписи осей (имена макросов)
+- Выбор какие макросы привязаны к X/Y — два ComboBox (Macro 1-8)
 
 ### Файлы
-- `src/synth/looper.rs` — `_pad` → `part_id`, сигнатуры `record_event`, `tick`
-- `src/synth/mod.rs` — поле `active_part`, передача part_id при записи, роутинг при playback
-- `src/gui/mod.rs` — `active_part_atom`, обновление при смене part
-- `src/main.rs` — init атомика
+- `src/gui/macros.rs` — добавить XY pad под/над grid макросов
+- Не трогает audio path
 
-### Риск: средний (меняет формат looper events, hot path)
+### Риск: минимальный
 
 ---
 
-## Блок 3: Keybindings система
+## Блок 3: Арпеджиатор
+
+### Архитектура
+- Новый `src/synth/arpeggiator.rs` — `Arpeggiator` struct
+- Хранит held_notes (до 16), текущий паттерн, позицию, rate
+- `tick()` вызывается из `tick_block` (synth/mod.rs), возвращает Option<(note, velocity)>
+- `note_on/note_off` вызываются из `handle_event` ДО роутинга в parts
+- Когда arp включён: `handle_event` NoteOn/NoteOff → arp.note_on/off (не в parts)
+- Arp.tick() генерирует ноты → роутятся в parts стандартным путём
+- BPM берёт из drum_engine.sequencer.bpm (уже доступен)
+
+### Параметры (в PatchParams)
+- `arp_enabled: f32` (0/1)
+- `arp_mode: f32` (0=Up, 1=Down, 2=UpDown, 3=Random, 4=Order)
+- `arp_rate: f32` (0=1/4, 1=1/8, 2=1/16, 3=1/32, 4=1/4T, 5=1/8T)
+- `arp_octaves: f32` (1-4)
+- `arp_gate: f32` (0.1..1.0 — длина ноты относительно шага)
+
+### GUI
+- Секция "Arp" в params — toggle + mode/rate/octaves/gate
+- Компактная горизонтальная полоска
+
+### Совместимость
+- Лупер записывает ноты ПОСЛЕ арпа (записывается результат арпеджио, не зажатые клавиши)
+- Работает в headless (audio thread)
+- Сохраняется в пресете
+
+### Файлы
+- `src/synth/arpeggiator.rs` — **новый**
+- `src/synth/mod.rs` — поле `arpeggiator`, вызов в tick_block + handle_event
+- `src/synth/patch_params.rs` — 5 новых полей
+- `src/gui/params.rs` — секция Arp UI
+
+### Риск: средний (вклинивается в note handling hot path)
+
+---
+
+## Блок 4: MIDI Learn
 
 ### Дизайн
+- Режим: клик правой кнопкой на параметр → "MIDI Learn" → крути ручку → привязано
+- GUI state: `midi_learn_target: Option<&'static str>` (param key)
+- При получении `ParamFeedback::CcReceived { cc }` и `midi_learn_target.is_some()` → создать CcBinding для этого CC → target param
+- Обновить `CcMap` и отправить через `ControlEvent::SetCcMap`
 
-**Действия (enum KeyAction):**
-```
-SwitchPart(u8)      // 0-7
-LooperRecord
-LooperTogglePlay
-LooperUndo
-LooperClear
-ToggleDrumsSynth
-```
+### Уже есть
+- `CcMap` с `bindings[128]` — RT-safe, Copy
+- `ParamFeedback::CcReceived { cc }` — уже отправляется из audio thread
+- GUI settings для ручного редактирования CC map
+- `PARAM_REGISTRY` с min/max/log для каждого параметра
 
-**Хранение:**
-```rust
-// config.rs
-pub keybinds: HashMap<String, String>  // "F1" → "SwitchPart(0)"
-```
+### Файлы
+- `src/gui/mod.rs` — поле `midi_learn_target`, context menu на параметрах
+- `src/gui/params.rs` — right-click → "MIDI Learn" на слайдерах
+- `src/gui/settings.rs` — индикация текущего learn mode
+- Не трогает audio path (только GUI + existing CcMap system)
 
-Сериализация: `egui::Key` → строка ("F1", "Space", "R", ...).
-Десериализация: строка → `KeyAction` enum.
+### Риск: низкий
 
-**Дефолты:**
-| Клавиша | Действие |
-|---------|----------|
-| F1-F8   | SwitchPart(0)-SwitchPart(7) |
-| Space   | LooperTogglePlay |
-| R       | LooperRecord |
-| Z       | LooperUndo |
-| X       | LooperClear |
-| Tab     | ToggleDrumsSynth |
+---
 
-**Обработка (GUI frame loop):**
-```rust
-for (key, action) in &self.keybinds {
-    if ctx.input(|i| i.key_pressed(*key)) && !self.text_editing {
-        match action {
-            SwitchPart(p) => { self.active_part = p; self.active_part_atom.store(p, ...); }
-            LooperRecord => { self.ctrl_tx.push(ControlEvent::LooperRecord); }
-            ...
-        }
-    }
-}
-```
+## Блок 5: Визуализация фильтра
 
-Важно: НЕ обрабатывать keybinds когда фокус в текстовом поле (preset search, perf name).
+### Дизайн
+- Frequency response curve рядом с параметрами фильтра
+- Рисуется через egui painter (как looper timeline)
+- Формулы: для SVF/biquad — аналитический расчёт magnitude response по cutoff/resonance/type
+- Обновляется при изменении filter_cutoff, filter_resonance, filter_type
+- Размер: ~300x80px, лог шкала по X (20Hz-20kHz), dB по Y
 
-**GUI настроек:**
-- Окно "Keybinds" (кнопка в top bar или вкладка)
-- Таблица: Action | Key | [Rebind]
-- Клик "Rebind" → режим захвата → следующее нажатие = новый бинд
-- Кнопка "Reset defaults"
+### Файлы
+- `src/gui/params.rs` — `draw_filter_response()` рядом с filter controls
+- Чистый GUI, не трогает audio path
 
-### Файлы (новый + изменения)
-- `src/gui/keybinds.rs` — **новый**: enum KeyAction, парсинг, GUI окно настроек
-- `src/gui/mod.rs` — поле `keybinds`, `show_keybinds_window`, обработка в frame loop, `mod keybinds`
-- `src/config.rs` — `UiSettings::keybinds: HashMap<String, String>`
-- `src/main.rs` — init keybinds из config
-
-### Риск: низкий (новый код, не трогает audio path)
+### Риск: минимальный
 
 ---
 
@@ -129,22 +126,45 @@ for (key, action) in &self.keybinds {
 
 | # | Блок | Зависимости | Сложность |
 |---|------|-------------|-----------|
-| 1 | BPM sync | нет | Низкая (30 мин) |
-| 2 | Part ID в LoopEvent | нет | Средняя (1-2 ч) |
-| 3 | Keybindings | Блок 2 (SwitchPart нужен active_part_atom) | Средняя (1-2 ч) |
+| 1 | Init + Randomize | нет | Низкая |
+| 2 | XY Pad | нет | Низкая |
+| 3 | Арпеджиатор | нет | Средняя |
+| 4 | MIDI Learn | нет | Средняя |
+| 5 | Фильтр визуализация | нет | Низкая-Средняя |
 
-Блоки 1 и 2 независимы — можно параллельно.
-Блок 3 зависит от active_part_atom из Блока 2.
+Все блоки независимы — можно в любом порядке.
 
 ---
 
 ## Чеклист завершения
 
-- [ ] Drum sequencer играет, looper quantize привязан к тому же BPM
-- [ ] Записал bass в looper → переключил part на piano → overdub записывает piano
-- [ ] При playback bass играет bass-пресетом, piano — piano-пресетом
-- [ ] F1-F8 переключают parts с компьютерной клавиатуры
-- [ ] Space/R/Z/X управляют looper с клавиатуры
-- [ ] Бинды настраиваются в GUI и сохраняются в config.json
-- [ ] Sync BPM toggle в GUI, сохраняется в config
-- [ ] Все 26 тестов проходят
+- [ ] Init Preset сбрасывает звук в default
+- [ ] Randomize генерирует играбельные случайные звуки
+- [ ] XY Pad управляет двумя макросами, видно в Mod Matrix
+- [ ] Arp: Up/Down/UpDown/Random работают, sync к BPM, записывается в looper
+- [ ] MIDI Learn: правый клик → крутим ручку → привязано, сохраняется в config
+- [ ] Filter curve обновляется при смене cutoff/resonance/type
+- [ ] Headless mode не сломан
+- [ ] Оба режима сборки (GUI + headless) компилируются без warnings
+
+---
+
+# Идеи (отложено)
+
+Фичи которые не ложатся легко в текущую архитектуру или требуют значительных усилий:
+
+### Звук / DSP
+- **Гранулярный осциллятор** — загрузка сэмпла, grain scheduling, новый OscType. Nimbus делает гранулярный FX, но гранулярный источник звука — другая задача. Нужен sample import UI.
+- **Spectral freeze/morph** — FFT на audio thread, overlap-add, отдельный буфер. CPU-интенсивно.
+- **Microtuning (.scl)** — парсинг Scala файлов, пересчёт частот в осцилляторах. Средняя сложность, нишевый спрос.
+
+### GUI
+- **Drag-and-drop модуляция** — как Serum/Vital. Mod Matrix уже есть, но D&D в egui требует кастомного виджета с drag source/drop target трекингом.
+- **Мини-пиано-ролл для pitch sequencer** — визуальное редактирование мелодий. Сейчас pitch seq управляется числами.
+- **Preset browser с тегами** — требует миграции пресетов в новый формат с метаданными (category, tags, author).
+- **Dark/Light тема** — переключение egui Visuals. Простая идея, но нужно проверить все кастомные цвета.
+
+### Платформа
+- **Web UI для headless** — HTTP сервер + HTML/JS фронтенд + WebSocket. Отдельный большой проект. Стандарт для Zynthian/MOD Duo.
+- **Systemd service** — автозапуск на Orange Pi. Простой .service файл, но нужно тестировать на реальном железе.
+- **Экспорт лупа в WAV** — offline render через движок или запись audio output в файл. Нужен отдельный render path или ring buffer для записи.
