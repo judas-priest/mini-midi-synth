@@ -15,6 +15,124 @@ use super::{
 
 const LFO_TRIGGER_MODE_NAMES: &[&str] = &["Free Run", "Key Trigger", "Random Start", "Random Unipolar"];
 
+/// Number of frequency points for the filter response curve.
+const FILTER_RESP_POINTS: usize = 64;
+
+/// Map a filter_type parameter value to a visualization category:
+/// 0 = LP, 1 = HP, 2 = BP, 3 = Notch, 4 = Other (flat).
+fn filter_vis_category(filter_type: u32) -> u8 {
+    match filter_type {
+        0 | 4 | 5 | 6 | 12 | 14 | 18 | 22 | 23 | 25 | 30 | 35 | 37 => 0, // LP variants
+        1 | 13 | 15 | 19 | 26 | 31 => 1,                                    // HP variants
+        2 | 16 | 20 | 27 | 32 | 38 => 2,                                    // BP variants
+        11 | 17 | 21 | 28 | 33 => 3,                                        // Notch variants
+        36 => 0,                                                             // SVFMorph (default LP)
+        _ => 4,                                                              // Comb/Allpass/S&H/AP warp → flat
+    }
+}
+
+/// Compute filter magnitude response (dB) at `FILTER_RESP_POINTS` log-spaced frequencies.
+fn compute_filter_response(cutoff: f32, resonance: f32, filter_type: u32) -> [(f32, f32); FILTER_RESP_POINTS] {
+    let mut points = [(0.0f32, 0.0f32); FILTER_RESP_POINTS];
+    let cat = filter_vis_category(filter_type);
+    // Map resonance 0..1 → Q (higher resonance = sharper peak).
+    let q = (1.0 - resonance * 0.95).max(0.05).recip();
+    // For 24dB (4-pole) types, cascade two 2-pole stages.
+    let is_4pole = matches!(filter_type, 4 | 12 | 13 | 16 | 17 | 22);
+    // 18dB (3-pole) types get 1.5x the slope.
+    let is_3pole = matches!(filter_type, 6 | 23);
+
+    for i in 0..FILTER_RESP_POINTS {
+        let t = i as f32 / (FILTER_RESP_POINTS - 1) as f32;
+        let freq = 20.0 * (20000.0f32 / 20.0).powf(t);
+        let ratio = freq / cutoff.max(1.0);
+        let r2 = ratio * ratio;
+        let denom = (1.0 - r2).powi(2) + (ratio / q).powi(2);
+
+        let mag_sq = match cat {
+            0 => 1.0 / denom,                              // LP
+            1 => r2 * r2 / denom,                          // HP
+            2 => (ratio / q).powi(2) / denom,              // BP
+            3 => (1.0 - r2).powi(2) / denom,               // Notch
+            _ => 1.0,                                       // flat
+        };
+
+        let mut db = 10.0 * mag_sq.max(1e-10).log10();
+        if is_4pole { db *= 2.0; }
+        if is_3pole { db *= 1.5; }
+        points[i] = (freq, db.clamp(-24.0, 12.0));
+    }
+    points
+}
+
+/// Map frequency (Hz) to x-coordinate within `rect` (log scale 20–20 kHz).
+fn freq_to_x(freq: f32, rect: egui::Rect) -> f32 {
+    let t = (freq / 20.0).log10() / (20000.0f32 / 20.0).log10();
+    rect.left() + t * rect.width()
+}
+
+/// Map dB to y-coordinate within `rect` (−24 dB at bottom, +12 dB at top).
+fn db_to_y(db: f32, rect: egui::Rect) -> f32 {
+    let t = (db - (-24.0)) / (12.0 - (-24.0));
+    rect.bottom() - t * rect.height()
+}
+
+/// Draw the filter frequency response curve.
+fn draw_filter_response(
+    ui: &mut egui::Ui,
+    cutoff: f32,
+    resonance: f32,
+    filter_type: u32,
+    _sample_rate: f32,
+) {
+    let width = ui.available_width().min(300.0);
+    let height = 80.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+
+    // Background
+    painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
+
+    // Grid lines at 100 Hz, 1 kHz, 10 kHz
+    for &freq in &[100.0f32, 1000.0, 10000.0] {
+        let x = freq_to_x(freq, rect);
+        painter.line_segment(
+            [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+            egui::Stroke::new(1.0, egui::Color32::from_gray(40)),
+        );
+    }
+
+    // 0 dB line
+    let y_0db = db_to_y(0.0, rect);
+    painter.line_segment(
+        [egui::pos2(rect.left(), y_0db), egui::pos2(rect.right(), y_0db)],
+        egui::Stroke::new(1.0, egui::Color32::from_gray(50)),
+    );
+
+    // Compute response curve
+    let points = compute_filter_response(cutoff, resonance, filter_type);
+
+    // Draw curve
+    let color = egui::Color32::from_rgb(100, 200, 255);
+    for i in 1..FILTER_RESP_POINTS {
+        let x0 = freq_to_x(points[i - 1].0, rect);
+        let y0 = db_to_y(points[i - 1].1, rect);
+        let x1 = freq_to_x(points[i].0, rect);
+        let y1 = db_to_y(points[i].1, rect);
+        painter.line_segment(
+            [egui::pos2(x0, y0), egui::pos2(x1, y1)],
+            egui::Stroke::new(1.5, color),
+        );
+    }
+
+    // Cutoff marker
+    let cx = freq_to_x(cutoff.clamp(20.0, 20000.0), rect);
+    painter.line_segment(
+        [egui::pos2(cx, rect.top()), egui::pos2(cx, rect.bottom())],
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 200, 50)),
+    );
+}
+
 fn env_shape_combo(
     ui: &mut egui::Ui,
     part: usize,
@@ -716,6 +834,11 @@ impl App {
                 changed |= self.param_slider(ui, "filter_drive", "Drive", 0.0, 1.0, false);
                 changed |= self.param_slider(ui, "filter_starve", "Starve", 0.0, 1.0, false);
             }
+
+            // Filter frequency response curve
+            let cutoff = self.parts[part].edited_params.get("filter_cutoff").copied().unwrap_or(1000.0);
+            let resonance = self.parts[part].edited_params.get("filter_resonance").copied().unwrap_or(0.0);
+            draw_filter_response(ui, cutoff, resonance, filter_type, self.sample_rate as f32);
         }
 
         // Filter routing (not available with formant filter)
