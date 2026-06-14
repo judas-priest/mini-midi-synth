@@ -140,6 +140,10 @@ pub struct PartState {
     pub macro_vals: [f32; 8],
     /// Macro knob names (user-editable, shown as label in GUI)
     pub macro_names: Vec<String>,
+    /// XY pad: which macro index is bound to X axis (0-based)
+    pub xy_macro_x: usize,
+    /// XY pad: which macro index is bound to Y axis (0-based)
+    pub xy_macro_y: usize,
 }
 
 impl PartState {
@@ -151,6 +155,8 @@ impl PartState {
             pan: 0.0, transpose: 0, sf2_mode: false, sf2_program: 0,
             macro_vals: [0.0; 8],
             macro_names: (1..=8).map(|i| format!("Macro {i}")).collect(),
+            xy_macro_x: 0,
+            xy_macro_y: 1,
         }
     }
 }

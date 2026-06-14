@@ -67,5 +67,151 @@ impl App {
                     }
                 }
             });
+
+        ui.add_space(8.0);
+        self.draw_xy_pad(ui);
+    }
+
+    /// XY Pad widget: drag to control two macros simultaneously.
+    fn draw_xy_pad(&mut self, ui: &mut egui::Ui) {
+        let part = self.active_part;
+        let macro_labels: Vec<String> = (0..8)
+            .map(|i| {
+                self.parts[part].macro_names.get(i)
+                    .cloned()
+                    .unwrap_or_else(|| format!("Macro {}", i + 1))
+            })
+            .collect();
+
+        // Axis assignment combo boxes
+        ui.horizontal(|ui| {
+            ui.strong("XY Pad");
+            ui.add_space(12.0);
+
+            ui.label("X:");
+            let x_label = macro_labels[self.parts[part].xy_macro_x].clone();
+            egui::ComboBox::from_id_salt(format!("xy_x_{part}"))
+                .selected_text(&x_label)
+                .width(90.0)
+                .show_ui(ui, |ui| {
+                    for i in 0..8 {
+                        ui.selectable_value(
+                            &mut self.parts[part].xy_macro_x,
+                            i,
+                            &macro_labels[i],
+                        );
+                    }
+                });
+
+            ui.add_space(8.0);
+            ui.label("Y:");
+            let y_label = macro_labels[self.parts[part].xy_macro_y].clone();
+            egui::ComboBox::from_id_salt(format!("xy_y_{part}"))
+                .selected_text(&y_label)
+                .width(90.0)
+                .show_ui(ui, |ui| {
+                    for i in 0..8 {
+                        ui.selectable_value(
+                            &mut self.parts[part].xy_macro_y,
+                            i,
+                            &macro_labels[i],
+                        );
+                    }
+                });
+        });
+
+        ui.add_space(4.0);
+
+        let xi = self.parts[part].xy_macro_x;
+        let yi = self.parts[part].xy_macro_y;
+        let x_name = macro_labels[xi].clone();
+        let y_name = macro_labels[yi].clone();
+
+        // Pad area
+        let size = egui::vec2(200.0, 200.0);
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        let painter = ui.painter_at(rect);
+
+        // Background
+        painter.rect_filled(rect, 4.0, egui::Color32::from_gray(30));
+        painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(80)), egui::StrokeKind::Outside);
+
+        // Grid lines (4×4 subdivisions)
+        for i in 1..4 {
+            let frac = i as f32 / 4.0;
+            let x = rect.left() + frac * rect.width();
+            let y = rect.top() + frac * rect.height();
+            painter.line_segment(
+                [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+                egui::Stroke::new(0.5, egui::Color32::from_gray(50)),
+            );
+            painter.line_segment(
+                [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+                egui::Stroke::new(0.5, egui::Color32::from_gray(50)),
+            );
+        }
+
+        // Current position
+        let x_val = self.parts[part].macro_vals[xi];
+        let y_val = self.parts[part].macro_vals[yi];
+        let x_frac = x_val;
+        let y_frac = 1.0 - y_val; // inverted so top = 1
+        let dot_pos = egui::pos2(
+            rect.left() + x_frac * rect.width(),
+            rect.top() + y_frac * rect.height(),
+        );
+
+        // Crosshair lines through dot
+        painter.line_segment(
+            [egui::pos2(dot_pos.x, rect.top()), egui::pos2(dot_pos.x, rect.bottom())],
+            egui::Stroke::new(0.5, egui::Color32::from_rgba_premultiplied(100, 200, 255, 60)),
+        );
+        painter.line_segment(
+            [egui::pos2(rect.left(), dot_pos.y), egui::pos2(rect.right(), dot_pos.y)],
+            egui::Stroke::new(0.5, egui::Color32::from_rgba_premultiplied(100, 200, 255, 60)),
+        );
+
+        // Dot
+        painter.circle_filled(dot_pos, 7.0, egui::Color32::from_rgb(100, 200, 255));
+        painter.circle_stroke(dot_pos, 7.0, egui::Stroke::new(1.0, egui::Color32::WHITE));
+
+        // Axis labels
+        painter.text(
+            egui::pos2(rect.center().x, rect.bottom() + 10.0),
+            egui::Align2::CENTER_TOP,
+            &x_name,
+            egui::FontId::proportional(11.0),
+            egui::Color32::from_gray(180),
+        );
+        // Y label (rotated text not trivial in egui, place to the left)
+        painter.text(
+            egui::pos2(rect.left() - 4.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            &y_name,
+            egui::FontId::proportional(11.0),
+            egui::Color32::from_gray(180),
+        );
+
+        // Handle drag / click
+        if response.dragged() || response.clicked() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let new_x = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                let new_y = 1.0 - ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
+
+                // Update X macro
+                self.parts[part].macro_vals[xi] = new_x;
+                self.parts[part].edited_params.insert(format!("macro_{xi}"), new_x);
+                let _ = self.ctrl_tx.push(ControlEvent::SetMacro {
+                    part, index: xi, value: new_x,
+                });
+
+                // Update Y macro
+                self.parts[part].macro_vals[yi] = new_y;
+                self.parts[part].edited_params.insert(format!("macro_{yi}"), new_y);
+                let _ = self.ctrl_tx.push(ControlEvent::SetMacro {
+                    part, index: yi, value: new_y,
+                });
+            }
+        }
     }
 }
