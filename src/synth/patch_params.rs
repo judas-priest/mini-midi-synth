@@ -454,4 +454,233 @@ impl PatchParams {
             },
         }
     }
+
+    /// Serialize all parameters into a BTreeMap (inverse of `from_map`).
+    pub fn to_map(&self) -> std::collections::BTreeMap<String, f32> {
+        let mut m = std::collections::BTreeMap::new();
+        macro_rules! s {
+            ($k:expr, $v:expr) => { m.insert($k.to_string(), $v); };
+        }
+        s!("osc_type", self.osc_type); s!("osc_detune", self.osc_detune);
+        s!("fm_ratio", self.fm_ratio); s!("fm_index", self.fm_index); s!("fm_env_amount", self.fm_env_amount);
+        s!("osc_count", self.osc_count); s!("osc1_level", self.osc1_level);
+        s!("osc2_type", self.osc2_type); s!("osc2_detune", self.osc2_detune); s!("osc2_level", self.osc2_level);
+        s!("osc3_type", self.osc3_type); s!("osc3_detune", self.osc3_detune); s!("osc3_level", self.osc3_level);
+        s!("filter_cutoff", self.filter_cutoff); s!("filter_resonance", self.filter_resonance);
+        s!("filter_type", self.filter_type); s!("filter_env_amount", self.filter_env_amount);
+        s!("filter_key_track", self.filter_key_track);
+        s!("filter_routing", self.filter_routing); s!("filter2_type", self.filter2_type);
+        s!("filter2_cutoff", self.filter2_cutoff); s!("filter2_resonance", self.filter2_resonance);
+        s!("noise_level", self.noise_level);
+        s!("amp_attack", self.amp_attack); s!("amp_decay", self.amp_decay);
+        s!("amp_sustain", self.amp_sustain); s!("amp_release", self.amp_release); s!("amp_hold", self.amp_hold);
+        s!("filter_attack", self.filter_attack); s!("filter_decay", self.filter_decay);
+        s!("filter_sustain", self.filter_sustain); s!("filter_release", self.filter_release); s!("filter_hold", self.filter_hold);
+        s!("ks_brightness", self.ks_brightness); s!("ks_feedback", self.ks_feedback);
+        for (i, &v) in self.organ_drawbars.iter().enumerate() { m.insert(format!("drawbar_{}", i + 1), v); }
+        s!("formant_voice", self.formant_voice); s!("formant_vowel", self.formant_vowel);
+        s!("drum_pitch_amount", self.drum_pitch_amount); s!("drum_pitch_decay", self.drum_pitch_decay);
+        s!("drum_noise_level", self.drum_noise_level); s!("drum_noise_decay", self.drum_noise_decay);
+        s!("drum_noise_color", self.drum_noise_color);
+        s!("bass_style", self.bass_style); s!("bass_tone", self.bass_tone); s!("bass_body", self.bass_body); s!("bass_pickup", self.bass_pickup);
+        s!("bow_pressure", self.bow_pressure); s!("bow_position", self.bow_position); s!("body_type", self.body_type);
+        s!("lip_tension", self.lip_tension); s!("blowing_pressure", self.blowing_pressure); s!("bell_type", self.bell_type);
+        s!("pd_shape", self.pd_shape); s!("pd_depth", self.pd_depth); s!("pd_env_amount", self.pd_env_amount);
+        s!("fold_amount", self.fold_amount); s!("fold_symmetry", self.fold_symmetry); s!("fold_source", self.fold_source);
+        s!("modal_material", self.modal_material); s!("modal_brightness", self.modal_brightness);
+        s!("modal_damping", self.modal_damping); s!("modal_strike_pos", self.modal_strike_pos);
+        s!("sync_ratio", self.sync_ratio); s!("sync_shape", self.sync_shape);
+        s!("supersaw_detune", self.supersaw_detune); s!("supersaw_mix", self.supersaw_mix);
+        s!("pulse_width", self.pulse_width);
+        s!("accordion_register", self.accordion_register); s!("accordion_bellows", self.accordion_bellows);
+        s!("sax_reed_stiffness", self.sax_reed_stiffness); s!("sax_embouchure", self.sax_embouchure);
+        s!("sax_blow_pressure", self.sax_blow_pressure); s!("sax_type", self.sax_type);
+        s!("epiano_type", self.epiano_type);
+        s!("velocity_curve", self.velocity_curve); s!("vel_to_filter", self.vel_to_filter);
+        s!("env_attack_shape", self.env_attack_shape); s!("env_decay_shape", self.env_decay_shape);
+        s!("env_release_shape", self.env_release_shape);
+        s!("filter_env_attack_shape", self.filter_env_attack_shape);
+        s!("filter_env_decay_shape", self.filter_env_decay_shape);
+        s!("filter_env_release_shape", self.filter_env_release_shape);
+        s!("lfo1_retrigger", self.lfo1_retrigger); s!("lfo2_retrigger", self.lfo2_retrigger);
+        s!("lfo3_retrigger", self.lfo3_retrigger); s!("lfo4_retrigger", self.lfo4_retrigger);
+        s!("lfo1_trigger_mode", self.lfo1_trigger_mode); s!("lfo2_trigger_mode", self.lfo2_trigger_mode);
+        s!("lfo3_trigger_mode", self.lfo3_trigger_mode); s!("lfo4_trigger_mode", self.lfo4_trigger_mode);
+        s!("lfo_waveform", self.lfo_waveform); s!("lfo_rate", self.lfo_rate);
+        s!("lfo_pitch_depth", self.lfo_pitch_depth); s!("lfo_filter_depth", self.lfo_filter_depth);
+        s!("lfo_amp_depth", self.lfo_amp_depth); s!("lfo_deform", self.lfo_deform);
+        s!("lfo2_waveform", self.lfo2_waveform); s!("lfo2_rate", self.lfo2_rate);
+        s!("lfo2_pitch_depth", self.lfo2_pitch_depth); s!("lfo2_filter_depth", self.lfo2_filter_depth);
+        s!("lfo2_amp_depth", self.lfo2_amp_depth); s!("lfo2_deform", self.lfo2_deform);
+        s!("lfo3_waveform", self.lfo3_waveform); s!("lfo3_rate", self.lfo3_rate); s!("lfo3_deform", self.lfo3_deform);
+        s!("lfo4_waveform", self.lfo4_waveform); s!("lfo4_rate", self.lfo4_rate); s!("lfo4_deform", self.lfo4_deform);
+        s!("lfo1_tempo_sync", self.lfo1_tempo_sync); s!("lfo2_tempo_sync", self.lfo2_tempo_sync);
+        s!("lfo3_tempo_sync", self.lfo3_tempo_sync); s!("lfo4_tempo_sync", self.lfo4_tempo_sync);
+        s!("lfo1_unipolar", self.lfo1_unipolar); s!("lfo2_unipolar", self.lfo2_unipolar);
+        s!("lfo3_unipolar", self.lfo3_unipolar); s!("lfo4_unipolar", self.lfo4_unipolar);
+        s!("slfo1_rate", self.slfo1_rate); s!("slfo1_waveform", self.slfo1_waveform);
+        s!("slfo1_deform", self.slfo1_deform); s!("slfo1_tempo_sync", self.slfo1_tempo_sync); s!("slfo1_unipolar", self.slfo1_unipolar);
+        s!("slfo2_rate", self.slfo2_rate); s!("slfo2_waveform", self.slfo2_waveform);
+        s!("slfo2_deform", self.slfo2_deform); s!("slfo2_tempo_sync", self.slfo2_tempo_sync); s!("slfo2_unipolar", self.slfo2_unipolar);
+        for (i, &v) in self.macro_vals.iter().enumerate() { m.insert(format!("macro_{i}"), v); }
+        s!("alias_wave_type", self.alias_wave_type); s!("alias_crush", self.alias_crush);
+        s!("window_type", self.window_type); s!("window_morph", self.window_morph); s!("window_formant", self.window_formant);
+        s!("twist_engine", self.twist_engine); s!("twist_harmonics", self.twist_harmonics);
+        s!("twist_timbre", self.twist_timbre); s!("twist_morph", self.twist_morph);
+        s!("twist_lpg_decay", self.twist_lpg_decay); s!("twist_lpg_colour", self.twist_lpg_colour);
+        s!("twist_aux_mix", self.twist_aux_mix);
+        s!("portamento_time", self.portamento_time); s!("portamento_mode", self.portamento_mode);
+        s!("pitch_bend_up", self.pitch_bend_up); s!("pitch_bend_down", self.pitch_bend_down);
+        s!("play_mode", self.play_mode); s!("sustain_mode", self.sustain_mode);
+        s!("unison_voices", self.unison_voices); s!("unison_detune", self.unison_detune); s!("unison_spread", self.unison_spread);
+        s!("chorus_mix", self.chorus_mix);
+        s!("delay_mix", self.delay_mix); s!("delay_time_l", self.delay_time_l); s!("delay_time_r", self.delay_time_r);
+        s!("delay_feedback", self.delay_feedback); s!("delay_ping_pong", self.delay_ping_pong); s!("delay_filter", self.delay_filter);
+        s!("reverb_mix", self.reverb_mix); s!("reverb_room_size", self.reverb_room_size); s!("reverb_damping", self.reverb_damping);
+        s!("reverb_width", self.reverb_width); s!("reverb_pre_delay", self.reverb_pre_delay);
+        s!("ring_mod_freq", self.ring_mod_freq); s!("ring_mod_shape", self.ring_mod_shape);
+        s!("ring_mod_bias", self.ring_mod_bias); s!("ring_mod_linear", self.ring_mod_linear); s!("ring_mod_mix", self.ring_mod_mix);
+        s!("freq_shift_hz", self.freq_shift_hz); s!("freq_shift_feedback", self.freq_shift_feedback);
+        s!("freq_shift_delay", self.freq_shift_delay); s!("freq_shift_mix", self.freq_shift_mix);
+        s!("tape_drive", self.tape_drive); s!("tape_saturation", self.tape_saturation);
+        s!("tape_bias", self.tape_bias); s!("tape_tone", self.tape_tone);
+        s!("tape_speed", self.tape_speed); s!("tape_mix", self.tape_mix);
+        s!("neuron_drive", self.neuron_drive); s!("neuron_squash", self.neuron_squash);
+        s!("neuron_stab", self.neuron_stab); s!("neuron_asym", self.neuron_asym);
+        s!("neuron_bias", self.neuron_bias); s!("neuron_comb_freq", self.neuron_comb_freq);
+        s!("neuron_comb_sep", self.neuron_comb_sep); s!("neuron_mix", self.neuron_mix);
+        s!("spring_size", self.spring_size); s!("spring_decay", self.spring_decay);
+        s!("spring_reflections", self.spring_reflections); s!("spring_damping", self.spring_damping);
+        s!("spring_spin", self.spring_spin); s!("spring_chaos", self.spring_chaos); s!("spring_mix", self.spring_mix);
+        s!("reverb_type", self.reverb_type);
+        s!("fm_cross_depth", self.fm_cross_depth);
+        s!("mseg_enabled", self.mseg_enabled);
+        s!("seq_pitch_depth", self.seq_pitch_depth);
+        s!("min_note", self.min_note); s!("max_note", self.max_note);
+        s!("filter_env_semitones", self.filter_env_semitones);
+        s!("rotary_speed", self.rotary_speed); s!("rotary_mix", self.rotary_mix);
+        s!("ensemble_depth", self.ensemble_depth); s!("ensemble_rate", self.ensemble_rate); s!("ensemble_mix", self.ensemble_mix);
+        s!("resonator_freq", self.resonator_freq); s!("resonator_decay", self.resonator_decay); s!("resonator_mix", self.resonator_mix);
+        s!("bonsai_drive", self.bonsai_drive); s!("bonsai_tone", self.bonsai_tone);
+        s!("bonsai_asym", self.bonsai_asym); s!("bonsai_mode", self.bonsai_mode); s!("bonsai_mix", self.bonsai_mix);
+        s!("wave_shaper_drive", self.wave_shaper_drive); s!("wave_shaper_mode", self.wave_shaper_mode);
+        s!("wave_shaper_bias", self.wave_shaper_bias); s!("wave_shaper_mix", self.wave_shaper_mix);
+        s!("ms_mid_gain", self.ms_mid_gain); s!("ms_side_gain", self.ms_side_gain);
+        s!("ms_rotation", self.ms_rotation); s!("ms_mix", self.ms_mix);
+        for (i, &v) in self.graphic_eq_gains.iter().enumerate() { m.insert(format!("geq_{i}"), v); }
+        s!("graphic_eq_output", self.graphic_eq_output);
+        s!("conditioner_bass_cut", self.conditioner_bass_cut); s!("conditioner_width", self.conditioner_width);
+        s!("conditioner_threshold", self.conditioner_threshold); s!("conditioner_mix", self.conditioner_mix);
+        s!("exciter_drive", self.exciter_drive); s!("exciter_freq", self.exciter_freq);
+        s!("exciter_presence", self.exciter_presence); s!("exciter_mix", self.exciter_mix);
+        s!("floaty_time", self.floaty_time); s!("floaty_feedback", self.floaty_feedback);
+        s!("floaty_wobble", self.floaty_wobble); s!("floaty_rate", self.floaty_rate);
+        s!("floaty_damp", self.floaty_damp); s!("floaty_mix", self.floaty_mix);
+        s!("reverb2_decay", self.reverb2_decay); s!("reverb2_damping", self.reverb2_damping);
+        s!("reverb2_size", self.reverb2_size); s!("reverb2_mix", self.reverb2_mix);
+        s!("combulator_freq", self.combulator_freq); s!("combulator_offset2", self.combulator_offset2);
+        s!("combulator_offset3", self.combulator_offset3); s!("combulator_feedback", self.combulator_feedback);
+        s!("combulator_tone", self.combulator_tone); s!("combulator_mix", self.combulator_mix);
+        s!("treemonster_threshold", self.treemonster_threshold); s!("treemonster_shift", self.treemonster_shift);
+        s!("treemonster_ring_mix", self.treemonster_ring_mix); s!("treemonster_mix", self.treemonster_mix);
+        s!("nimbus_position", self.nimbus_position); s!("nimbus_size", self.nimbus_size);
+        s!("nimbus_pitch", self.nimbus_pitch); s!("nimbus_density", self.nimbus_density);
+        s!("nimbus_spread", self.nimbus_spread); s!("nimbus_texture", self.nimbus_texture); s!("nimbus_mix", self.nimbus_mix);
+        s!("vocoder_env_follow", self.vocoder_env_follow); s!("vocoder_gate", self.vocoder_gate); s!("vocoder_mix", self.vocoder_mix);
+        s!("conv_reverb_room", self.conv_reverb_room); s!("conv_reverb_damping", self.conv_reverb_damping);
+        s!("conv_reverb_predelay", self.conv_reverb_predelay); s!("conv_reverb_mix", self.conv_reverb_mix);
+        s!("osc_ws_mode", self.osc_ws_mode); s!("osc_ws_drive", self.osc_ws_drive); s!("osc_ws_mix", self.osc_ws_mix);
+        s!("inter_ws_mode", self.inter_ws_mode); s!("inter_ws_drive", self.inter_ws_drive); s!("inter_ws_mix", self.inter_ws_mix);
+        s!("svf_morph", self.svf_morph);
+        s!("filter_drive", self.filter_drive); s!("filter_starve", self.filter_starve);
+        s!("airwindows_mode", self.airwindows_mode); s!("airwindows_drive", self.airwindows_drive); s!("airwindows_mix", self.airwindows_mix);
+        self.fx_chain.to_map(&mut m);
+        m
+    }
+
+    /// Generate a BTreeMap with musically useful random parameter values.
+    /// Uses a simple xorshift64 RNG seeded from system time (no external deps).
+    pub fn random_map() -> std::collections::BTreeMap<String, f32> {
+        // Start from defaults
+        let mut m = Self::default().to_map();
+
+        // Simple xorshift64 RNG
+        let mut state: u64 = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0xDEAD_BEEF_CAFE_1234);
+        if state == 0 { state = 1; }
+        let mut rng = || -> f32 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state as f64 / u64::MAX as f64) as f32
+        };
+        // Helper macro to avoid closure borrow conflicts
+        macro_rules! range {
+            ($lo:expr, $hi:expr) => {{ let r = rng(); $lo + r * ($hi - $lo) }}
+        }
+
+        // -- Oscillator: pick from common types (Sine=0, Saw=1, Square=2, Tri=3, FM=4, Supersaw=20)
+        let osc_choices = [0.0_f32, 1.0, 2.0, 3.0, 4.0, 20.0];
+        let osc_idx = (rng() * osc_choices.len() as f32) as usize % osc_choices.len();
+        let osc = osc_choices[osc_idx];
+        m.insert("osc_type".into(), osc);
+
+        // Detune (subtle)
+        m.insert("osc_detune".into(), range!(-0.15, 0.15));
+
+        // Filter
+        m.insert("filter_cutoff".into(), range!(200.0, 12000.0));
+        m.insert("filter_resonance".into(), range!(0.0, 0.6));
+        // Filter type: mostly LP (0), sometimes others
+        let filt_choices = [0.0_f32, 0.0, 0.0, 4.0, 12.0]; // bias toward LP
+        let filt_idx = (rng() * filt_choices.len() as f32) as usize % filt_choices.len();
+        m.insert("filter_type".into(), filt_choices[filt_idx]);
+        m.insert("filter_env_amount".into(), range!(0.0, 0.5));
+
+        // Amp ADSR
+        m.insert("amp_attack".into(), range!(0.001, 0.5));
+        m.insert("amp_decay".into(), range!(0.05, 0.8));
+        m.insert("amp_sustain".into(), range!(0.3, 1.0));
+        m.insert("amp_release".into(), range!(0.05, 1.5));
+
+        // Filter ADSR
+        m.insert("filter_attack".into(), range!(0.001, 0.3));
+        m.insert("filter_decay".into(), range!(0.05, 0.6));
+        m.insert("filter_sustain".into(), range!(0.2, 0.8));
+        m.insert("filter_release".into(), range!(0.05, 1.0));
+
+        // Noise (usually none, sometimes a touch)
+        let r = rng();
+        m.insert("noise_level".into(), if r < 0.3 { range!(0.0, 0.15) } else { 0.0 });
+
+        // LFO 1 (subtle modulation)
+        m.insert("lfo_rate".into(), range!(0.5, 8.0));
+        let r = rng(); m.insert("lfo_filter_depth".into(), if r < 0.4 { range!(0.0, 0.3) } else { 0.0 });
+        let r = rng(); m.insert("lfo_pitch_depth".into(), if r < 0.2 { range!(0.0, 0.1) } else { 0.0 });
+        let r = rng(); m.insert("lfo_amp_depth".into(), if r < 0.2 { range!(0.0, 0.2) } else { 0.0 });
+
+        // FX: small random mix values (keep things subtle)
+        let r = rng(); m.insert("chorus_mix".into(), if r < 0.3 { range!(0.05, 0.25) } else { 0.0 });
+        let r = rng(); m.insert("delay_mix".into(), if r < 0.25 { range!(0.05, 0.2) } else { 0.0 });
+        let r = rng(); m.insert("reverb_mix".into(), if r < 0.35 { range!(0.05, 0.3) } else { 0.0 });
+
+        // Supersaw params (only relevant if osc_type == 20)
+        if osc == 20.0 {
+            m.insert("supersaw_detune".into(), range!(0.2, 0.7));
+            m.insert("supersaw_mix".into(), range!(0.3, 0.8));
+        }
+
+        // FM params (only relevant if osc_type == 4)
+        if osc == 4.0 {
+            m.insert("fm_ratio".into(), range!(1.0, 8.0));
+            m.insert("fm_index".into(), range!(1.0, 10.0));
+        }
+
+        // Velocity: fixed curve (user has no velocity keyboard)
+        m.insert("velocity_curve".into(), 3.0); // Fixed
+
+        m
+    }
 }

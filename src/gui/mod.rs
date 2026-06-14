@@ -609,6 +609,18 @@ impl eframe::App for App {
                             }
                         }
                     });
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Init").clicked() {
+                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                            self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
+                            self.send_edited_params(part);
+                        }
+                        if ui.small_button("Rnd").clicked() {
+                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                            self.parts[part].edited_params = crate::synth::PatchParams::random_map();
+                            self.send_edited_params(part);
+                        }
+                    });
                 }
                 ui.add_space(2.0);
 
