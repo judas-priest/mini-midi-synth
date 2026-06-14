@@ -5,6 +5,8 @@ mod cc_map;
 mod config;
 #[cfg(feature = "gui")]
 mod gui;
+mod input;
+mod key_action;
 mod midi;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod preset;
@@ -76,9 +78,7 @@ struct CommonInit {
     looper_atoms: Arc<synth::looper::LooperAtoms>,
     #[cfg(feature = "gui")]
     looper_display: Arc<std::sync::Mutex<synth::looper::LooperDisplay>>,
-    #[cfg(feature = "gui")]
     seq_target_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
     active_part_atom: Arc<AtomicU8>,
     #[cfg(feature = "gui")]
     pitch_seq_step_atoms: Vec<Arc<AtomicU8>>,
@@ -136,9 +136,7 @@ fn init_common() -> Result<CommonInit> {
     let looper_atoms = engine.looper.atoms();
     #[cfg(feature = "gui")]
     let looper_display = engine.looper.display();
-    #[cfg(feature = "gui")]
     let seq_target_atom = engine.seq_target_atom();
-    #[cfg(feature = "gui")]
     let active_part_atom = engine.active_part_atom();
     #[cfg(feature = "gui")]
     let pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
@@ -212,9 +210,7 @@ fn init_common() -> Result<CommonInit> {
         looper_atoms,
         #[cfg(feature = "gui")]
         looper_display,
-        #[cfg(feature = "gui")]
         seq_target_atom,
-        #[cfg(feature = "gui")]
         active_part_atom,
         #[cfg(feature = "gui")]
         pitch_seq_step_atoms,
@@ -360,7 +356,16 @@ fn run_headless() -> Result<()> {
     }
     eprintln!("[cli] Press Ctrl+C to exit.");
 
-    // --- Main loop: MIDI reconnect + Program Change polling ---
+    // --- Keyboard input thread (evdev) ---
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let kb_rx = input::spawn_keyboard_thread(
+        &c.config.ui.keybinds,
+        shutdown_flag.clone(),
+    );
+    let seq_target_local: Arc<AtomicU8> = c.seq_target_atom.clone();
+    let mut drum_playing = false;
+
+    // --- Main loop: MIDI reconnect + Program Change + keyboard actions ---
     let mut midi_handle: Option<MidiInputConnection<()>> = c.midi_conn.take();
     let mut last_midi_check = std::time::Instant::now();
     let mut current_midi_port: Option<String> = c.midi_connected_name.clone();
@@ -369,10 +374,47 @@ fn run_headless() -> Result<()> {
         if SHUTDOWN.load(Ordering::SeqCst) {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::thread::sleep(std::time::Duration::from_millis(20));
 
         // Drain feedback (ignore in CLI)
         while c.feedback_rx.pop().is_ok() {}
+
+        // Process keyboard actions
+        if let Some((_, ref rx)) = kb_rx {
+            use key_action::KeyAction;
+            while let Ok(action) = rx.try_recv() {
+                match &action {
+                    KeyAction::SwitchPart(p) => {
+                        c.active_part_atom.store(*p, Ordering::Relaxed);
+                        seq_target_local.store(1, Ordering::Relaxed);
+                        eprintln!("[input] Part A{}", p + 1);
+                    }
+                    KeyAction::LooperRecord => {
+                        let _ = c.ctrl_tx.push(synth::ControlEvent::LooperRecord);
+                    }
+                    KeyAction::LooperTogglePlay => {
+                        let _ = c.ctrl_tx.push(synth::ControlEvent::LooperTogglePlay);
+                    }
+                    KeyAction::LooperUndo => {
+                        let _ = c.ctrl_tx.push(synth::ControlEvent::LooperUndo);
+                    }
+                    KeyAction::LooperClear => {
+                        let _ = c.ctrl_tx.push(synth::ControlEvent::LooperClear);
+                    }
+                    KeyAction::DrumTogglePlay => {
+                        drum_playing = !drum_playing;
+                        let _ = c.ctrl_tx.push(synth::ControlEvent::DrumSeqPlay { playing: drum_playing });
+                        eprintln!("[input] Drums: {}", if drum_playing { "Play" } else { "Stop" });
+                    }
+                    KeyAction::ToggleDrumsSynth => {
+                        let current = seq_target_local.load(Ordering::Relaxed);
+                        let new = if current == 0 { 1 } else { 0 };
+                        seq_target_local.store(new, Ordering::Relaxed);
+                        eprintln!("[input] Mode: {}", if new == 0 { "Drums" } else { "Synth" });
+                    }
+                }
+            }
+        }
 
         // MIDI auto-reconnect every 3 seconds
         if last_midi_check.elapsed() >= std::time::Duration::from_secs(3) {
@@ -406,10 +448,16 @@ fn run_headless() -> Result<()> {
         }
     }
 
-    // Graceful shutdown: All Notes Off
+    // Graceful shutdown
+    shutdown_flag.store(true, Ordering::SeqCst);
     eprintln!("\n[cli] Shutting down...");
     let _ = c.ctrl_tx.push(synth::ControlEvent::AllNotesOff);
     std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Wait for keyboard thread
+    if let Some((handle, _)) = kb_rx {
+        let _ = handle.join();
+    }
 
     // Drop MIDI before exit
     drop(midi_handle);
