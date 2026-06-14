@@ -197,6 +197,8 @@ pub enum ControlEvent {
     LooperSetBars { bars: u8 },
     LooperSetQuantize { quantize: u8 },
     LooperSetBpm { bpm: f32 },
+    LooperSetLayerMute { layer: u8, mute: bool },
+    LooperSetSolo { layer: Option<u8> },
     AllNotesOff,
     // SF2 sampler controls
     LoadKeysSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
@@ -1794,6 +1796,36 @@ impl SynthEngine {
                 self.looper.quantize = looper::Quantize::from_index(quantize);
             }
             ControlEvent::LooperSetBpm { bpm } => { self.looper.bpm = bpm; }
+            ControlEvent::LooperSetLayerMute { layer, mute } => {
+                let note_offs = self.looper.set_layer_mute(layer, mute);
+                for &(note, vel, part_id) in &note_offs {
+                    if part_id == 255 { break; }
+                    if vel == 0 {
+                        if let Some(part) = self.parts.get_mut(part_id as usize) {
+                            if part.sf2_mode {
+                                self.sampler.note_off(part_id as usize, note);
+                            } else {
+                                part.note_off(note);
+                            }
+                        }
+                    }
+                }
+            }
+            ControlEvent::LooperSetSolo { layer } => {
+                let note_offs = self.looper.set_solo(layer);
+                for &(note, vel, part_id) in &note_offs {
+                    if part_id == 255 { break; }
+                    if vel == 0 {
+                        if let Some(part) = self.parts.get_mut(part_id as usize) {
+                            if part.sf2_mode {
+                                self.sampler.note_off(part_id as usize, note);
+                            } else {
+                                part.note_off(note);
+                            }
+                        }
+                    }
+                }
+            }
             ControlEvent::AllNotesOff => {
                 for part in &mut self.parts {
                     // Kill all active voices immediately

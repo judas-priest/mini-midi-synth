@@ -605,6 +605,8 @@ fn run_gui() -> Result<()> {
         looper_sync_bpm: c.config.ui.looper_sync_bpm,
         looper_bpm: 120.0,
         looper_clear_confirm: None,
+        looper_layer_mute: [false; 256],
+        looper_solo_layer: None,
         seq_target_atom: c.seq_target_atom,
         active_part_atom: c.active_part_atom,
         keybinds: gui::keybinds::Keybinds::from_config(&c.config.ui.keybinds),

@@ -585,7 +585,6 @@ impl App {
         let layer_count = self.looper_atoms.layer_count.load(Ordering::Relaxed);
         let state = LooperState::from_u8(state_u8);
 
-        // Part colors (same as key zone map in layers.rs)
         let part_colors = [
             egui::Color32::from_rgb(70, 130, 200),
             egui::Color32::from_rgb(70, 190, 100),
@@ -597,8 +596,8 @@ impl App {
             egui::Color32::from_rgb(190, 100, 150),
         ];
 
+        // --- Row 1: Transport + Status ---
         ui.horizontal(|ui| {
-            // Play/Stop
             let play_label = match state {
                 LooperState::Playing | LooperState::Overdubbing => "\u{23F9} Stop",
                 _ => "\u{25B6} Play",
@@ -607,7 +606,6 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::LooperTogglePlay);
             }
 
-            // Record
             let is_rec = matches!(state, LooperState::Recording | LooperState::Overdubbing);
             let rec_label = if is_rec { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
             let rec_color = if is_rec { egui::Color32::RED } else { egui::Color32::GRAY };
@@ -622,28 +620,19 @@ impl App {
                 }
             }
 
-            // Undo — show which layer will be removed
-            let undo_label = if layer_count > 1 {
-                format!("Undo L{layer_count}")
-            } else {
-                "Undo".into()
-            };
-            let undo_btn = ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new(undo_label));
-            if undo_btn.clicked() {
+            let undo_label = if layer_count > 1 { format!("Undo L{layer_count}") } else { "Undo".into() };
+            if ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new(undo_label)).clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
             }
 
-            // Clear with confirmation
             let clear_pending = self.looper_clear_confirm
-                .map(|t| t.elapsed().as_secs_f32() < 2.0)
-                .unwrap_or(false);
+                .map(|t| t.elapsed().as_secs_f32() < 2.0).unwrap_or(false);
             let clear_label = if clear_pending { "Sure?" } else { "Clear" };
             let clear_color = if clear_pending { egui::Color32::RED } else { ui.visuals().text_color() };
-            let clear_btn = ui.add_enabled(
+            if ui.add_enabled(
                 event_count > 0 || state != LooperState::Idle,
                 egui::Button::new(egui::RichText::new(clear_label).color(clear_color)),
-            );
-            if clear_btn.clicked() {
+            ).clicked() {
                 if clear_pending {
                     let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
                     self.looper_clear_confirm = None;
@@ -651,14 +640,35 @@ impl App {
                     self.looper_clear_confirm = Some(std::time::Instant::now());
                 }
             }
-            // Reset confirm if expired
             if self.looper_clear_confirm.map(|t| t.elapsed().as_secs_f32() >= 2.0).unwrap_or(false) {
                 self.looper_clear_confirm = None;
             }
 
             ui.separator();
 
-            // Bars (with label)
+            let status_color = match state {
+                LooperState::Recording => egui::Color32::RED,
+                LooperState::Overdubbing => egui::Color32::from_rgb(255, 140, 0),
+                LooperState::Playing => egui::Color32::GREEN,
+                LooperState::Idle => egui::Color32::GRAY,
+            };
+            let state_label = match state {
+                LooperState::Idle => "Idle",
+                LooperState::Recording => "REC",
+                LooperState::Playing => "Play",
+                LooperState::Overdubbing => "OVR",
+            };
+            ui.colored_label(status_color, state_label);
+            if event_count > 0 {
+                ui.label(egui::RichText::new(format!("{event_count}ev L{layer_count}")).small().weak());
+            }
+            if state != LooperState::Idle {
+                ui.add(egui::ProgressBar::new(position as f32 / 255.0).desired_width(80.0));
+            }
+        });
+
+        // --- Row 2: Bars + Quantize + BPM + Recording target ---
+        ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Bars").weak().small());
             for &b in &[1u8, 2, 4, 8] {
                 if ui.selectable_label(self.looper_bars == b, format!("{b}")).clicked() {
@@ -666,23 +676,18 @@ impl App {
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: b });
                 }
             }
-
             ui.separator();
 
-            // Quantize (with label)
             ui.label(egui::RichText::new("Q").weak().small());
-            let q_labels = ["Off", "1/4", "1/8", "1/16"];
-            for (idx, &label) in q_labels.iter().enumerate() {
+            for (idx, &label) in ["Off", "1/4", "1/8", "1/16"].iter().enumerate() {
                 let idx = idx as u8;
                 if ui.selectable_label(self.looper_quantize == idx, label).clicked() {
                     self.looper_quantize = idx;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: idx });
                 }
             }
-
             ui.separator();
 
-            // BPM sync
             if ui.selectable_label(self.looper_sync_bpm, "Sync").on_hover_text("Sync BPM with drum sequencer").clicked() {
                 self.looper_sync_bpm = !self.looper_sync_bpm;
                 if self.looper_sync_bpm {
@@ -698,35 +703,118 @@ impl App {
 
             ui.separator();
 
-            // Status
-            let status_color = match state {
-                LooperState::Recording => egui::Color32::RED,
-                LooperState::Overdubbing => egui::Color32::from_rgb(255, 140, 0),
-                LooperState::Playing => egui::Color32::GREEN,
-                LooperState::Idle => egui::Color32::GRAY,
-            };
-            let state_label = match state {
-                LooperState::Idle => "Idle",
-                LooperState::Recording => "REC",
-                LooperState::Playing => "Play",
-                LooperState::Overdubbing => "OVR",
-            };
-            ui.colored_label(status_color, state_label);
-
-            if event_count > 0 {
-                ui.label(egui::RichText::new(format!("{event_count}ev L{layer_count}")).small().weak());
-            }
-
-            // Progress bar
-            if state != LooperState::Idle {
-                let frac = position as f32 / 255.0;
-                ui.add(egui::ProgressBar::new(frac).desired_width(80.0));
-            }
+            // "Recording to" — shows active part, allows quick switch
+            let ap = self.active_part;
+            let zone = if ap < 4 { "A" } else { "B" };
+            let num = (ap % 4) + 1;
+            let part_name = self.patches.get(self.parts[ap].patch_idx)
+                .map(|p| p.name.as_str()).unwrap_or("---");
+            let is_recording = matches!(state, LooperState::Recording | LooperState::Overdubbing);
+            let rec_indicator = if is_recording { "Rec" } else { "Part" };
+            let rec_text_color = if is_recording { egui::Color32::RED } else { part_colors[ap % 8] };
+            let selected = format!("{rec_indicator}: {zone}{num} {part_name}");
+            egui::ComboBox::from_id_salt("looper_rec_part")
+                .selected_text(egui::RichText::new(&selected).color(rec_text_color))
+                .width(160.0)
+                .show_ui(ui, |ui| {
+                    for i in 0..self.parts.len() {
+                        if !self.parts[i].enabled { continue; }
+                        let z = if i < 4 { "A" } else { "B" };
+                        let n = (i % 4) + 1;
+                        let pname = self.patches.get(self.parts[i].patch_idx)
+                            .map(|p| p.name.as_str()).unwrap_or("---");
+                        let label = format!("{z}{n}: {pname}");
+                        if ui.selectable_label(i == ap, egui::RichText::new(label).color(part_colors[i % 8])).clicked() {
+                            self.set_active_part(i);
+                        }
+                    }
+                });
         });
 
-        // Timeline visualization — show recorded notes as colored dots
+        // --- Timeline ---
         if event_count > 0 {
             self.draw_looper_timeline(ui, state, position, &part_colors);
+        }
+
+        // --- Layer list with Mute/Solo ---
+        if event_count > 0 {
+            self.draw_looper_layers(ui, layer_count, &part_colors);
+        }
+    }
+
+    fn draw_looper_layers(&mut self, ui: &mut egui::Ui, layer_count: u8, part_colors: &[egui::Color32; 8]) {
+        // Collect layer→part info from display snapshot
+        let layer_info: Vec<(u8, Vec<u8>)> = {
+            let display = match self.looper_display.try_lock() {
+                Ok(d) => d,
+                Err(_) => return,
+            };
+            let mut info: Vec<(u8, Vec<u8>)> = Vec::new();
+            for ev in &display.events {
+                if ev.velocity == 0 { continue; }
+                if let Some((_, parts)) = info.iter_mut().find(|(l, _)| *l == ev.layer_id) {
+                    if !parts.contains(&ev.part_id) { parts.push(ev.part_id); }
+                } else {
+                    info.push((ev.layer_id, vec![ev.part_id]));
+                }
+            }
+            info.sort_by_key(|(l, _)| *l);
+            info
+        };
+
+        if layer_info.is_empty() { return; }
+
+        for (layer_id, part_ids) in &layer_info {
+            ui.horizontal(|ui| {
+                let l = layer_id + 1;
+                let muted = self.looper_layer_mute[*layer_id as usize];
+                let soloed = self.looper_solo_layer == Some(*layer_id);
+
+                // Layer label with part color
+                let primary_part = part_ids[0] as usize % 8;
+                let color = if muted {
+                    egui::Color32::from_gray(80)
+                } else {
+                    part_colors[primary_part]
+                };
+
+                // Part/preset names for this layer
+                let part_names: Vec<String> = part_ids.iter().map(|&pid| {
+                    let z = if (pid as usize) < 4 { "A" } else { "B" };
+                    let n = (pid as usize % 4) + 1;
+                    let pname = self.patches.get(self.parts[pid as usize].patch_idx)
+                        .map(|p| p.name.as_str()).unwrap_or("---");
+                    format!("{z}{n}:{pname}")
+                }).collect();
+
+                ui.colored_label(color, egui::RichText::new(format!("L{l}")).strong());
+                ui.colored_label(color, egui::RichText::new(part_names.join(" ")).small());
+
+                // Solo button
+                let solo_color = if soloed { egui::Color32::YELLOW } else { egui::Color32::GRAY };
+                if ui.button(egui::RichText::new("S").color(solo_color)).clicked() {
+                    if soloed {
+                        self.looper_solo_layer = None;
+                        let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: None });
+                    } else {
+                        self.looper_solo_layer = Some(*layer_id);
+                        let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: Some(*layer_id) });
+                    }
+                }
+
+                // Mute button
+                let mute_color = if muted { egui::Color32::RED } else { egui::Color32::GRAY };
+                if ui.button(egui::RichText::new("M").color(mute_color)).clicked() {
+                    let new_mute = !muted;
+                    self.looper_layer_mute[*layer_id as usize] = new_mute;
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: *layer_id, mute: new_mute });
+                }
+
+                // Current layer indicator
+                if *layer_id == layer_count.saturating_sub(1) {
+                    ui.label(egui::RichText::new("<").small().weak());
+                }
+            });
         }
     }
 
@@ -796,10 +884,14 @@ impl App {
             let x = rect.left() + ev.position * total_w;
             let y = rect.bottom() - ((ev.note as f32 - note_lo) / note_span) * height;
             let color = part_colors[ev.part_id as usize % 8];
-            // Dim older layers slightly
-            let alpha = if ev.layer_id == current_layer { 255 } else {
-                180u8.saturating_sub(current_layer.saturating_sub(ev.layer_id) * 30)
-            };
+            // Dim muted/non-solo layers, older layers slightly dimmer
+            let layer_muted = self.looper_layer_mute[ev.layer_id as usize];
+            let layer_hidden = if let Some(solo) = self.looper_solo_layer {
+                ev.layer_id != solo
+            } else { layer_muted };
+            let alpha = if layer_hidden { 40 }
+            else if ev.layer_id == current_layer { 255 }
+            else { 180u8.saturating_sub(current_layer.saturating_sub(ev.layer_id) * 30) };
             let c = egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
             painter.rect_filled(
                 egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(dot_w, dot_h)),
@@ -816,31 +908,5 @@ impl App {
             );
         }
 
-        // Layer legend (which parts used per layer)
-        let mut layer_parts: Vec<(u8, Vec<u8>)> = Vec::new();
-        for ev in &events {
-            if ev.velocity == 0 { continue; }
-            let entry = layer_parts.iter_mut().find(|(l, _)| *l == ev.layer_id);
-            match entry {
-                Some((_, parts)) => {
-                    if !parts.contains(&ev.part_id) { parts.push(ev.part_id); }
-                }
-                None => { layer_parts.push((ev.layer_id, vec![ev.part_id])); }
-            }
-        }
-        if !layer_parts.is_empty() {
-            layer_parts.sort_by_key(|(l, _)| *l);
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Layers:").weak().small());
-                for (layer_id, parts) in &layer_parts {
-                    let l = layer_id + 1;
-                    for &pid in parts {
-                        let c = part_colors[pid as usize % 8];
-                        let name = format!("L{l}:A{}", pid + 1);
-                        ui.colored_label(c, egui::RichText::new(name).small());
-                    }
-                }
-            });
-        }
     }
 }

@@ -270,6 +270,8 @@ pub struct App {
     pub looper_sync_bpm: bool,
     pub looper_bpm: f32,
     pub looper_clear_confirm: Option<std::time::Instant>,
+    pub looper_layer_mute: [bool; 256],
+    pub looper_solo_layer: Option<u8>,
     /// 0 = SEQ buttons → drums, 1 = SEQ buttons → looper
     pub seq_target_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub active_part_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,

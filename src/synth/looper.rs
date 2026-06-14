@@ -148,9 +148,14 @@ pub struct MidiLooper {
     pub sample_rate: f32,
     // Track active notes for boundary note-off (255 = inactive, 0-7 = part_id)
     active_notes: [u8; 128],
+    // Track which layer produced each active note (for mute note-off)
+    active_note_layers: [u8; 128],
     needs_note_offs: bool,  // true when stop() was called with active notes
     recording_start_tick: u64, // global tick when recording started
     global_tick: u64,
+    // Per-layer mute/solo
+    layer_mute: [bool; 256],
+    solo_layer: Option<u8>,
     atoms: Arc<LooperAtoms>,
     display: Arc<Mutex<LooperDisplay>>,
 }
@@ -170,9 +175,12 @@ impl MidiLooper {
             quantize: Quantize::Off,
             sample_rate,
             active_notes: [255; 128],
+            active_note_layers: [0; 128],
             needs_note_offs: false,
             recording_start_tick: 0,
             global_tick: 0,
+            layer_mute: [false; 256],
+            solo_layer: None,
             atoms: LooperAtoms::new(),
             display: LooperDisplay::new(),
         }
@@ -301,8 +309,62 @@ impl MidiLooper {
         self.current_layer = 0;
         self.state = LooperState::Idle;
         self.active_notes = [255; 128];
+        self.active_note_layers = [0; 128];
         self.needs_note_offs = false;
+        self.layer_mute = [false; 256];
+        self.solo_layer = None;
         self.update_display();
+    }
+
+    /// Mute/unmute a layer. Returns note-offs for currently sounding notes from that layer.
+    pub fn set_layer_mute(&mut self, layer: u8, mute: bool) -> [(u8, u8, u8); MAX_SIMULTANEOUS] {
+        let mut out = [(0u8, 0u8, 255u8); MAX_SIMULTANEOUS];
+        self.layer_mute[layer as usize] = mute;
+        if mute {
+            // Send note-offs for any active notes from this layer
+            let mut count = 0;
+            for note in 0..128u8 {
+                if self.active_notes[note as usize] != 255
+                    && self.active_note_layers[note as usize] == layer
+                    && count < MAX_SIMULTANEOUS
+                {
+                    out[count] = (note, 0, self.active_notes[note as usize]);
+                    self.active_notes[note as usize] = 255;
+                    count += 1;
+                }
+            }
+        }
+        out
+    }
+
+    /// Set solo layer. None = no solo (all unmuted layers play).
+    pub fn set_solo(&mut self, layer: Option<u8>) -> [(u8, u8, u8); MAX_SIMULTANEOUS] {
+        let mut out = [(0u8, 0u8, 255u8); MAX_SIMULTANEOUS];
+        self.solo_layer = layer;
+        // Send note-offs for active notes NOT in the solo layer
+        if let Some(solo) = layer {
+            let mut count = 0;
+            for note in 0..128u8 {
+                if self.active_notes[note as usize] != 255
+                    && self.active_note_layers[note as usize] != solo
+                    && count < MAX_SIMULTANEOUS
+                {
+                    out[count] = (note, 0, self.active_notes[note as usize]);
+                    self.active_notes[note as usize] = 255;
+                    count += 1;
+                }
+            }
+        }
+        out
+    }
+
+    /// Check if a layer should be audible (considering mute + solo).
+    #[inline]
+    fn is_layer_audible(&self, layer_id: u8) -> bool {
+        if let Some(solo) = self.solo_layer {
+            return layer_id == solo;
+        }
+        !self.layer_mute[layer_id as usize]
     }
 
     /// Record a MIDI event. Called from audio thread when a note event arrives.
@@ -389,15 +451,19 @@ impl MidiLooper {
             && count < MAX_SIMULTANEOUS
         {
             let e = self.events[self.playback_cursor];
+            self.playback_cursor += 1;
+
+            if !self.is_layer_audible(e.layer_id) { continue; }
+
             out[count] = (e.note, e.velocity, e.part_id);
-            // Track active notes
+            // Track active notes + which layer produced them
             if e.velocity > 0 {
                 self.active_notes[e.note as usize] = e.part_id;
+                self.active_note_layers[e.note as usize] = e.layer_id;
             } else {
                 self.active_notes[e.note as usize] = 255;
             }
             count += 1;
-            self.playback_cursor += 1;
         }
 
         self.playback_tick += 1;
