@@ -21,7 +21,6 @@ pub struct Arpeggiator {
     gate: f32,     // 0.1..1.0
     bpm: f32,
     sample_rate: f32,
-    going_up: bool,     // for UpDown mode direction tracking
     rng_state: u32,     // xorshift32 for Random mode
 }
 
@@ -44,7 +43,6 @@ impl Arpeggiator {
             gate: 0.5,
             bpm: 120.0,
             sample_rate,
-            going_up: true,
             rng_state: 0xDEAD_BEEF,
         };
         arp.recalc_timing();
@@ -163,7 +161,6 @@ impl Arpeggiator {
         self.position = 0;
         self.tick_counter = 0;
         self.current_note = None;
-        self.going_up = true;
     }
 
     fn recalc_timing(&mut self) {
