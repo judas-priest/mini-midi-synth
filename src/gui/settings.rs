@@ -68,7 +68,7 @@ impl App {
 
                             // Performance name inside
                             if let Some(ref name) = self.pad_perf_map[idx] {
-                                let display = if name.len() > 10 { &name[..10] } else { name };
+                                let display: String = name.chars().take(10).collect();
                                 painter.text(
                                     rect.center(),
                                     egui::Align2::CENTER_CENTER,

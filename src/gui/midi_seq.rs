@@ -187,8 +187,9 @@ impl App {
                         ui.label(egui::RichText::new(ch_lbl).monospace());
 
                         // Track name (truncated)
-                        let name = if track.name.len() > 24 {
-                            format!("{}…", &track.name[..23])
+                        let name = if track.name.chars().count() > 24 {
+                            let truncated: String = track.name.chars().take(23).collect();
+                            format!("{truncated}…")
                         } else {
                             track.name.clone()
                         };
