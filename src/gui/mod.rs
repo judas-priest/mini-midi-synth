@@ -110,6 +110,8 @@ const FILTER_NAMES: &[&str] = &[
     "ResWarp AP",    // 34
     "Vintage Ladder",// 35
     "SVF Morph",     // 36
+    "Polivoks LP",   // 37
+    "Polivoks BP",   // 38
 ];
 const FILTER_ROUTING_NAMES: &[&str] = &["Single", "Serial", "Parallel"];
 const FORMANT_VOICE_NAMES: &[&str] = &["Bass", "Tenor", "Alto", "Soprano"];
