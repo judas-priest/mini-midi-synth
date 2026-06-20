@@ -48,12 +48,12 @@ fn envelope_output_range_0_to_1() {
     env.note_on();
     for _ in 0..44100 {
         let v = env.tick();
-        assert!(v >= -0.01 && v <= 1.01, "Envelope out of range: {v}");
+        assert!((-0.01..=1.01).contains(&v), "Envelope out of range: {v}");
     }
     env.note_off();
     for _ in 0..44100 {
         let v = env.tick();
-        assert!(v >= -0.01 && v <= 1.01, "Envelope out of range in release: {v}");
+        assert!((-0.01..=1.01).contains(&v), "Envelope out of range in release: {v}");
     }
 }
 
@@ -240,7 +240,7 @@ fn lfo_output_range() {
         let mut l = lfo::Lfo::new(44100.0);
         for _ in 0..44100 {
             let v = l.tick_with_deform(2.0, wf, 0.0);
-            assert!(v >= -1.01 && v <= 1.01, "{wf:?} out of range: {v}");
+            assert!((-1.01..=1.01).contains(&v), "{wf:?} out of range: {v}");
         }
     }
 }
@@ -249,14 +249,14 @@ fn lfo_output_range() {
 fn lfo_sine_is_periodic() {
     let mut l = lfo::Lfo::new(44100.0);
     // 1Hz LFO — count positive zero crossings in 4 seconds → expect ~4
-    let mut crossings = 0;
+    let mut crossings: i32 = 0;
     let mut prev = 0.0_f32;
     for _ in 0..(44100 * 4) {
         let v = l.tick_with_deform(1.0, lfo::LfoWaveform::Sine, 0.0);
         if prev <= 0.0 && v > 0.0 { crossings += 1; }
         prev = v;
     }
-    assert!((crossings as i32 - 4).abs() <= 1, "1Hz LFO: expected ~4 cycles, got {crossings}");
+    assert!((crossings - 4).abs() <= 1, "1Hz LFO: expected ~4 cycles, got {crossings}");
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn lfo_deform_stays_in_range() {
     for deform in [-1.0, -0.5, 0.0, 0.5, 1.0] {
         for _ in 0..4410 {
             let v = l.tick_with_deform(5.0, lfo::LfoWaveform::Sine, deform);
-            assert!(v >= -1.01 && v <= 1.01, "Deform {deform}: out of range {v}");
+            assert!((-1.01..=1.01).contains(&v), "Deform {deform}: out of range {v}");
         }
     }
 }
@@ -279,7 +279,7 @@ fn tick_block_matches_tick() {
 
     let patches = crate::preset::load_all_patches();
     let params = PatchParams::from_map(&patches[0].params);
-    let params2 = params.clone();
+    let params2 = params;
 
     synth_a.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
         part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_seq: None, wavetable: None,

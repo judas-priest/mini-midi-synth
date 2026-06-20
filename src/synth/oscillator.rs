@@ -2576,6 +2576,9 @@ impl Oscillator {
     /// `data` = flat array of [wt_frames * wt_frame_size] samples.
     /// Takes `Arc` so the (potentially MB-sized) buffer is shared, not copied.
     pub fn init_wavetable_from_data(&mut self, morph: f32, data: Arc<Vec<f32>>, wt_frames: usize, wt_frame_size: usize) {
+        if wt_frames == 0 || wt_frame_size == 0 || data.len() < wt_frames * wt_frame_size {
+            return; // Invalid wavetable data — skip initialization
+        }
         self.wavetable_morph = morph.clamp(0.0, 1.0);
         self.reclaim_buffers();
         self.state = OscState::Wavetable { phase: 0.0, table: data, wt_frames, wt_frame_size };

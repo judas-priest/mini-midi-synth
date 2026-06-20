@@ -34,8 +34,8 @@ impl Compressor {
     }
 
     fn update_coeffs(&mut self) {
-        self.attack_coeff  = 1.0 - (-1.0 / (self.attack  * self.sample_rate)).exp();
-        self.release_coeff = 1.0 - (-1.0 / (self.release * self.sample_rate)).exp();
+        self.attack_coeff  = 1.0 - (-1.0 / (self.attack.max(0.0001)  * self.sample_rate)).exp();
+        self.release_coeff = 1.0 - (-1.0 / (self.release.max(0.0001) * self.sample_rate)).exp();
     }
 
     #[allow(dead_code)]
