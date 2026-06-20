@@ -1,5 +1,5 @@
-/// 3-band parametric EQ using RBJ biquad filters.
-/// Low shelf + parametric mid + high shelf.
+//! 3-band parametric EQ using RBJ biquad filters.
+//! Low shelf + parametric mid + high shelf.
 
 use super::dsp_utils::{rbj_low_shelf, rbj_high_shelf, rbj_peaking};
 

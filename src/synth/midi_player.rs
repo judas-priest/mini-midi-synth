@@ -42,18 +42,15 @@ pub struct MidiSeqData {
 // ---------------------------------------------------------------------------
 
 /// How a track's notes are played.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum TrackInstrument {
     /// Use the DSP synth part 0 voice pool.
+    #[default]
     DspLayer0,
     /// Use the SF2 keys sampler with this GM program.
     Sf2 { program: u8 },
     /// Route to the drum engine (DSP or SF2 drums depending on current mode).
     Drums,
-}
-
-impl Default for TrackInstrument {
-    fn default() -> Self { Self::DspLayer0 }
 }
 
 // ---------------------------------------------------------------------------

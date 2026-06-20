@@ -1,6 +1,6 @@
-/// MIDI looper: records note events with sample-accurate timing,
-/// plays them back in a loop. Overdub support with per-part undo.
-/// Zero heap allocation in the audio path.
+//! MIDI looper: records note events with sample-accurate timing,
+//! plays them back in a loop. Overdub support with per-part undo.
+//! Zero heap allocation in the audio path.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU16, Ordering};
@@ -73,19 +73,13 @@ impl LooperState {
 }
 
 /// Compact recorded event: 8 bytes.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct LoopEvent {
     tick: u32,      // sample offset from loop start
     note: u8,       // MIDI note 0-127
     velocity: u8,   // 0 = note-off, 1-127 = note-on
     layer_id: u8,   // overdub layer (for undo)
     part_id: u8,    // which synth part this was recorded on
-}
-
-impl Default for LoopEvent {
-    fn default() -> Self {
-        Self { tick: 0, note: 0, velocity: 0, layer_id: 0, part_id: 0 }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -262,12 +256,10 @@ impl MidiLooper {
             LooperState::Playing | LooperState::Overdubbing => {
                 self.stop();
             }
-            LooperState::Idle => {
-                if self.len > 0 {
-                    self.state = LooperState::Playing;
-                    self.playback_tick = 0;
-                    self.playback_cursor = 0;
-                }
+            LooperState::Idle if self.len > 0 => {
+                self.state = LooperState::Playing;
+                self.playback_tick = 0;
+                self.playback_cursor = 0;
             }
             _ => {}
         }

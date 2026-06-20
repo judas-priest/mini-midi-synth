@@ -1,4 +1,4 @@
-/// Settings, help, feedback, and utility UI methods.
+//! Settings, help, feedback, and utility UI methods.
 
 use eframe::egui;
 
@@ -309,12 +309,10 @@ impl App {
                 }
                 ui.close_menu();
             }
-            if cc_info.is_some() {
+            if let Some(cc) = cc_info {
                 if ui.button("Clear MIDI").clicked() {
-                    if let Some(cc) = cc_info {
-                        self.cc_map.bindings[cc] = None;
-                        self.save_cc_map();
-                    }
+                    self.cc_map.bindings[cc] = None;
+                    self.save_cc_map();
                     ui.close_menu();
                 }
             }

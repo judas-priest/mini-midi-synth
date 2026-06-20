@@ -1,4 +1,4 @@
-/// Phaser: chain of first-order allpass filters with LFO-modulated frequency.
+//! Phaser: chain of first-order allpass filters with LFO-modulated frequency.
 
 use std::f32::consts::PI;
 
@@ -15,6 +15,9 @@ pub struct Phaser {
     pub mix: f32,
     feedback_l: f32,
     feedback_r: f32,
+    // DC blocker state for feedback path
+    dc_x1_l: f32, dc_y1_l: f32,
+    dc_x1_r: f32, dc_y1_r: f32,
 }
 
 impl Phaser {
@@ -26,6 +29,7 @@ impl Phaser {
             sample_rate,
             rate: 0.5, depth: 0.5, feedback: 0.3, mix: 0.0,
             feedback_l: 0.0, feedback_r: 0.0,
+            dc_x1_l: 0.0, dc_y1_l: 0.0, dc_x1_r: 0.0, dc_y1_r: 0.0,
         }
     }
 
@@ -35,6 +39,8 @@ impl Phaser {
         self.ap_state_r = [0.0; NUM_STAGES];
         self.feedback_l = 0.0;
         self.feedback_r = 0.0;
+        self.dc_x1_l = 0.0; self.dc_y1_l = 0.0;
+        self.dc_x1_r = 0.0; self.dc_y1_r = 0.0;
     }
 
     #[inline(always)]
@@ -69,8 +75,13 @@ impl Phaser {
             xl = Self::allpass_tick(xl, &mut self.ap_state_l[i], coeff);
             xr = Self::allpass_tick(xr, &mut self.ap_state_r[i], coeff);
         }
-        self.feedback_l = xl;
-        self.feedback_r = xr;
+        // DC blocker on feedback to prevent DC accumulation (one-pole HPF, R≈0.9995)
+        let dc_l = xl - self.dc_x1_l + 0.9995 * self.dc_y1_l;
+        let dc_r = xr - self.dc_x1_r + 0.9995 * self.dc_y1_r;
+        self.dc_x1_l = xl; self.dc_y1_l = dc_l;
+        self.dc_x1_r = xr; self.dc_y1_r = dc_r;
+        self.feedback_l = dc_l;
+        self.feedback_r = dc_r;
 
         let m = self.mix;
         (in_l * (1.0 - m) + (in_l + xl) * 0.5 * m,

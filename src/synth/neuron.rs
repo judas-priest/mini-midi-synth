@@ -1,5 +1,5 @@
-/// Neuron Distortion — GRU (Gated Recurrent Unit) nonlinearity with comb filters.
-/// Algorithm inspired by Surge XT chowdsp NeuronEffect.
+//! Neuron Distortion — GRU (Gated Recurrent Unit) nonlinearity with comb filters.
+//! Algorithm inspired by Surge XT chowdsp NeuronEffect.
 
 use super::dsp_utils::DcBlocker;
 
@@ -64,7 +64,7 @@ impl Neuron {
     /// Lagrange 3rd-order interpolation for fractional delay
     #[inline]
     fn lagrange_read(buf: &[f32; 4096], pos: usize, delay: f32) -> f32 {
-        let d = delay.max(1.0).min(4094.0);
+        let d = delay.clamp(1.0, 4094.0);
         let di = d as usize;
         let frac = d - di as f32;
         let mask = 4095;
@@ -81,6 +81,7 @@ impl Neuron {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self, in_l: f32, in_r: f32,
         drive: f32, squash: f32, stab: f32, asym: f32, bias: f32,

@@ -1,4 +1,4 @@
-/// Synth parameter editor UI.
+//! Synth parameter editor UI.
 
 use eframe::egui;
 
@@ -42,7 +42,7 @@ fn compute_filter_response(cutoff: f32, resonance: f32, filter_type: u32) -> [(f
     // 18dB (3-pole) types get 1.5x the slope.
     let is_3pole = matches!(filter_type, 6 | 23);
 
-    for i in 0..FILTER_RESP_POINTS {
+    for (i, point) in points.iter_mut().enumerate() {
         let t = i as f32 / (FILTER_RESP_POINTS - 1) as f32;
         let freq = 20.0 * (20000.0f32 / 20.0).powf(t);
         let ratio = freq / cutoff.max(1.0);
@@ -60,7 +60,7 @@ fn compute_filter_response(cutoff: f32, resonance: f32, filter_type: u32) -> [(f
         let mut db = 10.0 * mag_sq.max(1e-10).log10();
         if is_4pole { db *= 2.0; }
         if is_3pole { db *= 1.5; }
-        points[i] = (freq, db.clamp(-24.0, 12.0));
+        *point = (freq, db.clamp(-24.0, 12.0));
     }
     points
 }
@@ -1503,12 +1503,10 @@ impl App {
             if ui.button("Save as new preset...").clicked() {
                 self.save_as_user_preset();
             }
-            if self.parts[part].params_dirty {
-                if ui.button("Reset").clicked() {
-                    let l = self.active_part;
-                    self.load_edited_params(l);
-                    self.send_edited_params(l);
-                }
+            if self.parts[part].params_dirty && ui.button("Reset").clicked() {
+                let l = self.active_part;
+                self.load_edited_params(l);
+                self.send_edited_params(l);
             }
         });
     }

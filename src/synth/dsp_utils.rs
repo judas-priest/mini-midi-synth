@@ -1,4 +1,4 @@
-/// Shared DSP utility functions: fast math approximations, DC blocker, etc.
+//! Shared DSP utility functions: fast math approximations, DC blocker, etc.
 
 use std::f32::consts::PI;
 

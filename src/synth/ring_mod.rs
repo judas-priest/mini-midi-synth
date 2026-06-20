@@ -1,5 +1,5 @@
-/// Ring Modulator effect — 4-diode bridge simulation with carrier oscillator.
-/// Algorithm inspired by Surge XT RingModulatorEffect.
+//! Ring Modulator effect — 4-diode bridge simulation with carrier oscillator.
+//! Algorithm inspired by Surge XT RingModulatorEffect.
 
 use std::f32::consts::TAU;
 
@@ -54,6 +54,7 @@ impl RingMod {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self, in_l: f32, in_r: f32,
         carrier_freq: f32, carrier_shape: f32,

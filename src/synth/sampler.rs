@@ -1,6 +1,6 @@
-/// SF2 sampler engine wrapping rustysynth.
-/// Separate synthesizers for keys (ch0/ch1) and drums (ch9),
-/// allowing different SF2 files. Arc<SoundFont> deduplicates when same file.
+//! SF2 sampler engine wrapping rustysynth.
+//! Separate synthesizers for keys (ch0/ch1) and drums (ch9),
+//! allowing different SF2 files. Arc<SoundFont> deduplicates when same file.
 
 use std::sync::Arc;
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};

@@ -1,4 +1,4 @@
-/// MIDI input handling via midir + wmidi.
+//! MIDI input handling via midir + wmidi.
 
 const PITCH_BEND_CENTER: f32 = 8192.0;
 const MIDI_MAX_VAL: f32 = 127.0;
@@ -94,8 +94,8 @@ pub fn connect(
                             let v = u8::from(val);
                             if cc_num == 1 {
                                 Some(MidiEvent::ModWheel { channel, value: v as f32 / MIDI_MAX_VAL })
-                            } else if cc_num >= 1 && cc_num <= 119
-                                && cc_num != 0 && cc_num != 32
+                            } else if (1..=119).contains(&cc_num)
+                                && cc_num != 32
                             {
                                 Some(MidiEvent::ControlChange { channel, cc: cc_num, value: v })
                             } else {

@@ -1,18 +1,18 @@
-/// Electric Piano physical model — Rhodes Mark II / Wurlitzer 200A / Stage 73.
-///
-/// Architecture: 5 inharmonic damped sinusoidal modes (Gordon-Smith resonators)
-/// + hammer noise burst attack + pickup saturation ("bark").
-///
-/// References:
-/// - Hatch (2008) measured Rhodes tine spectra
-/// - Krekovic et al. (2016) inharmonicity ratios
-/// - Bank (2010) magnetic pickup nonlinearity
-///
-/// Brightness (ks_brightness 0-1) controls strike hardness:
-///   0 = soft/dark/quiet, 1 = hard/bright/barky
-/// Feedback (ks_feedback 0-1) controls sustain length:
-///   0 = damped (like pedal off), 1 = long ring
-/// Type (epiano_type 0-2): 0=Rhodes MkII, 1=Wurlitzer 200A, 2=Stage73
+//! Electric Piano physical model — Rhodes Mark II / Wurlitzer 200A / Stage 73.
+//!
+//! Architecture: 5 inharmonic damped sinusoidal modes (Gordon-Smith resonators)
+//! + hammer noise burst attack + pickup saturation ("bark").
+//!
+//! References:
+//! - Hatch (2008) measured Rhodes tine spectra
+//! - Krekovic et al. (2016) inharmonicity ratios
+//! - Bank (2010) magnetic pickup nonlinearity
+//!
+//! Brightness (ks_brightness 0-1) controls strike hardness:
+//!   0 = soft/dark/quiet, 1 = hard/bright/barky
+//! Feedback (ks_feedback 0-1) controls sustain length:
+//!   0 = damped (like pedal off), 1 = long ring
+//! Type (epiano_type 0-2): 0=Rhodes MkII, 1=Wurlitzer 200A, 2=Stage73
 
 use std::f32::consts::PI;
 
@@ -239,11 +239,8 @@ impl ElectricPianoModel {
         // at high tine displacement, the pickup saturates → harmonic distortion.
         // Model: soft clip via tanh approximation.
         let driven = sum * self.pickup_drive;
-        let pickup_out = if driven.abs() < 0.5 {
-            driven
-        } else {
-            driven.signum() * (1.0 - (-2.0 * driven.abs()).exp()) * 0.7
-        };
+        // Smooth soft-clip: x / (1 + |x|) — no derivative discontinuities
+        let pickup_out = driven / (1.0 + driven.abs());
 
         // Normalize pickup output back to reasonable level
         let out = pickup_out / self.pickup_drive.sqrt() + noise_out;

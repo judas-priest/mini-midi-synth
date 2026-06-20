@@ -1,12 +1,12 @@
-/// Treemonster — Pitch-tracking ring modulator.
-/// Detects the pitch of the input via zero-crossing rate, generates a sine at
-/// the detected pitch (with optional transposition), ring-modulates the signal.
-/// Creates metallic, robotic harmonics.
-///
-/// Inspired by Surge XT's Treemonster effect. The pitch detector watches the L
-/// channel for zero crossings and estimates the fundamental frequency from the
-/// average period between them. A slow IIR smoother prevents glitchy pitch jumps.
-/// Both L and R are ring-modulated with the same tracked sine oscillator.
+//! Treemonster — Pitch-tracking ring modulator.
+//! Detects the pitch of the input via zero-crossing rate, generates a sine at
+//! the detected pitch (with optional transposition), ring-modulates the signal.
+//! Creates metallic, robotic harmonics.
+//!
+//! Inspired by Surge XT's Treemonster effect. The pitch detector watches the L
+//! channel for zero crossings and estimates the fundamental frequency from the
+//! average period between them. A slow IIR smoother prevents glitchy pitch jumps.
+//! Both L and R are ring-modulated with the same tracked sine oscillator.
 
 use std::f32::consts::PI;
 

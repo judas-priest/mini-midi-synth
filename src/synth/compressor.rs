@@ -1,4 +1,4 @@
-/// Feed-forward compressor with peak detection, attack/release, knee.
+//! Feed-forward compressor with peak detection, attack/release, knee.
 
 pub struct Compressor {
     envelope: f32,

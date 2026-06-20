@@ -1,16 +1,16 @@
-/// Physical model bass guitar using Digital Waveguide synthesis.
-///
-/// Based on Julius Smith III DWG theory, Rank-Kubin slapbass model,
-/// and Kramer/Abesser/Dittmar (Fraunhofer IDMT) multi-technique model.
-///
-/// Key improvements over basic Karplus-Strong:
-/// - Välimäki robust loss filter (one-zero/one-pole) for freq-dependent damping
-/// - Dispersion allpass for string inharmonicity
-/// - Pickup position comb filter (bridge/neck/both)
-/// - Pickup electrical resonance model
-/// - 3-mode body resonance
-/// - Fret collision for slap buzz (Rank-Kubin)
-/// - Sympathetic string
+//! Physical model bass guitar using Digital Waveguide synthesis.
+//!
+//! Based on Julius Smith III DWG theory, Rank-Kubin slapbass model,
+//! and Kramer/Abesser/Dittmar (Fraunhofer IDMT) multi-technique model.
+//!
+//! Key improvements over basic Karplus-Strong:
+//! - Välimäki robust loss filter (one-zero/one-pole) for freq-dependent damping
+//! - Dispersion allpass for string inharmonicity
+//! - Pickup position comb filter (bridge/neck/both)
+//! - Pickup electrical resonance model
+//! - 3-mode body resonance
+//! - Fret collision for slap buzz (Rank-Kubin)
+//! - Sympathetic string
 
 use std::f32::consts::PI;
 
@@ -167,6 +167,7 @@ impl BassModel {
     }
 
     /// Initialize with pre-allocated buffers (no heap allocation).
+    #[allow(clippy::too_many_arguments)]
     pub fn init_with_buffers(
         &mut self,
         freq: f32,
@@ -183,7 +184,7 @@ impl BassModel {
         self.buffer2 = buf_b;
         self.init_inner(freq, velocity, style, tone, body, pickup, sample_rate);
     }
-
+    #[allow(clippy::too_many_arguments)]
     fn init_inner(
         &mut self,
         freq: f32,

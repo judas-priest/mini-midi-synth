@@ -1,4 +1,4 @@
-/// Patch loading/saving with serde + JSON.
+//! Patch loading/saving with serde + JSON.
 
 use anyhow::{Context, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};

@@ -1,4 +1,4 @@
-/// On-screen piano keyboard display.
+//! On-screen piano keyboard display.
 
 use std::sync::atomic::Ordering;
 use eframe::egui;
@@ -51,7 +51,7 @@ impl App {
             let pad_block_w = 8.0 * (pad_size + pad_gap) + 12.0; // 12px margin
 
             let available_w = ui.available_width() - pad_block_w;
-            let key_w = (available_w / total_white).min(18.0).max(6.0);
+            let key_w = (available_w / total_white).clamp(6.0, 18.0);
             let key_h = (key_w * 3.5).min(70.0);
             let black_h = key_h * 0.62;
 

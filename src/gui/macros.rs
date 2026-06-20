@@ -1,4 +1,4 @@
-/// Macro knobs panel — 8 named user-controllable modulation sources.
+//! Macro knobs panel — 8 named user-controllable modulation sources.
 use eframe::egui;
 use crate::synth::ControlEvent;
 use super::App;
@@ -93,11 +93,11 @@ impl App {
                 .selected_text(macro_labels[self.parts[part].xy_macro_x].as_str())
                 .width(90.0)
                 .show_ui(ui, |ui| {
-                    for i in 0..8 {
+                    for (i, label) in macro_labels.iter().enumerate() {
                         ui.selectable_value(
                             &mut self.parts[part].xy_macro_x,
                             i,
-                            &macro_labels[i],
+                            label,
                         );
                     }
                 });
@@ -108,11 +108,11 @@ impl App {
                 .selected_text(macro_labels[self.parts[part].xy_macro_y].as_str())
                 .width(90.0)
                 .show_ui(ui, |ui| {
-                    for i in 0..8 {
+                    for (i, label) in macro_labels.iter().enumerate() {
                         ui.selectable_value(
                             &mut self.parts[part].xy_macro_y,
                             i,
-                            &macro_labels[i],
+                            label,
                         );
                     }
                 });
@@ -180,7 +180,7 @@ impl App {
         painter.text(
             egui::pos2(rect.center().x, rect.bottom() + 10.0),
             egui::Align2::CENTER_TOP,
-            &x_name,
+            x_name,
             egui::FontId::proportional(11.0),
             egui::Color32::from_gray(180),
         );
@@ -188,7 +188,7 @@ impl App {
         painter.text(
             egui::pos2(rect.left() - 4.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,
-            &y_name,
+            y_name,
             egui::FontId::proportional(11.0),
             egui::Color32::from_gray(180),
         );

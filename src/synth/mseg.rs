@@ -1,5 +1,5 @@
-/// Multi-Segment Envelope Generator (MSEG).
-/// Algorithm inspired by Surge XT MSEGModulationHelper.
+//! Multi-Segment Envelope Generator (MSEG).
+//! Algorithm inspired by Surge XT MSEGModulationHelper.
 
 /// Curve type for each segment.
 #[derive(Clone, Copy, PartialEq)]

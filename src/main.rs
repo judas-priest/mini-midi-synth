@@ -162,7 +162,7 @@ fn init_common() -> Result<CommonInit> {
         .port_name
         .as_deref()
         .and_then(|name| find_midi_port(&midi_port_names, name))
-        .or_else(|| if midi_port_names.is_empty() { None } else { Some(0) });
+        .or(if midi_port_names.is_empty() { None } else { Some(0) });
 
     let midi_conn: Option<MidiInputConnection<()>> = midi_port_idx.and_then(|idx| {
         midi::connect(idx, midi_tx_shared.clone(), note_state.clone(), pad_state.clone()).ok()
@@ -236,13 +236,14 @@ fn main() -> Result<()> {
     {
         let headless = std::env::args().any(|a| a == "--headless" || a == "-H");
         if headless {
-            return run_headless();
+            run_headless()
+        } else {
+            run_gui()
         }
-        return run_gui();
     }
 
     #[cfg(not(feature = "gui"))]
-    return run_headless();
+    run_headless()
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +277,7 @@ fn run_headless() -> Result<()> {
     for i in 0..synth::MAX_PARTS {
         let (pidx, enabled, volume, min_note, max_note, sf2_mode, sf2_program) =
             if i < layer_configs.len() {
-                layer_configs[i].clone()
+                layer_configs[i]
             } else {
                 (0, false, 0.8, 0u8, 127u8, false, 0u8)
             };
@@ -423,7 +424,7 @@ fn run_headless() -> Result<()> {
                 let ports = midi::list_ports().unwrap_or_default();
                 let target = c.config.midi.port_name.as_deref()
                     .and_then(|name| find_midi_port(&ports, name))
-                    .or_else(|| if ports.is_empty() { None } else { Some(0) });
+                    .or(if ports.is_empty() { None } else { Some(0) });
                 if let Some(idx) = target {
                     if let Ok(conn) = midi::connect(idx, c.midi_tx_shared.clone(), c.note_state.clone(), c.pad_state.clone()) {
                         let name = ports.get(idx).cloned().unwrap_or_default();

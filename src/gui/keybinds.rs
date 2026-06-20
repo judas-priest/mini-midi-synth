@@ -1,6 +1,6 @@
-/// Keyboard shortcut system for live performance.
-/// Binds computer keyboard keys to actions (switch part, looper controls, etc.).
-/// Persisted in config.json as `keybinds: { "F1": "SwitchPart(0)", ... }`.
+//! Keyboard shortcut system for live performance.
+//! Binds computer keyboard keys to actions (switch part, looper controls, etc.).
+//! Persisted in config.json as `keybinds: { "F1": "SwitchPart(0)", ... }`.
 
 use eframe::egui;
 use std::collections::HashMap;
@@ -49,7 +49,7 @@ impl Keybinds {
 
     pub fn to_config(&self) -> HashMap<String, String> {
         self.binds.iter()
-            .map(|(key, action)| (key_to_str(*key).to_string(), action.to_string()))
+            .map(|(key, action)| (key_to_str(*key).to_string(), action.to_config_string()))
             .collect()
     }
 
@@ -119,11 +119,6 @@ pub fn key_from_str(s: &str) -> Option<egui::Key> {
 /// Detect any key press this frame (for rebind capture).
 pub fn detect_key_press(ctx: &egui::Context) -> Option<egui::Key> {
     ctx.input(|i| {
-        for &(key, _) in KEY_TABLE {
-            if i.key_pressed(key) {
-                return Some(key);
-            }
-        }
-        None
+        KEY_TABLE.iter().map(|&(key, _)| key).find(|&key| i.key_pressed(key))
     })
 }

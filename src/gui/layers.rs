@@ -1,12 +1,12 @@
-/// Part management with Split A/B zones.
-///
-/// Zone A = Parts 0-3 (always active)
-/// Zone B = Parts 4-7 (activated by Split checkbox)
-///
-/// When Split is OFF: Zone A parts play full range 0-127
-/// When Split is ON:
-///   Zone A parts → 0 .. split_point-1
-///   Zone B parts → split_point .. 127
+//! Part management with Split A/B zones.
+//!
+//! Zone A = Parts 0-3 (always active)
+//! Zone B = Parts 4-7 (activated by Split checkbox)
+//!
+//! When Split is OFF: Zone A parts play full range 0-127
+//! When Split is ON:
+//!   Zone A parts → 0 .. split_point-1
+//!   Zone B parts → split_point .. 127
 
 use std::sync::atomic::Ordering;
 use eframe::egui;
@@ -28,7 +28,7 @@ impl App {
             }
 
             // Add to Zone A
-            let a_count = ZONE_A.into_iter().filter(|&i| self.parts[i].enabled).count();
+            let a_count = ZONE_A.filter(|&i| self.parts[i].enabled).count();
             if a_count < 4 && ui.small_button("+ A").clicked() {
                 self.add_part_to_zone(false);
             }
@@ -75,7 +75,7 @@ impl App {
                     if !self.parts[i].enabled { continue; }
                     self.draw_part_tab(ui, i);
                 }
-                let b_count = ZONE_B.into_iter().filter(|&i| self.parts[i].enabled).count();
+                let b_count = ZONE_B.filter(|&i| self.parts[i].enabled).count();
                 if b_count < 4 && ui.small_button("+ B").clicked() {
                     self.add_part_to_zone(true);
                 }
@@ -149,11 +149,10 @@ impl App {
                 ui.label("Vel:");
                 let mut vmin = self.parts[part].vel_min as i32;
                 let mut vmax = self.parts[part].vel_max as i32;
-                let vel_changed;
                 let c1 = ui.add(egui::DragValue::new(&mut vmin).range(1..=127).speed(1)).changed();
                 ui.label("-");
                 let c2 = ui.add(egui::DragValue::new(&mut vmax).range(1..=127).speed(1)).changed();
-                vel_changed = c1 || c2;
+                let vel_changed = c1 || c2;
                 if vel_changed {
                     let vmin = (vmin as u8).max(1);
                     let vmax = (vmax as u8).max(vmin);
@@ -179,7 +178,7 @@ impl App {
             ui.add(egui::TextEdit::singleline(&mut self.perf_name)
                 .desired_width(110.0).hint_text("name"));
             if ui.button("Save").clicked() && !self.perf_name.trim().is_empty() {
-                let parts: Vec<PartConfig> = self.parts.iter().enumerate().map(|(_i, l)| {
+                let parts: Vec<PartConfig> = self.parts.iter().map(|l| {
                     let patch_name = self.patches.get(l.patch_idx)
                         .map(|p| p.name.clone()).unwrap_or_default();
                     PartConfig {

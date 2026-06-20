@@ -1,5 +1,5 @@
-/// CC mapping: maps MIDI CC numbers to synth parameters.
-/// RT-safe: CcBinding is Copy, CcMap uses fixed [Option<CcBinding>; 128] — zero heap.
+//! CC mapping: maps MIDI CC numbers to synth parameters.
+//! RT-safe: CcBinding is Copy, CcMap uses fixed [Option<CcBinding>; 128] — zero heap.
 
 use serde::{Deserialize, Serialize};
 

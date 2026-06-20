@@ -1,8 +1,8 @@
-/// MS Tool — Mid/Side processor.
-/// Encodes stereo to M/S, applies per-channel gain, optionally rotates the
-/// M/S plane, then decodes back to L/R.
-///
-/// Inspired by Surge XT's MS Tool effect.
+//! MS Tool — Mid/Side processor.
+//! Encodes stereo to M/S, applies per-channel gain, optionally rotates the
+//! M/S plane, then decodes back to L/R.
+//!
+//! Inspired by Surge XT's MS Tool effect.
 use std::f32::consts::PI;
 
 pub struct MsTool {

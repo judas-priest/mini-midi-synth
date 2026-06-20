@@ -1,4 +1,4 @@
-/// Synth engine: layered polyphonic voice pools + MIDI event dispatch.
+//! Synth engine: layered polyphonic voice pools + MIDI event dispatch.
 
 pub mod dsp_utils;
 mod airwindows;
@@ -124,9 +124,9 @@ impl ScopeBuffer {
     pub fn read(&self) -> [f32; SCOPE_SIZE] {
         let mut out = [0.0f32; SCOPE_SIZE];
         let wp = self.write_pos.load(std::sync::atomic::Ordering::Relaxed);
-        for i in 0..SCOPE_SIZE {
+        for (i, out_sample) in out.iter_mut().enumerate() {
             let idx = (wp + i) & (SCOPE_SIZE - 1);
-            out[i] = f32::from_bits(self.data[idx].load(std::sync::atomic::Ordering::Relaxed));
+            *out_sample = f32::from_bits(self.data[idx].load(std::sync::atomic::Ordering::Relaxed));
         }
         out
     }
@@ -557,8 +557,9 @@ impl Part {
         self.rand_bipolar = r * 2.0 - 1.0;
         self.rand_unipolar = r;
         self.alt_counter = self.alt_counter.wrapping_add(1);
-        self.alt_bipolar = if self.alt_counter % 2 == 0 { 1.0 } else { -1.0 };
-        self.alt_unipolar = if self.alt_counter % 2 == 0 { 1.0 } else { 0.0 };
+        let is_even = self.alt_counter.is_multiple_of(2);
+        self.alt_bipolar = if is_even { 1.0 } else { -1.0 };
+        self.alt_unipolar = if is_even { 1.0 } else { 0.0 };
 
         let play_mode = self.params.play_mode as u8;
 
@@ -623,10 +624,8 @@ impl Part {
         }
 
         // Piano mode: if same key is already playing, don't retrigger — let it continue
-        if play_mode == 6 {
-            if self.voices.iter().any(|v| v.active && v.note == note) {
-                return;
-            }
+        if play_mode == 6 && self.voices.iter().any(|v| v.active && v.note == note) {
+            return;
         }
 
         self.age_counter += 1;
@@ -1442,7 +1441,7 @@ impl SynthEngine {
                 }
 
                 // Route drum notes (36-51): always on ch10, or any channel when drum mode active
-                let is_drum_note = note >= 36 && note <= 51;
+                let is_drum_note = (36..=51).contains(&note);
                 let drum_mode = self.seq_target.load(std::sync::atomic::Ordering::Relaxed) == 0;
                 let sampler_drums = self.sampler.drums_enabled();
                 if channel == 9 || (is_drum_note && drum_mode) {
@@ -1670,8 +1669,8 @@ impl SynthEngine {
                     if let Some(m) = mseg2 { l.mseg2 = m; }
                     if let Some(sq) = pitch_seq { l.pitch_seq = sq; }
                     if let Some(ref sp) = lfo_step_seq {
-                        for i in 0..4 {
-                            l.lfos[i].apply_step_seq(&sp[i]);
+                        for (i, lfo) in l.lfos.iter_mut().enumerate().take(4) {
+                            lfo.apply_step_seq(&sp[i]);
                         }
                     }
                     l.update_routing_cache();
@@ -1731,7 +1730,7 @@ impl SynthEngine {
             }
             ControlEvent::SetCcMap { map } => { self.cc_map = *map; }
             ControlEvent::SetGlobalParam { key, value } => {
-                self.global_params.set(&key, value);
+                self.global_params.set(key, value);
                 if key == "pitch_bend_range" {
                     self.sampler.set_pitch_bend_range(value.clamp(1.0, 24.0) as u8);
                 }

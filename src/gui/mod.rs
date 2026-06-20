@@ -1,4 +1,4 @@
-/// GUI interface using egui/eframe.
+//! GUI interface using egui/eframe.
 
 mod params;
 mod drums;
@@ -194,6 +194,8 @@ fn note_name(note: u8) -> String {
     format!("{name}{oct}")
 }
 
+type MidiReconnectFn = Box<dyn FnMut(usize) -> Result<(), String>>;
+
 pub struct App {
     pub _frame_count: u64,
     pub patches: Vec<Patch>,
@@ -223,7 +225,7 @@ pub struct App {
     /// Currently edited part (0 = A, 1 = B)
     pub active_part: usize,
 
-    pub on_midi_reconnect: Option<Box<dyn FnMut(usize) -> Result<(), String>>>,
+    pub on_midi_reconnect: Option<MidiReconnectFn>,
 
     /// Collapsed patch categories
     pub collapsed_categories: HashSet<String>,
@@ -342,11 +344,17 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Increase base font size and spacing
         ctx.style_mut(|style| {
-            style.text_styles.get_mut(&egui::TextStyle::Body).unwrap().size = 15.0;
-            style.text_styles.get_mut(&egui::TextStyle::Button).unwrap().size = 15.0;
-            style.text_styles.get_mut(&egui::TextStyle::Monospace).unwrap().size = 14.0;
-            style.text_styles.get_mut(&egui::TextStyle::Small).unwrap().size = 13.0;
-            style.text_styles.get_mut(&egui::TextStyle::Heading).unwrap().size = 20.0;
+            for (text_style, size) in [
+                (egui::TextStyle::Body, 15.0),
+                (egui::TextStyle::Button, 15.0),
+                (egui::TextStyle::Monospace, 14.0),
+                (egui::TextStyle::Small, 13.0),
+                (egui::TextStyle::Heading, 20.0),
+            ] {
+                if let Some(font_id) = style.text_styles.get_mut(&text_style) {
+                    font_id.size = size;
+                }
+            }
             style.spacing.slider_width = 250.0;
             style.spacing.item_spacing = egui::vec2(8.0, 5.0);
         });
@@ -398,8 +406,7 @@ impl eframe::App for App {
             if let Some(key) = keybinds::detect_key_press(ctx) {
                 if key == egui::Key::Escape {
                     self.keybind_capturing = None;
-                } else {
-                    let action = self.keybind_capturing.take().unwrap();
+                } else if let Some(action) = self.keybind_capturing.take() {
                     self.keybinds.set_key_for_action(&action, key);
                     self.config.ui.keybinds = self.keybinds.to_config();
                 }
@@ -645,11 +652,9 @@ impl eframe::App for App {
                             .hint_text("\u{1F50D} Search...")
                             .desired_width(text_w.max(60.0)),
                     );
-                    if !self.preset_search.is_empty() {
-                        if ui.small_button("\u{2715}").clicked() {
-                            self.preset_search.clear();
-                            r.request_focus();
-                        }
+                    if !self.preset_search.is_empty() && ui.small_button("\u{2715}").clicked() {
+                        self.preset_search.clear();
+                        r.request_focus();
                     }
                 });
                 ui.separator();
@@ -966,7 +971,7 @@ impl App {
         self.config.ui.fader_delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
         self.config.ui.pitch_bend_range = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as u8;
         self.config.ui.drum_volume = self.drum_volume;
-        if let Some(l) = self.parts.get(0) { self.config.ui.layer_a_volume = l.volume; }
+        if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
         self.config.ui.looper_sync_bpm = self.looper_sync_bpm;
@@ -1051,7 +1056,7 @@ impl App {
                     for action in KeyAction::all() {
                         ui.label(action.label());
                         let key_label = self.keybinds.key_for_action(&action)
-                            .map(|k| key_to_str(k))
+                            .map(key_to_str)
                             .unwrap_or("---");
                         let is_capturing = self.keybind_capturing.as_ref() == Some(&action);
                         let btn_text = if is_capturing { "Press key..." } else { key_label };

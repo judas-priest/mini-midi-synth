@@ -1,5 +1,5 @@
-/// Per-engine arpeggiator: generates note-on/note-off events from held notes.
-/// Zero-alloc on the audio thread — uses fixed-size arrays throughout.
+//! Per-engine arpeggiator: generates note-on/note-off events from held notes.
+//! Zero-alloc on the audio thread — uses fixed-size arrays throughout.
 
 const MAX_HELD: usize = 16;
 const MAX_PATTERN: usize = 64; // 16 notes * 4 octaves
@@ -207,10 +207,10 @@ impl Arpeggiator {
             0 => {
                 // Up
                 for oct in 0..self.octaves {
-                    for i in 0..count {
+                    for &(snote, svel) in &sorted[..count] {
                         if len >= MAX_PATTERN { break; }
-                        let note = (sorted[i].0 as u16 + oct as u16 * 12).min(127) as u8;
-                        self.pattern[len] = (note, sorted[i].1);
+                        let note = (snote as u16 + oct as u16 * 12).min(127) as u8;
+                        self.pattern[len] = (note, svel);
                         len += 1;
                     }
                 }
@@ -218,10 +218,10 @@ impl Arpeggiator {
             1 => {
                 // Down
                 for oct in (0..self.octaves).rev() {
-                    for i in (0..count).rev() {
+                    for &(snote, svel) in sorted[..count].iter().rev() {
                         if len >= MAX_PATTERN { break; }
-                        let note = (sorted[i].0 as u16 + oct as u16 * 12).min(127) as u8;
-                        self.pattern[len] = (note, sorted[i].1);
+                        let note = (snote as u16 + oct as u16 * 12).min(127) as u8;
+                        self.pattern[len] = (note, svel);
                         len += 1;
                     }
                 }
@@ -230,10 +230,10 @@ impl Arpeggiator {
                 // UpDown: up then down (without repeating top/bottom)
                 // Up part
                 for oct in 0..self.octaves {
-                    for i in 0..count {
+                    for &(snote, svel) in &sorted[..count] {
                         if len >= MAX_PATTERN { break; }
-                        let note = (sorted[i].0 as u16 + oct as u16 * 12).min(127) as u8;
-                        self.pattern[len] = (note, sorted[i].1);
+                        let note = (snote as u16 + oct as u16 * 12).min(127) as u8;
+                        self.pattern[len] = (note, svel);
                         len += 1;
                     }
                 }
@@ -254,10 +254,10 @@ impl Arpeggiator {
             3 => {
                 // Random: fill pattern with all available notes, position picked randomly in advance_position
                 for oct in 0..self.octaves {
-                    for i in 0..count {
+                    for &(snote, svel) in &sorted[..count] {
                         if len >= MAX_PATTERN { break; }
-                        let note = (sorted[i].0 as u16 + oct as u16 * 12).min(127) as u8;
-                        self.pattern[len] = (note, sorted[i].1);
+                        let note = (snote as u16 + oct as u16 * 12).min(127) as u8;
+                        self.pattern[len] = (note, svel);
                         len += 1;
                     }
                 }

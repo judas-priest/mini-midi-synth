@@ -1,4 +1,4 @@
-/// Persistent settings: audio backend, buffer size, sample rate, MIDI port.
+//! Persistent settings: audio backend, buffer size, sample rate, MIDI port.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

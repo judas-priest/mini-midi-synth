@@ -1,4 +1,4 @@
-/// Audio backend using cpal.
+//! Audio backend using cpal.
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -34,12 +34,7 @@ pub fn available_hosts() -> Vec<(HostId, &'static str)> {
     cpal::available_hosts()
         .into_iter()
         .map(|id| {
-            let name = match id.name() {
-                "ALSA" => "ALSA",
-                "JACK" => "JACK",
-                n => n,
-            };
-            (id, name)
+            (id, id.name())
         })
         .collect()
 }

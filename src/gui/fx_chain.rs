@@ -1,4 +1,4 @@
-/// FX Chain GUI panel — 16 configurable slots.
+//! FX Chain GUI panel — 16 configurable slots.
 use eframe::egui;
 use super::App;
 use crate::synth::fx_chain::{FxChain, FxSlot, FxSlotType, FX_SLOTS};
@@ -9,15 +9,14 @@ impl App {
 
         ui.horizontal(|ui| {
             ui.strong("FX Chain");
-            ui.label("— 16 слотов, последовательная обработка");
+            ui.label("— 16 slots, serial processing");
             ui.separator();
-            if ui.small_button("Сбросить").clicked() {
-                let mut chain = FxChain::default();
-                chain.active = true;
+            if ui.small_button("Reset").clicked() {
+                let chain = FxChain { active: true, ..FxChain::default() };
                 flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
                 self.send_edited_params(part);
             }
-            if ui.small_button("Из пресета").clicked() {
+            if ui.small_button("From preset").clicked() {
                 let chain = FxChain::from_legacy_preset_active(
                     &self.parts[part].edited_params
                 );
@@ -31,9 +30,7 @@ impl App {
         let mut chain = if self.parts[part].edited_params.contains_key("fx0_type") {
             FxChain::from_map(&self.parts[part].edited_params)
         } else {
-            let mut c = FxChain::default();
-            c.active = true;
-            c
+            FxChain { active: true, ..FxChain::default() }
         };
 
         let mut swap: Option<(usize, usize)> = None;
@@ -79,7 +76,7 @@ fn flush_fx_chain(
     _layer: usize,
     params: &mut std::collections::BTreeMap<String, f32>,
 ) {
-    chain.to_map(params);
+    chain.write_to_map(params);
 }
 
 fn draw_slot(ui: &mut egui::Ui, part: usize, idx: usize, slot: &mut FxSlot) -> bool {

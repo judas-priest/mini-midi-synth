@@ -1,4 +1,4 @@
-/// Single synth voice: multi-oscillator → filter routing → amplitude envelope.
+//! Single synth voice: multi-oscillator → filter routing → amplitude envelope.
 
 use super::envelope::Envelope;
 use super::filter::{Filter, FilterType};

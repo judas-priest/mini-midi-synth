@@ -1,13 +1,13 @@
-/// Graphic EQ — 11-band parametric equalizer.
-///
-/// Fixed center frequencies: 31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz
-/// plus one additional band at 10 kHz (high shelf style via peak).
-/// All bands are peak filters except band 0 (low shelf at 31 Hz) and
-/// band 10 (high shelf at 16 kHz).  Gains range from -12 to +12 dB.
-///
-/// Uses Robert Bristow-Johnson Audio EQ Cookbook biquad coefficients.
-///
-/// Inspired by Surge XT's Graphic EQ effect.
+//! Graphic EQ — 11-band parametric equalizer.
+//!
+//! Fixed center frequencies: 31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz
+//! plus one additional band at 10 kHz (high shelf style via peak).
+//! All bands are peak filters except band 0 (low shelf at 31 Hz) and
+//! band 10 (high shelf at 16 kHz).  Gains range from -12 to +12 dB.
+//!
+//! Uses Robert Bristow-Johnson Audio EQ Cookbook biquad coefficients.
+//!
+//! Inspired by Surge XT's Graphic EQ effect.
 use super::dsp_utils::{rbj_low_shelf, rbj_high_shelf, rbj_peaking};
 
 /// Center frequencies for the 11 bands (Hz).

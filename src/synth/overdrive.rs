@@ -1,5 +1,5 @@
-/// Overdrive/Distortion with pre-filter, waveshaping, tone control.
-/// Includes simple 2x oversampling to reduce aliasing.
+//! Overdrive/Distortion with pre-filter, waveshaping, tone control.
+//! Includes simple 2x oversampling to reduce aliasing.
 
 use super::dsp_utils::DcBlocker;
 
@@ -99,7 +99,7 @@ impl Overdrive {
     pub fn tick(&mut self, in_l: f32, in_r: f32) -> (f32, f32) {
         if self.mix < 0.001 { return (in_l, in_r); }
 
-        let hp_coeff = 80.0 / self.sample_rate;
+        let hp_coeff = (2.0 * std::f32::consts::PI * 80.0 / self.sample_rate).min(0.5);
         let tone_coeff = 0.02 + 0.4 * self.tone;
         let tone_param = self.tone;
 

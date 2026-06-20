@@ -1,5 +1,5 @@
-/// LFO oscillator with multiple waveforms, step sequencer mode, tempo sync,
-/// unipolar output, and deform parameter.
+//! LFO oscillator with multiple waveforms, step sequencer mode, tempo sync,
+//! unipolar output, and deform parameter.
 
 use std::sync::OnceLock;
 

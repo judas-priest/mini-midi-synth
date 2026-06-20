@@ -1,4 +1,4 @@
-/// Oscillator with multiple waveform types.
+//! Oscillator with multiple waveform types.
 
 use std::f32::consts::PI;
 use std::sync::Arc;
@@ -137,6 +137,7 @@ const ORGAN_HARMONICS: [f32; 9] = [0.5, 1.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0];
 
 /// Per-oscillator-type runtime state. Only the active variant is allocated.
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum OscState {
     Simple {
         phase: f32,
@@ -880,16 +881,16 @@ impl Oscillator {
 
             let excite_len = ((0.002 * self.sample_rate) as usize).clamp(2, delay);
             let amp_scale = 1.0 / partial;
-            for j in 0..delay {
+            for (j, buf_sample) in buffers[i].iter_mut().enumerate().take(delay) {
                 if j < excite_len {
                     state ^= state << 13;
                     state ^= state >> 17;
                     state ^= state << 5;
                     let noise = (state as f32 / u32::MAX as f32) * 2.0 - 1.0;
                     let w = (PI * j as f32 / excite_len as f32).sin();
-                    buffers[i][j] = noise * w * amp_scale;
+                    *buf_sample = noise * w * amp_scale;
                 } else {
-                    buffers[i][j] = 0.0;
+                    *buf_sample = 0.0;
                 }
             }
 
@@ -2695,6 +2696,7 @@ impl Oscillator {
 
 impl Oscillator {
     /// Initialise Plaits voice. Called from voice.rs note_on for OscType::Twist.
+    #[allow(clippy::too_many_arguments)]
     pub fn init_twist(
         &mut self,
         engine: u32,

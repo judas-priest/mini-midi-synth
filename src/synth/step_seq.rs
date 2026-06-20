@@ -1,6 +1,6 @@
-/// Per-part pitch step sequencer.
-/// Synced to BPM, modulates pitch by semitone offsets, retriggers envelopes on each step.
-/// Mirrors the drum StepSequencer's phase accumulator approach for drift-free timing.
+//! Per-part pitch step sequencer.
+//! Synced to BPM, modulates pitch by semitone offsets, retriggers envelopes on each step.
+//! Mirrors the drum StepSequencer's phase accumulator approach for drift-free timing.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};

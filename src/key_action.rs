@@ -1,5 +1,5 @@
-/// Shared key action definitions used by both GUI keybinds and headless evdev input.
-/// No GUI dependencies — safe to use in headless mode.
+//! Shared key action definitions used by both GUI keybinds and headless evdev input.
+//! No GUI dependencies — safe to use in headless mode.
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
@@ -35,7 +35,7 @@ impl KeyAction {
         }
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn to_config_string(&self) -> String {
         match self {
             Self::SwitchPart(p) => format!("SwitchPart({p})"),
             Self::LooperRecord => "LooperRecord".into(),

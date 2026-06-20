@@ -1,8 +1,8 @@
-/// Rotary Speaker / Leslie cabinet simulator.
-///
-/// Models the horn (high frequencies, ~150–400 RPM) and rotor (low frequencies,
-/// ~40–350 RPM) with modulated delay lines for Doppler shift and AM for tremolo.
-/// A one-pole crossover splits the signal between horn and rotor paths.
+//! Rotary Speaker / Leslie cabinet simulator.
+//!
+//! Models the horn (high frequencies, ~150–400 RPM) and rotor (low frequencies,
+//! ~40–350 RPM) with modulated delay lines for Doppler shift and AM for tremolo.
+//! A one-pole crossover splits the signal between horn and rotor paths.
 
 use super::dsp_utils::buf_read_linear;
 

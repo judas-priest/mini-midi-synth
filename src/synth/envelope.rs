@@ -1,7 +1,7 @@
-/// Analog-style ADSR envelope generator.
-///
-/// Sqrt and Exponential shapes use one-pole IIR (RC-circuit model) with overshoot targets.
-/// Linear and Quadratic shapes use phase tracking for correct curve shapes.
+//! Analog-style ADSR envelope generator.
+//!
+//! Sqrt and Exponential shapes use one-pole IIR (RC-circuit model) with overshoot targets.
+//! Linear and Quadratic shapes use phase tracking for correct curve shapes.
 
 #[derive(Clone, Copy, PartialEq)]
 enum EnvStage {

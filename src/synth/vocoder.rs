@@ -1,18 +1,18 @@
-/// Vocoder — 16-band channel vocoder.
-/// Analyzes the modulator (typically voice) in 16 frequency bands,
-/// and applies that amplitude envelope to corresponding bands of the carrier (typically synth).
-/// Creates the classic "robot voice" / "talking synth" effect.
-///
-/// Architecture:
-/// - 16 bandpass filter channels, logarithmically spaced from 100 Hz to 8 kHz
-/// - Modulator path: input → band BPF → envelope follower (1-pole LP)
-/// - Carrier path: input → same band BPF → multiply by modulator envelope
-/// - Sum all channels for output
-///
-/// Parameters:
-/// - `env_follow` (0..1): envelope follower speed (10ms..200ms)
-/// - `gate` (0..1): minimum energy gate to suppress silent channels
-/// - `mix` (0..1): wet/dry
+//! Vocoder — 16-band channel vocoder.
+//! Analyzes the modulator (typically voice) in 16 frequency bands,
+//! and applies that amplitude envelope to corresponding bands of the carrier (typically synth).
+//! Creates the classic "robot voice" / "talking synth" effect.
+//!
+//! Architecture:
+//! - 16 bandpass filter channels, logarithmically spaced from 100 Hz to 8 kHz
+//! - Modulator path: input → band BPF → envelope follower (1-pole LP)
+//! - Carrier path: input → same band BPF → multiply by modulator envelope
+//! - Sum all channels for output
+//!
+//! Parameters:
+//! - `env_follow` (0..1): envelope follower speed (10ms..200ms)
+//! - `gate` (0..1): minimum energy gate to suppress silent channels
+//! - `mix` (0..1): wet/dry
 
 use std::f32::consts::PI;
 

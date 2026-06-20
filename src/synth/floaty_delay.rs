@@ -1,9 +1,9 @@
-/// Floaty Delay — pitch-modulated stereo delay with gentle LFO wobble.
-/// The delay time slowly drifts, creating a subtle pitch shift / vibrato on the echo.
-///
-/// Inspired by Surge XT's Floaty Delay. Uses two independent delay lines with
-/// quadrature LFO modulation on the read position, creating a floating/drifting
-/// stereo sensation. A 1-pole LP filter in the feedback path provides damping.
+//! Floaty Delay — pitch-modulated stereo delay with gentle LFO wobble.
+//! The delay time slowly drifts, creating a subtle pitch shift / vibrato on the echo.
+//!
+//! Inspired by Surge XT's Floaty Delay. Uses two independent delay lines with
+//! quadrature LFO modulation on the read position, creating a floating/drifting
+//! stereo sensation. A 1-pole LP filter in the feedback path provides damping.
 
 use std::f32::consts::PI;
 
@@ -66,6 +66,7 @@ impl FloatyDelay {
     /// - `rate`     (0..1): LFO rate mapped to 0.1..3.0 Hz
     /// - `damp`     (0..1): feedback damping (LP cutoff 200Hz..8kHz)
     /// - `mix`      (0..1): wet/dry ratio
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
         in_l: f32,

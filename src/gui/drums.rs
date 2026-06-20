@@ -1,4 +1,4 @@
-/// Drum sequencer, pitch sequencer, and looper UI.
+//! Drum sequencer, pitch sequencer, and looper UI.
 
 use std::sync::atomic::Ordering;
 use eframe::egui;
@@ -125,13 +125,11 @@ impl App {
                     Ok(kit) => {
                         self.drum_kit_name = kit.name.clone();
                         let mut patterns = [DrumPattern::default(); 8];
-                        for i in 0..kit.patterns.len().min(8) {
-                            patterns[i] = kit.patterns[i];
-                        }
+                        let pat_len = kit.patterns.len().min(8);
+                        patterns[..pat_len].copy_from_slice(&kit.patterns[..pat_len]);
                         let mut params = [DrumSlotParams::default(); NUM_DRUM_SLOTS];
-                        for i in 0..kit.params.len().min(NUM_DRUM_SLOTS) {
-                            params[i] = kit.params[i];
-                        }
+                        let par_len = kit.params.len().min(NUM_DRUM_SLOTS);
+                        params[..par_len].copy_from_slice(&kit.params[..par_len]);
                         self.drum_patterns = patterns;
                         self.drum_params = params;
                         self.drum_bpm = kit.bpm;
@@ -169,9 +167,8 @@ impl App {
                 match preset::import_midi_drums(&path) {
                     Ok((patterns_vec, bpm)) => {
                         let mut patterns = [DrumPattern::default(); 8];
-                        for i in 0..patterns_vec.len().min(8) {
-                            patterns[i] = patterns_vec[i];
-                        }
+                        let pvec_len = patterns_vec.len().min(8);
+                        patterns[..pvec_len].copy_from_slice(&patterns_vec[..pvec_len]);
                         self.drum_patterns = patterns;
                         self.drum_bpm = bpm;
                         self.drum_kit_status = format!(
@@ -439,7 +436,7 @@ impl App {
 
                 // Step grid: pitch bars + gate toggles
                 let avail_w = ui.available_width();
-                let step_w = (avail_w / length as f32).min(40.0).max(20.0);
+                let step_w = (avail_w / length as f32).clamp(20.0, 40.0);
                 let bar_h = 80.0;
 
                 // Pitch bars
@@ -695,10 +692,10 @@ impl App {
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.drum_bpm });
                 }
             }
-            if !self.looper_sync_bpm {
-                if ui.add(egui::DragValue::new(&mut self.looper_bpm).range(40.0..=300.0).speed(0.5).prefix("BPM ")).changed() {
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
-                }
+            if !self.looper_sync_bpm
+                && ui.add(egui::DragValue::new(&mut self.looper_bpm).range(40.0..=300.0).speed(0.5).prefix("BPM ")).changed()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
             }
 
             ui.separator();
@@ -877,8 +874,8 @@ impl App {
         let note_span = (note_hi - note_lo).max(1.0);
 
         // Draw note-on events as small rectangles
-        let dot_w = (total_w / (self.looper_bars as f32 * 16.0)).max(2.0).min(6.0);
-        let dot_h = (height / (note_span / 2.0)).max(2.0).min(5.0);
+        let dot_w = (total_w / (self.looper_bars as f32 * 16.0)).clamp(2.0, 6.0);
+        let dot_h = (height / (note_span / 2.0)).clamp(2.0, 5.0);
         for ev in &events {
             if ev.velocity == 0 { continue; } // skip note-offs
             let x = rect.left() + ev.position * total_w;

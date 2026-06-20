@@ -1,5 +1,5 @@
-/// Bitcrusher: bit depth reduction + sample rate reduction.
-/// Includes anti-aliasing lowpass filter and triangular PDF dithering.
+//! Bitcrusher: bit depth reduction + sample rate reduction.
+//! Includes anti-aliasing lowpass filter and triangular PDF dithering.
 
 pub struct Bitcrusher {
     held_l: f32,
@@ -49,7 +49,7 @@ impl Bitcrusher {
 
         // Anti-aliasing lowpass filter before sample-rate reduction
         // Cutoff at target_sr / 2, mapped to one-pole coefficient
-        let aa_coeff = (std::f32::consts::PI * self.downsample / self.sample_rate).min(0.99);
+        let aa_coeff = (std::f32::consts::PI * self.downsample * 0.5 / self.sample_rate).min(0.99);
         self.aa_state_l += aa_coeff * (in_l - self.aa_state_l);
         self.aa_state_r += aa_coeff * (in_r - self.aa_state_r);
 

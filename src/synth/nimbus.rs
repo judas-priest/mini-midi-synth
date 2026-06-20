@@ -1,17 +1,17 @@
-/// Nimbus — Granular synthesis cloud.
-/// Records incoming audio into a buffer and replays it as overlapping grains.
-/// Each grain has: start position, size, pitch shift, envelope (Hann window), pan.
-///
-/// Inspired by Mutable Instruments Clouds / Surge XT Nimbus.
-///
-/// Parameters:
-/// - `position` (0..1): playback position in the recorded buffer
-/// - `size` (0..1): grain size (0.01s..0.5s)
-/// - `pitch` (-1..1): pitch shift (-1 octave to +1 octave, 0=unity)
-/// - `density` (0..1): grain spawn rate (1..50 grains/sec)
-/// - `spread` (0..1): random spread of position/pitch per grain
-/// - `texture` (0..1): grain window shape (0=Hann, 1=square with short crossfade)
-/// - `mix` (0..1): wet/dry
+//! Nimbus — Granular synthesis cloud.
+//! Records incoming audio into a buffer and replays it as overlapping grains.
+//! Each grain has: start position, size, pitch shift, envelope (Hann window), pan.
+//!
+//! Inspired by Mutable Instruments Clouds / Surge XT Nimbus.
+//!
+//! Parameters:
+//! - `position` (0..1): playback position in the recorded buffer
+//! - `size` (0..1): grain size (0.01s..0.5s)
+//! - `pitch` (-1..1): pitch shift (-1 octave to +1 octave, 0=unity)
+//! - `density` (0..1): grain spawn rate (1..50 grains/sec)
+//! - `spread` (0..1): random spread of position/pitch per grain
+//! - `texture` (0..1): grain window shape (0=Hann, 1=square with short crossfade)
+//! - `mix` (0..1): wet/dry
 
 use std::f32::consts::PI;
 
@@ -184,6 +184,7 @@ impl Nimbus {
     /// - `spread` (0..1): random spread of position/pitch/pan per grain
     /// - `texture` (0..1): window shape (0=Hann, 1=square-fade)
     /// - `mix` (0..1): wet/dry ratio
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
         in_l: f32,

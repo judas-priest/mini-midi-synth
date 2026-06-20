@@ -1,17 +1,17 @@
-/// Physical model piano synthesis — modal/additive approach.
-///
-/// Based on research from:
-/// - Conklin (1996/1999): measured inharmonicity B coefficients
-/// - Weinreich (1977): double-decay / coupled string beating
-/// - Bank & Sujbert (2003): frequency-dependent decay model
-/// - Chaigne & Askenfelt (1994): hammer force model
-/// - Rauhala & Välimäki (2007): dispersion and T60 modeling
-///
-/// Architecture: 24 inharmonic partials × dual decay banks + hammer excitation
-/// + soundboard resonance + strike position comb filtering.
-///
-/// Key design: brightness controlled by `ks_brightness` parameter (NOT velocity),
-/// because the target MIDI keyboard sends constant velocity=127.
+//! Physical model piano synthesis — modal/additive approach.
+//!
+//! Based on research from:
+//! - Conklin (1996/1999): measured inharmonicity B coefficients
+//! - Weinreich (1977): double-decay / coupled string beating
+//! - Bank & Sujbert (2003): frequency-dependent decay model
+//! - Chaigne & Askenfelt (1994): hammer force model
+//! - Rauhala & Välimäki (2007): dispersion and T60 modeling
+//!
+//! Architecture: 24 inharmonic partials × dual decay banks + hammer excitation
+//! + soundboard resonance + strike position comb filtering.
+//!
+//! Key design: brightness controlled by `ks_brightness` parameter (NOT velocity),
+//! because the target MIDI keyboard sends constant velocity=127.
 
 use std::f32::consts::PI;
 

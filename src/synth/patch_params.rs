@@ -1,4 +1,4 @@
-/// Patch parameter struct — all per-voice/per-patch synth parameters as f32 fields.
+//! Patch parameter struct — all per-voice/per-patch synth parameters as f32 fields.
 
 use super::fx_chain::FxChain;
 
@@ -468,6 +468,7 @@ impl PatchParams {
     }
 
     /// Serialize all parameters into a BTreeMap (inverse of `from_map`).
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_map(&self) -> std::collections::BTreeMap<String, f32> {
         let mut m = std::collections::BTreeMap::new();
         macro_rules! s {
@@ -608,7 +609,7 @@ impl PatchParams {
         s!("airwindows_mode", self.airwindows_mode); s!("airwindows_drive", self.airwindows_drive); s!("airwindows_mix", self.airwindows_mix);
         s!("arp_enabled", self.arp_enabled); s!("arp_mode", self.arp_mode); s!("arp_rate", self.arp_rate);
         s!("arp_octaves", self.arp_octaves); s!("arp_gate", self.arp_gate);
-        self.fx_chain.to_map(&mut m);
+        self.fx_chain.write_to_map(&mut m);
         m
     }
 

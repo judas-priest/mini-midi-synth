@@ -1,7 +1,7 @@
-/// Formant filter: 5 parallel resonant bandpass filters for vocal synthesis.
-///
-/// Source-filter model: glottal source (saw/square) → 5 parallel biquad bandpass → sum.
-/// Each formant has: center frequency, bandwidth (Hz), gain (dB).
+//! Formant filter: 5 parallel resonant bandpass filters for vocal synthesis.
+//!
+//! Source-filter model: glottal source (saw/square) → 5 parallel biquad bandpass → sum.
+//! Each formant has: center frequency, bandwidth (Hz), gain (dB).
 
 use std::f32::consts::PI;
 
@@ -189,8 +189,7 @@ impl FormantFilter {
     /// Configure formants for a given voice type and vowel (sets targets for morphing).
     pub fn set_voice_vowel(&mut self, voice: VoiceType, vowel: Vowel) {
         let data = &FORMANT_TABLE[voice as usize][vowel as usize];
-        for i in 0..NUM_FORMANTS {
-            let [freq, gain_db, bw] = data[i];
+        for (i, &[freq, gain_db, bw]) in data.iter().enumerate().take(NUM_FORMANTS) {
             self.target_freq[i] = freq;
             self.target_gain_db[i] = gain_db;
             self.target_bw[i] = bw;
