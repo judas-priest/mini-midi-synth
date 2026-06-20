@@ -246,7 +246,7 @@ impl PitchSequencer {
 
         if self.phase_acc >= samples_per_step + swing_offset {
             self.phase_acc -= samples_per_step + swing_offset;
-            self.current_step = (self.current_step + 1) % self.length;
+            self.current_step = (self.current_step + 1) % self.length.max(1);
             self.step_atom.store(self.current_step, Ordering::Relaxed);
             stepped = true;
         }

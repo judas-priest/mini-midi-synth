@@ -785,7 +785,7 @@ impl StepSequencer {
                     }
                 }
             }
-            self.current_step = (self.current_step + 1) % pattern.length;
+            self.current_step = (self.current_step + 1) % pattern.length.max(1);
         }
         triggers
     }

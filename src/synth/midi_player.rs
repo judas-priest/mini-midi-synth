@@ -169,7 +169,7 @@ impl MidiPlayer {
 
         // Effective us-per-beat
         let us = if let Some(bpm) = self.bpm_override {
-            60_000_000.0 / bpm as f64
+            60_000_000.0 / (bpm as f64).max(1.0)
         } else {
             self.us_per_beat as f64
         };
