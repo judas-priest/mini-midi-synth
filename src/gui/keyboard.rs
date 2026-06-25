@@ -47,8 +47,8 @@ impl App {
                 .count() as f32;
 
             // Reserve space for pads on the right: 8 pads * pad_size + gap
-            let pad_size = 32.0_f32;
-            let pad_gap = 2.0_f32;
+            let pad_gap = 3.0_f32;
+            let pad_size = ((ui.available_width() * 0.25) / 8.0 - pad_gap).clamp(32.0, 48.0);
             let pad_block_w = 8.0 * (pad_size + pad_gap) + 12.0; // 12px margin
 
             let available_w = ui.available_width() - pad_block_w;

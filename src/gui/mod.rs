@@ -349,7 +349,7 @@ impl eframe::App for App {
         ctx.style_mut(|style| {
             for (text_style, size) in [
                 (egui::TextStyle::Body, 15.0),
-                (egui::TextStyle::Button, 15.0),
+                (egui::TextStyle::Button, 13.0),
                 (egui::TextStyle::Monospace, 14.0),
                 (egui::TextStyle::Small, 13.0),
                 (egui::TextStyle::Heading, 20.0),
@@ -535,8 +535,8 @@ impl eframe::App for App {
 
                 // Oscilloscope
                 let scope_data = self.scope_buf.read();
-                let scope_w = 100.0_f32;
-                let scope_h = 24.0_f32;
+                let scope_w = 150.0_f32;
+                let scope_h = 40.0_f32;
                 let (resp, painter) = ui.allocate_painter(
                     egui::vec2(scope_w, scope_h),
                     egui::Sense::hover(),
