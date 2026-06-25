@@ -4,7 +4,7 @@ use eframe::egui;
 
 use crate::preset::{self, Patch};
 use crate::synth::{ControlEvent, ParamFeedback};
-use super::{App, BUFFER_SIZES, buffer_label, scan_sf2_files, sf2_dir};
+use super::{App, BUFFER_SIZES, buffer_label, scan_sf2_files, sf2_dir, theme};
 
 impl App {
     pub(super) fn draw_pad_perf_window(&mut self, ctx: &egui::Context) {
@@ -14,9 +14,9 @@ impl App {
         // Bot (pink):  C1(36) C#1(37) D1(38) D#1(39) G#1(44) A1(45) A#1(46) B1(47)
         const PAD_TOP: [u8; 8] = [40, 41, 42, 43, 48, 49, 50, 51];
         const PAD_BOT: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
-        const TOP_COLOR: egui::Color32 = egui::Color32::from_rgb(0, 160, 180);
-        const BOT_COLOR: egui::Color32 = egui::Color32::from_rgb(180, 50, 120);
-        const EMPTY_COLOR: egui::Color32 = egui::Color32::from_rgb(50, 50, 58);
+        const TOP_COLOR: egui::Color32 = theme::PAD_PERF_TOP;
+        const BOT_COLOR: egui::Color32 = theme::PAD_PERF_BOT;
+        const EMPTY_COLOR: egui::Color32 = theme::BG_PAD_EMPTY;
 
         egui::Window::new("Pad Performances")
             .open(&mut open)
@@ -56,7 +56,7 @@ impl App {
                                     row_color
                                 }
                             } else if pressed {
-                                egui::Color32::from_rgb(90, 90, 100)
+                                theme::BG_PAD_PRESSED_EMPTY
                             } else {
                                 EMPTY_COLOR
                             };
@@ -368,7 +368,7 @@ impl App {
 
                 if self.is_jack {
                     ui.colored_label(
-                        egui::Color32::from_rgb(180, 180, 180),
+                        theme::TEXT_MUTED,
                         format!("JACK server: {}Hz", self.sample_rate),
                     );
                     ui.add_space(4.0);
@@ -422,7 +422,7 @@ impl App {
                     });
 
                 ui.add_space(4.0);
-                ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "Restart to apply audio changes.");
+                ui.colored_label(theme::TEXT_SECONDARY, "Restart to apply audio changes.");
                 if ui.button("Save Audio Settings").clicked() {
                     if let Some((_, host_name)) = self.available_hosts.get(self.selected_host_idx) {
                         self.config.audio.backend = host_name.to_string();
@@ -587,7 +587,7 @@ impl App {
                 }
 
                 ui.colored_label(
-                    egui::Color32::from_rgb(140, 140, 140),
+                    theme::TEXT_SECONDARY,
                     format!("Place .sf2 files in: {}", sf2_dir().display()),
                 );
 

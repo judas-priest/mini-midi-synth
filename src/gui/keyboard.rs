@@ -5,6 +5,7 @@ use eframe::egui;
 
 use super::App;
 use super::NOTE_NAMES;
+use super::theme;
 
 fn note_name(note: u8) -> String {
     let name = NOTE_NAMES[(note % 12) as usize];
@@ -31,7 +32,7 @@ impl App {
             .collect();
 
         if active.is_empty() {
-            ui.colored_label(egui::Color32::from_rgb(100, 100, 100), " ");
+            ui.colored_label(theme::TEXT_DIM, " ");
         } else {
             ui.label(active.join("  "));
         }
@@ -71,12 +72,12 @@ impl App {
                     egui::vec2(key_w - 1.0, key_h),
                 );
                 let color = if vel > 0 {
-                    egui::Color32::from_rgb(80, 180, 255)
+                    theme::KEY_WHITE_ACTIVE
                 } else {
-                    egui::Color32::from_rgb(220, 220, 220)
+                    theme::KEY_WHITE_IDLE
                 };
                 painter.rect_filled(key_rect, 1.0, color);
-                painter.rect_stroke(key_rect, 1.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(120, 120, 120)), egui::StrokeKind::Outside);
+                painter.rect_stroke(key_rect, 1.0, egui::Stroke::new(0.5, theme::STROKE_KEY_BORDER), egui::StrokeKind::Outside);
                 wx += key_w;
             }
 
@@ -91,9 +92,9 @@ impl App {
                         egui::vec2(bw, black_h),
                     );
                     let color = if vel > 0 {
-                        egui::Color32::from_rgb(60, 140, 220)
+                        theme::KEY_BLACK_ACTIVE
                     } else {
-                        egui::Color32::from_rgb(30, 30, 30)
+                        theme::BG_BLACK_KEY
                     };
                     painter.rect_filled(key_rect, 1.0, color);
                 } else {
@@ -131,10 +132,10 @@ impl App {
                 let color = if vel > 0 {
                     egui::Color32::WHITE
                 } else {
-                    egui::Color32::from_rgb(0, 200, 210)
+                    theme::PAD_CYAN
                 };
                 pad_painter.rect_filled(pr, 3.0, color);
-                pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)), egui::StrokeKind::Outside);
+                pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, theme::STROKE_PAD_BORDER), egui::StrokeKind::Outside);
             }
 
             // Bottom row (pink)
@@ -148,10 +149,10 @@ impl App {
                 let color = if vel > 0 {
                     egui::Color32::WHITE
                 } else {
-                    egui::Color32::from_rgb(220, 60, 150)
+                    theme::PAD_PINK
                 };
                 pad_painter.rect_filled(pr, 3.0, color);
-                pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)), egui::StrokeKind::Outside);
+                pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, theme::STROKE_PAD_BORDER), egui::StrokeKind::Outside);
             }
         });
     }

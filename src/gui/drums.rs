@@ -7,6 +7,7 @@ use crate::preset::{self, DrumKit};
 use crate::synth::{ControlEvent, DrumParam};
 use crate::synth::drum::{NUM_DRUM_SLOTS, DRUM_NAMES, DrumSlotParams, DrumPattern};
 use super::App;
+use super::theme;
 
 impl App {
     pub(super) fn draw_drum_sequencer(&mut self, ui: &mut egui::Ui) {
@@ -202,24 +203,7 @@ impl App {
         let pattern_length = self.drum_patterns[pat_idx].length as usize;
 
         // Colors per instrument type
-        let colors: [egui::Color32; NUM_DRUM_SLOTS] = [
-            egui::Color32::from_rgb(220, 60, 60),   // Kick
-            egui::Color32::from_rgb(180, 140, 80),   // Side Stick
-            egui::Color32::from_rgb(220, 140, 40),   // Snare
-            egui::Color32::from_rgb(200, 100, 200),  // Clap
-            egui::Color32::from_rgb(220, 160, 40),   // E-Snare
-            egui::Color32::from_rgb(120, 200, 80),   // Lo Floor Tom
-            egui::Color32::from_rgb(60, 180, 220),   // Closed HH
-            egui::Color32::from_rgb(100, 180, 60),   // Hi Floor Tom
-            egui::Color32::from_rgb(80, 160, 200),   // Pedal HH
-            egui::Color32::from_rgb(80, 160, 60),    // Low Tom
-            egui::Color32::from_rgb(60, 200, 240),   // Open HH
-            egui::Color32::from_rgb(60, 140, 60),    // Lo-Mid Tom
-            egui::Color32::from_rgb(60, 120, 60),    // Hi-Mid Tom
-            egui::Color32::from_rgb(200, 200, 60),   // Crash
-            egui::Color32::from_rgb(60, 100, 60),    // High Tom
-            egui::Color32::from_rgb(180, 180, 60),   // Ride
-        ];
+        let colors = theme::DRUM_COLORS;
 
         for slot in 0..NUM_DRUM_SLOTS {
             ui.horizontal(|ui| {
@@ -247,11 +231,11 @@ impl App {
 
                     // Beat grouping: highlight beat 1 of each group of 4
                     let bg = if step % 4 == 0 {
-                        egui::Color32::from_gray(50)
+                        theme::BG_BEAT_PRIMARY
                     } else if step % 2 == 0 {
-                        egui::Color32::from_gray(40)
+                        theme::BG_BEAT_SECONDARY
                     } else {
-                        egui::Color32::from_gray(32)
+                        theme::BG_BEAT_OFF
                     };
 
                     let painter = ui.painter();
@@ -284,7 +268,7 @@ impl App {
 
                     // Border (subtle)
                     if !is_current {
-                        painter.rect_stroke(rect, 2.0, egui::Stroke::new(0.5, egui::Color32::from_gray(55)), egui::StrokeKind::Outside);
+                        painter.rect_stroke(rect, 2.0, egui::Stroke::new(0.5, theme::STROKE_CELL_BORDER), egui::StrokeKind::Outside);
                     }
 
                     // Click: toggle step on/off. Place with default vel 100.
@@ -448,13 +432,13 @@ impl App {
                 let painter = ui.painter_at(rect);
 
                 // Background
-                painter.rect_filled(rect, 2.0, egui::Color32::from_gray(30));
+                painter.rect_filled(rect, 2.0, theme::BG_PANEL);
 
                 // Center line (pitch = 0)
                 let center_y = rect.top() + bar_h * 0.5;
                 painter.line_segment(
                     [egui::pos2(rect.left(), center_y), egui::pos2(rect.left() + step_w * length as f32, center_y)],
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+                    egui::Stroke::new(1.0, theme::STROKE_GUIDE),
                 );
 
                 for i in 0..length {
@@ -466,7 +450,7 @@ impl App {
                     if i > 0 {
                         painter.line_segment(
                             [egui::pos2(x, rect.top()), egui::pos2(x, rect.top() + bar_h)],
-                            egui::Stroke::new(0.5, egui::Color32::from_gray(50)),
+                            egui::Stroke::new(0.5, theme::STROKE_GRID),
                         );
                     }
 
@@ -485,11 +469,11 @@ impl App {
                     }
 
                     let bar_color = if !step.gate {
-                        egui::Color32::from_gray(60)
+                        theme::SEQ_BAR_MUTED
                     } else if is_current {
-                        egui::Color32::from_rgb(0, 220, 180)
+                        theme::SEQ_BAR_CURRENT
                     } else {
-                        egui::Color32::from_rgb(0, 160, 220)
+                        theme::SEQ_BAR_IDLE
                     };
 
                     let bar_rect = egui::Rect::from_min_max(
@@ -506,7 +490,7 @@ impl App {
                             egui::Align2::CENTER_CENTER,
                             &label,
                             egui::FontId::proportional(9.0),
-                            egui::Color32::from_gray(180),
+                            theme::TEXT_OVERLAY,
                         );
                     }
 
@@ -515,7 +499,7 @@ impl App {
                         painter.rect_stroke(
                             egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(step_w, bar_h)),
                             0.0,
-                            egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 200)),
+                            egui::Stroke::new(2.0, theme::SEQ_STEP_HIGHLIGHT),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -527,9 +511,9 @@ impl App {
                         egui::vec2(step_w - 8.0, 12.0),
                     );
                     let gate_color = if step.gate {
-                        egui::Color32::from_rgb(0, 200, 120)
+                        theme::SEQ_GATE_ON
                     } else {
-                        egui::Color32::from_gray(50)
+                        theme::SEQ_GATE_OFF
                     };
                     painter.rect_filled(gate_rect, 2.0, gate_color);
                 }
@@ -582,16 +566,7 @@ impl App {
         let layer_count = self.looper_atoms.layer_count.load(Ordering::Relaxed);
         let state = LooperState::from_u8(state_u8);
 
-        let part_colors = [
-            egui::Color32::from_rgb(70, 130, 200),
-            egui::Color32::from_rgb(70, 190, 100),
-            egui::Color32::from_rgb(220, 150, 50),
-            egui::Color32::from_rgb(200, 70, 70),
-            egui::Color32::from_rgb(160, 80, 200),
-            egui::Color32::from_rgb(50, 190, 190),
-            egui::Color32::from_rgb(220, 200, 50),
-            egui::Color32::from_rgb(190, 100, 150),
-        ];
+        let part_colors = theme::PART_COLORS;
 
         // --- Row 1: Transport + Status ---
         ui.horizontal(|ui| {
@@ -645,7 +620,7 @@ impl App {
 
             let status_color = match state {
                 LooperState::Recording => egui::Color32::RED,
-                LooperState::Overdubbing => egui::Color32::from_rgb(255, 140, 0),
+                LooperState::Overdubbing => theme::LOOPER_OVERDUB,
                 LooperState::Playing => egui::Color32::GREEN,
                 LooperState::Idle => egui::Color32::GRAY,
             };
@@ -770,7 +745,7 @@ impl App {
                 // Layer label with part color
                 let primary_part = part_ids[0] as usize % 8;
                 let color = if muted {
-                    egui::Color32::from_gray(80)
+                    theme::LOOPER_LAYER_MUTED
                 } else {
                     part_colors[primary_part]
                 };
@@ -840,16 +815,16 @@ impl App {
         let painter = ui.painter_at(rect);
 
         // Background
-        painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
+        painter.rect_filled(rect, 2.0, theme::BG_TIMELINE);
 
         // Beat grid lines
         let beats = self.looper_bars as u32 * 4;
         for beat in 1..beats {
             let x = rect.left() + (beat as f32 / beats as f32) * total_w;
             let color = if beat % 4 == 0 {
-                egui::Color32::from_gray(70)
+                theme::STROKE_BAR_LINE
             } else {
-                egui::Color32::from_gray(40)
+                theme::STROKE_GRID_DARK
             };
             painter.line_segment(
                 [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],

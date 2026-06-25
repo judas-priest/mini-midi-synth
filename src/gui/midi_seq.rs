@@ -7,6 +7,7 @@ use crate::synth::ControlEvent;
 use crate::synth::midi_player::TrackInstrument;
 use crate::synth::sampler::GM_PROGRAM_NAMES;
 use super::App;
+use super::theme;
 
 /// GUI-side per-track state (mirrors the audio-thread TrackState).
 pub struct MidiSeqTrackGui {
@@ -32,7 +33,7 @@ impl App {
 
             // Loop toggle
             let loop_col = if self.midi_seq_looping {
-                egui::Color32::from_rgb(80, 210, 100)
+                theme::MIDI_SEQ_LOOP_ON
             } else {
                 egui::Color32::DARK_GRAY
             };
@@ -114,9 +115,9 @@ impl App {
 
         if !self.midi_seq_status.is_empty() {
             let col = if self.midi_seq_status.starts_with("Error") {
-                egui::Color32::from_rgb(220, 70, 70)
+                theme::MIDI_SEQ_ERROR
             } else {
-                egui::Color32::from_rgb(100, 200, 100)
+                theme::MIDI_SEQ_OK
             };
             ui.colored_label(col, &self.midi_seq_status);
         }
@@ -167,7 +168,7 @@ impl App {
                         let m_col = if track.muted {
                             egui::Color32::YELLOW
                         } else {
-                            egui::Color32::from_gray(80)
+                            theme::MIDI_SEQ_MUTE_INACTIVE
                         };
                         if ui
                             .button(egui::RichText::new("M").color(m_col).monospace())

@@ -2,6 +2,7 @@
 use eframe::egui;
 use crate::synth::ControlEvent;
 use super::App;
+use super::theme;
 
 impl App {
     /// Draw the macro panel (called from params.rs, near top of synth params).
@@ -135,8 +136,8 @@ impl App {
         let painter = ui.painter_at(rect);
 
         // Background
-        painter.rect_filled(rect, 4.0, egui::Color32::from_gray(30));
-        painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(80)), egui::StrokeKind::Outside);
+        painter.rect_filled(rect, 4.0, theme::BG_PANEL);
+        painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, theme::STROKE_PANEL_BORDER), egui::StrokeKind::Outside);
 
         // Grid lines (4×4 subdivisions)
         for i in 1..4 {
@@ -145,11 +146,11 @@ impl App {
             let y = rect.top() + frac * rect.height();
             painter.line_segment(
                 [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-                egui::Stroke::new(0.5, egui::Color32::from_gray(50)),
+                egui::Stroke::new(0.5, theme::STROKE_GRID),
             );
             painter.line_segment(
                 [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-                egui::Stroke::new(0.5, egui::Color32::from_gray(50)),
+                egui::Stroke::new(0.5, theme::STROKE_GRID),
             );
         }
 
@@ -166,15 +167,15 @@ impl App {
         // Crosshair lines through dot
         painter.line_segment(
             [egui::pos2(dot_pos.x, rect.top()), egui::pos2(dot_pos.x, rect.bottom())],
-            egui::Stroke::new(0.5, egui::Color32::from_rgba_premultiplied(100, 200, 255, 60)),
+            egui::Stroke::new(0.5, theme::XY_CROSSHAIR),
         );
         painter.line_segment(
             [egui::pos2(rect.left(), dot_pos.y), egui::pos2(rect.right(), dot_pos.y)],
-            egui::Stroke::new(0.5, egui::Color32::from_rgba_premultiplied(100, 200, 255, 60)),
+            egui::Stroke::new(0.5, theme::XY_CROSSHAIR),
         );
 
         // Dot
-        painter.circle_filled(dot_pos, 7.0, egui::Color32::from_rgb(100, 200, 255));
+        painter.circle_filled(dot_pos, 7.0, theme::CURVE_FILTER);
         painter.circle_stroke(dot_pos, 7.0, egui::Stroke::new(1.0, egui::Color32::WHITE));
 
         // Axis labels
@@ -183,7 +184,7 @@ impl App {
             egui::Align2::CENTER_TOP,
             x_name,
             egui::FontId::proportional(11.0),
-            egui::Color32::from_gray(180),
+            theme::TEXT_OVERLAY,
         );
         // Y label (rotated text not trivial in egui, place to the left)
         painter.text(
@@ -191,7 +192,7 @@ impl App {
             egui::Align2::RIGHT_CENTER,
             y_name,
             egui::FontId::proportional(11.0),
-            egui::Color32::from_gray(180),
+            theme::TEXT_OVERLAY,
         );
 
         // Handle drag / click

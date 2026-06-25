@@ -3,6 +3,7 @@
 use eframe::egui;
 
 use super::App;
+use super::theme;
 use super::{
     OSC_NAMES, SIMPLE_OSC_NAMES, FILTER_NAMES, FILTER_ROUTING_NAMES,
     PD_SHAPE_NAMES, FOLD_SOURCE_NAMES, MODAL_MATERIAL_NAMES, SYNC_SHAPE_NAMES,
@@ -91,14 +92,14 @@ fn draw_filter_response(
     let painter = ui.painter_at(rect);
 
     // Background
-    painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
+    painter.rect_filled(rect, 2.0, theme::BG_TIMELINE);
 
     // Grid lines at 100 Hz, 1 kHz, 10 kHz
     for &freq in &[100.0f32, 1000.0, 10000.0] {
         let x = freq_to_x(freq, rect);
         painter.line_segment(
             [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-            egui::Stroke::new(1.0, egui::Color32::from_gray(40)),
+            egui::Stroke::new(1.0, theme::STROKE_GRID_DARK),
         );
     }
 
@@ -106,14 +107,14 @@ fn draw_filter_response(
     let y_0db = db_to_y(0.0, rect);
     painter.line_segment(
         [egui::pos2(rect.left(), y_0db), egui::pos2(rect.right(), y_0db)],
-        egui::Stroke::new(1.0, egui::Color32::from_gray(50)),
+        egui::Stroke::new(1.0, theme::STROKE_GUIDE),
     );
 
     // Compute response curve
     let points = compute_filter_response(cutoff, resonance, filter_type);
 
     // Draw curve
-    let color = egui::Color32::from_rgb(100, 200, 255);
+    let color = theme::CURVE_FILTER;
     for i in 1..FILTER_RESP_POINTS {
         let x0 = freq_to_x(points[i - 1].0, rect);
         let y0 = db_to_y(points[i - 1].1, rect);
@@ -129,7 +130,7 @@ fn draw_filter_response(
     let cx = freq_to_x(cutoff.clamp(20.0, 20000.0), rect);
     painter.line_segment(
         [egui::pos2(cx, rect.top()), egui::pos2(cx, rect.bottom())],
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 200, 50)),
+        egui::Stroke::new(1.0, theme::CURVE_CUTOFF_MARKER),
     );
 }
 
@@ -201,7 +202,7 @@ impl App {
         let h = 32.0_f32;
         let (resp, painter) = ui.allocate_painter(egui::vec2(w, h), egui::Sense::hover());
         let rect = resp.rect;
-        painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(25, 25, 35));
+        painter.rect_filled(rect, 2.0, theme::BG_WIDGET_ALT);
 
         // Normalize time segments to fit width (sustain gets fixed portion)
         let total_time = a + d + r + 0.001;
@@ -227,9 +228,9 @@ impl App {
         let p4 = egui::pos2(p3.x + r_w, bot);                      // release end
 
         let color = if prefix == "amp" {
-            egui::Color32::from_rgb(100, 180, 255)
+            theme::CURVE_AMP_ENV
         } else {
-            egui::Color32::from_rgb(255, 160, 80)
+            theme::CURVE_MOD_ENV
         };
         painter.add(egui::Shape::line(
             vec![p0, p1, p2, p3, p4],
@@ -239,7 +240,7 @@ impl App {
         let sy = bot - s * range;
         painter.line_segment(
             [egui::pos2(rect.left(), sy), egui::pos2(rect.right(), sy)],
-            egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 80)),
+            egui::Stroke::new(0.5, theme::STROKE_SUBTLE),
         );
     }
 

@@ -8,6 +8,7 @@ mod keyboard;
 mod layers;
 mod fx_chain;
 mod macros;
+mod theme;
 pub mod keybinds;
 
 use std::collections::HashSet;
@@ -541,7 +542,7 @@ impl eframe::App for App {
                     egui::Sense::hover(),
                 );
                 let r = resp.rect;
-                painter.rect_filled(r, 2.0, egui::Color32::from_rgb(20, 20, 30));
+                painter.rect_filled(r, 2.0, theme::BG_WIDGET);
                 let mid_y = r.center().y;
                 // Draw waveform
                 let n = scope_data.len();
@@ -552,12 +553,12 @@ impl eframe::App for App {
                     egui::pos2(r.left() + px as f32, mid_y - s * scope_h * 0.45)
                 }).collect();
                 if points.len() >= 2 {
-                    painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 200, 100))));
+                    painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, theme::SCOPE_WAVE)));
                 }
                 // Center line
                 painter.line_segment(
                     [egui::pos2(r.left(), mid_y), egui::pos2(r.right(), mid_y)],
-                    egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 80)),
+                    egui::Stroke::new(0.5, theme::STROKE_SUBTLE),
                 );
             });
             ui.add_space(4.0);
@@ -889,7 +890,7 @@ impl eframe::App for App {
                     let prog = self.parts[part].sf2_program;
                     let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
                     ui.colored_label(
-                        egui::Color32::from_rgb(160, 160, 160),
+                        theme::TEXT_SF2_STATUS,
                         format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_keys_loaded_name, prog, name),
                     );
                 } else {

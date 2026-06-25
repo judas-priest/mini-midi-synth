@@ -14,6 +14,7 @@ use crate::preset::{self, Performance, PartConfig};
 use crate::synth::ControlEvent;
 use super::App;
 use super::note_name;
+use super::theme;
 
 const ZONE_A: std::ops::Range<usize> = 0..4;
 const ZONE_B: std::ops::Range<usize> = 4..8;
@@ -332,20 +333,11 @@ impl App {
 }
 
 fn draw_key_zone_map(ui: &mut egui::Ui, parts: &[super::PartState], active: usize) {
-    let colors = [
-        egui::Color32::from_rgb(70, 130, 200),
-        egui::Color32::from_rgb(70, 190, 100),
-        egui::Color32::from_rgb(220, 150, 50),
-        egui::Color32::from_rgb(200, 70, 70),
-        egui::Color32::from_rgb(160, 80, 200),
-        egui::Color32::from_rgb(50, 190, 190),
-        egui::Color32::from_rgb(220, 200, 50),
-        egui::Color32::from_rgb(190, 100, 150),
-    ];
+    let colors = theme::PART_COLORS;
     let total_w = ui.available_width().min(500.0);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(total_w, 8.0), egui::Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, egui::Color32::from_gray(30));
+    painter.rect_filled(rect, 0.0, theme::BG_PANEL);
     for (i, part) in parts.iter().enumerate() {
         if !part.enabled { continue; }
         let c = colors[i % colors.len()];
@@ -363,7 +355,7 @@ fn draw_key_zone_map(ui: &mut egui::Ui, parts: &[super::PartState], active: usiz
         let x = rect.left() + (oct * 12) as f32 / 127.0 * total_w;
         painter.line_segment(
             [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-            egui::Stroke::new(0.5, egui::Color32::from_gray(60)),
+            egui::Stroke::new(0.5, theme::STROKE_ZONE_DIV),
         );
     }
 }
