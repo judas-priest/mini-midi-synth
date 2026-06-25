@@ -178,12 +178,6 @@ pub const SEQ_GATE_OFF: Color32 = Color32::from_gray(50);
 /// Loop button active.
 pub const MIDI_SEQ_LOOP_ON: Color32 = Color32::from_rgb(80, 210, 100);
 
-/// Status: error text.
-pub const MIDI_SEQ_ERROR: Color32 = Color32::from_rgb(220, 70, 70);
-
-/// Status: success text.
-pub const MIDI_SEQ_OK: Color32 = Color32::from_rgb(100, 200, 100);
-
 /// Mute button inactive.
 pub const MIDI_SEQ_MUTE_INACTIVE: Color32 = Color32::from_gray(80);
 

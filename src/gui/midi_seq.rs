@@ -6,7 +6,7 @@ use eframe::egui;
 use crate::synth::ControlEvent;
 use crate::synth::midi_player::TrackInstrument;
 use crate::synth::sampler::GM_PROGRAM_NAMES;
-use super::App;
+use super::{App, ToastKind};
 use super::theme;
 
 /// GUI-side per-track state (mirrors the audio-thread TrackState).
@@ -112,15 +112,6 @@ impl App {
                 self.do_load_midi();
             }
         });
-
-        if !self.midi_seq_status.is_empty() {
-            let col = if self.midi_seq_status.starts_with("Error") {
-                theme::MIDI_SEQ_ERROR
-            } else {
-                theme::MIDI_SEQ_OK
-            };
-            ui.colored_label(col, &self.midi_seq_status);
-        }
 
         ui.add_space(theme::SP_SM);
         ui.separator();
@@ -286,11 +277,11 @@ impl App {
         }
         match std::fs::read(&path) {
             Err(e) => {
-                self.midi_seq_status = format!("Error reading file: {e}");
+                self.show_toast(format!("Error reading file: {e}"), ToastKind::Error);
             }
             Ok(bytes) => match crate::synth::midi_player::parse_midi(&bytes) {
                 Err(e) => {
-                    self.midi_seq_status = format!("Error parsing MIDI: {e}");
+                    self.show_toast(format!("Error parsing MIDI: {e}"), ToastKind::Error);
                 }
                 Ok(data) => {
                     let n = data.track_names.len();
@@ -311,8 +302,7 @@ impl App {
                             muted: false,
                         })
                         .collect();
-                    self.midi_seq_status =
-                        format!("Loaded: {n} tracks, {ticks} ticks");
+                    self.show_toast(format!("MIDI loaded: {n} tracks, {ticks} ticks"), ToastKind::Success);
                     let _ = self
                         .ctrl_tx
                         .push(ControlEvent::MidiSeqLoad { data: Box::new(data) });

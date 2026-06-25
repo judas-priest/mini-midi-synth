@@ -13,7 +13,7 @@ pub mod keybinds;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cpal::HostId;
 use eframe::egui;
@@ -119,6 +119,18 @@ const FORMANT_VOICE_NAMES: &[&str] = &["Bass", "Tenor", "Alto", "Soprano"];
 const FORMANT_VOWEL_NAMES: &[&str] = &["A (ah)", "E (eh)", "I (ee)", "O (oh)", "U (oo)"];
 const LAYER_NAMES: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8"];
 
+/// Toast message severity
+#[derive(Clone)]
+pub enum ToastKind { Success, Error, Info }
+
+/// Active toast notification
+#[derive(Clone)]
+pub struct Toast {
+    pub message: String,
+    pub kind: ToastKind,
+    pub created: Instant,
+}
+
 fn buffer_label(size: u32) -> String {
     if size == 0 { "Default".to_string() } else { format!("{size}") }
 }
@@ -220,7 +232,6 @@ pub struct App {
     pub selected_sample_rate: u32,
     pub selected_buffer_size: u32,
     pub selected_midi_port: Option<String>,
-    pub settings_status: String,
     pub is_jack: bool,
 
     /// Layer states
@@ -264,7 +275,6 @@ pub struct App {
     // Drum kit save/load
     pub drum_kit_name: String,
     pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
-    pub drum_kit_status: String,
     pub drum_midi_import_path: String,
     // Looper
     pub show_looper: bool,
@@ -287,13 +297,11 @@ pub struct App {
     // Performance save/load
     pub perf_name: String,
     pub perf_list: Vec<(String, std::path::PathBuf)>,
-    pub perf_status: String,
     // Navigate button timing
     pub nav_press_time: Option<std::time::Instant>,
     // Pad performance map: 16 pads (notes 36-51) → performance names
     pub show_pad_perf: bool,
     pub pad_perf_map: [Option<String>; 16],
-    pub pad_perf_status: String,
     pub pad_prev_state: [u8; 16],
     pub last_config_save: std::time::Instant,
     pub global_dirty: bool,
@@ -303,7 +311,6 @@ pub struct App {
     pub sf2_keys_loaded_name: String,
     pub sf2_drums_selected: Option<usize>,
     pub sf2_drums_loaded_name: String,
-    pub sf2_status: String,
     pub sf2_drums_enabled: bool,
     pub sf2_keys_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
     pub sf2_drums_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
@@ -317,6 +324,8 @@ pub struct App {
     pub pitch_seq_rate: [u8; 2],
     pub pitch_seq_scale: [u8; 2],
     pub pitch_seq_swing: [f32; 2],
+    // Toast notifications
+    pub toasts: Vec<Toast>,
     // Patch search
     pub preset_search: String,
     // Oscilloscope
@@ -328,7 +337,6 @@ pub struct App {
     // MIDI file sequencer
     pub show_midi_seq: bool,
     pub midi_seq_path: String,
-    pub midi_seq_status: String,
     pub midi_seq_tracks: Vec<midi_seq::MidiSeqTrackGui>,
     pub midi_seq_playing: bool,
     pub midi_seq_looping: bool,
@@ -390,9 +398,9 @@ impl eframe::App for App {
                         let name = name.clone();
                         let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                         if self.load_performance_by_name(&name) {
-                            self.pad_perf_status = format!("Loaded: {name}");
+                            self.show_toast(format!("Loaded: {name}"), ToastKind::Success);
                         } else {
-                            self.pad_perf_status = format!("Not found: {name}");
+                            self.show_toast(format!("Not found: {name}"), ToastKind::Error);
                         }
                     }
                 }
@@ -598,17 +606,11 @@ impl eframe::App for App {
             ui.add_space(theme::SP_SM);
         });
 
-        // Pad perf status (above keyboard)
-        if !self.pad_perf_status.is_empty() || self.show_pad_perf {
+        // Pad perf indicator (above keyboard)
+        if self.show_pad_perf {
             egui::TopBottomPanel::bottom("pad_perf_bar").show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    if self.show_pad_perf {
-                        ui.colored_label(egui::Color32::YELLOW, "PAD PERF: tap a pad to switch performance");
-                    }
-                    if !self.pad_perf_status.is_empty() {
-                        ui.separator();
-                        ui.label(egui::RichText::new(&self.pad_perf_status).small().weak());
-                    }
+                    ui.colored_label(egui::Color32::YELLOW, "PAD PERF: tap a pad to switch performance");
                 });
             });
         }
@@ -876,6 +878,31 @@ impl eframe::App for App {
         // Keybindings window
         if self.show_keybinds_window {
             self.draw_keybinds_window(ctx);
+        }
+
+        // Draw toast notifications
+        self.toasts.retain(|t| t.created.elapsed().as_secs_f32() < 3.0);
+        for (i, toast) in self.toasts.iter().enumerate() {
+            let color = match toast.kind {
+                ToastKind::Success => egui::Color32::from_rgb(40, 160, 80),
+                ToastKind::Error => egui::Color32::from_rgb(200, 60, 60),
+                ToastKind::Info => egui::Color32::from_rgb(60, 140, 200),
+            };
+            egui::Area::new(egui::Id::new("toast").with(i))
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -40.0 - i as f32 * 36.0))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::default()
+                        .fill(color)
+                        .corner_radius(4.0)
+                        .inner_margin(egui::Margin::symmetric(12, 6))
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new(&toast.message).color(egui::Color32::WHITE).strong());
+                        });
+                });
+        }
+        if !self.toasts.is_empty() {
+            ctx.request_repaint();
         }
 
         // Central: part tabs + parameters / drum sequencer
@@ -1146,6 +1173,15 @@ impl App {
         self.show_keybinds_window = open;
     }
 
+    /// Push a toast notification.
+    pub fn show_toast(&mut self, message: impl Into<String>, kind: ToastKind) {
+        self.toasts.push(Toast {
+            message: message.into(),
+            kind,
+            created: Instant::now(),
+        });
+    }
+
     /// Maximum undo depth for patch parameter editing.
     const MAX_UNDO: usize = 50;
 
@@ -1169,6 +1205,7 @@ impl App {
             self.redo_stack.push(self.parts[part].edited_params.clone());
             self.parts[part].edited_params = snapshot;
             self.send_edited_params(part);
+            self.show_toast("Undo", ToastKind::Info);
         }
     }
 
@@ -1178,6 +1215,7 @@ impl App {
             self.undo_stack.push(self.parts[part].edited_params.clone());
             self.parts[part].edited_params = snapshot;
             self.send_edited_params(part);
+            self.show_toast("Redo", ToastKind::Info);
         }
     }
 
@@ -1217,16 +1255,16 @@ impl App {
                 let mut reader = BufReader::new(&mut file);
                 match rustysynth::SoundFont::new(&mut reader) {
                     Ok(sf) => Some(std::sync::Arc::new(sf)),
-                    Err(e) => { self.sf2_status = format!("Parse error: {e}"); None }
+                    Err(e) => { self.show_toast(format!("SF2 parse error: {e}"), ToastKind::Error); None }
                 }
             }
-            Err(e) => { self.sf2_status = format!("Open error: {e}"); None }
+            Err(e) => { self.show_toast(format!("SF2 open error: {e}"), ToastKind::Error); None }
         }
     }
 
     fn load_sf2_keys(&mut self, idx: usize) {
         let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
-            self.sf2_status = "File not found".to_string();
+            self.show_toast("SF2 file not found", ToastKind::Error);
             return;
         };
         // Reuse existing drums soundfont if same file
@@ -1246,7 +1284,7 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
         let _ = self.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
         self.sf2_keys_loaded_name = name;
-        self.sf2_status = "Keys SF2 loaded".to_string();
+        self.show_toast("Keys SF2 loaded", ToastKind::Success);
         // Apply per-part SF2 modes
         for i in 0..2 {
             if self.parts[i].sf2_mode {
@@ -1263,7 +1301,7 @@ impl App {
 
     fn load_sf2_drums(&mut self, idx: usize) {
         let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
-            self.sf2_status = "File not found".to_string();
+            self.show_toast("SF2 file not found", ToastKind::Error);
             return;
         };
         // Reuse existing keys soundfont if same file
@@ -1283,7 +1321,7 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
         let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf });
         self.sf2_drums_loaded_name = name;
-        self.sf2_status = "Drums SF2 loaded".to_string();
+        self.show_toast("Drums SF2 loaded", ToastKind::Success);
         if self.sf2_drums_enabled {
             let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
         }

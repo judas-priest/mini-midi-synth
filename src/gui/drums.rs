@@ -6,7 +6,7 @@ use eframe::egui;
 use crate::preset::{self, DrumKit};
 use crate::synth::{ControlEvent, DrumParam};
 use crate::synth::drum::{NUM_DRUM_SLOTS, DRUM_NAMES, DrumSlotParams, DrumPattern};
-use super::App;
+use super::{App, ToastKind};
 use super::theme;
 
 impl App {
@@ -102,11 +102,11 @@ impl App {
                     volume: self.drum_volume,
                 };
                 match preset::save_drum_kit(&kit) {
-                    Ok(path) => {
-                        self.drum_kit_status = format!("Saved: {}", path.display());
+                    Ok(_path) => {
+                        self.show_toast("Kit saved", ToastKind::Success);
                         self.drum_kit_list = preset::list_drum_kits();
                     }
-                    Err(e) => { self.drum_kit_status = format!("Error: {e}"); }
+                    Err(e) => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
             }
             ui.separator();
@@ -136,7 +136,7 @@ impl App {
                         self.drum_bpm = kit.bpm;
                         self.drum_swing = kit.swing;
                         self.drum_volume = kit.volume;
-                        self.drum_kit_status = format!("Loaded: {}", kit.name);
+                        self.show_toast(format!("Kit loaded: {}", kit.name), ToastKind::Success);
                         let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
                             patterns: Box::new(patterns),
                             params: Box::new(params),
@@ -149,12 +149,8 @@ impl App {
                             let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: kit.bpm });
                         }
                     }
-                    Err(e) => { self.drum_kit_status = format!("Error: {e}"); }
+                    Err(e) => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
-            }
-            if !self.drum_kit_status.is_empty() {
-                ui.separator();
-                ui.label(egui::RichText::new(&self.drum_kit_status).small().weak());
             }
         });
 
@@ -172,11 +168,10 @@ impl App {
                         patterns[..pvec_len].copy_from_slice(&patterns_vec[..pvec_len]);
                         self.drum_patterns = patterns;
                         self.drum_bpm = bpm;
-                        self.drum_kit_status = format!(
-                            "Imported {} bar(s) @ {:.0} BPM from {}",
+                        self.show_toast(format!(
+                            "Imported {} bar(s) @ {:.0} BPM",
                             patterns_vec.len().min(8), bpm,
-                            path.file_name().unwrap_or_default().to_string_lossy()
-                        );
+                        ), ToastKind::Success);
                         let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
                             patterns: Box::new(patterns),
                             params: Box::new(self.drum_params),
@@ -189,7 +184,7 @@ impl App {
                             let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm });
                         }
                     }
-                    Err(e) => { self.drum_kit_status = format!("Import error: {e}"); }
+                    Err(e) => { self.show_toast(format!("Import error: {e}"), ToastKind::Error); }
                 }
             }
         });

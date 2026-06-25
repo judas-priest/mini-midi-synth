@@ -7,7 +7,7 @@ use eframe::egui;
 
 use crate::preset::{self, Patch};
 use crate::synth::{ControlEvent, ParamFeedback, PatchParams};
-use super::{App, BUFFER_SIZES, buffer_label, scan_sf2_files, sf2_dir, theme};
+use super::{App, ToastKind, BUFFER_SIZES, buffer_label, scan_sf2_files, sf2_dir, theme};
 
 /// Default parameter values for double-click reset.
 static DEFAULT_PARAMS: LazyLock<BTreeMap<String, f32>> = LazyLock::new(|| PatchParams::default().to_map());
@@ -112,9 +112,6 @@ impl App {
                 }
 
                 ui.add_space(theme::SP_XS);
-                if !self.pad_perf_status.is_empty() {
-                    ui.label(egui::RichText::new(&self.pad_perf_status).small().weak());
-                }
             });
         if self.show_pad_perf && !open {
             // Window closing — save pad map
@@ -229,9 +226,6 @@ impl App {
                             } else {
                                 // Long press: toggle pad performance panel
                                 self.show_pad_perf = !self.show_pad_perf;
-                                if !self.show_pad_perf {
-                                    self.pad_perf_status.clear();
-                                }
                             }
                         }
                     }
@@ -364,8 +358,8 @@ impl App {
             wavetable_frame_size: 0,
         };
 
-        if let Ok(path) = preset::save_patch(&new_patch) {
-            self.settings_status = format!("Saved: {}", path.display());
+        if let Ok(_path) = preset::save_patch(&new_patch) {
+            self.show_toast("Preset saved", ToastKind::Success);
             self.patches.push(new_patch);
             self.parts[part].patch_idx = self.patches.len() - 1;
             self.parts[part].params_dirty = false;
@@ -445,7 +439,7 @@ impl App {
                         self.config.audio.sample_rate = self.selected_sample_rate;
                         self.config.audio.buffer_size = self.selected_buffer_size;
                         self.save_config();
-                        self.settings_status = "Audio saved. Restart to apply.".to_string();
+                        self.show_toast("Audio saved. Restart to apply.", ToastKind::Info);
                     }
                 }
 
@@ -607,14 +601,6 @@ impl App {
                     format!("Place .sf2 files in: {}", sf2_dir().display()),
                 );
 
-                if !self.sf2_status.is_empty() {
-                    ui.colored_label(egui::Color32::YELLOW, &self.sf2_status);
-                }
-
-                if !self.settings_status.is_empty() {
-                    ui.add_space(theme::SP_MD);
-                    ui.colored_label(egui::Color32::YELLOW, &self.settings_status);
-                }
             });
         self.show_settings = open;
     }
@@ -628,19 +614,19 @@ impl App {
                         Ok(()) => {
                             self.midi_connected_port = Some(port_name.clone());
                             self.config.midi.port_name = Some(port_name.clone());
-                            self.settings_status = format!("MIDI: {port_name}");
+                            self.show_toast(format!("MIDI: {port_name}"), ToastKind::Success);
                             self.save_config();
                         }
-                        Err(e) => { self.settings_status = format!("MIDI error: {e}"); }
+                        Err(e) => { self.show_toast(format!("MIDI error: {e}"), ToastKind::Error); }
                     }
                 }
             } else {
-                self.settings_status = format!("Port not found: {port_name}");
+                self.show_toast(format!("Port not found: {port_name}"), ToastKind::Error);
             }
         } else {
             self.midi_connected_port = None;
             self.config.midi.port_name = None;
-            self.settings_status = "MIDI disconnected".to_string();
+            self.show_toast("MIDI disconnected", ToastKind::Info);
             self.save_config();
         }
     }

@@ -564,7 +564,6 @@ fn run_gui() -> Result<()> {
         selected_sample_rate: c.config.audio.sample_rate,
         selected_buffer_size: c.config.audio.buffer_size,
         selected_midi_port: c.config.midi.port_name.clone(),
-        settings_status: String::new(),
         is_jack: c.is_jack,
         parts: std::iter::once(layer_a).chain(std::iter::once(layer_b)).chain(parts_extra).collect(),
         active_part: 0,
@@ -600,7 +599,6 @@ fn run_gui() -> Result<()> {
         drum_rec_atom: c.drum_rec_atom,
         drum_kit_name: String::new(),
         drum_kit_list: preset::list_drum_kits(),
-        drum_kit_status: String::new(),
         drum_midi_import_path: String::new(),
         looper_atoms: c.looper_atoms,
         looper_display: c.looper_display,
@@ -618,14 +616,12 @@ fn run_gui() -> Result<()> {
         keybind_capturing: None,
         perf_name: String::new(),
         perf_list: preset::list_performances(),
-        perf_status: String::new(),
         nav_press_time: None,
         show_pad_perf: false,
         pad_perf_map: {
             let saved = &c.config.ui.pad_perf_map;
             std::array::from_fn(|i| saved.get(i).cloned().flatten())
         },
-        pad_perf_status: String::new(),
         pad_prev_state: [0u8; 16],
         last_config_save: std::time::Instant::now(),
         global_dirty: false,
@@ -634,7 +630,6 @@ fn run_gui() -> Result<()> {
         sf2_keys_loaded_name: String::new(),
         sf2_drums_selected: None,
         sf2_drums_loaded_name: String::new(),
-        sf2_status: String::new(),
         sf2_drums_enabled: c.config.sf2.drums_sf2,
         sf2_keys_soundfont: None,
         sf2_drums_soundfont: None,
@@ -653,7 +648,6 @@ fn run_gui() -> Result<()> {
         show_fx_chain: false,
         show_midi_seq: false,
         midi_seq_path: String::new(),
-        midi_seq_status: String::new(),
         midi_seq_tracks: Vec::new(),
         midi_seq_playing: false,
         midi_seq_looping: true,
@@ -663,6 +657,7 @@ fn run_gui() -> Result<()> {
         midi_seq_file_pick: None,
         undo_stack: Vec::new(),
         redo_stack: Vec::new(),
+        toasts: Vec::new(),
     };
 
     app.load_edited_params(0);

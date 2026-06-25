@@ -12,7 +12,7 @@ use std::sync::atomic::Ordering;
 use eframe::egui;
 use crate::preset::{self, Performance, PartConfig};
 use crate::synth::ControlEvent;
-use super::App;
+use super::{App, ToastKind};
 use super::note_name;
 use super::theme;
 
@@ -202,9 +202,9 @@ impl App {
                     name: self.perf_name.trim().to_string(),
                     category: String::new(), parts,
                 }) {
-                    Ok(path) => { self.perf_status = format!("Saved: {}", path.display());
-                                  self.perf_list = preset::list_performances(); }
-                    Err(e)   => { self.perf_status = format!("Error: {e}"); }
+                    Ok(_path) => { self.show_toast("Performance saved", ToastKind::Success);
+                                   self.perf_list = preset::list_performances(); }
+                    Err(e)    => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
             }
             ui.separator();
@@ -248,12 +248,8 @@ impl App {
                                 part: i, program: part.sf2_program, bank: 0 });
                         }
                     }
-                    self.perf_status = format!("Loaded: {}", perf.name);
+                    self.show_toast(format!("Loaded: {}", perf.name), ToastKind::Success);
                 }
-            }
-            if !self.perf_status.is_empty() {
-                ui.separator();
-                ui.label(egui::RichText::new(&self.perf_status).small().weak());
             }
         });
     }
