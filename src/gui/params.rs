@@ -262,9 +262,13 @@ impl App {
         // Macro knobs (always visible at top — key performance controls)
         self.draw_macros(ui);
         ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
 
+        // Oscillator section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
         // Set secondary width for oscillator params
         ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
@@ -772,9 +776,15 @@ impl App {
         });
         changed |= self.param_slider(ui, "osc_ws_drive", "Drive", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "osc_ws_mix", "Mix", 0.0, 1.0, false);
+        }); // end Oscillator frame
+        ui.add_space(4.0);
 
-        ui.add_space(6.0);
-
+        // Filter section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
         // Primary width for filter — main sound-shaping params
         ui.style_mut().spacing.slider_width = theme::SLIDER_PRIMARY;
 
@@ -916,9 +926,15 @@ impl App {
                 }
             }
         }
+        }); // end Filter frame
+        ui.add_space(4.0);
 
-        ui.add_space(6.0);
-
+        // Envelopes section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
         // Primary width for envelopes — main sound-shaping params
         ui.style_mut().spacing.slider_width = theme::SLIDER_PRIMARY;
 
@@ -954,9 +970,15 @@ impl App {
             changed |= env_shape_combo(ui, part, "Dec:", "filter_env_decay_shape", "fenv_dec_shape", &mut self.parts[part].edited_params);
             changed |= env_shape_combo(ui, part, "Rel:", "filter_env_release_shape", "fenv_rel_shape", &mut self.parts[part].edited_params);
         });
+        }); // end Envelopes frame
+        ui.add_space(4.0);
 
-        ui.add_space(6.0);
-
+        // Dynamics section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
         // Secondary width for dynamics, LFOs, modulators
         ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
@@ -977,8 +999,16 @@ impl App {
                 });
         });
         changed |= self.param_slider(ui, "vel_to_filter", "Vel->Filter", 0.0, 1.0, false);
+        }); // end Dynamics frame
+        ui.add_space(4.0);
 
-        ui.add_space(6.0);
+        // LFO section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
         // LFO
         ui.strong("LFO");
@@ -1139,8 +1169,16 @@ impl App {
                 }
             });
         }
+        }); // end LFO frame
+        ui.add_space(4.0);
 
-        ui.add_space(6.0);
+        // Mod Matrix section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
         // Modulation Matrix
         ui.strong("Mod Matrix");
@@ -1205,8 +1243,17 @@ impl App {
                 });
             }
         }
+        }); // end Mod Matrix frame
+        ui.add_space(4.0);
 
-        ui.add_space(6.0);
+        // Voice section (Play Mode + Portamento + Unison)
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        // Compact width for utility params
+        ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
 
         // Play Mode
         ui.strong("Play Mode");
@@ -1241,10 +1288,7 @@ impl App {
                 });
         });
 
-        ui.add_space(6.0);
-
-        // Compact width for utility params
-        ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
+        ui.add_space(4.0);
 
         // Portamento
         ui.strong("Portamento");
@@ -1264,7 +1308,7 @@ impl App {
         });
         changed |= self.param_slider_ex(ui, "portamento_time", "Time", 0.0, 2.0, false, " s");
 
-        ui.add_space(6.0);
+        ui.add_space(4.0);
 
         // Unison
         ui.strong("Unison");
@@ -1277,8 +1321,16 @@ impl App {
         }
         changed |= self.param_slider_ex(ui, "unison_detune", "Detune", 0.0, 50.0, false, " ct");
         changed |= self.param_slider(ui, "unison_spread", "Spread", 0.0, 1.0, false);
+        }); // end Voice frame
+        ui.add_space(4.0);
 
-        ui.add_space(6.0);
+        // Arpeggiator section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
 
         // Arpeggiator
         ui.strong("Arpeggiator");
@@ -1339,9 +1391,15 @@ impl App {
             });
             changed |= self.param_slider(ui, "arp_gate", "Gate", 0.1, 1.0, false);
         }
+        }); // end Arpeggiator frame
+        ui.add_space(4.0);
 
-        ui.add_space(6.0);
-
+        // Effects section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
         // Secondary width for effects
         ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
@@ -1501,15 +1559,23 @@ impl App {
                     }
                 });
         });
+        }); // end Effects frame
+        ui.add_space(4.0);
 
+        // Pitch Bend section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
         // Compact width for pitch bend utility
         ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
 
         // Asymmetric pitch bend
-        ui.add_space(4.0);
         ui.strong("Pitch Bend");
         changed |= self.param_slider_ex(ui, "pitch_bend_up",   "Range Up",   0.0, 48.0, false, " st");
         changed |= self.param_slider_ex(ui, "pitch_bend_down", "Range Down", 0.0, 48.0, false, " st");
+        }); // end Pitch Bend frame
 
         if changed {
             self.parts[part].params_dirty = true;

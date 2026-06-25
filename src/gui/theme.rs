@@ -24,6 +24,9 @@ pub const BG_WIDGET_ALT: Color32 = Color32::from_rgb(25, 25, 35);
 /// Panel / section background (XY pad, pitch-seq, filter response).
 pub const BG_PANEL: Color32 = Color32::from_gray(30);
 
+/// Subtle frame background for parameter section grouping.
+pub const BG_SECTION: Color32 = Color32::from_gray(22);
+
 /// Key-zone map / timeline background.
 pub const BG_TIMELINE: Color32 = Color32::from_gray(25);
 
