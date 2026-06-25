@@ -310,6 +310,9 @@ impl App {
             slider = slider.suffix(suffix);
         }
         let resp = ui.add(slider).on_hover_text("Double-click to reset to default");
+        if resp.drag_started() {
+            self.push_undo_snapshot();
+        }
         resp.context_menu(|ui| {
             // Show current CC assignment
             if let Some(cc) = cc_info {
@@ -332,6 +335,7 @@ impl App {
         });
         if resp.double_clicked() {
             if let Some(&default_val) = DEFAULT_PARAMS.get(key) {
+                self.push_undo_snapshot();
                 self.parts[part].edited_params.insert(key.into(), default_val);
                 return true;
             }

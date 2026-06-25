@@ -661,6 +661,8 @@ fn run_gui() -> Result<()> {
         midi_seq_play_atom: c.midi_seq_play_atom,
         midi_seq_pos_atom: c.midi_seq_pos_atom,
         midi_seq_file_pick: None,
+        undo_stack: Vec::new(),
+        redo_stack: Vec::new(),
     };
 
     app.load_edited_params(0);

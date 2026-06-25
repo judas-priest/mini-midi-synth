@@ -282,6 +282,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in OSC_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut osc, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("osc_type".into(), osc as f32);
                             changed = true;
                         }
@@ -290,7 +291,9 @@ impl App {
 
             let mut detune = self.parts[part].edited_params.get("osc_detune").copied().unwrap_or(0.0);
             ui.label("Detune:");
-            if ui.add(egui::Slider::new(&mut detune, 0.0..=0.05).step_by(0.001)).on_hover_text("Oscillator pitch detune").changed() {
+            let detune_resp = ui.add(egui::Slider::new(&mut detune, 0.0..=0.05).step_by(0.001)).on_hover_text("Oscillator pitch detune");
+            if detune_resp.drag_started() { self.push_undo_snapshot(); }
+            if detune_resp.changed() {
                 self.parts[part].edited_params.insert("osc_detune".into(), detune);
                 changed = true;
             }
@@ -327,7 +330,9 @@ impl App {
             for (i, name) in drawbar_names.iter().enumerate() {
                 let key = format!("drawbar_{}", i + 1);
                 let mut val = self.parts[part].edited_params.get(&key).copied().unwrap_or(0.0);
-                if ui.add(egui::Slider::new(&mut val, 0.0..=8.0).step_by(1.0).text(*name)).on_hover_text("Organ drawbar level").changed() {
+                let db_resp = ui.add(egui::Slider::new(&mut val, 0.0..=8.0).step_by(1.0).text(*name)).on_hover_text("Organ drawbar level");
+                if db_resp.drag_started() { self.push_undo_snapshot(); }
+                if db_resp.changed() {
                     self.parts[part].edited_params.insert(key, val);
                     changed = true;
                 }
@@ -357,6 +362,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in BASS_STYLE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut style, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("bass_style".into(), style as f32);
                                 changed = true;
                             }
@@ -371,6 +377,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in BASS_PICKUP_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut pu, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("bass_pickup".into(), pu as f32);
                                 changed = true;
                             }
@@ -393,6 +400,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in BOWED_BODY_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut bt, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("body_type".into(), bt as f32);
                                 changed = true;
                             }
@@ -415,6 +423,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in BRASS_BELL_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut bt, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("bell_type".into(), bt as f32);
                                 changed = true;
                             }
@@ -437,6 +446,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in ACCORDION_REGISTER_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut reg, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("accordion_register".into(), reg as f32);
                                 changed = true;
                             }
@@ -458,6 +468,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in SAX_TYPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut st, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("sax_type".into(), st as f32);
                                 changed = true;
                             }
@@ -481,6 +492,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in ["Rhodes MkII", "Wurlitzer 200A", "Stage 73"].iter().enumerate() {
                             if ui.selectable_value(&mut ep_t, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("epiano_type".into(), ep_t as f32);
                                 changed = true;
                             }
@@ -503,6 +515,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in ALIAS_WAVE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut wt, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("alias_wave_type".into(), wt as f32);
                                 changed = true;
                             }
@@ -524,6 +537,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in WINDOW_TYPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut wt, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("window_type".into(), wt as f32);
                                 changed = true;
                             }
@@ -558,6 +572,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in TWIST_ENGINES.iter().enumerate() {
                             if ui.selectable_value(&mut eng, i, *name).clicked() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("twist_engine".into(), eng as f32);
                                 changed = true;
                             }
@@ -578,7 +593,9 @@ impl App {
             let mut pw_val = pw;
             ui.horizontal(|ui| {
                 ui.label("Pulse Width");
-                if ui.add(egui::Slider::new(&mut pw_val, 0.05..=0.95)).on_hover_text("Square wave duty cycle").changed() {
+                let pw_resp = ui.add(egui::Slider::new(&mut pw_val, 0.05..=0.95)).on_hover_text("Square wave duty cycle");
+                if pw_resp.drag_started() { self.push_undo_snapshot(); }
+                if pw_resp.changed() {
                     self.parts[part].edited_params.insert("pulse_width".into(), pw_val);
                     self.parts[part].params_dirty = true;
                 }
@@ -597,6 +614,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in PD_SHAPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut shape, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("pd_shape".into(), shape as f32);
                                 changed = true;
                             }
@@ -619,6 +637,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in FOLD_SOURCE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut src, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("fold_source".into(), src as f32);
                                 changed = true;
                             }
@@ -641,6 +660,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in MODAL_MATERIAL_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut mat, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("modal_material".into(), mat as f32);
                                 changed = true;
                             }
@@ -664,6 +684,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in SYNC_SHAPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut shape, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("sync_shape".into(), shape as f32);
                                 changed = true;
                             }
@@ -687,7 +708,9 @@ impl App {
             let mut osc_count = self.parts[part].edited_params.get("osc_count").copied().unwrap_or(1.0) as u32;
             ui.horizontal(|ui| {
                 ui.label("Osc Count:");
-                if ui.add(egui::Slider::new(&mut osc_count, 1..=3)).on_hover_text("Number of oscillators").changed() {
+                let oc_resp = ui.add(egui::Slider::new(&mut osc_count, 1..=3)).on_hover_text("Number of oscillators");
+                if oc_resp.drag_started() { self.push_undo_snapshot(); }
+                if oc_resp.changed() {
                     self.parts[part].edited_params.insert("osc_count".into(), osc_count as f32);
                     changed = true;
                 }
@@ -708,6 +731,7 @@ impl App {
                         .show_ui(ui, |ui| {
                             for (i, name) in SIMPLE_OSC_NAMES.iter().enumerate() {
                                 if ui.selectable_value(&mut osc2, i, *name).changed() {
+                                    self.push_undo_snapshot();
                                     self.parts[part].edited_params.insert("osc2_type".into(), osc2 as f32);
                                     changed = true;
                                 }
@@ -716,7 +740,9 @@ impl App {
 
                     let mut detune2 = self.parts[part].edited_params.get("osc2_detune").copied().unwrap_or(0.0);
                     ui.label("Detune:");
-                    if ui.add(egui::Slider::new(&mut detune2, -0.05..=0.05).step_by(0.001)).on_hover_text("Osc 2 pitch detune").changed() {
+                    let d2_resp = ui.add(egui::Slider::new(&mut detune2, -0.05..=0.05).step_by(0.001)).on_hover_text("Osc 2 pitch detune");
+                    if d2_resp.drag_started() { self.push_undo_snapshot(); }
+                    if d2_resp.changed() {
                         self.parts[part].edited_params.insert("osc2_detune".into(), detune2);
                         changed = true;
                     }
@@ -735,6 +761,7 @@ impl App {
                         .show_ui(ui, |ui| {
                             for (i, name) in SIMPLE_OSC_NAMES.iter().enumerate() {
                                 if ui.selectable_value(&mut osc3, i, *name).changed() {
+                                    self.push_undo_snapshot();
                                     self.parts[part].edited_params.insert("osc3_type".into(), osc3 as f32);
                                     changed = true;
                                 }
@@ -743,7 +770,9 @@ impl App {
 
                     let mut detune3 = self.parts[part].edited_params.get("osc3_detune").copied().unwrap_or(0.0);
                     ui.label("Detune:");
-                    if ui.add(egui::Slider::new(&mut detune3, -0.05..=0.05).step_by(0.001)).on_hover_text("Osc 3 pitch detune").changed() {
+                    let d3_resp = ui.add(egui::Slider::new(&mut detune3, -0.05..=0.05).step_by(0.001)).on_hover_text("Osc 3 pitch detune");
+                    if d3_resp.drag_started() { self.push_undo_snapshot(); }
+                    if d3_resp.changed() {
                         self.parts[part].edited_params.insert("osc3_detune".into(), detune3);
                         changed = true;
                     }
@@ -768,6 +797,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wsm, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("osc_ws_mode".into(), wsm as f32);
                             changed = true;
                         }
@@ -798,6 +828,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in FILTER_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut ft, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("filter_type".into(), ft as f32);
                             changed = true;
                         }
@@ -818,6 +849,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in FORMANT_VOICE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut fv, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("formant_voice".into(), fv as f32);
                                 changed = true;
                             }
@@ -831,6 +863,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in FORMANT_VOWEL_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut vw, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("formant_vowel".into(), vw as f32);
                                 changed = true;
                             }
@@ -869,6 +902,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in FILTER_ROUTING_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut routing, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("filter_routing".into(), routing as f32);
                                 changed = true;
                             }
@@ -894,6 +928,7 @@ impl App {
                             for (i, name) in f2_names.iter().enumerate() {
                                 if ui.selectable_value(&mut f2_sel, i, *name).changed() {
                                     let param_val = f2_values[f2_sel];
+                                    self.push_undo_snapshot();
                                     self.parts[part].edited_params.insert("filter2_type".into(), param_val as f32);
                                     changed = true;
                                 }
@@ -915,6 +950,7 @@ impl App {
                             .show_ui(ui, |ui| {
                                 for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
                                     if ui.selectable_value(&mut wsm, i, *name).changed() {
+                                        self.push_undo_snapshot();
                                         self.parts[part].edited_params.insert("inter_ws_mode".into(), wsm as f32);
                                         changed = true;
                                     }
@@ -992,6 +1028,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in VELOCITY_CURVE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut vc, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("velocity_curve".into(), vc as f32);
                             changed = true;
                         }
@@ -1020,6 +1057,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("lfo_waveform".into(), lw as f32);
                             changed = true;
                         }
@@ -1045,6 +1083,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw2, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("lfo2_waveform".into(), lw2 as f32);
                             changed = true;
                         }
@@ -1070,6 +1109,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw3, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("lfo3_waveform".into(), lw3 as f32);
                             changed = true;
                         }
@@ -1089,6 +1129,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw4, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("lfo4_waveform".into(), lw4 as f32);
                             changed = true;
                         }
@@ -1114,6 +1155,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wf, i, *name).clicked() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("slfo1_waveform".into(), wf as f32);
                             changed = true;
                         }
@@ -1127,10 +1169,12 @@ impl App {
             let mut tsync = self.parts[part].edited_params.get("slfo1_tempo_sync").copied().unwrap_or(0.0) > 0.5;
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut uni, "Unipolar").changed() {
+                    self.push_undo_snapshot();
                     self.parts[part].edited_params.insert("slfo1_unipolar".into(), if uni { 1.0 } else { 0.0 });
                     changed = true;
                 }
                 if ui.checkbox(&mut tsync, "Tempo Sync").changed() {
+                    self.push_undo_snapshot();
                     self.parts[part].edited_params.insert("slfo1_tempo_sync".into(), if tsync { 1.0 } else { 0.0 });
                     changed = true;
                 }
@@ -1147,6 +1191,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wf, i, *name).clicked() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("slfo2_waveform".into(), wf as f32);
                             changed = true;
                         }
@@ -1160,10 +1205,12 @@ impl App {
             let mut tsync = self.parts[part].edited_params.get("slfo2_tempo_sync").copied().unwrap_or(0.0) > 0.5;
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut uni, "Unipolar").changed() {
+                    self.push_undo_snapshot();
                     self.parts[part].edited_params.insert("slfo2_unipolar".into(), if uni { 1.0 } else { 0.0 });
                     changed = true;
                 }
                 if ui.checkbox(&mut tsync, "Tempo Sync").changed() {
+                    self.push_undo_snapshot();
                     self.parts[part].edited_params.insert("slfo2_tempo_sync".into(), if tsync { 1.0 } else { 0.0 });
                     changed = true;
                 }
@@ -1264,6 +1311,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in PLAY_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut pmode, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("play_mode".into(), pmode as f32);
                             changed = true;
                         }
@@ -1281,6 +1329,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in sustain_names.iter().enumerate() {
                         if ui.selectable_value(&mut smode, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("sustain_mode".into(), smode as f32);
                             changed = true;
                         }
@@ -1300,6 +1349,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in PORTAMENTO_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut pm, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("portamento_mode".into(), pm as f32);
                             changed = true;
                         }
@@ -1314,7 +1364,9 @@ impl App {
         ui.strong("Unison");
         {
             let mut uv = self.parts[part].edited_params.get("unison_voices").copied().unwrap_or(1.0) as u32;
-            if ui.add(egui::Slider::new(&mut uv, 1..=8).text("Voices")).on_hover_text("Unison voice count").changed() {
+            let uv_resp = ui.add(egui::Slider::new(&mut uv, 1..=8).text("Voices")).on_hover_text("Unison voice count");
+            if uv_resp.drag_started() { self.push_undo_snapshot(); }
+            if uv_resp.changed() {
                 self.parts[part].edited_params.insert("unison_voices".into(), uv as f32);
                 changed = true;
             }
@@ -1341,6 +1393,7 @@ impl App {
             ui.horizontal(|ui| {
                 let mut enabled = self.parts[part].edited_params.get("arp_enabled").copied().unwrap_or(0.0) > 0.5;
                 if ui.checkbox(&mut enabled, "Enabled").changed() {
+                    self.push_undo_snapshot();
                     self.parts[part].edited_params.insert("arp_enabled".into(), if enabled { 1.0 } else { 0.0 });
                     changed = true;
                     // Send immediate arp param update
@@ -1361,6 +1414,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in arp_mode_names.iter().enumerate() {
                             if ui.selectable_value(&mut amode, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("arp_mode".into(), amode as f32);
                                 changed = true;
                             }
@@ -1375,6 +1429,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in arp_rate_names.iter().enumerate() {
                             if ui.selectable_value(&mut arate, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("arp_rate".into(), arate as f32);
                                 changed = true;
                             }
@@ -1384,7 +1439,9 @@ impl App {
 
             ui.horizontal(|ui| {
                 let mut oct = self.parts[part].edited_params.get("arp_octaves").copied().unwrap_or(1.0) as u32;
-                if ui.add(egui::Slider::new(&mut oct, 1..=4).text("Octaves")).on_hover_text("Arpeggiator octave range").changed() {
+                let oct_resp = ui.add(egui::Slider::new(&mut oct, 1..=4).text("Octaves")).on_hover_text("Arpeggiator octave range");
+                if oct_resp.drag_started() { self.push_undo_snapshot(); }
+                if oct_resp.changed() {
                     self.parts[part].edited_params.insert("arp_octaves".into(), oct as f32);
                     changed = true;
                 }
@@ -1419,6 +1476,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in RING_MOD_SHAPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut rs, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("ring_mod_shape".into(), rs as f32);
                             changed = true;
                         }
@@ -1465,6 +1523,7 @@ impl App {
         {
             let mut pp = self.parts[part].edited_params.get("delay_ping_pong").copied().unwrap_or(0.0) > 0.5;
             if ui.checkbox(&mut pp, "Ping-Pong").changed() {
+                self.push_undo_snapshot();
                 self.parts[part].edited_params.insert("delay_ping_pong".into(), if pp { 1.0 } else { 0.0 });
                 changed = true;
             }
@@ -1480,6 +1539,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in REVERB_TYPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut rt, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("reverb_type".into(), rt as f32);
                             changed = true;
                         }
@@ -1517,6 +1577,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wsm, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("wave_shaper_mode".into(), wsm as f32);
                             changed = true;
                         }
@@ -1553,6 +1614,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in airwindows_mode_names.iter().enumerate() {
                         if ui.selectable_value(&mut awm, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("airwindows_mode".into(), i as f32);
                             changed = true;
                         }

@@ -337,6 +337,9 @@ pub struct App {
     pub midi_seq_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// Result of an async file picker (zenity/kdialog subprocess). None = no pending pick.
     pub midi_seq_file_pick: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+    // Undo/redo for patch parameter editing
+    pub undo_stack: Vec<std::collections::BTreeMap<String, f32>>,
+    pub redo_stack: Vec<std::collections::BTreeMap<String, f32>>,
 }
 
 impl eframe::App for App {
@@ -416,6 +419,15 @@ impl eframe::App for App {
             }
         } else if !text_editing {
             self.process_keybinds(ctx);
+        }
+
+        // Undo/Redo keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z)
+        if !text_editing {
+            if ctx.input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z)) {
+                self.redo();
+            } else if ctx.input(|i| i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z)) {
+                self.undo();
+            }
         }
 
         // Sync drum play/rec state from engine (for MIDI-triggered changes)
@@ -645,14 +657,23 @@ impl eframe::App for App {
                     });
                     ui.horizontal(|ui| {
                         if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
+                            self.push_undo_snapshot();
                             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                             self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
                             self.send_edited_params(part);
                         }
                         if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
+                            self.push_undo_snapshot();
                             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                             self.parts[part].edited_params = crate::synth::PatchParams::random_map();
                             self.send_edited_params(part);
+                        }
+                        ui.separator();
+                        if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
+                            self.undo();
+                        }
+                        if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+                            self.redo();
                         }
                     });
                 }
@@ -1123,6 +1144,41 @@ impl App {
                 }
             });
         self.show_keybinds_window = open;
+    }
+
+    /// Maximum undo depth for patch parameter editing.
+    const MAX_UNDO: usize = 50;
+
+    /// Push a snapshot of the active part's edited_params onto the undo stack.
+    /// Safe to call multiple times — only pushes if state differs from top of stack.
+    pub(super) fn push_undo_snapshot(&mut self) {
+        let current = &self.parts[self.active_part].edited_params;
+        if self.undo_stack.last() == Some(current) {
+            return; // no change since last snapshot
+        }
+        self.undo_stack.push(current.clone());
+        self.redo_stack.clear();
+        if self.undo_stack.len() > Self::MAX_UNDO {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    fn undo(&mut self) {
+        let part = self.active_part;
+        if let Some(snapshot) = self.undo_stack.pop() {
+            self.redo_stack.push(self.parts[part].edited_params.clone());
+            self.parts[part].edited_params = snapshot;
+            self.send_edited_params(part);
+        }
+    }
+
+    fn redo(&mut self) {
+        let part = self.active_part;
+        if let Some(snapshot) = self.redo_stack.pop() {
+            self.undo_stack.push(self.parts[part].edited_params.clone());
+            self.parts[part].edited_params = snapshot;
+            self.send_edited_params(part);
+        }
     }
 
     fn send_edited_params(&mut self, part: usize) {
