@@ -1,6 +1,17 @@
-//! Centralized color palette for the GUI.
+//! Centralized color palette and layout constants for the GUI.
 
 use eframe::egui::Color32;
+
+// ── Slider widths ───────────────────────────────────────────────────────────
+
+/// Main params: Cutoff, Volume, Attack, Release, envelope controls.
+pub const SLIDER_PRIMARY: f32 = 250.0;
+/// Secondary: Detune, Pan, Velocity, LFO Depth, FM Index.
+pub const SLIDER_SECONDARY: f32 = 180.0;
+/// Compact: Fine tune, Portamento, Pitch Bend Range, misc utility.
+pub const SLIDER_COMPACT: f32 = 120.0;
+/// Drum per-instrument sliders.
+pub const SLIDER_DRUM: f32 = 40.0;
 
 // ── Backgrounds ──────────────────────────────────────────────────────────────
 

@@ -317,7 +317,7 @@ impl App {
                     let mut tune = self.drum_params[slot].tune;
                     let mut decay = self.drum_params[slot].decay;
 
-                    ui.style_mut().spacing.slider_width = 40.0;
+                    ui.style_mut().spacing.slider_width = theme::SLIDER_DRUM;
                     if ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text("Level").changed() {
                         self.drum_params[slot].level = level;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });

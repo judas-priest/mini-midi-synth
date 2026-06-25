@@ -265,6 +265,9 @@ impl App {
         ui.separator();
         ui.add_space(4.0);
 
+        // Set secondary width for oscillator params
+        ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
+
         // Oscillator 1
         ui.strong("Oscillator 1");
         ui.horizontal(|ui| {
@@ -772,6 +775,9 @@ impl App {
 
         ui.add_space(6.0);
 
+        // Primary width for filter — main sound-shaping params
+        ui.style_mut().spacing.slider_width = theme::SLIDER_PRIMARY;
+
         // Filter 1
         ui.strong("Filter 1");
         ui.horizontal(|ui| {
@@ -913,6 +919,9 @@ impl App {
 
         ui.add_space(6.0);
 
+        // Primary width for envelopes — main sound-shaping params
+        ui.style_mut().spacing.slider_width = theme::SLIDER_PRIMARY;
+
         // Amp Envelope (AHDSR)
         ui.strong("Amp Envelope");
         changed |= self.param_slider_ex(ui, "amp_attack",  "Attack",  0.001, 5.0, true, " s");
@@ -947,6 +956,9 @@ impl App {
         });
 
         ui.add_space(6.0);
+
+        // Secondary width for dynamics, LFOs, modulators
+        ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
         // Dynamics
         ui.strong("Dynamics");
@@ -1231,6 +1243,9 @@ impl App {
 
         ui.add_space(6.0);
 
+        // Compact width for utility params
+        ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
+
         // Portamento
         ui.strong("Portamento");
         ui.horizontal(|ui| {
@@ -1326,6 +1341,9 @@ impl App {
         }
 
         ui.add_space(6.0);
+
+        // Secondary width for effects
+        ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
         // Effects
         ui.strong("Effects");
@@ -1483,6 +1501,9 @@ impl App {
                     }
                 });
         });
+
+        // Compact width for pitch bend utility
+        ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
 
         // Asymmetric pitch bend
         ui.add_space(4.0);
