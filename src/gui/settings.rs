@@ -1,10 +1,16 @@
 //! Settings, help, feedback, and utility UI methods.
 
+use std::sync::LazyLock;
+use std::collections::BTreeMap;
+
 use eframe::egui;
 
 use crate::preset::{self, Patch};
-use crate::synth::{ControlEvent, ParamFeedback};
+use crate::synth::{ControlEvent, ParamFeedback, PatchParams};
 use super::{App, BUFFER_SIZES, buffer_label, scan_sf2_files, sf2_dir, theme};
+
+/// Default parameter values for double-click reset.
+static DEFAULT_PARAMS: LazyLock<BTreeMap<String, f32>> = LazyLock::new(|| PatchParams::default().to_map());
 
 impl App {
     pub(super) fn draw_pad_perf_window(&mut self, ctx: &egui::Context) {
@@ -303,7 +309,7 @@ impl App {
         if !suffix.is_empty() {
             slider = slider.suffix(suffix);
         }
-        let resp = ui.add(slider);
+        let resp = ui.add(slider).on_hover_text("Double-click to reset to default");
         resp.context_menu(|ui| {
             // Show current CC assignment
             if let Some(cc) = cc_info {
@@ -324,6 +330,12 @@ impl App {
                 }
             }
         });
+        if resp.double_clicked() {
+            if let Some(&default_val) = DEFAULT_PARAMS.get(key) {
+                self.parts[part].edited_params.insert(key.into(), default_val);
+                return true;
+            }
+        }
         if resp.changed() {
             self.parts[part].edited_params.insert(key.into(), val);
             return true;

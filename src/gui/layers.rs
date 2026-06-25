@@ -128,21 +128,30 @@ impl App {
 
                 ui.label("Vol:");
                 let mut vol = self.parts[part].volume;
-                if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2)).changed() {
+                let vol_r = ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
+                    .on_hover_text("Double-click to reset");
+                if vol_r.double_clicked() { vol = 0.8; }
+                if vol_r.changed() || vol_r.double_clicked() {
                     self.parts[part].volume = vol;
                     self.send_part_volume(part);
                 }
 
                 ui.label("Pan:");
                 let mut pan = self.parts[part].pan;
-                if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).fixed_decimals(2)).changed() {
+                let pan_r = ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).fixed_decimals(2))
+                    .on_hover_text("Double-click to reset");
+                if pan_r.double_clicked() { pan = 0.0; }
+                if pan_r.changed() || pan_r.double_clicked() {
                     self.parts[part].pan = pan;
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
                 }
 
                 ui.label("Tr:");
                 let mut tr = self.parts[part].transpose as i32;
-                if ui.add(egui::Slider::new(&mut tr, -24..=24).suffix(" st")).on_hover_text("Transpose in semitones").changed() {
+                let tr_r = ui.add(egui::Slider::new(&mut tr, -24..=24).suffix(" st"))
+                    .on_hover_text("Transpose in semitones. Double-click to reset");
+                if tr_r.double_clicked() { tr = 0; }
+                if tr_r.changed() || tr_r.double_clicked() {
                     self.parts[part].transpose = tr as i8;
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: tr as i8 });
                 }

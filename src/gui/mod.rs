@@ -480,7 +480,10 @@ impl eframe::App for App {
                 // Master Volume (global)
                 let mut vol = self.global_params.get("master_volume").copied().unwrap_or(0.8);
                 ui.label("Vol:");
-                if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2)).changed() {
+                let vol_r = ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
+                    .on_hover_text("Double-click to reset");
+                if vol_r.double_clicked() { vol = 0.8; }
+                if vol_r.changed() || vol_r.double_clicked() {
                     self.global_params.insert("master_volume".into(), vol);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_volume", value: vol });
                     self.global_dirty = true;
@@ -491,7 +494,10 @@ impl eframe::App for App {
                 // Master Tone (global)
                 let mut tone = self.global_params.get("master_tone").copied().unwrap_or(20000.0);
                 ui.label("Tone:");
-                if ui.add(egui::Slider::new(&mut tone, 200.0..=20000.0).logarithmic(true).suffix(" Hz").fixed_decimals(0)).changed() {
+                let tone_r = ui.add(egui::Slider::new(&mut tone, 200.0..=20000.0).logarithmic(true).suffix(" Hz").fixed_decimals(0))
+                    .on_hover_text("Double-click to reset");
+                if tone_r.double_clicked() { tone = 20000.0; }
+                if tone_r.changed() || tone_r.double_clicked() {
                     self.global_params.insert("master_tone".into(), tone);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_tone", value: tone });
                     self.global_dirty = true;
@@ -502,7 +508,10 @@ impl eframe::App for App {
                 // Reverb (global)
                 let mut reverb = self.global_params.get("reverb_mix").copied().unwrap_or(0.0);
                 ui.label("Reverb:");
-                if ui.add(egui::Slider::new(&mut reverb, 0.0..=1.0).fixed_decimals(2)).changed() {
+                let rev_r = ui.add(egui::Slider::new(&mut reverb, 0.0..=1.0).fixed_decimals(2))
+                    .on_hover_text("Double-click to reset");
+                if rev_r.double_clicked() { reverb = 0.0; }
+                if rev_r.changed() || rev_r.double_clicked() {
                     self.global_params.insert("reverb_mix".into(), reverb);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "reverb_mix", value: reverb });
                     self.global_dirty = true;
@@ -513,7 +522,10 @@ impl eframe::App for App {
                 // Delay (global)
                 let mut delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
                 ui.label("Delay:");
-                if ui.add(egui::Slider::new(&mut delay, 0.0..=1.0).fixed_decimals(2)).changed() {
+                let del_r = ui.add(egui::Slider::new(&mut delay, 0.0..=1.0).fixed_decimals(2))
+                    .on_hover_text("Double-click to reset");
+                if del_r.double_clicked() { delay = 0.0; }
+                if del_r.changed() || del_r.double_clicked() {
                     self.global_params.insert("delay_mix".into(), delay);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "delay_mix", value: delay });
                     self.global_dirty = true;
@@ -524,7 +536,10 @@ impl eframe::App for App {
                 // Pitch Bend Range
                 let mut pbr = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as i32;
                 ui.label("PB:");
-                if ui.add(egui::Slider::new(&mut pbr, 1..=24).suffix(" st")).changed() {
+                let pb_r = ui.add(egui::Slider::new(&mut pbr, 1..=24).suffix(" st"))
+                    .on_hover_text("Double-click to reset");
+                if pb_r.double_clicked() { pbr = 2; }
+                if pb_r.changed() || pb_r.double_clicked() {
                     let val = pbr as f32;
                     self.global_params.insert("pitch_bend_range".into(), val);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "pitch_bend_range", value: val });
