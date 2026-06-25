@@ -102,7 +102,7 @@ impl App {
                 }
             }
 
-            ui.add_space(12.0);
+            ui.add_space(theme::SP_LG);
 
             // --- Pads (C1–D#2 = MIDI 36–51, MPC layout as 2×8) ---
             // Top row: E1,F1,F#1,G1, C2,C#2,D2,D#2 — cyan

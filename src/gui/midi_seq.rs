@@ -68,7 +68,7 @@ impl App {
             ui.add(egui::ProgressBar::new(frac).desired_width(160.0).show_percentage());
         });
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // ── File load ──────────────────────────────────────────────────────
         // Poll the async file picker result (zenity runs in a background thread)
@@ -122,9 +122,9 @@ impl App {
             ui.colored_label(col, &self.midi_seq_status);
         }
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.separator();
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         if self.midi_seq_tracks.is_empty() {
             ui.label(

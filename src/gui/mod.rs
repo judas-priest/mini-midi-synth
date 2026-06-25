@@ -439,7 +439,7 @@ impl eframe::App for App {
 
         // Top bar
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
-            ui.add_space(2.0);
+            ui.add_space(theme::SP_XS);
             ui.horizontal(|ui| {
                 if ui.button("\u{2699}").on_hover_text("Settings").clicked() {
                     self.show_settings = !self.show_settings;
@@ -470,12 +470,12 @@ impl eframe::App for App {
                     ));
                 });
             });
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
         });
 
         // Global controls bar
         egui::TopBottomPanel::top("global_controls").show(ctx, |ui| {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.horizontal(|ui| {
                 // Master Volume (global)
                 let mut vol = self.global_params.get("master_volume").copied().unwrap_or(0.8);
@@ -576,14 +576,14 @@ impl eframe::App for App {
                     egui::Stroke::new(0.5, theme::STROKE_SUBTLE),
                 );
             });
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
         });
 
         // Bottom: keyboard
         egui::TopBottomPanel::bottom("keyboard_panel").show(ctx, |ui| {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             self.draw_keyboard(ui);
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
         });
 
         // Pad perf status (above keyboard)
@@ -612,7 +612,7 @@ impl eframe::App for App {
                 let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
                 let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
 
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
                 if is_sf2 {
                     ui.strong(format!("GM Instruments (Layer {layer_label})"));
                 } else {
@@ -656,7 +656,7 @@ impl eframe::App for App {
                         }
                     });
                 }
-                ui.add_space(2.0);
+                ui.add_space(theme::SP_XS);
 
                 // Search bar
                 let search_width = ui.available_width();
@@ -859,11 +859,11 @@ impl eframe::App for App {
 
         // Central: part tabs + parameters / drum sequencer
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             self.draw_part_tabs(ui);
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.separator();
-            ui.add_space(6.0);
+            ui.add_space(theme::SP_MD);
             if self.show_fx_chain {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     self.draw_fx_chain(ui);
@@ -878,10 +878,10 @@ impl eframe::App for App {
                 });
             } else {
                 self.draw_looper(ui);
-                ui.add_space(2.0);
+                ui.add_space(theme::SP_XS);
                 self.draw_pitch_sequencer(ui);
                 ui.separator();
-                ui.add_space(6.0);
+                ui.add_space(theme::SP_MD);
                 let part = self.active_part;
                 let is_sf2 = self.parts[part].sf2_mode;
                 // Synth / SF2 toggle
@@ -1115,7 +1115,7 @@ impl App {
                         ui.end_row();
                     }
                 });
-                ui.add_space(5.0);
+                ui.add_space(theme::SP_SM);
                 if ui.button("Reset Defaults").clicked() {
                     self.keybinds = keybinds::Keybinds::defaults();
                     self.config.ui.keybinds = self.keybinds.to_config();

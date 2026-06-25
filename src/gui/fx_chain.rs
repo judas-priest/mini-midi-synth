@@ -1,6 +1,6 @@
 //! FX Chain GUI panel — 16 configurable slots.
 use eframe::egui;
-use super::App;
+use super::{App, theme};
 use crate::synth::fx_chain::{FxChain, FxSlot, FxSlotType, FX_SLOTS};
 
 impl App {
@@ -24,7 +24,7 @@ impl App {
                 self.send_edited_params(part);
             }
         });
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Read current chain
         let mut chain = if self.parts[part].edited_params.contains_key("fx0_type") {

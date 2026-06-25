@@ -182,7 +182,7 @@ impl App {
         }
 
         // ── Performance save/load ────────────────────────────────────────
-        ui.add_space(2.0);
+        ui.add_space(theme::SP_XS);
         ui.horizontal(|ui| {
             ui.label("Perf:");
             ui.add(egui::TextEdit::singleline(&mut self.perf_name)

@@ -255,13 +255,13 @@ impl App {
 
         let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
         ui.strong(format!("{preset_name} (Layer {layer_label})"));
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_MD);
 
         let mut changed = false;
 
         // Macro knobs (always visible at top — key performance controls)
         self.draw_macros(ui);
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Oscillator section
         egui::Frame::default()
@@ -321,7 +321,7 @@ impl App {
 
         // Organ drawbar params
         if osc_type == 7 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Drawbars");
             let drawbar_names = ["16'", "5⅓'", "8'", "4'", "2⅔'", "2'", "1⅗'", "1⅓'", "1'"];
             for (i, name) in drawbar_names.iter().enumerate() {
@@ -336,7 +336,7 @@ impl App {
 
         // Drum synth params
         if osc_type == 12 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Drum Synth");
             changed |= self.param_slider_ex(ui, "drum_pitch_amount", "Pitch Sweep", 0.0, 72.0, false, " st");
             changed |= self.param_slider_ex(ui, "drum_pitch_decay", "Pitch Decay", 5.0, 200.0, false, " ms");
@@ -347,7 +347,7 @@ impl App {
 
         // Bass guitar params
         if osc_type == 13 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Bass Guitar");
             ui.horizontal(|ui| {
                 let mut style = self.parts[part].edited_params.get("bass_style").copied().unwrap_or(0.0) as usize;
@@ -383,7 +383,7 @@ impl App {
 
         // Bowed string params
         if osc_type == 14 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Bowed String");
             ui.horizontal(|ui| {
                 let mut bt = self.parts[part].edited_params.get("body_type").copied().unwrap_or(0.0) as usize;
@@ -405,7 +405,7 @@ impl App {
 
         // Brass params
         if osc_type == 15 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Brass");
             ui.horizontal(|ui| {
                 let mut bt = self.parts[part].edited_params.get("bell_type").copied().unwrap_or(0.0) as usize;
@@ -427,7 +427,7 @@ impl App {
 
         // Accordion params
         if osc_type == 22 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Accordion");
             ui.horizontal(|ui| {
                 let mut reg = self.parts[part].edited_params.get("accordion_register").copied().unwrap_or(0.0) as usize;
@@ -448,7 +448,7 @@ impl App {
 
         // Saxophone params
         if osc_type == 23 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Saxophone");
             ui.horizontal(|ui| {
                 let mut st = self.parts[part].edited_params.get("sax_type").copied().unwrap_or(1.0) as usize;
@@ -471,7 +471,7 @@ impl App {
 
         // Electric Piano params
         if osc_type == 24 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Electric Piano");
             ui.horizontal(|ui| {
                 let mut ep_t = self.parts[part].edited_params.get("epiano_type").copied().unwrap_or(0.0) as usize;
@@ -493,7 +493,7 @@ impl App {
 
         // Alias oscillator params
         if osc_type == 25 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Alias (8-bit)");
             ui.horizontal(|ui| {
                 let mut wt = self.parts[part].edited_params.get("alias_wave_type").copied().unwrap_or(0.0) as usize;
@@ -514,7 +514,7 @@ impl App {
 
         // Window oscillator params
         if osc_type == 26 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Window Oscillator");
             ui.horizontal(|ui| {
                 let mut wt = self.parts[part].edited_params.get("window_type").copied().unwrap_or(0.0) as usize;
@@ -536,7 +536,7 @@ impl App {
 
         // Twist / Plaits (engine 29)
         if osc_type == 29 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Twist (Plaits)");
             // Engine selector
             const TWIST_ENGINES: &[&str] = &[
@@ -587,7 +587,7 @@ impl App {
 
         // Phase Distortion params
         if osc_type == 16 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Phase Distortion");
             ui.horizontal(|ui| {
                 let mut shape = self.parts[part].edited_params.get("pd_shape").copied().unwrap_or(0.0) as usize;
@@ -609,7 +609,7 @@ impl App {
 
         // Wavefolder params
         if osc_type == 17 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Wavefolder");
             ui.horizontal(|ui| {
                 let mut src = self.parts[part].edited_params.get("fold_source").copied().unwrap_or(0.0) as usize;
@@ -631,7 +631,7 @@ impl App {
 
         // Modal Resonator params
         if osc_type == 18 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Modal Resonator");
             ui.horizontal(|ui| {
                 let mut mat = self.parts[part].edited_params.get("modal_material").copied().unwrap_or(0.0) as usize;
@@ -654,7 +654,7 @@ impl App {
 
         // Hard Sync params
         if osc_type == 19 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.label("Hard Sync");
             ui.horizontal(|ui| {
                 let mut shape = self.parts[part].edited_params.get("sync_shape").copied().unwrap_or(0.0) as usize;
@@ -675,7 +675,7 @@ impl App {
 
         // Supersaw params
         if osc_type == 20 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.label("Supersaw");
             changed |= self.param_slider(ui, "supersaw_detune", "Detune", 0.0, 1.0, false);
             changed |= self.param_slider(ui, "supersaw_mix", "Mix", 0.0, 1.0, false);
@@ -683,7 +683,7 @@ impl App {
 
         // Multi-osc controls (only for simple osc types)
         if osc_is_simple {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             let mut osc_count = self.parts[part].edited_params.get("osc_count").copied().unwrap_or(1.0) as u32;
             ui.horizontal(|ui| {
                 ui.label("Osc Count:");
@@ -698,7 +698,7 @@ impl App {
             }
 
             if osc_count >= 2 {
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
                 ui.strong("Oscillator 2");
                 ui.horizontal(|ui| {
                     let mut osc2 = self.parts[part].edited_params.get("osc2_type").copied().unwrap_or(1.0) as usize;
@@ -725,7 +725,7 @@ impl App {
             }
 
             if osc_count >= 3 {
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
                 ui.strong("Oscillator 3");
                 ui.horizontal(|ui| {
                     let mut osc3 = self.parts[part].edited_params.get("osc3_type").copied().unwrap_or(1.0) as usize;
@@ -758,7 +758,7 @@ impl App {
         }
 
         // Osc Waveshaper (pre-filter, per-voice)
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Osc Shaper");
         ui.horizontal(|ui| {
             let mut wsm = self.parts[part].edited_params.get("osc_ws_mode").copied().unwrap_or(0.0) as usize;
@@ -777,7 +777,7 @@ impl App {
         changed |= self.param_slider(ui, "osc_ws_drive", "Drive", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "osc_ws_mix", "Mix", 0.0, 1.0, false);
         }); // end Oscillator frame
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Filter section
         egui::Frame::default()
@@ -860,7 +860,7 @@ impl App {
 
         // Filter routing (not available with formant filter)
         if !is_formant {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             let mut routing = self.parts[part].edited_params.get("filter_routing").copied().unwrap_or(0.0) as usize;
             ui.horizontal(|ui| {
                 ui.label("Routing:");
@@ -878,7 +878,7 @@ impl App {
 
             // Filter 2 controls (only when routing != Single)
             if routing >= 1 {
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
                 ui.strong("Filter 2");
                 ui.horizontal(|ui| {
                     let ft2 = self.parts[part].edited_params.get("filter2_type").copied().unwrap_or(0.0) as usize;
@@ -905,7 +905,7 @@ impl App {
 
                 // Inter-filter waveshaper (Serial routing only)
                 if routing == 1 {
-                    ui.add_space(4.0);
+                    ui.add_space(theme::SP_SM);
                     ui.strong("Inter-Filter Shaper");
                     ui.horizontal(|ui| {
                         let mut wsm = self.parts[part].edited_params.get("inter_ws_mode").copied().unwrap_or(0.0) as usize;
@@ -927,7 +927,7 @@ impl App {
             }
         }
         }); // end Filter frame
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Envelopes section
         egui::Frame::default()
@@ -947,7 +947,7 @@ impl App {
         changed |= self.param_slider_ex(ui, "amp_release", "Release", 0.001, 5.0, true, " s");
         Self::draw_adsr_curve(ui, part, &self.parts[part].edited_params, "amp");
 
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_MD);
 
         // Filter Envelope (AHDSR)
         ui.strong("Filter Envelope");
@@ -971,7 +971,7 @@ impl App {
             changed |= env_shape_combo(ui, part, "Rel:", "filter_env_release_shape", "fenv_rel_shape", &mut self.parts[part].edited_params);
         });
         }); // end Envelopes frame
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Dynamics section
         egui::Frame::default()
@@ -1000,7 +1000,7 @@ impl App {
         });
         changed |= self.param_slider(ui, "vel_to_filter", "Vel->Filter", 0.0, 1.0, false);
         }); // end Dynamics frame
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // LFO section
         egui::Frame::default()
@@ -1033,7 +1033,7 @@ impl App {
         changed |= self.param_slider(ui, "lfo_deform", "Deform", -1.0, 1.0, false);
         changed |= draw_lfo_trigger_mode(ui, part, 1, &mut self.parts[part].edited_params);
 
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_MD);
 
         // LFO 2
         ui.strong("LFO 2");
@@ -1058,7 +1058,7 @@ impl App {
         changed |= self.param_slider(ui, "lfo2_deform", "Deform", -1.0, 1.0, false);
         changed |= draw_lfo_trigger_mode(ui, part, 2, &mut self.parts[part].edited_params);
 
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_MD);
 
         // LFO 3 & 4 (mod matrix sources)
         ui.strong("LFO 3 (Mod Matrix)");
@@ -1101,7 +1101,7 @@ impl App {
         {
         }
 
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_MD);
 
         // Scene LFOs (free-running — never reset on note-on)
         ui.strong("Scene LFO 1");
@@ -1137,7 +1137,7 @@ impl App {
             });
         }
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Scene LFO 2");
         ui.horizontal(|ui| {
             let mut wf = self.parts[part].edited_params.get("slfo2_waveform").copied().unwrap_or(0.0) as usize;
@@ -1170,7 +1170,7 @@ impl App {
             });
         }
         }); // end LFO frame
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Mod Matrix section
         egui::Frame::default()
@@ -1244,7 +1244,7 @@ impl App {
             }
         }
         }); // end Mod Matrix frame
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Voice section (Play Mode + Portamento + Unison)
         egui::Frame::default()
@@ -1288,7 +1288,7 @@ impl App {
                 });
         });
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Portamento
         ui.strong("Portamento");
@@ -1308,7 +1308,7 @@ impl App {
         });
         changed |= self.param_slider_ex(ui, "portamento_time", "Time", 0.0, 2.0, false, " s");
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Unison
         ui.strong("Unison");
@@ -1322,7 +1322,7 @@ impl App {
         changed |= self.param_slider_ex(ui, "unison_detune", "Detune", 0.0, 50.0, false, " ct");
         changed |= self.param_slider(ui, "unison_spread", "Spread", 0.0, 1.0, false);
         }); // end Voice frame
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Arpeggiator section
         egui::Frame::default()
@@ -1392,7 +1392,7 @@ impl App {
             changed |= self.param_slider(ui, "arp_gate", "Gate", 0.1, 1.0, false);
         }
         }); // end Arpeggiator frame
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Effects section
         egui::Frame::default()
@@ -1407,7 +1407,7 @@ impl App {
         ui.strong("Effects");
         changed |= self.param_slider(ui, "chorus_mix", "Chorus", 0.0, 1.0, false);
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Ring Modulator");
         changed |= self.param_slider(ui, "ring_mod_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider_ex(ui, "ring_mod_freq", "Carrier Freq", 20.0, 8000.0, true, " Hz");
@@ -1428,14 +1428,14 @@ impl App {
         changed |= self.param_slider(ui, "ring_mod_bias", "Diode Bias", 0.0, 2.0, false);
         changed |= self.param_slider(ui, "ring_mod_linear", "Diode Linear", 0.01, 2.0, false);
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Freq Shifter");
         changed |= self.param_slider(ui, "freq_shift_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider_ex(ui, "freq_shift_hz", "Shift", -1000.0, 1000.0, false, " Hz");
         changed |= self.param_slider(ui, "freq_shift_feedback", "Feedback", 0.0, 0.9, false);
         changed |= self.param_slider_ex(ui, "freq_shift_delay", "Delay", 0.0, 1.0, false, " s");
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Tape Saturation");
         changed |= self.param_slider(ui, "tape_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "tape_drive", "Drive", 0.0, 1.0, false);
@@ -1444,7 +1444,7 @@ impl App {
         changed |= self.param_slider(ui, "tape_tone", "Tone", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "tape_speed", "Speed", 0.0, 1.0, false);
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Neuron Distortion");
         changed |= self.param_slider(ui, "neuron_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "neuron_drive", "Drive", 0.0, 1.0, false);
@@ -1455,7 +1455,7 @@ impl App {
         changed |= self.param_slider_ex(ui, "neuron_comb_freq", "Comb Freq", 20.0, 4000.0, true, " Hz");
         changed |= self.param_slider(ui, "neuron_comb_sep", "Comb Sep", 0.0, 1.0, false);
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Delay");
         changed |= self.param_slider(ui, "delay_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider_ex(ui, "delay_time_l", "Time L", 0.01, 2.0, false, " s");
@@ -1470,7 +1470,7 @@ impl App {
             }
         }
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Reverb");
         ui.horizontal(|ui| {
             let mut rt = self.parts[part].edited_params.get("reverb_type").copied().unwrap_or(0.0) as usize;
@@ -1504,7 +1504,7 @@ impl App {
             changed |= self.param_slider(ui, "spring_spin", "Spin", 0.0, 1.0, false);
         }
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Wave Shaper");
         changed |= self.param_slider(ui, "wave_shaper_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "wave_shaper_drive", "Drive", 0.0, 1.0, false);
@@ -1524,7 +1524,7 @@ impl App {
                 });
         });
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Airwindows");
         changed |= self.param_slider(ui, "airwindows_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "airwindows_drive", "Drive", 0.0, 1.0, false);
@@ -1560,7 +1560,7 @@ impl App {
                 });
         });
         }); // end Effects frame
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Pitch Bend section
         egui::Frame::default()
@@ -1582,7 +1582,7 @@ impl App {
             self.send_edited_params(part);
         }
 
-        ui.add_space(8.0);
+        ui.add_space(theme::SP_MD);
         ui.horizontal(|ui| {
             if self.parts[part].params_dirty {
                 ui.colored_label(egui::Color32::YELLOW, "Modified");

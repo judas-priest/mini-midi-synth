@@ -13,7 +13,7 @@ impl App {
             ui.strong("Macros");
             ui.label(egui::RichText::new("— assign in Mod Matrix as sources Macro 1-8").small().weak());
         });
-        ui.add_space(2.0);
+        ui.add_space(theme::SP_XS);
 
         // 8 macros in a 4×2 grid
         egui::Grid::new(format!("macros_{part}"))
@@ -69,7 +69,7 @@ impl App {
                 }
             });
 
-        ui.add_space(8.0);
+        ui.add_space(theme::SP_MD);
         self.draw_xy_pad(ui);
     }
 
@@ -87,7 +87,7 @@ impl App {
         // Axis assignment combo boxes
         ui.horizontal(|ui| {
             ui.strong("XY Pad");
-            ui.add_space(12.0);
+            ui.add_space(theme::SP_LG);
 
             ui.label("X:");
             egui::ComboBox::from_id_salt(format!("xy_x_{part}"))
@@ -103,7 +103,7 @@ impl App {
                     }
                 });
 
-            ui.add_space(8.0);
+            ui.add_space(theme::SP_MD);
             ui.label("Y:");
             egui::ComboBox::from_id_salt(format!("xy_y_{part}"))
                 .selected_text(macro_labels[self.parts[part].xy_macro_y].as_str())
@@ -119,7 +119,7 @@ impl App {
                 });
         });
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         let xi = self.parts[part].xy_macro_x;
         let yi = self.parts[part].xy_macro_y;

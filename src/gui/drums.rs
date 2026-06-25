@@ -194,7 +194,7 @@ impl App {
             }
         });
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Step grid
         let cell_w = 28.0;
@@ -309,7 +309,7 @@ impl App {
                 }
 
                 ui.spacing_mut().item_spacing = spacing;
-                ui.add_space(8.0);
+                ui.add_space(theme::SP_MD);
 
                 // Per-instrument controls
                 ui.horizontal(|ui| {

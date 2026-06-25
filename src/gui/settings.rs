@@ -31,7 +31,7 @@ impl App {
             .show(ctx, |ui| {
                 ui.label(egui::RichText::new("Tap pad to switch perf. Click cell to assign. Right-click to clear.")
                     .small().weak());
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
 
                 let pad_w = 80.0_f32;
                 let pad_h = 52.0_f32;
@@ -111,7 +111,7 @@ impl App {
                     ui.add_space(gap);
                 }
 
-                ui.add_space(2.0);
+                ui.add_space(theme::SP_XS);
                 if !self.pad_perf_status.is_empty() {
                     ui.label(egui::RichText::new(&self.pad_perf_status).small().weak());
                 }
@@ -132,7 +132,7 @@ impl App {
             .default_width(420.0)
             .show(ctx, |ui| {
                 ui.heading("SMK-37 Pro Controller Map");
-                ui.add_space(8.0);
+                ui.add_space(theme::SP_MD);
 
                 // Preset-scoped bindings
                 ui.strong("Preset (reset on patch change, pickup mode)");
@@ -152,7 +152,7 @@ impl App {
                         }
                     });
 
-                ui.add_space(8.0);
+                ui.add_space(theme::SP_MD);
 
                 // Global bindings
                 ui.strong("Global (persist across patch changes)");
@@ -172,7 +172,7 @@ impl App {
                         }
                     });
 
-                ui.add_space(8.0);
+                ui.add_space(theme::SP_MD);
                 ui.separator();
                 ui.label("Preset knobs use pickup mode: after switching presets,");
                 ui.label("move the knob past the current value to start controlling.");
@@ -383,7 +383,7 @@ impl App {
                         theme::TEXT_MUTED,
                         format!("JACK server: {}Hz", self.sample_rate),
                     );
-                    ui.add_space(4.0);
+                    ui.add_space(theme::SP_SM);
                 }
 
                 egui::Grid::new("audio_settings")
@@ -433,7 +433,7 @@ impl App {
                         ui.end_row();
                     });
 
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
                 ui.colored_label(theme::TEXT_SECONDARY, "Restart to apply audio changes.");
                 if ui.button("Save Audio Settings").clicked() {
                     if let Some((_, host_name)) = self.available_hosts.get(self.selected_host_idx) {
@@ -445,7 +445,7 @@ impl App {
                     }
                 }
 
-                ui.add_space(12.0);
+                ui.add_space(theme::SP_LG);
                 ui.heading("MIDI");
 
                 egui::Grid::new("midi_settings")
@@ -478,7 +478,7 @@ impl App {
                 });
 
                 // SF2 SoundFont section
-                ui.add_space(12.0);
+                ui.add_space(theme::SP_LG);
                 ui.heading("SoundFont (SF2)");
 
                 // Keys SF2
@@ -608,7 +608,7 @@ impl App {
                 }
 
                 if !self.settings_status.is_empty() {
-                    ui.add_space(6.0);
+                    ui.add_space(theme::SP_MD);
                     ui.colored_label(egui::Color32::YELLOW, &self.settings_status);
                 }
             });

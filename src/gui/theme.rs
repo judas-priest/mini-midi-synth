@@ -2,6 +2,17 @@
 
 use eframe::egui::Color32;
 
+// ── Spacing scale ───────────────────────────────────────────────────────────
+
+/// Tight: between closely related items.
+pub const SP_XS: f32 = 2.0;
+/// Small: default gap.
+pub const SP_SM: f32 = 4.0;
+/// Medium: between sections.
+pub const SP_MD: f32 = 8.0;
+/// Large: between major areas.
+pub const SP_LG: f32 = 12.0;
+
 // ── Slider widths ───────────────────────────────────────────────────────────
 
 /// Main params: Cutoff, Volume, Attack, Release, envelope controls.
