@@ -11,12 +11,12 @@ impl App {
             ui.strong("FX Chain");
             ui.label("— 16 slots, serial processing");
             ui.separator();
-            if ui.small_button("Reset").clicked() {
+            if ui.small_button("Reset").on_hover_text("Reset FX chain to defaults").clicked() {
                 let chain = FxChain { active: true, ..FxChain::default() };
                 flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
                 self.send_edited_params(part);
             }
-            if ui.small_button("From preset").clicked() {
+            if ui.small_button("From preset").on_hover_text("Import FX from current preset").clicked() {
                 let chain = FxChain::from_legacy_preset_active(
                     &self.parts[part].edited_params
                 );
@@ -46,10 +46,10 @@ impl App {
 
                     // Swap buttons (outside closure so we can act on the chain)
                     ui.horizontal(|ui| {
-                        if i > 0 && ui.small_button("↑").clicked() {
+                        if i > 0 && ui.small_button("↑").on_hover_text("Move up").clicked() {
                             swap = Some((i - 1, i));
                         }
-                        if i + 1 < FX_SLOTS && ui.small_button("↓").clicked() {
+                        if i + 1 < FX_SLOTS && ui.small_button("↓").on_hover_text("Move down").clicked() {
                             swap = Some((i, i + 1));
                         }
                     });
@@ -87,7 +87,7 @@ fn draw_slot(ui: &mut egui::Ui, part: usize, idx: usize, slot: &mut FxSlot) -> b
 
         // Enable
         let mut en = slot.enabled;
-        if ui.checkbox(&mut en, "").changed() {
+        if ui.checkbox(&mut en, "").on_hover_text("Enable/bypass effect").changed() {
             slot.enabled = en;
             changed = true;
         }
@@ -117,7 +117,7 @@ fn draw_slot(ui: &mut egui::Ui, part: usize, idx: usize, slot: &mut FxSlot) -> b
         if ui.add(
             egui::Slider::new(&mut mix, 0.0..=1.0)
                 .text("Mix").fixed_decimals(2)
-        ).changed() {
+        ).on_hover_text("Dry/wet mix").changed() {
             slot.mix = mix;
             changed = true;
         }

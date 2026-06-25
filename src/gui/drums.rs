@@ -33,10 +33,10 @@ impl App {
             }
 
             // Undo / Clear
-            if ui.button("Undo").clicked() {
+            if ui.button("Undo").on_hover_text("Undo last edit").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqUndo);
             }
-            if ui.button("Clear").clicked() {
+            if ui.button("Clear").on_hover_text("Clear all steps").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
             }
 
@@ -56,13 +56,13 @@ impl App {
 
             // Swing + Vol
             ui.label("Swing:");
-            if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).fixed_decimals(2)).changed() {
+            if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).fixed_decimals(2)).on_hover_text("Swing amount").changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqSwing { swing: self.drum_swing });
             }
 
             ui.separator();
             ui.label("Vol:");
-            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=2.0).fixed_decimals(2)).changed() {
+            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=2.0).fixed_decimals(2)).on_hover_text("Master drum volume").changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
             }
         });
@@ -91,7 +91,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label("Kit:");
             ui.add(egui::TextEdit::singleline(&mut self.drum_kit_name).desired_width(120.0).hint_text("name"));
-            if ui.button("Save").clicked() && !self.drum_kit_name.trim().is_empty() {
+            if ui.button("Save").on_hover_text("Save drum kit").clicked() && !self.drum_kit_name.trim().is_empty() {
                 let kit = DrumKit {
                     name: self.drum_kit_name.trim().to_string(),
                     patterns: self.drum_patterns.to_vec(),
@@ -162,7 +162,7 @@ impl App {
             ui.label("MIDI:");
             ui.add(egui::TextEdit::singleline(&mut self.drum_midi_import_path)
                 .desired_width(240.0).hint_text("path to .mid file"));
-            if ui.button("Import").clicked() && !self.drum_midi_import_path.trim().is_empty() {
+            if ui.button("Import").on_hover_text("Import from MIDI file").clicked() && !self.drum_midi_import_path.trim().is_empty() {
                 let path = std::path::PathBuf::from(self.drum_midi_import_path.trim());
                 match preset::import_midi_drums(&path) {
                     Ok((patterns_vec, bpm)) => {
@@ -334,20 +334,20 @@ impl App {
                     let mut decay = self.drum_params[slot].decay;
 
                     ui.style_mut().spacing.slider_width = 40.0;
-                    if ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).changed() {
+                    if ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text("Level").changed() {
                         self.drum_params[slot].level = level;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
                     }
-                    if ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).changed() {
+                    if ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).on_hover_text("Tune (semitones)").changed() {
                         self.drum_params[slot].tune = tune;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
                     }
-                    if ui.add(egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).changed() {
+                    if ui.add(egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).on_hover_text("Decay time").changed() {
                         self.drum_params[slot].decay = decay;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
                     }
                     let mut pan = self.drum_params[slot].pan;
-                    if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).changed() {
+                    if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).on_hover_text("Pan L/R").changed() {
                         self.drum_params[slot].pan = pan;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
                     }
@@ -789,7 +789,7 @@ impl App {
 
                 // Solo button
                 let solo_color = if soloed { egui::Color32::YELLOW } else { egui::Color32::GRAY };
-                if ui.button(egui::RichText::new("S").color(solo_color)).clicked() {
+                if ui.button(egui::RichText::new("S").color(solo_color)).on_hover_text("Solo layer").clicked() {
                     if soloed {
                         self.looper_solo_layer = None;
                         let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: None });
@@ -801,7 +801,7 @@ impl App {
 
                 // Mute button
                 let mute_color = if muted { egui::Color32::RED } else { egui::Color32::GRAY };
-                if ui.button(egui::RichText::new("M").color(mute_color)).clicked() {
+                if ui.button(egui::RichText::new("M").color(mute_color)).on_hover_text("Mute layer").clicked() {
                     let new_mute = !muted;
                     self.looper_layer_mute[*layer_id as usize] = new_mute;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: *layer_id, mute: new_mute });

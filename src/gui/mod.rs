@@ -601,7 +601,7 @@ impl eframe::App for App {
                     ui.strong(format!("GM Instruments (Layer {layer_label})"));
                 } else {
                     ui.horizontal(|ui| {
-                        if ui.small_button("\u{25C0}").clicked() {
+                        if ui.small_button("\u{25C0}").on_hover_text("Previous preset").clicked() {
                             // Prev patch
                             let idx = self.parts[part].patch_idx;
                             if idx > 0 {
@@ -613,7 +613,7 @@ impl eframe::App for App {
                             }
                         }
                         ui.strong(format!("Presets ({layer_label})"));
-                        if ui.small_button("\u{25B6}").clicked() {
+                        if ui.small_button("\u{25B6}").on_hover_text("Next preset").clicked() {
                             // Next patch
                             let idx = self.parts[part].patch_idx;
                             if idx + 1 < self.patches.len() {
@@ -626,12 +626,12 @@ impl eframe::App for App {
                         }
                     });
                     ui.horizontal(|ui| {
-                        if ui.small_button("Init").clicked() {
+                        if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
                             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                             self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
                             self.send_edited_params(part);
                         }
-                        if ui.small_button("Rnd").clicked() {
+                        if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
                             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                             self.parts[part].edited_params = crate::synth::PatchParams::random_map();
                             self.send_edited_params(part);
@@ -654,7 +654,7 @@ impl eframe::App for App {
                             .hint_text("\u{1F50D} Search...")
                             .desired_width(text_w.max(60.0)),
                     );
-                    if !self.preset_search.is_empty() && ui.small_button("\u{2715}").clicked() {
+                    if !self.preset_search.is_empty() && ui.small_button("\u{2715}").on_hover_text("Clear search").clicked() {
                         self.preset_search.clear();
                         r.request_focus();
                     }
@@ -871,8 +871,8 @@ impl eframe::App for App {
                     ui.horizontal(|ui| {
                         ui.label("Mode:");
                         let mut sf2 = is_sf2;
-                        if ui.selectable_label(!sf2, "Synth").clicked() { sf2 = false; }
-                        if ui.selectable_label(sf2, "SF2").clicked() { sf2 = true; }
+                        if ui.selectable_label(!sf2, "Synth").on_hover_text("Use synth engine").clicked() { sf2 = false; }
+                        if ui.selectable_label(sf2, "SF2").on_hover_text("Use SoundFont samples").clicked() { sf2 = true; }
                         if sf2 != is_sf2 {
                             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                             self.parts[part].sf2_mode = sf2;

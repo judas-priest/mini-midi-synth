@@ -282,7 +282,7 @@ impl App {
 
             let mut detune = self.parts[part].edited_params.get("osc_detune").copied().unwrap_or(0.0);
             ui.label("Detune:");
-            if ui.add(egui::Slider::new(&mut detune, 0.0..=0.05).step_by(0.001)).changed() {
+            if ui.add(egui::Slider::new(&mut detune, 0.0..=0.05).step_by(0.001)).on_hover_text("Oscillator pitch detune").changed() {
                 self.parts[part].edited_params.insert("osc_detune".into(), detune);
                 changed = true;
             }
@@ -319,7 +319,7 @@ impl App {
             for (i, name) in drawbar_names.iter().enumerate() {
                 let key = format!("drawbar_{}", i + 1);
                 let mut val = self.parts[part].edited_params.get(&key).copied().unwrap_or(0.0);
-                if ui.add(egui::Slider::new(&mut val, 0.0..=8.0).step_by(1.0).text(*name)).changed() {
+                if ui.add(egui::Slider::new(&mut val, 0.0..=8.0).step_by(1.0).text(*name)).on_hover_text("Organ drawbar level").changed() {
                     self.parts[part].edited_params.insert(key, val);
                     changed = true;
                 }
@@ -570,7 +570,7 @@ impl App {
             let mut pw_val = pw;
             ui.horizontal(|ui| {
                 ui.label("Pulse Width");
-                if ui.add(egui::Slider::new(&mut pw_val, 0.05..=0.95)).changed() {
+                if ui.add(egui::Slider::new(&mut pw_val, 0.05..=0.95)).on_hover_text("Square wave duty cycle").changed() {
                     self.parts[part].edited_params.insert("pulse_width".into(), pw_val);
                     self.parts[part].params_dirty = true;
                 }
@@ -679,7 +679,7 @@ impl App {
             let mut osc_count = self.parts[part].edited_params.get("osc_count").copied().unwrap_or(1.0) as u32;
             ui.horizontal(|ui| {
                 ui.label("Osc Count:");
-                if ui.add(egui::Slider::new(&mut osc_count, 1..=3)).changed() {
+                if ui.add(egui::Slider::new(&mut osc_count, 1..=3)).on_hover_text("Number of oscillators").changed() {
                     self.parts[part].edited_params.insert("osc_count".into(), osc_count as f32);
                     changed = true;
                 }
@@ -708,7 +708,7 @@ impl App {
 
                     let mut detune2 = self.parts[part].edited_params.get("osc2_detune").copied().unwrap_or(0.0);
                     ui.label("Detune:");
-                    if ui.add(egui::Slider::new(&mut detune2, -0.05..=0.05).step_by(0.001)).changed() {
+                    if ui.add(egui::Slider::new(&mut detune2, -0.05..=0.05).step_by(0.001)).on_hover_text("Osc 2 pitch detune").changed() {
                         self.parts[part].edited_params.insert("osc2_detune".into(), detune2);
                         changed = true;
                     }
@@ -735,7 +735,7 @@ impl App {
 
                     let mut detune3 = self.parts[part].edited_params.get("osc3_detune").copied().unwrap_or(0.0);
                     ui.label("Detune:");
-                    if ui.add(egui::Slider::new(&mut detune3, -0.05..=0.05).step_by(0.001)).changed() {
+                    if ui.add(egui::Slider::new(&mut detune3, -0.05..=0.05).step_by(0.001)).on_hover_text("Osc 3 pitch detune").changed() {
                         self.parts[part].edited_params.insert("osc3_detune".into(), detune3);
                         changed = true;
                     }
@@ -1185,7 +1185,7 @@ impl App {
 
                     // Depth slider
                     let mut depth = depth_val;
-                    if ui.add(egui::Slider::new(&mut depth, -1.0..=1.0).text("Depth").step_by(0.01)).changed() {
+                    if ui.add(egui::Slider::new(&mut depth, -1.0..=1.0).text("Depth").step_by(0.01)).on_hover_text("Modulation depth").changed() {
                         ep.insert(format!("{prefix}depth"), depth);
                         changed = true;
                     }
@@ -1254,7 +1254,7 @@ impl App {
         ui.strong("Unison");
         {
             let mut uv = self.parts[part].edited_params.get("unison_voices").copied().unwrap_or(1.0) as u32;
-            if ui.add(egui::Slider::new(&mut uv, 1..=8).text("Voices")).changed() {
+            if ui.add(egui::Slider::new(&mut uv, 1..=8).text("Voices")).on_hover_text("Unison voice count").changed() {
                 self.parts[part].edited_params.insert("unison_voices".into(), uv as f32);
                 changed = true;
             }
@@ -1316,7 +1316,7 @@ impl App {
 
             ui.horizontal(|ui| {
                 let mut oct = self.parts[part].edited_params.get("arp_octaves").copied().unwrap_or(1.0) as u32;
-                if ui.add(egui::Slider::new(&mut oct, 1..=4).text("Octaves")).changed() {
+                if ui.add(egui::Slider::new(&mut oct, 1..=4).text("Octaves")).on_hover_text("Arpeggiator octave range").changed() {
                     self.parts[part].edited_params.insert("arp_octaves".into(), oct as f32);
                     changed = true;
                 }

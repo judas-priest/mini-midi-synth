@@ -49,7 +49,7 @@ impl App {
                             egui::Slider::new(&mut v, 0.0..=1.0)
                                 .show_value(true)
                                 .text("")
-                        ).changed() {
+                        ).on_hover_text("Macro modulation value").changed() {
                             self.parts[part].macro_vals[i] = v;
                             // Update edited_params so it's saved in patch
                             self.parts[part].edited_params.insert(
@@ -131,6 +131,7 @@ impl App {
         // Pad area
         let size = egui::vec2(200.0, 200.0);
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        response.clone().on_hover_text("Drag to control two macros");
         let painter = ui.painter_at(rect);
 
         // Background

@@ -29,7 +29,7 @@ impl App {
 
             // Add to Zone A
             let a_count = ZONE_A.filter(|&i| self.parts[i].enabled).count();
-            if a_count < 4 && ui.small_button("+ A").clicked() {
+            if a_count < 4 && ui.small_button("+ A").on_hover_text("Add part to Zone A").clicked() {
                 self.add_part_to_zone(false);
             }
 
@@ -38,7 +38,7 @@ impl App {
 
             let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
             let mut split = split_on;
-            if ui.checkbox(&mut split, "Split").changed() {
+            if ui.checkbox(&mut split, "Split").on_hover_text("Enable keyboard split").changed() {
                 if split {
                     // Enable the first free B slot
                     if let Some(i) = ZONE_B.into_iter().find(|&i| !self.parts[i].enabled) {
@@ -76,23 +76,23 @@ impl App {
                     self.draw_part_tab(ui, i);
                 }
                 let b_count = ZONE_B.filter(|&i| self.parts[i].enabled).count();
-                if b_count < 4 && ui.small_button("+ B").clicked() {
+                if b_count < 4 && ui.small_button("+ B").on_hover_text("Add part to Zone B").clicked() {
                     self.add_part_to_zone(true);
                 }
             }
 
             // ── Other tabs ───────────────────────────────────────────────
             ui.separator();
-            if ui.selectable_label(self.show_drums && !self.show_midi_seq, "Drums").clicked() {
+            if ui.selectable_label(self.show_drums && !self.show_midi_seq, "Drums").on_hover_text("Drum sequencer").clicked() {
                 self.show_drums = true; self.show_looper = false;
                 self.show_midi_seq = false; self.show_fx_chain = false;
                 self.seq_target_atom.store(0, Ordering::Relaxed);
             }
-            if ui.selectable_label(self.show_midi_seq, "MIDI Seq").clicked() {
+            if ui.selectable_label(self.show_midi_seq, "MIDI Seq").on_hover_text("MIDI file sequencer").clicked() {
                 self.show_midi_seq = true; self.show_drums = false;
                 self.show_looper = false; self.show_fx_chain = false;
             }
-            if ui.selectable_label(self.show_fx_chain, "FX Chain").clicked() {
+            if ui.selectable_label(self.show_fx_chain, "FX Chain").on_hover_text("16-slot serial FX chain").clicked() {
                 self.show_fx_chain = true; self.show_drums = false;
                 self.show_looper = false; self.show_midi_seq = false;
             }
@@ -104,7 +104,7 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label("Split point:");
                 let sp_name = note_name(self.split_point);
-                if ui.add(egui::Slider::new(&mut self.split_point, 0..=127).text(sp_name)).changed() {
+                if ui.add(egui::Slider::new(&mut self.split_point, 0..=127).text(sp_name)).on_hover_text("Keyboard split note").changed() {
                     self.apply_split_ranges();
                 }
             });
@@ -120,7 +120,7 @@ impl App {
                 ui.strong(format!("Part {}{}: ", zone_label, (part % 4) + 1));
 
                 let mut muted = self.parts[part].mute;
-                if ui.toggle_value(&mut muted, "Mute").changed() {
+                if ui.toggle_value(&mut muted, "Mute").on_hover_text("Mute this part").changed() {
                     self.parts[part].mute = muted;
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute: muted });
                 }
@@ -141,7 +141,7 @@ impl App {
 
                 ui.label("Tr:");
                 let mut tr = self.parts[part].transpose as i32;
-                if ui.add(egui::Slider::new(&mut tr, -24..=24).suffix(" st")).changed() {
+                if ui.add(egui::Slider::new(&mut tr, -24..=24).suffix(" st")).on_hover_text("Transpose in semitones").changed() {
                     self.parts[part].transpose = tr as i8;
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: tr as i8 });
                 }
@@ -163,7 +163,7 @@ impl App {
 
                 // Remove: not for first part of each zone
                 let is_zone_first = part == 0 || part == 4;
-                if !is_zone_first && ui.small_button("✕").clicked() {
+                if !is_zone_first && ui.small_button("✕").on_hover_text("Remove this part").clicked() {
                     self.remove_part(part);
                 }
             });
@@ -177,7 +177,7 @@ impl App {
             ui.label("Perf:");
             ui.add(egui::TextEdit::singleline(&mut self.perf_name)
                 .desired_width(110.0).hint_text("name"));
-            if ui.button("Save").clicked() && !self.perf_name.trim().is_empty() {
+            if ui.button("Save").on_hover_text("Save performance").clicked() && !self.perf_name.trim().is_empty() {
                 let parts: Vec<PartConfig> = self.parts.iter().map(|l| {
                     let patch_name = self.patches.get(l.patch_idx)
                         .map(|p| p.name.clone()).unwrap_or_default();
@@ -261,7 +261,9 @@ impl App {
             format!("[{zone}{num}]")
         };
         let color = if muted { egui::Color32::GRAY } else { egui::Color32::WHITE };
-        if ui.add(egui::Button::new(egui::RichText::new(&label).color(color)).selected(is_active)).clicked() {
+        if ui.add(egui::Button::new(egui::RichText::new(&label).color(color)).selected(is_active))
+            .on_hover_text(format!("Switch to part {zone}{num}"))
+            .clicked() {
             self.set_active_part(i);
             self.show_drums = false; self.show_looper = false;
             self.show_midi_seq = false; self.show_fx_chain = false;
