@@ -56,13 +56,13 @@ impl App {
 
             // Swing + Vol
             ui.label("Swing:");
-            if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).show_value(false)).changed() {
+            if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).fixed_decimals(2)).changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqSwing { swing: self.drum_swing });
             }
 
             ui.separator();
             ui.label("Vol:");
-            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=2.0).show_value(false)).changed() {
+            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=2.0).fixed_decimals(2)).changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
             }
         });

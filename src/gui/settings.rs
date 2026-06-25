@@ -277,6 +277,10 @@ impl App {
     }
 
     pub(super) fn param_slider(&mut self, ui: &mut egui::Ui, key: &str, label: &str, min: f32, max: f32, logarithmic: bool) -> bool {
+        self.param_slider_ex(ui, key, label, min, max, logarithmic, "")
+    }
+
+    pub(super) fn param_slider_ex(&mut self, ui: &mut egui::Ui, key: &str, label: &str, min: f32, max: f32, logarithmic: bool, suffix: &str) -> bool {
         let part = self.active_part;
         let mut val = self.parts[part].edited_params.get(key).copied().unwrap_or(min);
 
@@ -293,9 +297,12 @@ impl App {
             _ => label.to_string(),
         };
 
-        let slider = egui::Slider::new(&mut val, min..=max)
+        let mut slider = egui::Slider::new(&mut val, min..=max)
             .text(&display_label)
             .logarithmic(logarithmic);
+        if !suffix.is_empty() {
+            slider = slider.suffix(suffix);
+        }
         let resp = ui.add(slider);
         resp.context_menu(|ui| {
             // Show current CC assignment

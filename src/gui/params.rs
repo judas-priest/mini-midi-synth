@@ -330,10 +330,10 @@ impl App {
         if osc_type == 12 {
             ui.add_space(4.0);
             ui.strong("Drum Synth");
-            changed |= self.param_slider(ui, "drum_pitch_amount", "Pitch Sweep (st)", 0.0, 72.0, false);
-            changed |= self.param_slider(ui, "drum_pitch_decay", "Pitch Decay", 5.0, 200.0, false);
+            changed |= self.param_slider_ex(ui, "drum_pitch_amount", "Pitch Sweep", 0.0, 72.0, false, " st");
+            changed |= self.param_slider_ex(ui, "drum_pitch_decay", "Pitch Decay", 5.0, 200.0, false, " ms");
             changed |= self.param_slider(ui, "drum_noise_level", "Noise Level", 0.0, 1.0, false);
-            changed |= self.param_slider(ui, "drum_noise_decay", "Noise Decay", 5.0, 200.0, false);
+            changed |= self.param_slider_ex(ui, "drum_noise_decay", "Noise Decay", 5.0, 200.0, false, " ms");
             changed |= self.param_slider(ui, "drum_noise_color", "Noise Color", 0.0, 1.0, false);
         }
 
@@ -523,7 +523,7 @@ impl App {
                     });
             });
             changed |= self.param_slider(ui, "window_morph", "Morph", 0.0, 1.0, false);
-            changed |= self.param_slider(ui, "window_formant", "Formant", -24.0, 24.0, false);
+            changed |= self.param_slider_ex(ui, "window_formant", "Formant", -24.0, 24.0, false, " st");
         }
 
         // Twist / Plaits (engine 29)
@@ -821,9 +821,9 @@ impl App {
                     });
             });
         } else {
-            changed |= self.param_slider(ui, "filter_cutoff", "Cutoff", 20.0, 20000.0, true);
+            changed |= self.param_slider_ex(ui, "filter_cutoff", "Cutoff", 20.0, 20000.0, true, " Hz");
             changed |= self.param_slider(ui, "filter_resonance", "Resonance", 0.0, 1.0, false);
-            changed |= self.param_slider(ui, "filter_env_amount", "Env Amount", 0.0, 15000.0, false);
+            changed |= self.param_slider_ex(ui, "filter_env_amount", "Env Amount", 0.0, 15000.0, false, " Hz");
             changed |= self.param_slider(ui, "filter_key_track", "Key Track", 0.0, 1.0, false);
             // SVF Morph slider: only shown when filter type is SVFMorph (type 36)
             if filter_type == 36 {
@@ -883,7 +883,7 @@ impl App {
                             }
                         });
                 });
-                changed |= self.param_slider(ui, "filter2_cutoff", "Cutoff 2", 20.0, 20000.0, true);
+                changed |= self.param_slider_ex(ui, "filter2_cutoff", "Cutoff 2", 20.0, 20000.0, true, " Hz");
                 changed |= self.param_slider(ui, "filter2_resonance", "Resonance 2", 0.0, 1.0, false);
 
                 // Inter-filter waveshaper (Serial routing only)
@@ -914,22 +914,22 @@ impl App {
 
         // Amp Envelope (AHDSR)
         ui.strong("Amp Envelope");
-        changed |= self.param_slider(ui, "amp_attack",  "Attack",  0.001, 5.0, true);
-        changed |= self.param_slider(ui, "amp_hold",    "Hold",    0.0,   5.0, false);
-        changed |= self.param_slider(ui, "amp_decay",   "Decay",   0.0,   5.0, false);
+        changed |= self.param_slider_ex(ui, "amp_attack",  "Attack",  0.001, 5.0, true, " s");
+        changed |= self.param_slider_ex(ui, "amp_hold",    "Hold",    0.0,   5.0, false, " s");
+        changed |= self.param_slider_ex(ui, "amp_decay",   "Decay",   0.0,   5.0, false, " s");
         changed |= self.param_slider(ui, "amp_sustain", "Sustain", 0.0,   1.0, false);
-        changed |= self.param_slider(ui, "amp_release", "Release", 0.001, 5.0, true);
+        changed |= self.param_slider_ex(ui, "amp_release", "Release", 0.001, 5.0, true, " s");
         Self::draw_adsr_curve(ui, part, &self.parts[part].edited_params, "amp");
 
         ui.add_space(6.0);
 
         // Filter Envelope (AHDSR)
         ui.strong("Filter Envelope");
-        changed |= self.param_slider(ui, "filter_attack",  "Attack",  0.001, 5.0, true);
-        changed |= self.param_slider(ui, "filter_hold",    "Hold",    0.0,   5.0, false);
-        changed |= self.param_slider(ui, "filter_decay",   "Decay",   0.0,   5.0, false);
+        changed |= self.param_slider_ex(ui, "filter_attack",  "Attack",  0.001, 5.0, true, " s");
+        changed |= self.param_slider_ex(ui, "filter_hold",    "Hold",    0.0,   5.0, false, " s");
+        changed |= self.param_slider_ex(ui, "filter_decay",   "Decay",   0.0,   5.0, false, " s");
         changed |= self.param_slider(ui, "filter_sustain", "Sustain", 0.0,   1.0, false);
-        changed |= self.param_slider(ui, "filter_release", "Release", 0.001, 5.0, true);
+        changed |= self.param_slider_ex(ui, "filter_release", "Release", 0.001, 5.0, true, " s");
         Self::draw_adsr_curve(ui, part, &self.parts[part].edited_params, "filter");
 
         // Envelope shapes
@@ -983,7 +983,7 @@ impl App {
                     }
                 });
         });
-        changed |= self.param_slider(ui, "lfo_rate", "Rate", 0.1, 20.0, true);
+        changed |= self.param_slider_ex(ui, "lfo_rate", "Rate", 0.1, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "lfo_pitch_depth", "Pitch Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_filter_depth", "Filter Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_amp_depth", "Amp Depth", 0.0, 1.0, false);
@@ -1008,7 +1008,7 @@ impl App {
                     }
                 });
         });
-        changed |= self.param_slider(ui, "lfo2_rate", "Rate", 0.1, 20.0, true);
+        changed |= self.param_slider_ex(ui, "lfo2_rate", "Rate", 0.1, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "lfo2_pitch_depth", "Pitch Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_filter_depth", "Filter Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_amp_depth", "Amp Depth", 0.0, 1.0, false);
@@ -1033,7 +1033,7 @@ impl App {
                     }
                 });
         });
-        changed |= self.param_slider(ui, "lfo3_rate", "Rate", 0.1, 20.0, true);
+        changed |= self.param_slider_ex(ui, "lfo3_rate", "Rate", 0.1, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "lfo3_deform", "Deform", -1.0, 1.0, false);
         changed |= draw_lfo_trigger_mode(ui, part, 3, &mut self.parts[part].edited_params);
 
@@ -1052,7 +1052,7 @@ impl App {
                     }
                 });
         });
-        changed |= self.param_slider(ui, "lfo4_rate", "Rate", 0.1, 20.0, true);
+        changed |= self.param_slider_ex(ui, "lfo4_rate", "Rate", 0.1, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "lfo4_deform", "Deform", -1.0, 1.0, false);
         changed |= draw_lfo_trigger_mode(ui, part, 4, &mut self.parts[part].edited_params);
         {
@@ -1077,7 +1077,7 @@ impl App {
                     }
                 });
         });
-        changed |= self.param_slider(ui, "slfo1_rate", "Rate", 0.01, 20.0, true);
+        changed |= self.param_slider_ex(ui, "slfo1_rate", "Rate", 0.01, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "slfo1_deform", "Deform", -1.0, 1.0, false);
         {
             let mut uni = self.parts[part].edited_params.get("slfo1_unipolar").copied().unwrap_or(0.0) > 0.5;
@@ -1110,7 +1110,7 @@ impl App {
                     }
                 });
         });
-        changed |= self.param_slider(ui, "slfo2_rate", "Rate", 0.01, 20.0, true);
+        changed |= self.param_slider_ex(ui, "slfo2_rate", "Rate", 0.01, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "slfo2_deform", "Deform", -1.0, 1.0, false);
         {
             let mut uni = self.parts[part].edited_params.get("slfo2_unipolar").copied().unwrap_or(0.0) > 0.5;
@@ -1246,7 +1246,7 @@ impl App {
                     }
                 });
         });
-        changed |= self.param_slider(ui, "portamento_time", "Time", 0.0, 2.0, false);
+        changed |= self.param_slider_ex(ui, "portamento_time", "Time", 0.0, 2.0, false, " s");
 
         ui.add_space(6.0);
 
@@ -1259,7 +1259,7 @@ impl App {
                 changed = true;
             }
         }
-        changed |= self.param_slider(ui, "unison_detune", "Detune (cents)", 0.0, 50.0, false);
+        changed |= self.param_slider_ex(ui, "unison_detune", "Detune", 0.0, 50.0, false, " ct");
         changed |= self.param_slider(ui, "unison_spread", "Spread", 0.0, 1.0, false);
 
         ui.add_space(6.0);
@@ -1333,7 +1333,7 @@ impl App {
         ui.add_space(4.0);
         ui.strong("Ring Modulator");
         changed |= self.param_slider(ui, "ring_mod_mix", "Mix", 0.0, 1.0, false);
-        changed |= self.param_slider(ui, "ring_mod_freq", "Carrier Freq", 20.0, 8000.0, true);
+        changed |= self.param_slider_ex(ui, "ring_mod_freq", "Carrier Freq", 20.0, 8000.0, true, " Hz");
         ui.horizontal(|ui| {
             let mut rs = self.parts[part].edited_params.get("ring_mod_shape").copied().unwrap_or(0.0) as usize;
             ui.label("Shape:");
@@ -1354,9 +1354,9 @@ impl App {
         ui.add_space(4.0);
         ui.strong("Freq Shifter");
         changed |= self.param_slider(ui, "freq_shift_mix", "Mix", 0.0, 1.0, false);
-        changed |= self.param_slider(ui, "freq_shift_hz", "Shift (Hz)", -1000.0, 1000.0, false);
+        changed |= self.param_slider_ex(ui, "freq_shift_hz", "Shift", -1000.0, 1000.0, false, " Hz");
         changed |= self.param_slider(ui, "freq_shift_feedback", "Feedback", 0.0, 0.9, false);
-        changed |= self.param_slider(ui, "freq_shift_delay", "Delay", 0.0, 1.0, false);
+        changed |= self.param_slider_ex(ui, "freq_shift_delay", "Delay", 0.0, 1.0, false, " s");
 
         ui.add_space(4.0);
         ui.strong("Tape Saturation");
@@ -1375,14 +1375,14 @@ impl App {
         changed |= self.param_slider(ui, "neuron_stab", "Stab", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "neuron_asym", "Asymmetry", -1.0, 1.0, false);
         changed |= self.param_slider(ui, "neuron_bias", "Bias", 0.0, 1.0, false);
-        changed |= self.param_slider(ui, "neuron_comb_freq", "Comb Freq", 20.0, 4000.0, true);
+        changed |= self.param_slider_ex(ui, "neuron_comb_freq", "Comb Freq", 20.0, 4000.0, true, " Hz");
         changed |= self.param_slider(ui, "neuron_comb_sep", "Comb Sep", 0.0, 1.0, false);
 
         ui.add_space(4.0);
         ui.strong("Delay");
         changed |= self.param_slider(ui, "delay_mix", "Mix", 0.0, 1.0, false);
-        changed |= self.param_slider(ui, "delay_time_l", "Time L", 0.01, 2.0, false);
-        changed |= self.param_slider(ui, "delay_time_r", "Time R", 0.01, 2.0, false);
+        changed |= self.param_slider_ex(ui, "delay_time_l", "Time L", 0.01, 2.0, false, " s");
+        changed |= self.param_slider_ex(ui, "delay_time_r", "Time R", 0.01, 2.0, false, " s");
         changed |= self.param_slider(ui, "delay_feedback", "Feedback", 0.0, 0.95, false);
         changed |= self.param_slider(ui, "delay_filter", "Filter", 0.0, 0.95, false);
         {
@@ -1416,7 +1416,7 @@ impl App {
             changed |= self.param_slider(ui, "reverb_room_size", "Room Size", 0.0, 1.0, false);
             changed |= self.param_slider(ui, "reverb_damping", "Damping", 0.0, 1.0, false);
             changed |= self.param_slider(ui, "reverb_width", "Width", 0.0, 1.0, false);
-            changed |= self.param_slider(ui, "reverb_pre_delay", "Pre-Delay", 0.0, 0.1, false);
+            changed |= self.param_slider_ex(ui, "reverb_pre_delay", "Pre-Delay", 0.0, 0.1, false, " s");
         } else {
             // Spring reverb params
             changed |= self.param_slider(ui, "spring_mix", "Mix", 0.0, 1.0, false);
@@ -1486,8 +1486,8 @@ impl App {
         // Asymmetric pitch bend
         ui.add_space(4.0);
         ui.strong("Pitch Bend");
-        changed |= self.param_slider(ui, "pitch_bend_up",   "Range Up (st)",   0.0, 48.0, false);
-        changed |= self.param_slider(ui, "pitch_bend_down", "Range Down (st)", 0.0, 48.0, false);
+        changed |= self.param_slider_ex(ui, "pitch_bend_up",   "Range Up",   0.0, 48.0, false, " st");
+        changed |= self.param_slider_ex(ui, "pitch_bend_down", "Range Down", 0.0, 48.0, false, " st");
 
         if changed {
             self.parts[part].params_dirty = true;

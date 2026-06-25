@@ -116,7 +116,7 @@ fn draw_slot(ui: &mut egui::Ui, part: usize, idx: usize, slot: &mut FxSlot) -> b
         let mut mix = slot.mix;
         if ui.add(
             egui::Slider::new(&mut mix, 0.0..=1.0)
-                .text("Mix").show_value(false)
+                .text("Mix").fixed_decimals(2)
         ).changed() {
             slot.mix = mix;
             changed = true;
@@ -130,7 +130,7 @@ fn draw_slot(ui: &mut egui::Ui, part: usize, idx: usize, slot: &mut FxSlot) -> b
                 let mut v = slot.params[j];
                 if ui.add(
                     egui::Slider::new(&mut v, min..=max)
-                        .text(*label).show_value(false)
+                        .text(*label).fixed_decimals(2)
                 ).changed() {
                     slot.params[j] = v;
                     changed = true;

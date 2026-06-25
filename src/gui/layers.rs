@@ -127,21 +127,21 @@ impl App {
 
                 ui.label("Vol:");
                 let mut vol = self.parts[part].volume;
-                if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false)).changed() {
+                if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2)).changed() {
                     self.parts[part].volume = vol;
                     self.send_part_volume(part);
                 }
 
                 ui.label("Pan:");
                 let mut pan = self.parts[part].pan;
-                if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false)).changed() {
+                if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).fixed_decimals(2)).changed() {
                     self.parts[part].pan = pan;
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
                 }
 
                 ui.label("Tr:");
                 let mut tr = self.parts[part].transpose as i32;
-                if ui.add(egui::Slider::new(&mut tr, -24..=24).show_value(true)).changed() {
+                if ui.add(egui::Slider::new(&mut tr, -24..=24).suffix(" st")).changed() {
                     self.parts[part].transpose = tr as i8;
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: tr as i8 });
                 }
