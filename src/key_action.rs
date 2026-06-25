@@ -11,6 +11,8 @@ pub enum KeyAction {
     LooperClear,
     DrumTogglePlay,
     ToggleDrumsSynth,
+    PrevPreset,
+    NextPreset,
 }
 
 #[allow(dead_code)]
@@ -32,6 +34,8 @@ impl KeyAction {
             Self::LooperClear => "Looper Clear",
             Self::DrumTogglePlay => "Drum Seq Play/Stop",
             Self::ToggleDrumsSynth => "Toggle Drums/Synth",
+            Self::PrevPreset => "Previous Preset",
+            Self::NextPreset => "Next Preset",
         }
     }
 
@@ -44,6 +48,8 @@ impl KeyAction {
             Self::LooperClear => "LooperClear".into(),
             Self::DrumTogglePlay => "DrumTogglePlay".into(),
             Self::ToggleDrumsSynth => "ToggleDrumsSynth".into(),
+            Self::PrevPreset => "PrevPreset".into(),
+            Self::NextPreset => "NextPreset".into(),
         }
     }
 
@@ -59,6 +65,8 @@ impl KeyAction {
             "LooperClear" => Some(Self::LooperClear),
             "DrumTogglePlay" => Some(Self::DrumTogglePlay),
             "ToggleDrumsSynth" => Some(Self::ToggleDrumsSynth),
+            "PrevPreset" => Some(Self::PrevPreset),
+            "NextPreset" => Some(Self::NextPreset),
             _ => None,
         }
     }
@@ -73,6 +81,7 @@ impl KeyAction {
             Self::LooperRecord, Self::LooperTogglePlay,
             Self::LooperUndo, Self::LooperClear,
             Self::DrumTogglePlay, Self::ToggleDrumsSynth,
+            Self::PrevPreset, Self::NextPreset,
         ]
     }
 }

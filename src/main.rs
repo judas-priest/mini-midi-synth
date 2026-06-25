@@ -413,6 +413,9 @@ fn run_headless() -> Result<()> {
                         seq_target_local.store(new, Ordering::Relaxed);
                         eprintln!("[input] Mode: {}", if new == 0 { "Drums" } else { "Synth" });
                     }
+                    KeyAction::PrevPreset | KeyAction::NextPreset => {
+                        // Preset navigation not supported in headless mode
+                    }
                 }
             }
         }

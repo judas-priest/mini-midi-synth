@@ -43,6 +43,8 @@ impl Keybinds {
                 (egui::Key::Z, KeyAction::LooperUndo),
                 (egui::Key::X, KeyAction::LooperClear),
                 (egui::Key::Tab, KeyAction::ToggleDrumsSynth),
+                (egui::Key::OpenBracket, KeyAction::PrevPreset),
+                (egui::Key::CloseBracket, KeyAction::NextPreset),
             ],
         }
     }
@@ -106,6 +108,7 @@ const KEY_TABLE: &[(egui::Key, &str)] = &[
     (egui::Key::PageUp, "PageUp"), (egui::Key::PageDown, "PageDown"),
     (egui::Key::Delete, "Delete"), (egui::Key::Insert, "Insert"),
     (egui::Key::Minus, "Minus"), (egui::Key::Plus, "Plus"),
+    (egui::Key::OpenBracket, "["), (egui::Key::CloseBracket, "]"),
 ];
 
 pub fn key_to_str(key: egui::Key) -> &'static str {

@@ -613,7 +613,9 @@ impl eframe::App for App {
                                 self.save_config();
                             }
                         }
-                        ui.strong(format!("Presets ({layer_label})"));
+                        let idx = self.parts[part].patch_idx;
+                        let total = self.patches.len();
+                        ui.strong(format!("Presets ({layer_label}) {}/{}", idx + 1, total));
                         if ui.small_button("\u{25B6}").on_hover_text("Next preset").clicked() {
                             // Next patch
                             let idx = self.parts[part].patch_idx;
@@ -1037,6 +1039,28 @@ impl App {
                         self.seq_target_atom.store(1, Ordering::Relaxed);
                     } else {
                         self.seq_target_atom.store(0, Ordering::Relaxed);
+                    }
+                }
+                KeyAction::PrevPreset => {
+                    let part = self.active_part;
+                    let idx = self.parts[part].patch_idx;
+                    if idx > 0 {
+                        let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                        self.parts[part].patch_idx = idx - 1;
+                        self.load_edited_params(part);
+                        self.send_edited_params(part);
+                        self.save_config();
+                    }
+                }
+                KeyAction::NextPreset => {
+                    let part = self.active_part;
+                    let idx = self.parts[part].patch_idx;
+                    if idx + 1 < self.patches.len() {
+                        let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                        self.parts[part].patch_idx = idx + 1;
+                        self.load_edited_params(part);
+                        self.send_edited_params(part);
+                        self.save_config();
                     }
                 }
             }
