@@ -177,17 +177,25 @@ impl PartState {
 
 /// Scan for .sf2 files in the standard data directory.
 pub fn scan_sf2_files() -> Vec<(String, std::path::PathBuf)> {
-    let dir = sf2_dir();
     let mut result = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("sf2") {
-                let name = path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("?")
-                    .to_string();
-                result.push((name, path));
+    let mut dirs_to_scan = vec![sf2_dir()];
+    // On Android, also scan /sdcard/Download for SF2 files
+    #[cfg(target_os = "android")]
+    dirs_to_scan.push(std::path::PathBuf::from("/sdcard/Download"));
+
+    for dir in &dirs_to_scan {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("sf2") {
+                    let name = path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("?")
+                        .to_string();
+                    if !result.iter().any(|(n, _)| n == &name) {
+                        result.push((name, path));
+                    }
+                }
             }
         }
     }
