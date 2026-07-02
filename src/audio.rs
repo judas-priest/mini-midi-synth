@@ -142,6 +142,7 @@ impl AudioBackend {
                         let block_len = (total_frames - frame_offset).min(crate::synth::BLOCK_SIZE);
 
                         while let Ok(event) = midi_rx.pop() {
+                            log::info!("[audio] got MIDI event from ring buffer");
                             synth.handle_event(event);
                         }
 

@@ -117,8 +117,14 @@ pub fn parse_and_push(
         _ => None,
     };
     if let Some(ev) = event {
-        if let Ok(mut tx) = tx.try_lock() {
-            let _ = tx.push(ev);
+        match tx.try_lock() {
+            Ok(mut tx) => {
+                match tx.push(ev) {
+                    Ok(()) => log::info!("[midi] pushed event OK"),
+                    Err(_) => log::warn!("[midi] ring buffer full"),
+                }
+            }
+            Err(_) => log::warn!("[midi] try_lock failed"),
         }
     }
 
