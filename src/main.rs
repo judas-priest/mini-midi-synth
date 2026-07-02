@@ -246,6 +246,12 @@ fn init_common() -> Result<CommonInit> {
     })
 }
 
+// On Android the real entry point is `android_main` (see bottom of file).
+// This dummy keeps the bin target compilable for `cargo ndk build`.
+#[cfg(target_os = "android")]
+fn main() {}
+
+#[cfg(not(target_os = "android"))]
 fn main() -> Result<()> {
     #[cfg(target_os = "linux")]
     suppress_alsa_errors();
@@ -271,7 +277,7 @@ fn run_headless() -> Result<()> {
     static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
     // Signal handler for graceful shutdown (sigaction is MT-safe, unlike signal)
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
         extern "C" fn signal_handler(_sig: i32) {
             SHUTDOWN.store(true, Ordering::SeqCst);
@@ -709,18 +715,12 @@ fn run_gui(
     let viewport = eframe::egui::ViewportBuilder::default()
         .with_app_id("mini_midi_synth");
 
-    #[cfg(target_os = "android")]
-    let android_app_clone = android_app.clone();
-
     let options = eframe::NativeOptions {
         viewport,
         #[cfg(not(target_os = "android"))]
         persist_window: true,
         #[cfg(target_os = "android")]
-        event_loop_builder: Some(Box::new(move |builder| {
-            use winit::platform::android::EventLoopBuilderExtAndroid;
-            builder.with_android_app(android_app_clone);
-        })),
+        android_app: Some(android_app),
         ..Default::default()
     };
 

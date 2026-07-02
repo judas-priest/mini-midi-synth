@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 [[bin]]
 name = "mini_midi_synth"
 path = "src/main.rs"
+required-features = ["desktop"]
 
 [features]
 default = ["gui", "desktop"]
@@ -40,6 +41,7 @@ libc = "0.2"
 # Android-only (cpal without jack)
 [target.'cfg(target_os = "android")'.dependencies]
 cpal = { version = "0.15" }
+winit = { version = "0.30.7", features = ["android-native-activity"] }
 
 # All other non-Linux non-Android platforms (fallback)
 [target.'cfg(not(any(target_os = "linux", target_os = "android")))'.dependencies]
