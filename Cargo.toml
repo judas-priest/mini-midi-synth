@@ -21,6 +21,7 @@ libc = "0.2"
 rustysynth = { path = "vendor/rustysynth" }
 mi-plaits-dsp = { path = "vendor/mi-plaits-dsp-rs" }
 midly = "0.5"
+no_denormals = "0.1"
 
 [profile.release]
 opt-level = 3

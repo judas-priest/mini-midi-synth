@@ -1684,6 +1684,7 @@ dependencies = [
  "mi-plaits-dsp",
  "midir",
  "midly",
+ "no_denormals",
  "rtrb",
  "rustysynth",
  "serde",
@@ -1791,6 +1792,12 @@ checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys 0.3.1",
 ]
+
+[[package]]
+name = "no_denormals"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d58f53aca050a54a6c17c2fe9391d7771bff0be36ae007d4be4ca6bd5a5b3537"
 
 [[package]]
 name = "nohash-hasher"

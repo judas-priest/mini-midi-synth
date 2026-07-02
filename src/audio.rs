@@ -123,68 +123,50 @@ impl AudioBackend {
         let stream = device.build_output_stream(
             &stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                // If JACK changed the sample rate, update the synth immediately.
-                let new_sr = jack_sr_cb.load(Ordering::Relaxed);
-                if new_sr != synth_sr {
-                    synth_sr = new_sr;
-                    synth.set_sample_rate(new_sr as f32);
-                }
-
-                // Flush denormals to zero (DAZ+FTZ) — prevents CPU spikes
-                // when filter/reverb tails decay to subnormal floats.
-                #[cfg(target_arch = "x86_64")]
-                let _old_mxcsr: u32 = unsafe {
-                    let mut old: u32 = 0;
-                    std::arch::asm!("stmxcsr [{}]", in(reg) &mut old, options(nostack));
-                    let new = old | 0x8040; // FTZ (bit 15) | DAZ (bit 6)
-                    std::arch::asm!("ldmxcsr [{}]", in(reg) &new, options(nostack));
-                    old
-                };
-
-                while let Ok(event) = ctrl_rx.pop() {
-                    synth.handle_control(event);
-                }
-
-                let total_frames = data.len() / channels;
-                let mut frame_offset = 0;
-
-                while frame_offset < total_frames {
-                    let block_len = (total_frames - frame_offset).min(crate::synth::BLOCK_SIZE);
-
-                    // Collect MIDI events for this block
-                    while let Ok(event) = midi_rx.pop() {
-                        synth.handle_event(event);
+                no_denormals::no_denormals(|| {
+                    // If JACK changed the sample rate, update the synth immediately.
+                    let new_sr = jack_sr_cb.load(Ordering::Relaxed);
+                    if new_sr != synth_sr {
+                        synth_sr = new_sr;
+                        synth.set_sample_rate(new_sr as f32);
                     }
 
-                    // Process block
-                    let mut bl = [0.0f32; crate::synth::BLOCK_SIZE];
-                    let mut br = [0.0f32; crate::synth::BLOCK_SIZE];
-                    synth.tick_block(&mut bl[..block_len], &mut br[..block_len]);
+                    while let Ok(event) = ctrl_rx.pop() {
+                        synth.handle_control(event);
+                    }
 
-                    // Write to output with soft limiting
-                    for i in 0..block_len {
-                        let left = soft_limit(bl[i]);
-                        let right = soft_limit(br[i]);
-                        let base = (frame_offset + i) * channels;
-                        if channels >= 2 {
-                            data[base] = left;
-                            data[base + 1] = right;
-                            for s in data[base + 2..base + channels].iter_mut() {
-                                *s = 0.0;
-                            }
-                        } else {
-                            data[base] = (left + right) * 0.5;
+                    let total_frames = data.len() / channels;
+                    let mut frame_offset = 0;
+
+                    while frame_offset < total_frames {
+                        let block_len = (total_frames - frame_offset).min(crate::synth::BLOCK_SIZE);
+
+                        while let Ok(event) = midi_rx.pop() {
+                            synth.handle_event(event);
                         }
+
+                        let mut bl = [0.0f32; crate::synth::BLOCK_SIZE];
+                        let mut br = [0.0f32; crate::synth::BLOCK_SIZE];
+                        synth.tick_block(&mut bl[..block_len], &mut br[..block_len]);
+
+                        for i in 0..block_len {
+                            let left = soft_limit(bl[i]);
+                            let right = soft_limit(br[i]);
+                            let base = (frame_offset + i) * channels;
+                            if channels >= 2 {
+                                data[base] = left;
+                                data[base + 1] = right;
+                                for s in data[base + 2..base + channels].iter_mut() {
+                                    *s = 0.0;
+                                }
+                            } else {
+                                data[base] = (left + right) * 0.5;
+                            }
+                        }
+
+                        frame_offset += block_len;
                     }
-
-                    frame_offset += block_len;
-                }
-
-                // Restore MXCSR
-                #[cfg(target_arch = "x86_64")]
-                unsafe {
-                    std::arch::asm!("ldmxcsr [{}]", in(reg) &_old_mxcsr, options(nostack));
-                }
+                });
             },
             move |err| {
                 let msg = err.to_string();
