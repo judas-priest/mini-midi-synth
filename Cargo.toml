@@ -3,25 +3,47 @@ name = "mini_midi_synth"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "mini_midi_synth"
+path = "src/main.rs"
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "mini_midi_synth"
+path = "src/main.rs"
+
 [features]
-default = ["gui"]
-gui = ["eframe"]
+default = ["gui", "desktop"]
+gui = ["dep:eframe"]
+desktop = ["eframe/x11", "eframe/wayland"]
+android-app = ["eframe/android-native-activity"]
 
 [dependencies]
-cpal = { version = "0.15", features = ["jack"] }
-midir = "0.10"
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "persistence"], optional = true }
+midir = "0.11"
 wmidi = "4"
 rtrb = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6"
 anyhow = "1"
-eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "x11", "wayland", "persistence"], optional = true }
-libc = "0.2"
 rustysynth = { path = "vendor/rustysynth" }
 mi-plaits-dsp = { path = "vendor/mi-plaits-dsp-rs" }
 midly = "0.5"
 no_denormals = "0.1"
+
+# Desktop-only
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.15", features = ["jack"] }
+libc = "0.2"
+
+# Android-only (cpal without jack)
+[target.'cfg(target_os = "android")'.dependencies]
+cpal = { version = "0.15" }
+
+# All other non-Linux non-Android platforms (fallback)
+[target.'cfg(not(any(target_os = "linux", target_os = "android")))'.dependencies]
+cpal = { version = "0.15" }
 
 [profile.release]
 opt-level = 3
@@ -30,7 +52,6 @@ codegen-units = 1
 panic = "abort"
 strip = "symbols"
 
-# Dev builds: optimize deps so audio doesn't glitch during development
 [profile.dev]
 opt-level = 1
 
