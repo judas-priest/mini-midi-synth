@@ -193,15 +193,16 @@ fn init_common() -> Result<CommonInit> {
     log::info!("[init] Audio: sample_rate={actual_sr}");
     eprintln!("[init] Audio: sample_rate={actual_sr}");
 
-    // MIDI — on Android, wait for BLE MIDI devices to fully initialize
-    #[cfg(target_os = "android")]
-    {
-        log::info!("[init] Waiting 2s for BLE MIDI devices to initialize...");
-        std::thread::sleep(std::time::Duration::from_secs(2));
-    }
+    // MIDI — on Android, BLE MIDI goes through Java MidiBridge → JNI, not midir.
+    // midir (AMidi) doesn't receive BLE MIDI data and its polling thread wastes CPU.
+    #[cfg(not(target_os = "android"))]
     let midi_port_names = midi::list_ports().unwrap_or_default();
-    log::info!("[init] MIDI ports: {midi_port_names:?}");
+    #[cfg(target_os = "android")]
+    let midi_port_names: Vec<String> = Vec::new();
+
     eprintln!("[init] MIDI ports: {midi_port_names:?}");
+
+    #[cfg(not(target_os = "android"))]
     let midi_port_idx = config
         .midi
         .port_name
@@ -209,15 +210,20 @@ fn init_common() -> Result<CommonInit> {
         .and_then(|name| find_midi_port(&midi_port_names, name))
         .or(if midi_port_names.is_empty() { None } else { Some(0) });
 
+    #[cfg(not(target_os = "android"))]
     let midi_conn: Option<MidiInputConnection<()>> = midi_port_idx.and_then(|idx| {
-        log::info!("[init] Connecting MIDI port idx={idx}");
         midi::connect(idx, midi_tx_shared.clone(), note_state.clone(), pad_state.clone()).ok()
     });
+    #[cfg(target_os = "android")]
+    let midi_conn: Option<MidiInputConnection<()>> = None;
 
+    #[cfg(not(target_os = "android"))]
     let midi_connected_name = midi_port_idx
         .and_then(|idx| midi_port_names.get(idx))
         .filter(|_| midi_conn.is_some())
         .cloned();
+    #[cfg(target_os = "android")]
+    let midi_connected_name: Option<String> = None;
 
     let patch_idx = config
         .ui
@@ -814,15 +820,10 @@ pub extern "system" fn Java_com_minimidisynth_MidiBridge_onMidiData<'local>(
         return;
     };
 
-    log::info!("[jni_midi] received {} bytes: {:02X?}", bytes.len(), &bytes[..bytes.len().min(8)]);
-
     let mut offset = 0;
     while offset < bytes.len() {
         let consumed = midi::parse_and_push(&bytes[offset..], tx, ns, ps);
-        if consumed == 0 {
-            log::warn!("[jni_midi] parse failed at offset {offset}, remaining: {:02X?}", &bytes[offset..]);
-            break;
-        }
+        if consumed == 0 { break }
         offset += consumed;
     }
 }

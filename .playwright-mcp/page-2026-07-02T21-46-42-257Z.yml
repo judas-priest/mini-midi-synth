@@ -1,0 +1,1701 @@
+- generic [active] [ref=f7e1]:
+  - generic [ref=f7e3]:
+    - generic [ref=f7e4]:
+      - generic [ref=f7e5]:
+        - generic:
+          - generic:
+            - img "Концентратор типа C USB-C на 3,5 мм аудио AUX и гнездо Type-A OTG с адаптером питания PD, совместимым с ноутбуком, планшетом, телефоном"
+        - generic:
+          - generic:
+            - generic:
+              - heading "Концентратор типа C USB-C на 3,5 мм аудио AUX и гнездо Type-A OTG с адаптером питания PD, совместимым с ноутбуком, планшетом, телефоном" [level=3]
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - img
+                  - generic: 5,0
+                - link "1 отзыв" [ref=f7e6] [cursor=pointer]:
+                  - /url: "#reviews_anchor"
+                - generic:
+                  - link "Характеристики" [ref=f7e7] [cursor=pointer]:
+                    - /url: "#characteristics_anchor"
+                  - link "Описание" [ref=f7e8] [cursor=pointer]:
+                    - /url: "#content_anchor"
+        - generic:
+          - generic:
+            - generic:
+              - paragraph: 889 ₽
+              - paragraph: 965 ₽
+            - generic:
+              - img
+              - paragraph: в Москва бесплатно
+        - button "В корзину" [ref=f7e13] [cursor=pointer]:
+          - paragraph [ref=f7e14]:
+            - generic [ref=f7e15]: В корзину
+      - banner [ref=f7e18]:
+        - link [ref=f7e21] [cursor=pointer]:
+          - /url: https://aliexpress.ru/
+          - img [ref=f7e22]
+        - generic [ref=f7e24]:
+          - navigation [ref=f7e25]:
+            - list [ref=f7e26]:
+              - listitem [ref=f7e27]:
+                - button "Каталог" [ref=f7e28] [cursor=pointer]:
+                  - generic [ref=f7e30]:
+                    - img [ref=f7e31]
+                    - generic [ref=f7e33]: Каталог
+          - generic [ref=f7e35]:
+            - textbox "броши" [ref=f7e36]
+            - button "Найти" [ref=f7e37] [cursor=pointer]
+          - navigation [ref=f7e38]:
+            - list [ref=f7e39]:
+              - listitem [ref=f7e40]:
+                - button "Заказы" [ref=f7e41] [cursor=pointer]:
+                  - link "Заказы" [ref=f7e43]:
+                    - /url: /order-list
+                    - img [ref=f7e44]
+                    - generic [ref=f7e46]: Заказы
+              - listitem [ref=f7e47]:
+                - button "Корзина" [ref=f7e48] [cursor=pointer]:
+                  - link "Корзина" [ref=f7e50]:
+                    - /url: /cart
+                    - img [ref=f7e51]
+                    - generic [ref=f7e55]: Корзина
+              - listitem [ref=f7e56]:
+                - button "Войти" [ref=f7e57] [cursor=pointer]:
+                  - link "Войти" [ref=f7e59]:
+                    - /url: https://aliexpress.ru/account
+                    - img [ref=f7e60]
+                    - generic [ref=f7e62]: Войти
+      - generic [ref=f7e63]:
+        - generic [ref=f7e65]:
+          - link "ДНИ ВЫГОДЫ" [ref=f7e66] [cursor=pointer]:
+            - /url: https://aliexpress.ru/promotions/sl/benefit_days?fusion=y&hastoolbar=false&pageName=Promotions_1186&presentationmode=push
+            - generic [ref=f7e69]: ДНИ ВЫГОДЫ
+          - link "ХИТЫ РАСПРОДАЖИ" [ref=f7e70] [cursor=pointer]:
+            - /url: https://aliexpress.ru/promotions/sl/hits?fusion=y&hastoolbar=false&pageName=Promotions_1187&presentationmode=push
+            - generic [ref=f7e73]: ХИТЫ РАСПРОДАЖИ
+          - link "КАЛЕНДАРЬ СКИДОК" [ref=f7e74] [cursor=pointer]:
+            - /url: https://aliexpress.ru/promotions/sl/brandsfestival?fusion=y&hastoolbar=false&pageName=Promotions_2561&presentationmode=push
+            - generic [ref=f7e77]: КАЛЕНДАРЬ СКИДОК
+          - link "Одна цена" [ref=f7e78] [cursor=pointer]:
+            - /url: https://aliexpress.ru/one-price
+            - generic [ref=f7e81]: Одна цена
+          - link "Горящие товары" [ref=f7e82] [cursor=pointer]:
+            - /url: https://aliexpress.ru/promotions/sl/flashdeals?fusion=y&hastoolbar=false&page=1&pageName=Promotions_2963&presentationmode=push
+            - generic [ref=f7e85]: Горящие товары
+          - link "Ниже рынка" [ref=f7e86] [cursor=pointer]:
+            - /url: https://aliexpress.ru/promotions/sl/bigsave
+            - generic [ref=f7e89]: Ниже рынка
+          - link "Комбо!" [ref=f7e90] [cursor=pointer]:
+            - /url: https://aliexpress.ru/top
+            - generic [ref=f7e93]: Комбо!
+          - link "Хватай купон!" [ref=f7e94] [cursor=pointer]:
+            - /url: https://aliexpress.ru/star-coupons
+            - generic [ref=f7e97]: Хватай купон!
+          - link "OPPO Reno16" [ref=f7e98] [cursor=pointer]:
+            - /url: https://aliexpress.ru/promotions/sl/oppo?fusion=y&hastoolbar=false&pageName=Promotions_2581&presentationmode=push
+            - generic [ref=f7e101]: OPPO Reno16
+        - generic [ref=f7e103]:
+          - generic [ref=f7e105]: RUB
+          - generic [ref=f7e107] [cursor=pointer]: RU
+          - generic [ref=f7e109] [cursor=pointer]:
+            - img [ref=f7e110]
+            - generic [ref=f7e112]: Москва
+      - generic [ref=f7e113]:
+        - generic [ref=f7e114]:
+          - link "AliExpress" [ref=f7e115] [cursor=pointer]:
+            - /url: https://aliexpress.ru
+            - generic [ref=f7e116]: AliExpress
+            - img [ref=f7e118]
+          - generic [ref=f7e120] [cursor=pointer]:
+            - generic [ref=f7e122]:
+              - generic [ref=f7e123]: ...
+              - img [ref=f7e125]
+            - generic:
+              - link "Компьютеры":
+                - /url: https://aliexpress.ru/category/4/computers
+                - generic: Компьютеры
+                - generic:
+                  - img
+              - link "Комплектующие и аксессуары для компьютеров":
+                - /url: https://aliexpress.ru/category/16004/computers-parts-accessories
+                - generic: Комплектующие и аксессуары для компьютеров
+                - generic:
+                  - img
+          - link "Компьютерная периферия" [ref=f7e127] [cursor=pointer]:
+            - /url: https://aliexpress.ru/category/1118/computer-peripherals
+            - generic [ref=f7e128]: Компьютерная периферия
+            - img [ref=f7e130]
+          - link "USB-хабы" [ref=f7e132] [cursor=pointer]:
+            - /url: https://aliexpress.ru/category/5757/docking-stations-usb-hubs
+            - generic [ref=f7e133]: USB-хабы
+        - generic [ref=f7e134]:
+          - generic [ref=f7e135] [cursor=pointer]:
+            - img [ref=f7e136]
+            - text: Артикул 1005007903266579
+          - button "В избранное" [ref=f7e138] [cursor=pointer]:
+            - img [ref=f7e139]
+            - generic [ref=f7e141]: В избранное
+          - button "Поделиться" [ref=f7e143] [cursor=pointer]:
+            - img [ref=f7e144]
+            - generic [ref=f7e146]: Поделиться
+      - generic [ref=f7e148]:
+        - generic [ref=f7e151]:
+          - heading "Концентратор типа C USB-C на 3,5 мм аудио AUX и гнездо Type-A OTG с адаптером питания PD, совместимым с ноутбуком, планшетом, телефоном" [level=1] [ref=f7e153]
+          - generic [ref=f7e155]:
+            - generic [ref=f7e156]:
+              - generic [ref=f7e157]:
+                - img [ref=f7e159]
+                - img [ref=f7e163]
+                - img [ref=f7e167]
+                - img [ref=f7e171]
+                - img [ref=f7e175]
+              - generic [ref=f7e178]: 5,0
+            - link "1 отзыв" [ref=f7e179] [cursor=pointer]:
+              - /url: "#reviews_anchor"
+            - generic [ref=f7e180]: 14 купили
+            - generic [ref=f7e181]:
+              - link "Характеристики" [ref=f7e182] [cursor=pointer]:
+                - /url: "#characteristics_anchor"
+              - link "Описание" [ref=f7e183] [cursor=pointer]:
+                - /url: "#content_anchor"
+        - generic [ref=f7e186]:
+          - generic [ref=f7e187]:
+            - generic [ref=f7e188]:
+              - img [ref=f7e191] [cursor=pointer]
+              - img [ref=f7e194] [cursor=pointer]
+              - img [ref=f7e197] [cursor=pointer]
+              - img [ref=f7e200] [cursor=pointer]
+              - img [ref=f7e203] [cursor=pointer]
+              - img [ref=f7e206] [cursor=pointer]
+              - img [ref=f7e209] [cursor=pointer]
+              - img [ref=f7e212] [cursor=pointer]
+            - generic [ref=f7e214]:
+              - generic [ref=f7e216]:
+                - img "Концентратор типа C USB-C на 3,5 мм аудио AUX и гнездо Type-A OTG с адаптером питания PD, совместимым с ноутбуком, планшетом, телефоном" [ref=f7e218]
+                - button [ref=f7e223] [cursor=pointer]:
+                  - img [ref=f7e224]
+                - img "Концентратор типа C USB-C на 3,5 мм аудио AUX и гнездо Type-A OTG с адаптером питания PD, совместимым с ноутбуком, планшетом, телефоном" [ref=f7e228]
+                - img "Концентратор типа C USB-C на 3,5 мм аудио AUX и гнездо Type-A OTG с адаптером питания PD, совместимым с ноутбуком, планшетом, телефоном" [ref=f7e231]
+                - img "Концентратор типа C USB-C на 3,5 мм аудио AUX и гнездо Type-A OTG с адаптером питания PD, совместимым с ноутбуком, планшетом, телефоном" [ref=f7e234]
+                - img "Концентратор типа C USB-C на 3,5 мм аудио AUX и гнездо Type-A OTG с адаптером питания PD, совместимым с ноутбуком, планшетом, телефоном" [ref=f7e237]
+                - img "Концентратор типа C USB-C на 3,5 мм аудио AUX и гнездо Type-A OTG с адаптером питания PD, совместимым с ноутбуком, планшетом, телефоном" [ref=f7e240]
+                - img "Концентратор типа C USB-C на 3,5 мм аудио AUX и гнездо Type-A OTG с адаптером питания PD, совместимым с ноутбуком, планшетом, телефоном" [ref=f7e243]
+              - img [ref=f7e246]
+              - img [ref=f7e249] [cursor=pointer]
+          - img "tag-0" [ref=f7e252]
+        - generic [ref=f7e254]:
+          - generic [ref=f7e257]:
+            - generic [ref=f7e258]:
+              - generic [ref=f7e259]: "Цвет:"
+              - generic [ref=f7e260]: БЕЛЫЙ
+            - list [ref=f7e261]:
+              - listitem [ref=f7e262]:
+                - button [ref=f7e263] [cursor=pointer]:
+                  - generic:
+                    - img
+          - generic [ref=f7e264]:
+            - generic [ref=f7e266]:
+              - generic [ref=f7e268]: Номер модели
+              - generic [ref=f7e269]: USB2.0 HUB
+            - generic [ref=f7e271]:
+              - generic [ref=f7e273]: Происхождение
+              - generic [ref=f7e274]: Китай
+            - generic [ref=f7e276]:
+              - generic [ref=f7e278]: Сертификация
+              - generic [ref=f7e279]: Евротест (СЕ)
+            - generic [ref=f7e281]:
+              - generic [ref=f7e283]: Тип вилки
+              - generic [ref=f7e284]: Нет
+            - generic [ref=f7e286]:
+              - generic [ref=f7e288]: Упаковка
+              - generic [ref=f7e289]: Да
+            - generic [ref=f7e291]:
+              - generic [ref=f7e293]: Тип интерфейса
+              - generic [ref=f7e294]: USB Type-C
+            - generic [ref=f7e296]:
+              - generic [ref=f7e298]: Стандарт
+              - generic [ref=f7e299]: УСБ 2,0
+            - generic [ref=f7e301]:
+              - generic [ref=f7e303]: Функция
+              - generic [ref=f7e304]: Нет
+          - text: Все характеристики
+        - generic [ref=f7e306]:
+          - generic [ref=f7e307]:
+            - generic [ref=f7e308]:
+              - generic [ref=f7e309]:
+                - generic [ref=f7e313]: 889 ₽
+                - generic [ref=f7e316]:
+                  - generic [ref=f7e317]: 965 ₽
+                  - generic [ref=f7e319]: "-8% ещё 5 дней"
+                - generic [ref=f7e323]: Осталось 83 шт.
+              - generic [ref=f7e324]: Цена за 1 штуку
+            - button "В корзину" [ref=f7e328] [cursor=pointer]:
+              - paragraph [ref=f7e329]:
+                - generic [ref=f7e330]: В корзину
+            - generic [ref=f7e332]:
+              - list [ref=f7e333]:
+                - listitem [ref=f7e334]:
+                  - paragraph [ref=f7e335]:
+                    - generic [ref=f7e336]: 10–13 июля в пункт выдачи
+                    - generic [ref=f7e337]: Бесплатно
+                - listitem [ref=f7e338]:
+                  - paragraph [ref=f7e339]:
+                    - generic [ref=f7e340]: 14–18 июля почтой
+                    - generic [ref=f7e341]: Бесплатно
+              - paragraph [ref=f7e342]: Вернём деньги, если не получите заказ через 75 дней после отправки.
+          - generic [ref=f7e344]:
+            - generic [ref=f7e345]:
+              - link [ref=f7e346] [cursor=pointer]:
+                - /url: https://aliexpress.ru/store/1103016087
+                - img [ref=f7e348]
+              - link "MDR Cables Shop Store 91,88% рейтинг продавца · 78 подписчиков" [ref=f7e349] [cursor=pointer]:
+                - /url: https://aliexpress.ru/store/1103016087
+                - generic [ref=f7e351]: MDR Cables Shop Store
+                - generic [ref=f7e352]:
+                  - generic [ref=f7e353]:
+                    - generic [ref=f7e354]: 91,88% рейтинг продавца
+                    - text: ·
+                  - generic [ref=f7e356]: 78 подписчиков
+            - generic [ref=f7e360]:
+              - generic [ref=f7e362]: Купоны
+              - generic [ref=f7e365]:
+                - generic [ref=f7e366]:
+                  - img [ref=f7e367]
+                  - img [ref=f7e369]
+                - img [ref=f7e372]
+                - generic [ref=f7e376]:
+                  - generic "-70 ₽" [ref=f7e377]
+                  - generic [ref=f7e378]: При заказе от 2 356 ₽
+                - generic [ref=f7e379]:
+                  - img [ref=f7e380]
+                  - img [ref=f7e383] [cursor=pointer]
+        - generic [ref=f7e386]:
+          - generic [ref=f7e387]:
+            - heading "Похожие товары" [level=3] [ref=f7e388]
+            - generic [ref=f7e390]:
+              - generic [ref=f7e391]:
+                - generic [ref=f7e393]:
+                  - link "OLPAY USB-концентратор 4 портов USB 3.0 OLPAY USB-концентратор 4 портов USB 3.0 OLPAY USB-концентратор 4 портов USB 3.0 OLPAY USB-концентратор 4 портов USB 3.0 OLPAY USB-концентратор 4 портов USB 3.0 OLPAY USB-концентратор 4 портов USB 3.0 OLPAY USB-концентратор 4 портов USB 3.0" [ref=f7e394] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005005681528311.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_SUPER_ECONOMY&sku_id=12000033994494048&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e397]:
+                      - img "OLPAY USB-концентратор 4 портов USB 3.0" [ref=f7e399]
+                      - img "OLPAY USB-концентратор 4 портов USB 3.0" [ref=f7e402]
+                      - img "OLPAY USB-концентратор 4 портов USB 3.0" [ref=f7e405]
+                      - img "OLPAY USB-концентратор 4 портов USB 3.0" [ref=f7e408]
+                      - img "OLPAY USB-концентратор 4 портов USB 3.0" [ref=f7e411]
+                      - img "OLPAY USB-концентратор 4 портов USB 3.0" [ref=f7e414]
+                      - img "OLPAY USB-концентратор 4 портов USB 3.0" [ref=f7e417]
+                    - img [ref=f7e429]
+                  - link "183 ₽ -28% 132 ₽ 4.7 4 181 купили OLPAY USB-концентратор 4 портов USB 3.0 до 14 дней, бесплатно" [ref=f7e432] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005005681528311.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_SUPER_ECONOMY&sku_id=12000033994494048&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e433]:
+                      - generic [ref=f7e435]:
+                        - generic [ref=f7e436]: 183 ₽
+                        - generic [ref=f7e437]: "-28%"
+                      - generic [ref=f7e439]: 132 ₽
+                    - generic [ref=f7e440]:
+                      - generic [ref=f7e441]:
+                        - generic [ref=f7e442]:
+                          - img [ref=f7e443]
+                          - generic [ref=f7e444]: "4.7"
+                        - generic [ref=f7e446]: 4 181 купили
+                      - generic "OLPAY USB-концентратор 4 портов USB 3.0" [ref=f7e448]
+                    - generic [ref=f7e451]:
+                      - img [ref=f7e452]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e454]:
+                  - link "UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA" [ref=f7e455] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005007501128910.html?mixer_rcmd_bucket_id=promoAdDistanceMaxed&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000041045832657&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e458]:
+                      - img "UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA" [ref=f7e460]
+                      - img "UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA" [ref=f7e463]
+                      - img "UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA" [ref=f7e466]
+                      - img "UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA" [ref=f7e469]
+                      - img "UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA" [ref=f7e472]
+                      - img "UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA" [ref=f7e475]
+                      - img "UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA" [ref=f7e478]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e490]
+                  - link "512 ₽ -10% 461 ₽ 4.5 4 701 купили UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA Рекомендуем до 10 дней, от 252 ₽" [ref=f7e493] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005007501128910.html?mixer_rcmd_bucket_id=promoAdDistanceMaxed&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000041045832657&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e494]:
+                      - generic [ref=f7e496]:
+                        - generic [ref=f7e497]: 512 ₽
+                        - generic [ref=f7e498]: "-10%"
+                      - generic [ref=f7e500]: 461 ₽
+                    - generic [ref=f7e501]:
+                      - generic [ref=f7e502]:
+                        - generic [ref=f7e503]:
+                          - img [ref=f7e504]
+                          - generic [ref=f7e505]: "4.5"
+                        - generic [ref=f7e507]: 4 701 купили
+                      - generic [ref=f7e508]:
+                        - generic "UGOURD Адаптер USB C на HDMI, DP, miniDP, VGA" [ref=f7e509]
+                        - generic [ref=f7e511]: Рекомендуем
+                    - generic [ref=f7e514]:
+                      - img [ref=f7e515]
+                      - text: до 10 дней, от 252 ₽
+                - generic [ref=f7e517]:
+                  - link [ref=f7e518] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009991576539.html?mixer_rcmd_bucket_id=promoAdDistanceMaxed&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000050780656254&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e521]:
+                      - img "Концентратор и адаптер док-станции Surface Pro 12 с 4K HDMI Thunderbolt 4 USB3.0, слотом для аудио SD/TF-карты 3,5 мм для Surface Pro 12" [ref=f7e523]
+                      - img "Концентратор и адаптер док-станции Surface Pro 12 с 4K HDMI Thunderbolt 4 USB3.0, слотом для аудио SD/TF-карты 3,5 мм для Surface Pro 12" [ref=f7e526]
+                      - img "Концентратор и адаптер док-станции Surface Pro 12 с 4K HDMI Thunderbolt 4 USB3.0, слотом для аудио SD/TF-карты 3,5 мм для Surface Pro 12" [ref=f7e529]
+                      - img "Концентратор и адаптер док-станции Surface Pro 12 с 4K HDMI Thunderbolt 4 USB3.0, слотом для аудио SD/TF-карты 3,5 мм для Surface Pro 12" [ref=f7e532]
+                      - img "Концентратор и адаптер док-станции Surface Pro 12 с 4K HDMI Thunderbolt 4 USB3.0, слотом для аудио SD/TF-карты 3,5 мм для Surface Pro 12" [ref=f7e535]
+                      - img "Концентратор и адаптер док-станции Surface Pro 12 с 4K HDMI Thunderbolt 4 USB3.0, слотом для аудио SD/TF-карты 3,5 мм для Surface Pro 12" [ref=f7e538]
+                      - img "Концентратор и адаптер док-станции Surface Pro 12 с 4K HDMI Thunderbolt 4 USB3.0, слотом для аудио SD/TF-карты 3,5 мм для Surface Pro 12" [ref=f7e541]
+                    - img [ref=f7e553]
+                  - link "3 401 ₽ -23% 2 619 ₽ 5.0 42 купили Концентратор и адаптер док-станции Surface Pro 12 с 4K HDMI Thunderbolt 4 USB3.0, слотом для аудио SD/TF-карты 3,5 мм для Surface Pro 12 Рекомендуем до 14 дней, бесплатно" [ref=f7e556] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009991576539.html?mixer_rcmd_bucket_id=promoAdDistanceMaxed&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000050780656254&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e557]:
+                      - generic [ref=f7e559]:
+                        - generic [ref=f7e560]: 3 401 ₽
+                        - generic [ref=f7e561]: "-23%"
+                      - generic [ref=f7e563]: 2 619 ₽
+                    - generic [ref=f7e564]:
+                      - generic [ref=f7e565]:
+                        - generic [ref=f7e566]:
+                          - img [ref=f7e567]
+                          - generic [ref=f7e568]: "5.0"
+                        - generic [ref=f7e570]: 42 купили
+                      - generic [ref=f7e571]:
+                        - generic "Концентратор и адаптер док-станции Surface Pro 12 с 4K HDMI Thunderbolt 4 USB3.0, слотом для аудио SD/TF-карты 3,5 мм для Surface Pro 12" [ref=f7e572]
+                        - generic [ref=f7e574]: Рекомендуем
+                    - generic [ref=f7e577]:
+                      - img [ref=f7e578]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e580]:
+                  - link "WYMECT Концентратор USB Type-C серебристый WYMECT Концентратор USB Type-C серебристый WYMECT Концентратор USB Type-C серебристый WYMECT Концентратор USB Type-C серебристый WYMECT Концентратор USB Type-C серебристый WYMECT Концентратор USB Type-C серебристый WYMECT Концентратор USB Type-C серебристый" [ref=f7e581] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005007781860606.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&sku_id=12000042186291203&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e584]:
+                      - img "WYMECT Концентратор USB Type-C серебристый" [ref=f7e586]
+                      - img "WYMECT Концентратор USB Type-C серебристый" [ref=f7e589]
+                      - img "WYMECT Концентратор USB Type-C серебристый" [ref=f7e592]
+                      - img "WYMECT Концентратор USB Type-C серебристый" [ref=f7e595]
+                      - img "WYMECT Концентратор USB Type-C серебристый" [ref=f7e598]
+                      - img "WYMECT Концентратор USB Type-C серебристый" [ref=f7e601]
+                      - img "WYMECT Концентратор USB Type-C серебристый" [ref=f7e604]
+                    - img [ref=f7e616]
+                  - link "582 ₽ -18% 479 ₽ 4.4 345 купили WYMECT Концентратор USB Type-C серебристый от 234 ₽" [ref=f7e619] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005007781860606.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&sku_id=12000042186291203&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e620]:
+                      - generic [ref=f7e622]:
+                        - generic [ref=f7e623]: 582 ₽
+                        - generic [ref=f7e624]: "-18%"
+                      - generic [ref=f7e626]: 479 ₽
+                    - generic [ref=f7e627]:
+                      - generic [ref=f7e628]:
+                        - generic [ref=f7e629]:
+                          - img [ref=f7e630]
+                          - generic [ref=f7e631]: "4.4"
+                        - generic [ref=f7e633]: 345 купили
+                      - generic "WYMECT Концентратор USB Type-C серебристый" [ref=f7e635]
+                    - generic [ref=f7e638]:
+                      - img [ref=f7e639]
+                      - text: от 234 ₽
+                - generic [ref=f7e641]:
+                  - link "ORICO USB 3.2 док-станция 7 портов ORICO USB 3.2 док-станция 7 портов ORICO USB 3.2 док-станция 7 портов ORICO USB 3.2 док-станция 7 портов ORICO USB 3.2 док-станция 7 портов ORICO USB 3.2 док-станция 7 портов ORICO USB 3.2 док-станция 7 портов" [ref=f7e642] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005007683614909.html?mixer_rcmd_bucket_id=promoAdDistanceMaxed&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000041868103585&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e645]:
+                      - img "ORICO USB 3.2 док-станция 7 портов" [ref=f7e647]
+                      - img "ORICO USB 3.2 док-станция 7 портов" [ref=f7e650]
+                      - img "ORICO USB 3.2 док-станция 7 портов" [ref=f7e653]
+                      - img "ORICO USB 3.2 док-станция 7 портов" [ref=f7e656]
+                      - img "ORICO USB 3.2 док-станция 7 портов" [ref=f7e659]
+                      - img "ORICO USB 3.2 док-станция 7 портов" [ref=f7e662]
+                      - img "ORICO USB 3.2 док-станция 7 портов" [ref=f7e665]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e677]
+                  - link "7 640 ₽ -41% 4 479 ₽ 4.8 2 973 купили ORICO USB 3.2 док-станция 7 портов Рекомендуем до 14 дней, бесплатно" [ref=f7e680] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005007683614909.html?mixer_rcmd_bucket_id=promoAdDistanceMaxed&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000041868103585&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e681]:
+                      - generic [ref=f7e683]:
+                        - generic [ref=f7e684]: 7 640 ₽
+                        - generic [ref=f7e685]: "-41%"
+                      - generic [ref=f7e687]: 4 479 ₽
+                    - generic [ref=f7e688]:
+                      - generic [ref=f7e689]:
+                        - generic [ref=f7e690]:
+                          - img [ref=f7e691]
+                          - generic [ref=f7e692]: "4.8"
+                        - generic [ref=f7e694]: 2 973 купили
+                      - generic [ref=f7e695]:
+                        - generic "ORICO USB 3.2 док-станция 7 портов" [ref=f7e696]
+                        - generic [ref=f7e698]: Рекомендуем
+                    - generic [ref=f7e701]:
+                      - img [ref=f7e702]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e704]:
+                  - 'link "Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона" [ref=f7e705] [cursor=pointer]':
+                    - /url: https://aliexpress.ru/item/1005011529453639.html?mixer_rcmd_bucket_id=promoAdDistanceMaxed&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000057361857983&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e708]:
+                      - 'img "Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона" [ref=f7e710]'
+                      - 'img "Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона" [ref=f7e713]'
+                      - 'img "Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона" [ref=f7e716]'
+                      - 'img "Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона" [ref=f7e719]'
+                      - 'img "Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона" [ref=f7e722]'
+                      - 'img "Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона" [ref=f7e725]'
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e736]
+                  - 'link "1 032 ₽ -8% 950 ₽ 4.7 13 купили Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона Рекомендуем до 14 дней, бесплатно" [ref=f7e739] [cursor=pointer]':
+                    - /url: https://aliexpress.ru/item/1005011529453639.html?mixer_rcmd_bucket_id=promoAdDistanceMaxed&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000057361857983&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e740]:
+                      - generic [ref=f7e742]:
+                        - generic [ref=f7e743]: 1 032 ₽
+                        - generic [ref=f7e744]: "-8%"
+                      - generic [ref=f7e746]: 950 ₽
+                    - generic [ref=f7e747]:
+                      - generic [ref=f7e748]:
+                        - generic [ref=f7e749]:
+                          - img [ref=f7e750]
+                          - generic [ref=f7e751]: "4.7"
+                        - generic [ref=f7e753]: 13 купили
+                      - generic [ref=f7e754]:
+                        - 'generic "Многопортовый USB-аудиоадаптер: расширение портов USB + Type-C, стереозвуковая карта с независимым регулятором громкости и переключателем микрофона" [ref=f7e755]'
+                        - generic [ref=f7e757]: Рекомендуем
+                    - generic [ref=f7e760]:
+                      - img [ref=f7e761]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e763]:
+                  - link [ref=f7e764] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005006212182570.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&sku_id=12000036302028944&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e767]:
+                      - img "Многофункциональный концентратор 6 в 1 Type-C, разъем 3,55 мм, PD100W, USB3.0/USB2.0/USB3.1, совместимый с HDMI USB-разветвитель" [ref=f7e769]
+                      - img "Многофункциональный концентратор 6 в 1 Type-C, разъем 3,55 мм, PD100W, USB3.0/USB2.0/USB3.1, совместимый с HDMI USB-разветвитель" [ref=f7e772]
+                      - img "Многофункциональный концентратор 6 в 1 Type-C, разъем 3,55 мм, PD100W, USB3.0/USB2.0/USB3.1, совместимый с HDMI USB-разветвитель" [ref=f7e775]
+                      - img "Многофункциональный концентратор 6 в 1 Type-C, разъем 3,55 мм, PD100W, USB3.0/USB2.0/USB3.1, совместимый с HDMI USB-разветвитель" [ref=f7e778]
+                      - img "Многофункциональный концентратор 6 в 1 Type-C, разъем 3,55 мм, PD100W, USB3.0/USB2.0/USB3.1, совместимый с HDMI USB-разветвитель" [ref=f7e781]
+                      - img "Многофункциональный концентратор 6 в 1 Type-C, разъем 3,55 мм, PD100W, USB3.0/USB2.0/USB3.1, совместимый с HDMI USB-разветвитель" [ref=f7e784]
+                      - img "Многофункциональный концентратор 6 в 1 Type-C, разъем 3,55 мм, PD100W, USB3.0/USB2.0/USB3.1, совместимый с HDMI USB-разветвитель" [ref=f7e787]
+                    - img [ref=f7e799]
+                  - link "852 ₽ -50% 429 ₽ 4.5 552 купили Многофункциональный концентратор 6 в 1 Type-C, разъем 3,55 мм, PD100W, USB3.0/USB2.0/USB3.1, совместимый с HDMI USB-разветвитель от 219 ₽" [ref=f7e802] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005006212182570.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&sku_id=12000036302028944&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e803]:
+                      - generic [ref=f7e805]:
+                        - generic [ref=f7e806]: 852 ₽
+                        - generic [ref=f7e807]: "-50%"
+                      - generic [ref=f7e809]: 429 ₽
+                    - generic [ref=f7e810]:
+                      - generic [ref=f7e811]:
+                        - generic [ref=f7e812]:
+                          - img [ref=f7e813]
+                          - generic [ref=f7e814]: "4.5"
+                        - generic [ref=f7e816]: 552 купили
+                      - generic "Многофункциональный концентратор 6 в 1 Type-C, разъем 3,55 мм, PD100W, USB3.0/USB2.0/USB3.1, совместимый с HDMI USB-разветвитель" [ref=f7e818]
+                    - generic [ref=f7e821]:
+                      - img [ref=f7e822]
+                      - text: от 219 ₽
+                - generic [ref=f7e824]:
+                  - link "OUTMIX USB-C хаб для iPad Pro/Macbook OUTMIX USB-C хаб для iPad Pro/Macbook OUTMIX USB-C хаб для iPad Pro/Macbook OUTMIX USB-C хаб для iPad Pro/Macbook OUTMIX USB-C хаб для iPad Pro/Macbook OUTMIX USB-C хаб для iPad Pro/Macbook OUTMIX USB-C хаб для iPad Pro/Macbook" [ref=f7e825] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005002339234516.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000020173270039&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e828]:
+                      - img "OUTMIX USB-C хаб для iPad Pro/Macbook" [ref=f7e830]
+                      - img "OUTMIX USB-C хаб для iPad Pro/Macbook" [ref=f7e833]
+                      - img "OUTMIX USB-C хаб для iPad Pro/Macbook" [ref=f7e836]
+                      - img "OUTMIX USB-C хаб для iPad Pro/Macbook" [ref=f7e839]
+                      - img "OUTMIX USB-C хаб для iPad Pro/Macbook" [ref=f7e842]
+                      - img "OUTMIX USB-C хаб для iPad Pro/Macbook" [ref=f7e845]
+                      - img "OUTMIX USB-C хаб для iPad Pro/Macbook" [ref=f7e848]
+                    - img [ref=f7e860]
+                  - link "1 925 ₽ -33% 1 290 ₽ 4.8 37 купили OUTMIX USB-C хаб для iPad Pro/Macbook до 14 дней, бесплатно" [ref=f7e863] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005002339234516.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000020173270039&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e864]:
+                      - generic [ref=f7e866]:
+                        - generic [ref=f7e867]: 1 925 ₽
+                        - generic [ref=f7e868]: "-33%"
+                      - generic [ref=f7e870]: 1 290 ₽
+                    - generic [ref=f7e871]:
+                      - generic [ref=f7e872]:
+                        - generic [ref=f7e873]:
+                          - img [ref=f7e874]
+                          - generic [ref=f7e875]: "4.8"
+                        - generic [ref=f7e877]: 37 купили
+                      - generic "OUTMIX USB-C хаб для iPad Pro/Macbook" [ref=f7e879]
+                    - generic [ref=f7e882]:
+                      - img [ref=f7e883]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e885]:
+                  - link "EQP Разветвитель USB C 100 Вт 2 в 1 EQP Разветвитель USB C 100 Вт 2 в 1 EQP Разветвитель USB C 100 Вт 2 в 1 EQP Разветвитель USB C 100 Вт 2 в 1 EQP Разветвитель USB C 100 Вт 2 в 1 EQP Разветвитель USB C 100 Вт 2 в 1 EQP Разветвитель USB C 100 Вт 2 в 1" [ref=f7e886] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009743198362.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000050015571332&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e889]:
+                      - img "EQP Разветвитель USB C 100 Вт 2 в 1" [ref=f7e891]
+                      - img "EQP Разветвитель USB C 100 Вт 2 в 1" [ref=f7e894]
+                      - img "EQP Разветвитель USB C 100 Вт 2 в 1" [ref=f7e897]
+                      - img "EQP Разветвитель USB C 100 Вт 2 в 1" [ref=f7e900]
+                      - img "EQP Разветвитель USB C 100 Вт 2 в 1" [ref=f7e903]
+                      - img "EQP Разветвитель USB C 100 Вт 2 в 1" [ref=f7e906]
+                      - img "EQP Разветвитель USB C 100 Вт 2 в 1" [ref=f7e909]
+                    - img [ref=f7e921]
+                  - link "612 ₽ -54% 279 ₽ 4.8 201 купили EQP Разветвитель USB C 100 Вт 2 в 1 до 14 дней, от 252 ₽" [ref=f7e924] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009743198362.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000050015571332&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e925]:
+                      - generic [ref=f7e927]:
+                        - generic [ref=f7e928]: 612 ₽
+                        - generic [ref=f7e929]: "-54%"
+                      - generic [ref=f7e931]: 279 ₽
+                    - generic [ref=f7e932]:
+                      - generic [ref=f7e933]:
+                        - generic [ref=f7e934]:
+                          - img [ref=f7e935]
+                          - generic [ref=f7e936]: "4.8"
+                        - generic [ref=f7e938]: 201 купили
+                      - generic "EQP Разветвитель USB C 100 Вт 2 в 1" [ref=f7e940]
+                    - generic [ref=f7e943]:
+                      - img [ref=f7e944]
+                      - text: до 14 дней, от 252 ₽
+                - generic [ref=f7e946]:
+                  - link "ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung" [ref=f7e947] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008054068671.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000048179700630&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e950]:
+                      - img "ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung" [ref=f7e952]
+                      - img "ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung" [ref=f7e955]
+                      - img "ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung" [ref=f7e958]
+                      - img "ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung" [ref=f7e961]
+                      - img "ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung" [ref=f7e964]
+                      - img "ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung" [ref=f7e967]
+                      - img "ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung" [ref=f7e970]
+                    - img [ref=f7e982]
+                  - link "379 ₽ 4.6 6 020 купили ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung до 14 дней, от 218 ₽" [ref=f7e985] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008054068671.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000048179700630&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e989]: 379 ₽
+                    - generic [ref=f7e990]:
+                      - generic [ref=f7e991]:
+                        - generic [ref=f7e992]:
+                          - img [ref=f7e993]
+                          - generic [ref=f7e994]: "4.6"
+                        - generic [ref=f7e996]: 6 020 купили
+                      - generic "ULOOPKY 5-портовый USB C хаб для MacBook iPad Samsung" [ref=f7e998]
+                    - generic [ref=f7e1001]:
+                      - img [ref=f7e1002]
+                      - text: до 14 дней, от 218 ₽
+                - generic [ref=f7e1004]:
+                  - link "okdeals 4 в 1 USB-хаб Type-C okdeals 4 в 1 USB-хаб Type-C okdeals 4 в 1 USB-хаб Type-C okdeals 4 в 1 USB-хаб Type-C okdeals 4 в 1 USB-хаб Type-C okdeals 4 в 1 USB-хаб Type-C okdeals 4 в 1 USB-хаб Type-C" [ref=f7e1005] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005006367704794.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000036918024664&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1008]:
+                      - img "okdeals 4 в 1 USB-хаб Type-C" [ref=f7e1010]
+                      - img "okdeals 4 в 1 USB-хаб Type-C" [ref=f7e1013]
+                      - img "okdeals 4 в 1 USB-хаб Type-C" [ref=f7e1016]
+                      - img "okdeals 4 в 1 USB-хаб Type-C" [ref=f7e1019]
+                      - img "okdeals 4 в 1 USB-хаб Type-C" [ref=f7e1022]
+                      - img "okdeals 4 в 1 USB-хаб Type-C" [ref=f7e1025]
+                      - img "okdeals 4 в 1 USB-хаб Type-C" [ref=f7e1028]
+                    - img [ref=f7e1040]
+                  - link "382 ₽ -30% 269 ₽ 4.8 65 купили okdeals 4 в 1 USB-хаб Type-C до 14 дней, от 75 ₽" [ref=f7e1043] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005006367704794.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000036918024664&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1044]:
+                      - generic [ref=f7e1046]:
+                        - generic [ref=f7e1047]: 382 ₽
+                        - generic [ref=f7e1048]: "-30%"
+                      - generic [ref=f7e1050]: 269 ₽
+                    - generic [ref=f7e1051]:
+                      - generic [ref=f7e1052]:
+                        - generic [ref=f7e1053]:
+                          - img [ref=f7e1054]
+                          - generic [ref=f7e1055]: "4.8"
+                        - generic [ref=f7e1057]: 65 купили
+                      - generic "okdeals 4 в 1 USB-хаб Type-C" [ref=f7e1059]
+                    - generic [ref=f7e1062]:
+                      - img [ref=f7e1063]
+                      - text: до 14 дней, от 75 ₽
+                - generic [ref=f7e1065]:
+                  - link "Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C" [ref=f7e1066] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005007937852921.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000042938476750&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1069]:
+                      - img "Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C" [ref=f7e1071]
+                      - img "Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C" [ref=f7e1074]
+                      - img "Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C" [ref=f7e1077]
+                      - img "Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C" [ref=f7e1080]
+                      - img "Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C" [ref=f7e1083]
+                      - img "Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C" [ref=f7e1086]
+                      - img "Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C" [ref=f7e1089]
+                    - img [ref=f7e1101]
+                  - link "279 ₽ 3.3 26 купили Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C до 14 дней, от 50 ₽" [ref=f7e1104] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005007937852921.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000042938476750&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1108]: 279 ₽
+                    - generic [ref=f7e1109]:
+                      - generic [ref=f7e1110]:
+                        - generic [ref=f7e1111]:
+                          - img [ref=f7e1112]
+                          - generic [ref=f7e1113]: "3.3"
+                        - generic [ref=f7e1115]: 26 купили
+                      - generic "Адаптер-концентратор USB C «мама» на двойной гнездовой разветвитель-конвертер Тип C Соединитель-удлинитель для устройства USB C" [ref=f7e1117]
+                    - generic [ref=f7e1120]:
+                      - img [ref=f7e1121]
+                      - text: до 14 дней, от 50 ₽
+                - generic [ref=f7e1123]:
+                  - link "kebidumei 8-в-2 USB-C хаб kebidumei 8-в-2 USB-C хаб kebidumei 8-в-2 USB-C хаб kebidumei 8-в-2 USB-C хаб kebidumei 8-в-2 USB-C хаб kebidumei 8-в-2 USB-C хаб kebidumei 8-в-2 USB-C хаб" [ref=f7e1124] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009441786005.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_FULFILLMENT_STD&sku_id=12000049111362127&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1127]:
+                      - img "kebidumei 8-в-2 USB-C хаб" [ref=f7e1129]
+                      - img "kebidumei 8-в-2 USB-C хаб" [ref=f7e1132]
+                      - img "kebidumei 8-в-2 USB-C хаб" [ref=f7e1135]
+                      - img "kebidumei 8-в-2 USB-C хаб" [ref=f7e1138]
+                      - img "kebidumei 8-в-2 USB-C хаб" [ref=f7e1141]
+                      - img "kebidumei 8-в-2 USB-C хаб" [ref=f7e1144]
+                      - img "kebidumei 8-в-2 USB-C хаб" [ref=f7e1147]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e1159]
+                  - link "1 045 ₽ -69% 322 ₽ 4.6 2 922 купили kebidumei 8-в-2 USB-C хаб до 14 дней, бесплатно" [ref=f7e1162] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009441786005.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_FULFILLMENT_STD&sku_id=12000049111362127&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1163]:
+                      - generic [ref=f7e1165]:
+                        - generic [ref=f7e1166]: 1 045 ₽
+                        - generic [ref=f7e1167]: "-69%"
+                      - generic [ref=f7e1169]: 322 ₽
+                    - generic [ref=f7e1170]:
+                      - generic [ref=f7e1171]:
+                        - generic [ref=f7e1172]:
+                          - img [ref=f7e1173]
+                          - generic [ref=f7e1174]: "4.6"
+                        - generic [ref=f7e1176]: 2 922 купили
+                      - generic "kebidumei 8-в-2 USB-C хаб" [ref=f7e1178]
+                    - generic [ref=f7e1181]:
+                      - img [ref=f7e1182]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e1184]:
+                  - link "OLOOPKY 5-портовый USB хаб Type C OLOOPKY 5-портовый USB хаб Type C OLOOPKY 5-портовый USB хаб Type C OLOOPKY 5-портовый USB хаб Type C OLOOPKY 5-портовый USB хаб Type C OLOOPKY 5-портовый USB хаб Type C OLOOPKY 5-портовый USB хаб Type C" [ref=f7e1185] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005004304774740.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000028692162536&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1188]:
+                      - img "OLOOPKY 5-портовый USB хаб Type C" [ref=f7e1190]
+                      - img "OLOOPKY 5-портовый USB хаб Type C" [ref=f7e1193]
+                      - img "OLOOPKY 5-портовый USB хаб Type C" [ref=f7e1196]
+                      - img "OLOOPKY 5-портовый USB хаб Type C" [ref=f7e1199]
+                      - img "OLOOPKY 5-портовый USB хаб Type C" [ref=f7e1202]
+                      - img "OLOOPKY 5-портовый USB хаб Type C" [ref=f7e1205]
+                      - img "OLOOPKY 5-портовый USB хаб Type C" [ref=f7e1208]
+                    - img [ref=f7e1220]
+                  - link "279 ₽ 4.6 13 191 купили OLOOPKY 5-портовый USB хаб Type C до 14 дней, от 71 ₽" [ref=f7e1223] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005004304774740.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000028692162536&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1227]: 279 ₽
+                    - generic [ref=f7e1228]:
+                      - generic [ref=f7e1229]:
+                        - generic [ref=f7e1230]:
+                          - img [ref=f7e1231]
+                          - generic [ref=f7e1232]: "4.6"
+                        - generic [ref=f7e1234]: 13 191 купили
+                      - generic "OLOOPKY 5-портовый USB хаб Type C" [ref=f7e1236]
+                    - generic [ref=f7e1239]:
+                      - img [ref=f7e1240]
+                      - text: до 14 дней, от 71 ₽
+                - generic [ref=f7e1242]:
+                  - link "FONKEN USB концентратор 8 в 1 FONKEN USB концентратор 8 в 1 FONKEN USB концентратор 8 в 1 FONKEN USB концентратор 8 в 1 FONKEN USB концентратор 8 в 1 FONKEN USB концентратор 8 в 1 FONKEN USB концентратор 8 в 1" [ref=f7e1243] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009901522735.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000050524391021&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1246]:
+                      - img "FONKEN USB концентратор 8 в 1" [ref=f7e1248]
+                      - img "FONKEN USB концентратор 8 в 1" [ref=f7e1251]
+                      - img "FONKEN USB концентратор 8 в 1" [ref=f7e1254]
+                      - img "FONKEN USB концентратор 8 в 1" [ref=f7e1257]
+                      - img "FONKEN USB концентратор 8 в 1" [ref=f7e1260]
+                      - img "FONKEN USB концентратор 8 в 1" [ref=f7e1263]
+                      - img "FONKEN USB концентратор 8 в 1" [ref=f7e1266]
+                    - img [ref=f7e1278]
+                  - link "298 ₽ -30% 209 ₽ 5.0 20 купили FONKEN USB концентратор 8 в 1 до 14 дней, от 315 ₽" [ref=f7e1281] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009901522735.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000050524391021&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1282]:
+                      - generic [ref=f7e1284]:
+                        - generic [ref=f7e1285]: 298 ₽
+                        - generic [ref=f7e1286]: "-30%"
+                      - generic [ref=f7e1288]: 209 ₽
+                    - generic [ref=f7e1289]:
+                      - generic [ref=f7e1290]:
+                        - generic [ref=f7e1291]:
+                          - img [ref=f7e1292]
+                          - generic [ref=f7e1293]: "5.0"
+                        - generic [ref=f7e1295]: 20 купили
+                      - generic "FONKEN USB концентратор 8 в 1" [ref=f7e1297]
+                    - generic [ref=f7e1300]:
+                      - img [ref=f7e1301]
+                      - text: до 14 дней, от 315 ₽
+                - generic [ref=f7e1303]:
+                  - link "USB-C концентратор 8 в 2 USB-C концентратор 8 в 2 USB-C концентратор 8 в 2 USB-C концентратор 8 в 2 USB-C концентратор 8 в 2 USB-C концентратор 8 в 2 USB-C концентратор 8 в 2" [ref=f7e1304] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009188966761.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_FULFILLMENT_STD&sku_id=12000048242756954&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1307]:
+                      - img "USB-C концентратор 8 в 2" [ref=f7e1309]
+                      - img "USB-C концентратор 8 в 2" [ref=f7e1312]
+                      - img "USB-C концентратор 8 в 2" [ref=f7e1315]
+                      - img "USB-C концентратор 8 в 2" [ref=f7e1318]
+                      - img "USB-C концентратор 8 в 2" [ref=f7e1321]
+                      - img "USB-C концентратор 8 в 2" [ref=f7e1324]
+                      - img "USB-C концентратор 8 в 2" [ref=f7e1327]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e1339]
+                  - link "986 ₽ -66% 339 ₽ 4.5 146 купили USB-C концентратор 8 в 2 до 14 дней, бесплатно" [ref=f7e1342] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009188966761.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_FULFILLMENT_STD&sku_id=12000048242756954&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1343]:
+                      - generic [ref=f7e1345]:
+                        - generic [ref=f7e1346]: 986 ₽
+                        - generic [ref=f7e1347]: "-66%"
+                      - generic [ref=f7e1349]: 339 ₽
+                    - generic [ref=f7e1350]:
+                      - generic [ref=f7e1351]:
+                        - generic [ref=f7e1352]:
+                          - img [ref=f7e1353]
+                          - generic [ref=f7e1354]: "4.5"
+                        - generic [ref=f7e1356]: 146 купили
+                      - generic "USB-C концентратор 8 в 2" [ref=f7e1358]
+                    - generic [ref=f7e1361]:
+                      - img [ref=f7e1362]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e1364]:
+                  - link "USB-хаб Type-C USB-хаб Type-C USB-хаб Type-C USB-хаб Type-C USB-хаб Type-C USB-хаб Type-C USB-хаб Type-C" [ref=f7e1365] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008846916793.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_FULFILLMENT_STD&sku_id=12000046930473074&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1368]:
+                      - img "USB-хаб Type-C" [ref=f7e1370]
+                      - img "USB-хаб Type-C" [ref=f7e1373]
+                      - img "USB-хаб Type-C" [ref=f7e1376]
+                      - img "USB-хаб Type-C" [ref=f7e1379]
+                      - img "USB-хаб Type-C" [ref=f7e1382]
+                      - img "USB-хаб Type-C" [ref=f7e1385]
+                      - img "USB-хаб Type-C" [ref=f7e1388]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e1400]
+                  - link "509 ₽ 5.0 2 купили USB-хаб Type-C до 14 дней, бесплатно" [ref=f7e1403] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008846916793.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_FULFILLMENT_STD&sku_id=12000046930473074&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1407]: 509 ₽
+                    - generic [ref=f7e1408]:
+                      - generic [ref=f7e1409]:
+                        - generic [ref=f7e1410]:
+                          - img [ref=f7e1411]
+                          - generic [ref=f7e1412]: "5.0"
+                        - generic [ref=f7e1414]: 2 купили
+                      - generic "USB-хаб Type-C" [ref=f7e1416]
+                    - generic [ref=f7e1419]:
+                      - img [ref=f7e1420]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e1422]:
+                  - link "ORICO 4-портовый USB 3.0 концентратор ORICO 4-портовый USB 3.0 концентратор ORICO 4-портовый USB 3.0 концентратор ORICO 4-портовый USB 3.0 концентратор ORICO 4-портовый USB 3.0 концентратор ORICO 4-портовый USB 3.0 концентратор ORICO 4-портовый USB 3.0 концентратор" [ref=f7e1423] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005005292045061.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CN_OWH_GD_RU_PUDO_PROV&sku_id=12000033742214064&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1426]:
+                      - img "ORICO 4-портовый USB 3.0 концентратор" [ref=f7e1428]
+                      - img "ORICO 4-портовый USB 3.0 концентратор" [ref=f7e1431]
+                      - img "ORICO 4-портовый USB 3.0 концентратор" [ref=f7e1434]
+                      - img "ORICO 4-портовый USB 3.0 концентратор" [ref=f7e1437]
+                      - img "ORICO 4-портовый USB 3.0 концентратор" [ref=f7e1440]
+                      - img "ORICO 4-портовый USB 3.0 концентратор" [ref=f7e1443]
+                      - img "ORICO 4-портовый USB 3.0 концентратор" [ref=f7e1446]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e1458]
+                  - link "1 309 ₽ -57% 569 ₽ 4.9 2 604 купили ORICO 4-портовый USB 3.0 концентратор до 10 дней, бесплатно" [ref=f7e1461] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005005292045061.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CN_OWH_GD_RU_PUDO_PROV&sku_id=12000033742214064&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1462]:
+                      - generic [ref=f7e1464]:
+                        - generic [ref=f7e1465]: 1 309 ₽
+                        - generic [ref=f7e1466]: "-57%"
+                      - generic [ref=f7e1468]: 569 ₽
+                    - generic [ref=f7e1469]:
+                      - generic [ref=f7e1470]:
+                        - generic [ref=f7e1471]:
+                          - img [ref=f7e1472]
+                          - generic [ref=f7e1473]: "4.9"
+                        - generic [ref=f7e1475]: 2 604 купили
+                      - generic "ORICO 4-портовый USB 3.0 концентратор" [ref=f7e1477]
+                    - generic [ref=f7e1480]:
+                      - img [ref=f7e1481]
+                      - text: до 10 дней, бесплатно
+                - generic [ref=f7e1483]:
+                  - link "OLOOPKY USB концентратор 8 в 1 OLOOPKY USB концентратор 8 в 1 OLOOPKY USB концентратор 8 в 1 OLOOPKY USB концентратор 8 в 1 OLOOPKY USB концентратор 8 в 1 OLOOPKY USB концентратор 8 в 1 OLOOPKY USB концентратор 8 в 1" [ref=f7e1484] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008036734755.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000043359505110&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1487]:
+                      - img "OLOOPKY USB концентратор 8 в 1" [ref=f7e1489]
+                      - img "OLOOPKY USB концентратор 8 в 1" [ref=f7e1492]
+                      - img "OLOOPKY USB концентратор 8 в 1" [ref=f7e1495]
+                      - img "OLOOPKY USB концентратор 8 в 1" [ref=f7e1498]
+                      - img "OLOOPKY USB концентратор 8 в 1" [ref=f7e1501]
+                      - img "OLOOPKY USB концентратор 8 в 1" [ref=f7e1504]
+                      - img "OLOOPKY USB концентратор 8 в 1" [ref=f7e1507]
+                    - img [ref=f7e1519]
+                  - link "804 ₽ -50% 402 ₽ 4.7 4 972 купили OLOOPKY USB концентратор 8 в 1 до 14 дней, бесплатно" [ref=f7e1522] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008036734755.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000043359505110&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1523]:
+                      - generic [ref=f7e1525]:
+                        - generic [ref=f7e1526]: 804 ₽
+                        - generic [ref=f7e1527]: "-50%"
+                      - generic [ref=f7e1529]: 402 ₽
+                    - generic [ref=f7e1530]:
+                      - generic [ref=f7e1531]:
+                        - generic [ref=f7e1532]:
+                          - img [ref=f7e1533]
+                          - generic [ref=f7e1534]: "4.7"
+                        - generic [ref=f7e1536]: 4 972 купили
+                      - generic "OLOOPKY USB концентратор 8 в 1" [ref=f7e1538]
+                    - generic [ref=f7e1541]:
+                      - img [ref=f7e1542]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e1544]:
+                  - link "kebidumei 8-в-2 USB-хаб для Macbook kebidumei 8-в-2 USB-хаб для Macbook kebidumei 8-в-2 USB-хаб для Macbook kebidumei 8-в-2 USB-хаб для Macbook kebidumei 8-в-2 USB-хаб для Macbook kebidumei 8-в-2 USB-хаб для Macbook kebidumei 8-в-2 USB-хаб для Macbook" [ref=f7e1545] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005007724034357.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000042099207710&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1548]:
+                      - img "kebidumei 8-в-2 USB-хаб для Macbook" [ref=f7e1550]
+                      - img "kebidumei 8-в-2 USB-хаб для Macbook" [ref=f7e1553]
+                      - img "kebidumei 8-в-2 USB-хаб для Macbook" [ref=f7e1556]
+                      - img "kebidumei 8-в-2 USB-хаб для Macbook" [ref=f7e1559]
+                      - img "kebidumei 8-в-2 USB-хаб для Macbook" [ref=f7e1562]
+                      - img "kebidumei 8-в-2 USB-хаб для Macbook" [ref=f7e1565]
+                      - img "kebidumei 8-в-2 USB-хаб для Macbook" [ref=f7e1568]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e1580]
+                  - link "472 ₽ -51% 229 ₽ 4.7 162 купили kebidumei 8-в-2 USB-хаб для Macbook до 14 дней, от 278 ₽" [ref=f7e1583] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005007724034357.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000042099207710&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1584]:
+                      - generic [ref=f7e1586]:
+                        - generic [ref=f7e1587]: 472 ₽
+                        - generic [ref=f7e1588]: "-51%"
+                      - generic [ref=f7e1590]: 229 ₽
+                    - generic [ref=f7e1591]:
+                      - generic [ref=f7e1592]:
+                        - generic [ref=f7e1593]:
+                          - img [ref=f7e1594]
+                          - generic [ref=f7e1595]: "4.7"
+                        - generic [ref=f7e1597]: 162 купили
+                      - generic "kebidumei 8-в-2 USB-хаб для Macbook" [ref=f7e1599]
+                    - generic [ref=f7e1602]:
+                      - img [ref=f7e1603]
+                      - text: до 14 дней, от 278 ₽
+                - generic [ref=f7e1605]:
+                  - link "Vention 5-в-1 USB-хаб HDMI 4K 60 Гц Vention 5-в-1 USB-хаб HDMI 4K 60 Гц Vention 5-в-1 USB-хаб HDMI 4K 60 Гц Vention 5-в-1 USB-хаб HDMI 4K 60 Гц Vention 5-в-1 USB-хаб HDMI 4K 60 Гц Vention 5-в-1 USB-хаб HDMI 4K 60 Гц Vention 5-в-1 USB-хаб HDMI 4K 60 Гц" [ref=f7e1606] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009287176241.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000048626197154&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1609]:
+                      - img "Vention 5-в-1 USB-хаб HDMI 4K 60 Гц" [ref=f7e1611]
+                      - img "Vention 5-в-1 USB-хаб HDMI 4K 60 Гц" [ref=f7e1614]
+                      - img "Vention 5-в-1 USB-хаб HDMI 4K 60 Гц" [ref=f7e1617]
+                      - img "Vention 5-в-1 USB-хаб HDMI 4K 60 Гц" [ref=f7e1620]
+                      - img "Vention 5-в-1 USB-хаб HDMI 4K 60 Гц" [ref=f7e1623]
+                      - img "Vention 5-в-1 USB-хаб HDMI 4K 60 Гц" [ref=f7e1626]
+                      - img "Vention 5-в-1 USB-хаб HDMI 4K 60 Гц" [ref=f7e1629]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e1641]
+                  - link "2 167 ₽ -61% 849 ₽ 4.7 128 купили Vention 5-в-1 USB-хаб HDMI 4K 60 Гц до 14 дней, бесплатно" [ref=f7e1644] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009287176241.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000048626197154&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1645]:
+                      - generic [ref=f7e1647]:
+                        - generic [ref=f7e1648]: 2 167 ₽
+                        - generic [ref=f7e1649]: "-61%"
+                      - generic [ref=f7e1651]: 849 ₽
+                    - generic [ref=f7e1652]:
+                      - generic [ref=f7e1653]:
+                        - generic [ref=f7e1654]:
+                          - img [ref=f7e1655]
+                          - generic [ref=f7e1656]: "4.7"
+                        - generic [ref=f7e1658]: 128 купили
+                      - generic "Vention 5-в-1 USB-хаб HDMI 4K 60 Гц" [ref=f7e1660]
+                    - generic [ref=f7e1663]:
+                      - img [ref=f7e1664]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e1666]:
+                  - link "TelDaykemei 8 в 1 USB-хаб серый TelDaykemei 8 в 1 USB-хаб серый TelDaykemei 8 в 1 USB-хаб серый TelDaykemei 8 в 1 USB-хаб серый TelDaykemei 8 в 1 USB-хаб серый TelDaykemei 8 в 1 USB-хаб серый TelDaykemei 8 в 1 USB-хаб серый" [ref=f7e1667] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009584683553.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_FULFILLMENT_STD&sku_id=12000049538242494&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1670]:
+                      - img "TelDaykemei 8 в 1 USB-хаб серый" [ref=f7e1672]
+                      - img "TelDaykemei 8 в 1 USB-хаб серый" [ref=f7e1675]
+                      - img "TelDaykemei 8 в 1 USB-хаб серый" [ref=f7e1678]
+                      - img "TelDaykemei 8 в 1 USB-хаб серый" [ref=f7e1681]
+                      - img "TelDaykemei 8 в 1 USB-хаб серый" [ref=f7e1684]
+                      - img "TelDaykemei 8 в 1 USB-хаб серый" [ref=f7e1687]
+                      - img "TelDaykemei 8 в 1 USB-хаб серый" [ref=f7e1690]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e1702]
+                  - link "1 472 ₽ -69% 449 ₽ 4.7 199 купили TelDaykemei 8 в 1 USB-хаб серый до 14 дней, бесплатно" [ref=f7e1705] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009584683553.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_FULFILLMENT_STD&sku_id=12000049538242494&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1706]:
+                      - generic [ref=f7e1708]:
+                        - generic [ref=f7e1709]: 1 472 ₽
+                        - generic [ref=f7e1710]: "-69%"
+                      - generic [ref=f7e1712]: 449 ₽
+                    - generic [ref=f7e1713]:
+                      - generic [ref=f7e1714]:
+                        - generic [ref=f7e1715]:
+                          - img [ref=f7e1716]
+                          - generic [ref=f7e1717]: "4.7"
+                        - generic [ref=f7e1719]: 199 купили
+                      - generic "TelDaykemei 8 в 1 USB-хаб серый" [ref=f7e1721]
+                    - generic [ref=f7e1724]:
+                      - img [ref=f7e1725]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e1727]:
+                  - link "kebidumei 9-в-1 USB C концентратор для планшета kebidumei 9-в-1 USB C концентратор для планшета kebidumei 9-в-1 USB C концентратор для планшета kebidumei 9-в-1 USB C концентратор для планшета kebidumei 9-в-1 USB C концентратор для планшета kebidumei 9-в-1 USB C концентратор для планшета kebidumei 9-в-1 USB C концентратор для планшета" [ref=f7e1728] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008093508556.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&sku_id=12000043698309540&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1731]:
+                      - img "kebidumei 9-в-1 USB C концентратор для планшета" [ref=f7e1733]
+                      - img "kebidumei 9-в-1 USB C концентратор для планшета" [ref=f7e1736]
+                      - img "kebidumei 9-в-1 USB C концентратор для планшета" [ref=f7e1739]
+                      - img "kebidumei 9-в-1 USB C концентратор для планшета" [ref=f7e1742]
+                      - img "kebidumei 9-в-1 USB C концентратор для планшета" [ref=f7e1745]
+                      - img "kebidumei 9-в-1 USB C концентратор для планшета" [ref=f7e1748]
+                      - img "kebidumei 9-в-1 USB C концентратор для планшета" [ref=f7e1751]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e1763]
+                  - link "4 888 ₽ -53% 2 299 ₽ 4.9 102 купили kebidumei 9-в-1 USB C концентратор для планшета" [ref=f7e1766] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008093508556.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&sku_id=12000043698309540&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1767]:
+                      - generic [ref=f7e1769]:
+                        - generic [ref=f7e1770]: 4 888 ₽
+                        - generic [ref=f7e1771]: "-53%"
+                      - generic [ref=f7e1773]: 2 299 ₽
+                    - generic [ref=f7e1774]:
+                      - generic [ref=f7e1775]:
+                        - generic [ref=f7e1776]:
+                          - img [ref=f7e1777]
+                          - generic [ref=f7e1778]: "4.9"
+                        - generic [ref=f7e1780]: 102 купили
+                      - generic "kebidumei 9-в-1 USB C концентратор для планшета" [ref=f7e1782]
+                - generic [ref=f7e1784]:
+                  - link "FEIWIMI 7-портовый USB 3.0 Hub серый FEIWIMI 7-портовый USB 3.0 Hub серый FEIWIMI 7-портовый USB 3.0 Hub серый FEIWIMI 7-портовый USB 3.0 Hub серый FEIWIMI 7-портовый USB 3.0 Hub серый FEIWIMI 7-портовый USB 3.0 Hub серый FEIWIMI 7-портовый USB 3.0 Hub серый" [ref=f7e1785] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009636432645.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000049714344915&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1788]:
+                      - img "FEIWIMI 7-портовый USB 3.0 Hub серый" [ref=f7e1790]
+                      - img "FEIWIMI 7-портовый USB 3.0 Hub серый" [ref=f7e1793]
+                      - img "FEIWIMI 7-портовый USB 3.0 Hub серый" [ref=f7e1796]
+                      - img "FEIWIMI 7-портовый USB 3.0 Hub серый" [ref=f7e1799]
+                      - img "FEIWIMI 7-портовый USB 3.0 Hub серый" [ref=f7e1802]
+                      - img "FEIWIMI 7-портовый USB 3.0 Hub серый" [ref=f7e1805]
+                      - img "FEIWIMI 7-портовый USB 3.0 Hub серый" [ref=f7e1808]
+                    - img [ref=f7e1820]
+                  - link "207 ₽ -19% 167 ₽ 4.8 221 купили FEIWIMI 7-портовый USB 3.0 Hub серый до 14 дней, от 176 ₽" [ref=f7e1823] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009636432645.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000049714344915&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1824]:
+                      - generic [ref=f7e1826]:
+                        - generic [ref=f7e1827]: 207 ₽
+                        - generic [ref=f7e1828]: "-19%"
+                      - generic [ref=f7e1830]: 167 ₽
+                    - generic [ref=f7e1831]:
+                      - generic [ref=f7e1832]:
+                        - generic [ref=f7e1833]:
+                          - img [ref=f7e1834]
+                          - generic [ref=f7e1835]: "4.8"
+                        - generic [ref=f7e1837]: 221 купили
+                      - generic "FEIWIMI 7-портовый USB 3.0 Hub серый" [ref=f7e1839]
+                    - generic [ref=f7e1842]:
+                      - img [ref=f7e1843]
+                      - text: до 14 дней, от 176 ₽
+                - generic [ref=f7e1845]:
+                  - link "YiFanHeRong 8 в 1 USB C концентратор YiFanHeRong 8 в 1 USB C концентратор YiFanHeRong 8 в 1 USB C концентратор YiFanHeRong 8 в 1 USB C концентратор YiFanHeRong 8 в 1 USB C концентратор YiFanHeRong 8 в 1 USB C концентратор YiFanHeRong 8 в 1 USB C концентратор" [ref=f7e1846] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009120947149.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000047987153367&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1849]:
+                      - img "YiFanHeRong 8 в 1 USB C концентратор" [ref=f7e1851]
+                      - img "YiFanHeRong 8 в 1 USB C концентратор" [ref=f7e1854]
+                      - img "YiFanHeRong 8 в 1 USB C концентратор" [ref=f7e1857]
+                      - img "YiFanHeRong 8 в 1 USB C концентратор" [ref=f7e1860]
+                      - img "YiFanHeRong 8 в 1 USB C концентратор" [ref=f7e1863]
+                      - img "YiFanHeRong 8 в 1 USB C концентратор" [ref=f7e1866]
+                      - img "YiFanHeRong 8 в 1 USB C концентратор" [ref=f7e1869]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e1881]
+                  - link "623 ₽ -41% 369 ₽ 4.4 31 купили YiFanHeRong 8 в 1 USB C концентратор до 14 дней, бесплатно" [ref=f7e1884] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009120947149.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_ECONOMY&sku_id=12000047987153367&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1885]:
+                      - generic [ref=f7e1887]:
+                        - generic [ref=f7e1888]: 623 ₽
+                        - generic [ref=f7e1889]: "-41%"
+                      - generic [ref=f7e1891]: 369 ₽
+                    - generic [ref=f7e1892]:
+                      - generic [ref=f7e1893]:
+                        - generic [ref=f7e1894]:
+                          - img [ref=f7e1895]
+                          - generic [ref=f7e1896]: "4.4"
+                        - generic [ref=f7e1898]: 31 купили
+                      - generic "YiFanHeRong 8 в 1 USB C концентратор" [ref=f7e1900]
+                    - generic [ref=f7e1903]:
+                      - img [ref=f7e1904]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e1906]:
+                  - link "Концентратор 4 в 1 USB на Type C для iPad Pro 2018 Концентратор 4 в 1 USB на Type C для iPad Pro 2018 Концентратор 4 в 1 USB на Type C для iPad Pro 2018 Концентратор 4 в 1 USB на Type C для iPad Pro 2018 Концентратор 4 в 1 USB на Type C для iPad Pro 2018 Концентратор 4 в 1 USB на Type C для iPad Pro 2018 Концентратор 4 в 1 USB на Type C для iPad Pro 2018" [ref=f7e1907] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008774817649.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000046618413271&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1910]:
+                      - img "Концентратор 4 в 1 USB на Type C для iPad Pro 2018" [ref=f7e1912]
+                      - img "Концентратор 4 в 1 USB на Type C для iPad Pro 2018" [ref=f7e1915]
+                      - img "Концентратор 4 в 1 USB на Type C для iPad Pro 2018" [ref=f7e1918]
+                      - img "Концентратор 4 в 1 USB на Type C для iPad Pro 2018" [ref=f7e1921]
+                      - img "Концентратор 4 в 1 USB на Type C для iPad Pro 2018" [ref=f7e1924]
+                      - img "Концентратор 4 в 1 USB на Type C для iPad Pro 2018" [ref=f7e1927]
+                      - img "Концентратор 4 в 1 USB на Type C для iPad Pro 2018" [ref=f7e1930]
+                    - img [ref=f7e1942]
+                  - link "899 ₽ 4.0 Концентратор 4 в 1 USB на Type C для iPad Pro 2018 до 14 дней, от 491 ₽" [ref=f7e1945] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008774817649.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000046618413271&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1949]: 899 ₽
+                    - generic [ref=f7e1950]:
+                      - generic [ref=f7e1952]:
+                        - img [ref=f7e1953]
+                        - generic [ref=f7e1954]: "4.0"
+                      - generic "Концентратор 4 в 1 USB на Type C для iPad Pro 2018" [ref=f7e1956]
+                    - generic [ref=f7e1959]:
+                      - img [ref=f7e1960]
+                      - text: до 14 дней, от 491 ₽
+                - generic [ref=f7e1962]:
+                  - link "ORICO прозрачный USB C хаб 4 портов ORICO прозрачный USB C хаб 4 портов ORICO прозрачный USB C хаб 4 портов ORICO прозрачный USB C хаб 4 портов ORICO прозрачный USB C хаб 4 портов ORICO прозрачный USB C хаб 4 портов ORICO прозрачный USB C хаб 4 портов" [ref=f7e1963] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005005820152211.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000034478799618&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e1966]:
+                      - img "ORICO прозрачный USB C хаб 4 портов" [ref=f7e1968]
+                      - img "ORICO прозрачный USB C хаб 4 портов" [ref=f7e1971]
+                      - img "ORICO прозрачный USB C хаб 4 портов" [ref=f7e1974]
+                      - img "ORICO прозрачный USB C хаб 4 портов" [ref=f7e1977]
+                      - img "ORICO прозрачный USB C хаб 4 портов" [ref=f7e1980]
+                      - img "ORICO прозрачный USB C хаб 4 портов" [ref=f7e1983]
+                      - img "ORICO прозрачный USB C хаб 4 портов" [ref=f7e1986]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e1998]
+                  - link "1 971 ₽ -49% 1 009 ₽ 4.9 1 545 купили ORICO прозрачный USB C хаб 4 портов до 14 дней, бесплатно" [ref=f7e2001] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005005820152211.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000034478799618&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2002]:
+                      - generic [ref=f7e2004]:
+                        - generic [ref=f7e2005]: 1 971 ₽
+                        - generic [ref=f7e2006]: "-49%"
+                      - generic [ref=f7e2008]: 1 009 ₽
+                    - generic [ref=f7e2009]:
+                      - generic [ref=f7e2010]:
+                        - generic [ref=f7e2011]:
+                          - img [ref=f7e2012]
+                          - generic [ref=f7e2013]: "4.9"
+                        - generic [ref=f7e2015]: 1 545 купили
+                      - generic "ORICO прозрачный USB C хаб 4 портов" [ref=f7e2017]
+                    - generic [ref=f7e2020]:
+                      - img [ref=f7e2021]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e2023]:
+                  - link "USB концентратор 8-в-1 basix для MacBook Pro USB концентратор 8-в-1 basix для MacBook Pro USB концентратор 8-в-1 basix для MacBook Pro USB концентратор 8-в-1 basix для MacBook Pro USB концентратор 8-в-1 basix для MacBook Pro USB концентратор 8-в-1 basix для MacBook Pro USB концентратор 8-в-1 basix для MacBook Pro" [ref=f7e2024] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009185606138.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_FULFILLMENT_STD&sku_id=12000048229629276&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2027]:
+                      - img "USB концентратор 8-в-1 basix для MacBook Pro" [ref=f7e2029]
+                      - img "USB концентратор 8-в-1 basix для MacBook Pro" [ref=f7e2032]
+                      - img "USB концентратор 8-в-1 basix для MacBook Pro" [ref=f7e2035]
+                      - img "USB концентратор 8-в-1 basix для MacBook Pro" [ref=f7e2038]
+                      - img "USB концентратор 8-в-1 basix для MacBook Pro" [ref=f7e2041]
+                      - img "USB концентратор 8-в-1 basix для MacBook Pro" [ref=f7e2044]
+                      - img "USB концентратор 8-в-1 basix для MacBook Pro" [ref=f7e2047]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e2059]
+                  - link "2 955 ₽ -70% 872 ₽ 4.5 4 купили USB концентратор 8-в-1 basix для MacBook Pro до 14 дней, бесплатно" [ref=f7e2062] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009185606138.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_FULFILLMENT_STD&sku_id=12000048229629276&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2063]:
+                      - generic [ref=f7e2065]:
+                        - generic [ref=f7e2066]: 2 955 ₽
+                        - generic [ref=f7e2067]: "-70%"
+                      - generic [ref=f7e2069]: 872 ₽
+                    - generic [ref=f7e2070]:
+                      - generic [ref=f7e2071]:
+                        - generic [ref=f7e2072]:
+                          - img [ref=f7e2073]
+                          - generic [ref=f7e2074]: "4.5"
+                        - generic [ref=f7e2076]: 4 купили
+                      - generic "USB концентратор 8-в-1 basix для MacBook Pro" [ref=f7e2078]
+                    - generic [ref=f7e2081]:
+                      - img [ref=f7e2082]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e2084]:
+                  - link "UGREEN USB-концентратор 9-в-1 UGREEN USB-концентратор 9-в-1 UGREEN USB-концентратор 9-в-1 UGREEN USB-концентратор 9-в-1 UGREEN USB-концентратор 9-в-1 UGREEN USB-концентратор 9-в-1 UGREEN USB-концентратор 9-в-1" [ref=f7e2085] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005003016375106.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CN_OWH_GD_RU_PUDO_PROV&sku_id=12000048095275430&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2088]:
+                      - img "UGREEN USB-концентратор 9-в-1" [ref=f7e2090]
+                      - img "UGREEN USB-концентратор 9-в-1" [ref=f7e2093]
+                      - img "UGREEN USB-концентратор 9-в-1" [ref=f7e2096]
+                      - img "UGREEN USB-концентратор 9-в-1" [ref=f7e2099]
+                      - img "UGREEN USB-концентратор 9-в-1" [ref=f7e2102]
+                      - img "UGREEN USB-концентратор 9-в-1" [ref=f7e2105]
+                      - img "UGREEN USB-концентратор 9-в-1" [ref=f7e2108]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e2120]
+                  - link "2 259 ₽ с купоном 2 579 ₽ 4.8 14 558 купили UGREEN USB-концентратор 9-в-1 до 10 дней, бесплатно" [ref=f7e2123] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005003016375106.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CN_OWH_GD_RU_PUDO_PROV&sku_id=12000048095275430&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2124]:
+                      - generic [ref=f7e2127]: 2 259 ₽ с купоном
+                      - generic [ref=f7e2129]: 2 579 ₽
+                    - generic [ref=f7e2130]:
+                      - generic [ref=f7e2131]:
+                        - generic [ref=f7e2132]:
+                          - img [ref=f7e2133]
+                          - generic [ref=f7e2134]: "4.8"
+                        - generic [ref=f7e2136]: 14 558 купили
+                      - generic "UGREEN USB-концентратор 9-в-1" [ref=f7e2138]
+                    - generic [ref=f7e2141]:
+                      - img [ref=f7e2142]
+                      - text: до 10 дней, бесплатно
+                - generic [ref=f7e2144]:
+                  - link "Vention USB 3.2 Gen2 HUB 5 портов Vention USB 3.2 Gen2 HUB 5 портов Vention USB 3.2 Gen2 HUB 5 портов Vention USB 3.2 Gen2 HUB 5 портов Vention USB 3.2 Gen2 HUB 5 портов Vention USB 3.2 Gen2 HUB 5 портов Vention USB 3.2 Gen2 HUB 5 портов" [ref=f7e2145] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008015931547.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000043298119855&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2148]:
+                      - img "Vention USB 3.2 Gen2 HUB 5 портов" [ref=f7e2150]
+                      - img "Vention USB 3.2 Gen2 HUB 5 портов" [ref=f7e2153]
+                      - img "Vention USB 3.2 Gen2 HUB 5 портов" [ref=f7e2156]
+                      - img "Vention USB 3.2 Gen2 HUB 5 портов" [ref=f7e2159]
+                      - img "Vention USB 3.2 Gen2 HUB 5 портов" [ref=f7e2162]
+                      - img "Vention USB 3.2 Gen2 HUB 5 портов" [ref=f7e2165]
+                      - img "Vention USB 3.2 Gen2 HUB 5 портов" [ref=f7e2168]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e2180]
+                  - link "1 265 ₽ -46% 689 ₽ 4.7 12 374 купили Vention USB 3.2 Gen2 HUB 5 портов до 14 дней, бесплатно" [ref=f7e2183] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005008015931547.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000043298119855&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2184]:
+                      - generic [ref=f7e2186]:
+                        - generic [ref=f7e2187]: 1 265 ₽
+                        - generic [ref=f7e2188]: "-46%"
+                      - generic [ref=f7e2190]: 689 ₽
+                    - generic [ref=f7e2191]:
+                      - generic [ref=f7e2192]:
+                        - generic [ref=f7e2193]:
+                          - img [ref=f7e2194]
+                          - generic [ref=f7e2195]: "4.7"
+                        - generic [ref=f7e2197]: 12 374 купили
+                      - generic "Vention USB 3.2 Gen2 HUB 5 портов" [ref=f7e2199]
+                    - generic [ref=f7e2202]:
+                      - img [ref=f7e2203]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e2205]:
+                  - link "UGREEN USB C концентратор 4 порта UGREEN USB C концентратор 4 порта UGREEN USB C концентратор 4 порта UGREEN USB C концентратор 4 порта UGREEN USB C концентратор 4 порта UGREEN USB C концентратор 4 порта UGREEN USB C концентратор 4 порта" [ref=f7e2206] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005001339449471.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CN_OWH_GD_RU_PUDO_PROV&sku_id=12000058669582185&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2209]:
+                      - img "UGREEN USB C концентратор 4 порта" [ref=f7e2211]
+                      - img "UGREEN USB C концентратор 4 порта" [ref=f7e2214]
+                      - img "UGREEN USB C концентратор 4 порта" [ref=f7e2217]
+                      - img "UGREEN USB C концентратор 4 порта" [ref=f7e2220]
+                      - img "UGREEN USB C концентратор 4 порта" [ref=f7e2223]
+                      - img "UGREEN USB C концентратор 4 порта" [ref=f7e2226]
+                      - img "UGREEN USB C концентратор 4 порта" [ref=f7e2229]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e2241]
+                  - link "1 579 ₽ -42% 911 ₽ 4.8 6 391 купили UGREEN USB C концентратор 4 порта до 10 дней, бесплатно" [ref=f7e2244] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005001339449471.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CN_OWH_GD_RU_PUDO_PROV&sku_id=12000058669582185&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2245]:
+                      - generic [ref=f7e2247]:
+                        - generic [ref=f7e2248]: 1 579 ₽
+                        - generic [ref=f7e2249]: "-42%"
+                      - generic [ref=f7e2251]: 911 ₽
+                    - generic [ref=f7e2252]:
+                      - generic [ref=f7e2253]:
+                        - generic [ref=f7e2254]:
+                          - img [ref=f7e2255]
+                          - generic [ref=f7e2256]: "4.8"
+                        - generic [ref=f7e2258]: 6 391 купили
+                      - generic "UGREEN USB C концентратор 4 порта" [ref=f7e2260]
+                    - generic [ref=f7e2263]:
+                      - img [ref=f7e2264]
+                      - text: до 10 дней, бесплатно
+                - generic [ref=f7e2266]:
+                  - link "RSHTECH USB C Hub 4 портов RSHTECH USB C Hub 4 портов RSHTECH USB C Hub 4 портов RSHTECH USB C Hub 4 портов RSHTECH USB C Hub 4 портов RSHTECH USB C Hub 4 портов RSHTECH USB C Hub 4 портов" [ref=f7e2267] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005006138621132.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000035933549358&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2270]:
+                      - img "RSHTECH USB C Hub 4 портов" [ref=f7e2272]
+                      - img "RSHTECH USB C Hub 4 портов" [ref=f7e2275]
+                      - img "RSHTECH USB C Hub 4 портов" [ref=f7e2278]
+                      - img "RSHTECH USB C Hub 4 портов" [ref=f7e2281]
+                      - img "RSHTECH USB C Hub 4 портов" [ref=f7e2284]
+                      - img "RSHTECH USB C Hub 4 портов" [ref=f7e2287]
+                      - img "RSHTECH USB C Hub 4 портов" [ref=f7e2290]
+                    - generic:
+                      - generic:
+                        - generic:
+                          - img
+                      - generic:
+                        - generic:
+                          - img
+                    - img [ref=f7e2302]
+                  - link "2 589 ₽ -59% 1 061 ₽ 4.7 1 911 купили RSHTECH USB C Hub 4 портов до 14 дней, бесплатно" [ref=f7e2305] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005006138621132.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000035933549358&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2306]:
+                      - generic [ref=f7e2308]:
+                        - generic [ref=f7e2309]: 2 589 ₽
+                        - generic [ref=f7e2310]: "-59%"
+                      - generic [ref=f7e2312]: 1 061 ₽
+                    - generic [ref=f7e2313]:
+                      - generic [ref=f7e2314]:
+                        - generic [ref=f7e2315]:
+                          - img [ref=f7e2316]
+                          - generic [ref=f7e2317]: "4.7"
+                        - generic [ref=f7e2319]: 1 911 купили
+                      - generic "RSHTECH USB C Hub 4 портов" [ref=f7e2321]
+                    - generic [ref=f7e2324]:
+                      - img [ref=f7e2325]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e2327]:
+                  - link "LIYPOP LP USB C концентратор 10 в 1 LIYPOP LP USB C концентратор 10 в 1 LIYPOP LP USB C концентратор 10 в 1 LIYPOP LP USB C концентратор 10 в 1 LIYPOP LP USB C концентратор 10 в 1 LIYPOP LP USB C концентратор 10 в 1 LIYPOP LP USB C концентратор 10 в 1" [ref=f7e2328] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009418681131.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000049042003393&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2331]:
+                      - img "LIYPOP LP USB C концентратор 10 в 1" [ref=f7e2333]
+                      - img "LIYPOP LP USB C концентратор 10 в 1" [ref=f7e2336]
+                      - img "LIYPOP LP USB C концентратор 10 в 1" [ref=f7e2339]
+                      - img "LIYPOP LP USB C концентратор 10 в 1" [ref=f7e2342]
+                      - img "LIYPOP LP USB C концентратор 10 в 1" [ref=f7e2345]
+                      - img "LIYPOP LP USB C концентратор 10 в 1" [ref=f7e2348]
+                      - img "LIYPOP LP USB C концентратор 10 в 1" [ref=f7e2351]
+                    - img [ref=f7e2363]
+                  - link "2 131 ₽ 5.0 4 купили LIYPOP LP USB C концентратор 10 в 1 до 14 дней, бесплатно" [ref=f7e2366] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005009418681131.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000049042003393&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2370]: 2 131 ₽
+                    - generic [ref=f7e2371]:
+                      - generic [ref=f7e2372]:
+                        - generic [ref=f7e2373]:
+                          - img [ref=f7e2374]
+                          - generic [ref=f7e2375]: "5.0"
+                        - generic [ref=f7e2377]: 4 купили
+                      - generic "LIYPOP LP USB C концентратор 10 в 1" [ref=f7e2379]
+                    - generic [ref=f7e2382]:
+                      - img [ref=f7e2383]
+                      - text: до 14 дней, бесплатно
+                - generic [ref=f7e2385]:
+                  - link "UYYNY USB-концентратор 8 в 1 Type C 3.1 UYYNY USB-концентратор 8 в 1 Type C 3.1 UYYNY USB-концентратор 8 в 1 Type C 3.1 UYYNY USB-концентратор 8 в 1 Type C 3.1 UYYNY USB-концентратор 8 в 1 Type C 3.1 UYYNY USB-концентратор 8 в 1 Type C 3.1 UYYNY USB-концентратор 8 в 1 Type C 3.1" [ref=f7e2386] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005003321002994.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000025201294180&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2389]:
+                      - img "UYYNY USB-концентратор 8 в 1 Type C 3.1" [ref=f7e2391]
+                      - img "UYYNY USB-концентратор 8 в 1 Type C 3.1" [ref=f7e2394]
+                      - img "UYYNY USB-концентратор 8 в 1 Type C 3.1" [ref=f7e2397]
+                      - img "UYYNY USB-концентратор 8 в 1 Type C 3.1" [ref=f7e2400]
+                      - img "UYYNY USB-концентратор 8 в 1 Type C 3.1" [ref=f7e2403]
+                      - img "UYYNY USB-концентратор 8 в 1 Type C 3.1" [ref=f7e2406]
+                      - img "UYYNY USB-концентратор 8 в 1 Type C 3.1" [ref=f7e2409]
+                    - img [ref=f7e2421]
+                  - link "339 ₽ 4.4 1 198 купили UYYNY USB-концентратор 8 в 1 Type C 3.1 до 14 дней, от 296 ₽" [ref=f7e2424] [cursor=pointer]:
+                    - /url: https://aliexpress.ru/item/1005003321002994.html?mixer_rcmd_bucket_id=89f5a4a0cb9969cb&pdp_trigger_item_id=0_1005007903266579&ru_algo_pv_id=b6fbee-61b690-a58bcb-19f0a9-1783026000&scenario=aerSimilarItemPdpRcmd&shpMethod=CAINIAO_STANDARD&sku_id=12000025201294180&traffic_source=recommendation&type_rcmd=core
+                    - generic [ref=f7e2428]: 339 ₽
+                    - generic [ref=f7e2429]:
+                      - generic [ref=f7e2430]:
+                        - generic [ref=f7e2431]:
+                          - img [ref=f7e2432]
+                          - generic [ref=f7e2433]: "4.4"
+                        - generic [ref=f7e2435]: 1 198 купили
+                      - generic "UYYNY USB-концентратор 8 в 1 Type C 3.1" [ref=f7e2437]
+                    - generic [ref=f7e2440]:
+                      - img [ref=f7e2441]
+                      - text: до 14 дней, от 296 ₽
+              - img [ref=f7e2443] [cursor=pointer]
+          - generic [ref=f7e2446]:
+            - generic [ref=f7e2447]:
+              - link "tab-0" [ref=f7e2448] [cursor=pointer]:
+                - /url: /item/1005007903266579/reviews
+                - heading "Отзывы" [level=4] [ref=f7e2449]
+              - generic "tab-1" [ref=f7e2450]:
+                - heading "Задать вопрос" [level=4] [ref=f7e2451]
+            - list [ref=f7e2454]:
+              - listitem [ref=f7e2455]:
+                - generic [ref=f7e2458]:
+                  - generic [ref=f7e2461]:
+                    - generic [ref=f7e2462]:
+                      - generic [ref=f7e2463]:
+                        - generic [ref=f7e2464]: 5,0
+                        - generic [ref=f7e2465]:
+                          - img [ref=f7e2467]
+                          - img [ref=f7e2470]
+                          - img [ref=f7e2473]
+                          - img [ref=f7e2476]
+                          - img [ref=f7e2479]
+                      - generic [ref=f7e2481]:
+                        - generic [ref=f7e2482]: 1 отзыв
+                        - generic [ref=f7e2483]: 14 купили
+                    - generic [ref=f7e2484]:
+                      - generic [ref=f7e2485]:
+                        - generic [ref=f7e2487]:
+                          - img [ref=f7e2488]
+                          - img [ref=f7e2490]
+                          - img [ref=f7e2492]
+                          - img [ref=f7e2494]
+                          - img [ref=f7e2496]
+                        - generic [ref=f7e2501]:
+                          - img [ref=f7e2502]
+                          - img [ref=f7e2504]
+                          - img [ref=f7e2506]
+                          - img [ref=f7e2508]
+                          - img [ref=f7e2510]
+                        - generic [ref=f7e2514]:
+                          - img [ref=f7e2515]
+                          - img [ref=f7e2517]
+                          - img [ref=f7e2519]
+                          - img [ref=f7e2521]
+                          - img [ref=f7e2523]
+                        - generic [ref=f7e2527]:
+                          - img [ref=f7e2528]
+                          - img [ref=f7e2530]
+                          - img [ref=f7e2532]
+                          - img [ref=f7e2534]
+                          - img [ref=f7e2536]
+                        - generic [ref=f7e2540]:
+                          - img [ref=f7e2541]
+                          - img [ref=f7e2543]
+                          - img [ref=f7e2545]
+                          - img [ref=f7e2547]
+                          - img [ref=f7e2549]
+                      - generic [ref=f7e2552]:
+                        - generic [ref=f7e2553] [cursor=pointer]: "1"
+                        - generic: "0"
+                        - generic: "0"
+                        - generic: "0"
+                        - generic: "0"
+                  - list [ref=f7e2556]:
+                    - listitem [ref=f7e2557]:
+                      - generic [ref=f7e2558] [cursor=pointer]:
+                        - generic [ref=f7e2561]:
+                          - generic [ref=f7e2563]:
+                            - generic [ref=f7e2564]:
+                              - generic [ref=f7e2565]: SL
+                              - img [ref=f7e2568]
+                            - generic [ref=f7e2569]:
+                              - paragraph [ref=f7e2570]: Seng L.
+                              - paragraph [ref=f7e2571]: 12 июня 2026
+                          - generic [ref=f7e2572]:
+                            - generic [ref=f7e2573]:
+                              - img [ref=f7e2574]
+                              - img [ref=f7e2576]
+                              - img [ref=f7e2578]
+                              - img [ref=f7e2580]
+                              - img [ref=f7e2582]
+                            - paragraph [ref=f7e2584]: WHITE
+                        - button "likeButton" [ref=f7e2586]:
+                          - img [ref=f7e2588]
+              - listitem:
+                - generic [ref=f7e2591]:
+                  - generic [ref=f7e2592]:
+                    - textbox "Напишите вопрос" [disabled] [ref=f7e2595]
+                    - button "Войти" [ref=f7e2596] [cursor=pointer]:
+                      - paragraph [ref=f7e2597]:
+                        - generic [ref=f7e2598]: Войти
+                  - generic [ref=f7e2601]: Опубликовать анонимно
+          - generic [ref=f7e2603]:
+            - generic [ref=f7e2605]:
+              - generic [ref=f7e2607]:
+                - heading "Описание" [level=4] [ref=f7e2608]
+                - generic [ref=f7e2611]:
+                  - generic [ref=f7e2612]:
+                    - paragraph [ref=f7e2613]: Хаб Type-C USB-C с разъемом 3.5 мм AUX для аудио и OTG Type-A (гнездо) с поддержкой PD для зарядки, совместим с ноутбуками, планшетами и телефонами.
+                    - paragraph [ref=f7e2615]:
+                      - text: 1.) USB 3.1 Type C штекер к 3.5 мм аудиоразъему, который позволяет пользователям использовать любое аудиоустройство с разъемом 3.5 мм и воспроизводить музыку.
+                      - text: 2.) USB 3.1 Type C штекер к USB 2.0 Type A гнезду, который позволяет пользователям использовать любое устройство с USB 3.0 с любым стандартным контроллером Type-C.
+                      - text: 3.) Поддержка порта USB Type-C и максимальной скорости передачи данных 480 Мбит/с. Высокоскоростная передача данных.
+                      - text: 4.) Вы также можете подключить зарядный кабель к порту USB-C, чтобы зарядить ваш планшет. Поддержка мощности до 15 Вт (PD).
+                      - text: 5.) Питание через порт USB-C, дополнительный источник питания не требуется. Совместимо с Windows, MacOS, Android с интерфейсом USB-C.
+                      - text: 6.) Вход Type-C от хоста и аудио 3,5 мм / выход USB2.0 на устройство.
+                  - generic [ref=f7e2617]:
+                    - img [ref=f7e2618]
+                    - img [ref=f7e2619]
+                    - img [ref=f7e2620]
+                    - img [ref=f7e2621]
+                    - img [ref=f7e2622]
+                    - img [ref=f7e2623]
+              - button "Полное описание" [ref=f7e2625] [cursor=pointer]:
+                - paragraph [ref=f7e2626]:
+                  - generic [ref=f7e2627]: Полное описание
+                - img [ref=f7e2629]
+            - generic [ref=f7e2631]:
+              - generic [ref=f7e2632]:
+                - heading "Характеристики" [level=4] [ref=f7e2633]
+                - generic [ref=f7e2636]:
+                  - generic [ref=f7e2637]:
+                    - generic [ref=f7e2639]: Номер модели
+                    - generic [ref=f7e2640]: USB2.0 HUB
+                  - generic [ref=f7e2641]:
+                    - generic [ref=f7e2643]: Происхождение
+                    - generic [ref=f7e2644]: Китай
+                  - generic [ref=f7e2645]:
+                    - generic [ref=f7e2647]: Сертификация
+                    - generic [ref=f7e2648]: Евротест (СЕ)
+                  - generic [ref=f7e2649]:
+                    - generic [ref=f7e2651]: Тип вилки
+                    - generic [ref=f7e2652]: Нет
+                  - generic [ref=f7e2653]:
+                    - generic [ref=f7e2655]: Упаковка
+                    - generic [ref=f7e2656]: Да
+                  - generic [ref=f7e2657]:
+                    - generic [ref=f7e2659]: Тип интерфейса
+                    - generic [ref=f7e2660]: USB Type-C
+                  - generic [ref=f7e2661]:
+                    - generic [ref=f7e2663]: Стандарт
+                    - generic [ref=f7e2664]: УСБ 2,0
+                  - generic [ref=f7e2665]:
+                    - generic [ref=f7e2667]: Функция
+                    - generic [ref=f7e2668]: Нет
+              - button "Все характеристики" [ref=f7e2669] [cursor=pointer]:
+                - paragraph [ref=f7e2670]:
+                  - generic [ref=f7e2671]: Все характеристики
+                - img [ref=f7e2673]
+            - generic [ref=f7e2676]:
+              - generic [ref=f7e2677]:
+                - link [ref=f7e2678] [cursor=pointer]:
+                  - /url: https://aliexpress.ru/store/1103016087
+                  - img [ref=f7e2680]
+                - link "MDR Cables Shop Store 91,88% рейтинг продавца · 78 подписчиков · 4,7 рейтинг товаров" [ref=f7e2681] [cursor=pointer]:
+                  - /url: https://aliexpress.ru/store/1103016087
+                  - heading "MDR Cables Shop Store" [level=5] [ref=f7e2683]
+                  - generic [ref=f7e2684]:
+                    - generic [ref=f7e2685]:
+                      - generic [ref=f7e2686]: 91,88% рейтинг продавца
+                      - text: ·
+                    - generic [ref=f7e2687]:
+                      - generic [ref=f7e2688]: 78 подписчиков
+                      - text: ·
+                    - generic [ref=f7e2689]:
+                      - img [ref=f7e2690]
+                      - generic [ref=f7e2692]: 4,7 рейтинг товаров
+                - list [ref=f7e2693]:
+                  - listitem [ref=f7e2694]:
+                    - button "Подписаться" [ref=f7e2695] [cursor=pointer]:
+                      - generic [ref=f7e2697]:
+                        - img [ref=f7e2698]
+                        - img [ref=f7e2701]
+                      - paragraph [ref=f7e2705]:
+                        - generic [ref=f7e2706]: Подписаться
+                  - listitem [ref=f7e2707]:
+                    - link "Чат с продавцом" [ref=f7e2708] [cursor=pointer]:
+                      - /url: https://aliexpress.ru/chat?entry_point=Pdp&type=bs&item_id=1005007903266579&seller_id=2674586018&sku_id=12000042782351399
+                      - button "Чат с продавцом" [ref=f7e2709]:
+                        - paragraph [ref=f7e2710]:
+                          - generic [ref=f7e2711]: Чат с продавцом
+                  - listitem [ref=f7e2713]:
+                    - button [ref=f7e2714] [cursor=pointer]:
+                      - img [ref=f7e2717]
+              - generic [ref=f7e2721]:
+                - generic [ref=f7e2723]:
+                  - heading "Скидка магазина" [level=5] [ref=f7e2724]
+                  - generic [ref=f7e2725]:
+                    - generic [ref=f7e2726]: Скидка 106 ₽ за 1 178 ₽
+                    - generic [ref=f7e2727]: Скидка 223 ₽ за 5 890 ₽
+                    - generic [ref=f7e2728]: Скидка 341 ₽ за 11 780 ₽
+                  - generic [ref=f7e2729]: Без учета стоимости доставки
+                - generic [ref=f7e2734]:
+                  - generic [ref=f7e2736]:
+                    - generic [ref=f7e2737]:
+                      - img [ref=f7e2738]
+                      - img [ref=f7e2740]
+                    - img [ref=f7e2743]
+                    - generic [ref=f7e2745]:
+                      - generic [ref=f7e2746]:
+                        - img [ref=f7e2747]
+                        - generic [ref=f7e2749]: до 31 июля
+                      - generic [ref=f7e2751]:
+                        - generic "-70 ₽" [ref=f7e2752]
+                        - generic [ref=f7e2753]: При заказе от 2 356 ₽
+                    - generic [ref=f7e2754]:
+                      - img [ref=f7e2755]
+                      - img [ref=f7e2758] [cursor=pointer]
+                  - generic [ref=f7e2761]:
+                    - generic [ref=f7e2762]:
+                      - img [ref=f7e2763]
+                      - img [ref=f7e2765]
+                    - img [ref=f7e2768]
+                    - generic [ref=f7e2770]:
+                      - generic [ref=f7e2771]:
+                        - img [ref=f7e2772]
+                        - generic [ref=f7e2774]: до 1 сентября
+                      - generic [ref=f7e2776]:
+                        - generic "-70 ₽" [ref=f7e2777]
+                        - generic [ref=f7e2778]: При заказе от 2 356 ₽
+                    - generic [ref=f7e2779]:
+                      - img [ref=f7e2780]
+                      - img [ref=f7e2783] [cursor=pointer]
+            - button "Пожаловаться на товар" [ref=f7e2787] [cursor=pointer]:
+              - paragraph [ref=f7e2788]:
+                - generic [ref=f7e2789]: Пожаловаться на товар
+          - generic [ref=f7e2791]:
+            - heading "Продавец рекомендует" [level=3] [ref=f7e2792]
+            - img [ref=f7e3222] [cursor=pointer]
+          - heading "Подобрали для вас" [level=3] [ref=f7e3226]
+          - generic [ref=f7e3656]:
+            - text: Связанный поиск
+            - generic [ref=f7e3657]:
+              - link "usb hub" [ref=f7e3659] [cursor=pointer]:
+                - /url: /popular/usb-hub
+                - generic [ref=f7e3660]: usb hub
+              - link "usb разветвитель" [ref=f7e3662] [cursor=pointer]:
+                - /url: /popular/usb-%D1%80%D0%B0%D0%B7%D0%B2%D0%B5%D1%82%D0%B2%D0%B8%D1%82%D0%B5%D0%BB%D1%8C
+                - generic [ref=f7e3663]: usb разветвитель
+              - link "usb hub с питанием" [ref=f7e3665] [cursor=pointer]:
+                - /url: /popular/usb-hub-%D1%81-%D0%BF%D0%B8%D1%82%D0%B0%D0%BD%D0%B8%D0%B5%D0%BC
+                - generic [ref=f7e3666]: usb hub с питанием
+              - link "usb hub type c" [ref=f7e3668] [cursor=pointer]:
+                - /url: /popular/usb-hub-type-c
+                - generic [ref=f7e3669]: usb hub type c
+              - link "usb хаб для компьютера" [ref=f7e3671] [cursor=pointer]:
+                - /url: /popular/usb-%D1%85%D0%B0%D0%B1-%D0%B4%D0%BB%D1%8F-%D0%BA%D0%BE%D0%BC%D0%BF%D1%8C%D1%8E%D1%82%D0%B5%D1%80%D0%B0
+                - generic [ref=f7e3672]: usb хаб для компьютера
+              - link "usb hub audio" [ref=f7e3674] [cursor=pointer]:
+                - /url: /popular/usb-hub-audio
+                - generic [ref=f7e3675]: usb hub audio
+              - link "usb hub type c с питанием" [ref=f7e3677] [cursor=pointer]:
+                - /url: /popular/usb-hub-type-c-%D1%81-%D0%BF%D0%B8%D1%82%D0%B0%D0%BD%D0%B8%D0%B5%D0%BC
+                - generic [ref=f7e3678]: usb hub type c с питанием
+              - link "type c хаб с доп питанием" [ref=f7e3680] [cursor=pointer]:
+                - /url: /popular/type-c-%D1%85%D0%B0%D0%B1-%D1%81-%D0%B4%D0%BE%D0%BF-%D0%BF%D0%B8%D1%82%D0%B0%D0%BD%D0%B8%D0%B5%D0%BC
+                - generic [ref=f7e3681]: type c хаб с доп питанием
+      - img [ref=f7e3683] [cursor=pointer]
+    - generic [ref=f7e3685]:
+      - img [ref=f7e3688]
+      - generic [ref=f7e3691]:
+        - generic [ref=f7e3692]:
+          - generic [ref=f7e3693]:
+            - generic [ref=f7e3694]:
+              - generic [ref=f7e3695]: Покупателям
+              - generic [ref=f7e3696]:
+                - link "Поддержка" [ref=f7e3697] [cursor=pointer]:
+                  - /url: https://aliexpress.ru/chat?_title=%D0%9F%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%BA%D0%B0%20AliExpress&entry_point=footer
+                - link "Календарь распродаж" [ref=f7e3698] [cursor=pointer]:
+                  - /url: https://aliexpress.ru/promo/sales
+                - link "Справка AliExpress" [ref=f7e3699] [cursor=pointer]:
+                  - /url: //docs.aliexpress.ru/
+            - generic [ref=f7e3700]:
+              - generic [ref=f7e3701]: Партнёрам
+              - generic [ref=f7e3702]:
+                - link "Продавайте на AliExpress" [ref=f7e3703] [cursor=pointer]:
+                  - /url: //business.aliexpress.ru/?utm_medium=internal&utm_source=mp&utm_campaign=footer
+                - link "Аффилиатная программа" [ref=f7e3704] [cursor=pointer]:
+                  - /url: //aeplatform.ru
+          - generic [ref=f7e3705]:
+            - generic [ref=f7e3706]:
+              - generic [ref=f7e3707]: О компании
+              - generic [ref=f7e3708]:
+                - link "Работа в AliExpress" [ref=f7e3709] [cursor=pointer]:
+                  - /url: //it.aliexpress.ru
+                - link "Мы на Хабре" [ref=f7e3710] [cursor=pointer]:
+                  - /url: //habr.com/ru/companies/aliexpress_russia/articles/
+            - generic [ref=f7e3711]:
+              - generic [ref=f7e3712]: Мы в соцсетях
+              - generic [ref=f7e3713]:
+                - link "Вконтакте" [ref=f7e3714] [cursor=pointer]:
+                  - /url: //vk.com/aliexpress
+                - link "Telegram" [ref=f7e3715] [cursor=pointer]:
+                  - /url: //t.me/AliExpressofficial_channel
+                - link "MAX" [ref=f7e3716] [cursor=pointer]:
+                  - /url: //max.ru/AliExpressofficial_channel
+        - generic [ref=f7e3717]:
+          - generic [ref=f7e3719]:
+            - generic [ref=f7e3720]: © AliExpress®
+            - generic [ref=f7e3721]: 2019 – 2026
+          - generic [ref=f7e3722]:
+            - generic [ref=f7e3723]:
+              - link "Политика конфиденциальности" [ref=f7e3724] [cursor=pointer]:
+                - /url: //business.aliexpress.ru/legal-docs/article/aer_ru_confidentiality_agreement
+              - link "Пользовательские соглашения" [ref=f7e3725] [cursor=pointer]:
+                - /url: //business.aliexpress.ru/legal-docs
+            - generic [ref=f7e3726]:
+              - text: На информационном ресурсе применяются
+              - link "рекомендательные технологии" [ref=f7e3727] [cursor=pointer]:
+                - /url: //business.aliexpress.ru/legal-docs/article/aer_ru_recommendations
+          - generic [ref=f7e3729]:
+            - link [ref=f7e3730] [cursor=pointer]:
+              - /url: "https://trk.mail.ru/c/ipure9?mt_idfa={mt_idfa}"
+              - img [ref=f7e3731]
+            - link [ref=f7e3753] [cursor=pointer]:
+              - /url: https://msite.onelink.me/LfAv/x37b8gbp
+              - img [ref=f7e3754]
+  - generic:
+    - generic:
+      - heading "Выберите валюту" [level=3]
+      - generic:
+        - list:
+          - generic:
+            - generic:
+              - generic:
+                - img
+              - generic:
+                - textbox
+  - generic:
+    - generic:
+      - heading "Выберите язык" [level=3]
+      - generic:
+        - list
+  - generic:
+    - generic:
+      - heading "Вы находитесь в Москва? Точный адрес поможет заранее увидеть условия доставки товаров" [level=6]:
+        - text: Вы находитесь в Москва?
+        - generic: Точный адрес поможет заранее увидеть условия доставки товаров
+      - generic:
+        - img
+        - text: Указать адрес на карте
+      - generic:
+        - button "Изменить"
+        - button "Да, верно"
+      - img
+    - generic:
+      - img

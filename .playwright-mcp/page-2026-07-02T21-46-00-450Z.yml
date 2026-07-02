@@ -1,0 +1,15 @@
+- generic [ref=f1e2]:
+  - generic [ref=f1e3]:
+    - heading "点击查看源网页" [level=1]:
+      - link "点击查看源网页":
+        - /url: https://aliexpress.ru/
+        - img "点击查看源网页"
+  - generic:
+    - generic:
+      - generic [ref=f1e6]:
+        - generic "Ub6mobcY9oYdTeJdHEKkLg|akbcEw|RNd8yw_0|BfoDdg|1" [ref=f1e7]:
+          - img [ref=f1e8]
+        - link "ПОЖАЛОВАТЬСЯ" [ref=f1e9] [cursor=pointer]:
+          - /url: https://aliexpress.ru:443//item/1005007903266579.html/_____tmd_____/page/feedback?rand=S3WxGHAgAt756EpznwfNzJq2AFA2qBNla3j6EINUS8We9dazM_iKElp8DwVSHZUevpC41Bx7RzivXIj9RnZgdg&x5secdata=xg70368c9d4fece2d3ka51bea6a1b718f6861d4de25d1c42a42e1783028756a-388365139a1154972875abaac3aafclick33befad3ebc3f32c8471c3720ce81b5e112__bx__aliexpress.ru%3A443%2Fitem%2F1005007903266579.html&type=18&language=ru_RU
+        - paragraph
+      - generic [ref=f1e11]: ©️ 2010-2026 AliExpress.ru. Все права защищены.

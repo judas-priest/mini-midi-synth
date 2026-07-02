@@ -45,7 +45,6 @@ pub fn parse_and_push(
 
     let event = match msg {
         MidiMessage::NoteOn(ch, note, velocity) => {
-            log::info!("MIDI NoteOn ch={} note={} vel={}", ch.index(), u8::from(note), u8::from(velocity));
             let channel = ch.index();
             let n = u8::from(note);
             let v = u8::from(velocity);
@@ -117,14 +116,8 @@ pub fn parse_and_push(
         _ => None,
     };
     if let Some(ev) = event {
-        match tx.try_lock() {
-            Ok(mut tx) => {
-                match tx.push(ev) {
-                    Ok(()) => log::info!("[midi] pushed event OK"),
-                    Err(_) => log::warn!("[midi] ring buffer full"),
-                }
-            }
-            Err(_) => log::warn!("[midi] try_lock failed"),
+        if let Ok(mut tx) = tx.try_lock() {
+            let _ = tx.push(ev);
         }
     }
 
