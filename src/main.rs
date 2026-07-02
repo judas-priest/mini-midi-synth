@@ -801,17 +801,28 @@ pub extern "system" fn Java_com_minimidisynth_MidiBridge_onMidiData<'local>(
     _class: jni::objects::JClass<'local>,
     data: jni::objects::JByteArray<'local>,
 ) {
-    let Ok(bytes) = env.convert_byte_array(&data) else { return };
+    let Ok(bytes) = env.convert_byte_array(&data) else {
+        log::warn!("[jni_midi] convert_byte_array failed");
+        return;
+    };
     if bytes.is_empty() { return }
 
     let (Some(tx), Some(ns), Some(ps)) = (
         JNI_MIDI_TX.get(), JNI_NOTE_STATE.get(), JNI_PAD_STATE.get()
-    ) else { return };
+    ) else {
+        log::warn!("[jni_midi] OnceLock not set yet");
+        return;
+    };
+
+    log::info!("[jni_midi] received {} bytes: {:02X?}", bytes.len(), &bytes[..bytes.len().min(8)]);
 
     let mut offset = 0;
     while offset < bytes.len() {
         let consumed = midi::parse_and_push(&bytes[offset..], tx, ns, ps);
-        if consumed == 0 { break }
+        if consumed == 0 {
+            log::warn!("[jni_midi] parse failed at offset {offset}, remaining: {:02X?}", &bytes[offset..]);
+            break;
+        }
         offset += consumed;
     }
 }

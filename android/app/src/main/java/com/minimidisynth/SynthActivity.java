@@ -30,6 +30,7 @@ public class SynthActivity extends NativeActivity {
 
     static {
         System.loadLibrary("c++_shared");
+        System.loadLibrary("mini_midi_synth");
     }
 
     private MidiManager mMidiManager;
