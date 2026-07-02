@@ -547,7 +547,10 @@ impl App {
                     if ui.button("Open folder").clicked() {
                         let dir = sf2_dir();
                         let _ = std::fs::create_dir_all(&dir);
-                        let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+                        #[cfg(not(target_os = "android"))]
+                        {
+                            let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+                        }
                     }
                 });
 

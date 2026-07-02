@@ -322,6 +322,7 @@ fn instr_type_name(instr: TrackInstrument) -> &'static str {
 
 /// Open a native file-picker dialog and return the chosen path.
 /// Tries zenity, then kdialog. Returns None if nothing was selected or no tool found.
+#[cfg(not(target_os = "android"))]
 fn open_midi_file_dialog() -> Option<String> {
     // zenity (GTK, works on both X11 and Wayland via xdg-portal)
     if let Ok(out) = std::process::Command::new("zenity")
@@ -362,4 +363,9 @@ fn open_midi_file_dialog() -> Option<String> {
     }
 
     None
+}
+
+#[cfg(target_os = "android")]
+fn open_midi_file_dialog() -> Option<String> {
+    None // No native file picker on Android yet
 }

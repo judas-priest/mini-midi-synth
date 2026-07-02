@@ -5,6 +5,7 @@ mod cc_map;
 mod config;
 #[cfg(feature = "gui")]
 mod gui;
+#[cfg(target_os = "linux")]
 mod input;
 mod key_action;
 mod midi;
@@ -253,15 +254,18 @@ fn run_headless() -> Result<()> {
     static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
     // Signal handler for graceful shutdown (sigaction is MT-safe, unlike signal)
-    extern "C" fn signal_handler(_sig: i32) {
-        SHUTDOWN.store(true, Ordering::SeqCst);
-    }
-    unsafe {
-        let mut sa: libc::sigaction = std::mem::zeroed();
-        sa.sa_sigaction = signal_handler as *const () as usize;
-        sa.sa_flags = libc::SA_RESTART;
-        libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
-        libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
+    #[cfg(unix)]
+    {
+        extern "C" fn signal_handler(_sig: i32) {
+            SHUTDOWN.store(true, Ordering::SeqCst);
+        }
+        unsafe {
+            let mut sa: libc::sigaction = std::mem::zeroed();
+            sa.sa_sigaction = signal_handler as *const () as usize;
+            sa.sa_flags = libc::SA_RESTART;
+            libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
+            libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
+        }
     }
 
     let mut c = init_common()?;
@@ -359,10 +363,13 @@ fn run_headless() -> Result<()> {
 
     // --- Keyboard input thread (evdev) ---
     let shutdown_flag = Arc::new(AtomicBool::new(false));
+    #[cfg(target_os = "linux")]
     let kb_rx = input::spawn_keyboard_thread(
         &c.config.ui.keybinds,
         shutdown_flag.clone(),
     );
+    #[cfg(not(target_os = "linux"))]
+    let kb_rx: Option<(std::thread::JoinHandle<()>, std::sync::mpsc::Receiver<key_action::KeyAction>)> = None;
     let seq_target_local: Arc<AtomicU8> = c.seq_target_atom.clone();
     let mut drum_playing = false;
 
