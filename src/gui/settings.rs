@@ -622,21 +622,17 @@ impl App {
 
     pub(super) fn apply_midi(&mut self) {
         if let Some(port_name) = &self.selected_midi_port {
-            let port_idx = self.midi_port_names.iter().position(|n| n == port_name);
-            if let Some(idx) = port_idx {
-                if let Some(reconnect) = &mut self.on_midi_reconnect {
-                    match reconnect(idx) {
-                        Ok(()) => {
-                            self.midi_connected_port = Some(port_name.clone());
-                            self.config.midi.port_name = Some(port_name.clone());
-                            self.show_toast(format!("MIDI: {port_name}"), ToastKind::Success);
-                            self.save_config();
-                        }
-                        Err(e) => { self.show_toast(format!("MIDI error: {e}"), ToastKind::Error); }
+            let port_name = port_name.clone();
+            if let Some(reconnect) = &mut self.on_midi_reconnect {
+                match reconnect(&port_name) {
+                    Ok(()) => {
+                        self.midi_connected_port = Some(port_name.clone());
+                        self.config.midi.port_name = Some(port_name.clone());
+                        self.show_toast(format!("MIDI: {port_name}"), ToastKind::Success);
+                        self.save_config();
                     }
+                    Err(e) => { self.show_toast(format!("MIDI error: {e}"), ToastKind::Error); }
                 }
-            } else {
-                self.show_toast(format!("Port not found: {port_name}"), ToastKind::Error);
             }
         } else {
             self.midi_connected_port = None;

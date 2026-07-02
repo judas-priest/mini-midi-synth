@@ -560,8 +560,8 @@ fn run_gui(
     let midi_tx_cb = c.midi_tx_shared.clone();
     let note_state_cb = c.note_state.clone();
     let pad_state_cb = c.pad_state.clone();
-    let on_midi_reconnect = Box::new(move |port_idx: usize| -> Result<(), String> {
-        let new_conn = midi::connect(port_idx, midi_tx_cb.clone(), note_state_cb.clone(), pad_state_cb.clone())
+    let on_midi_reconnect = Box::new(move |port_name: &str| -> Result<(), String> {
+        let new_conn = midi::connect_by_name(Some(port_name), 0, midi_tx_cb.clone(), note_state_cb.clone(), pad_state_cb.clone())
             .map_err(|e| e.to_string())?;
         let mut handle = midi_handle_cb.lock().map_err(|e| e.to_string())?;
         *handle = Some(new_conn);

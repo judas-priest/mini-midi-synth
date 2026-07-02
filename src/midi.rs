@@ -40,18 +40,45 @@ pub fn list_ports() -> Result<Vec<String>> {
     Ok(names)
 }
 
-/// Connect to a MIDI input port by index using a shared producer.
+/// Connect to a MIDI input port by index or name using a shared producer.
+/// Tries by index first; if the name at that index doesn't match, searches by name.
 pub fn connect(
     port_index: usize,
     tx: SharedMidiTx,
     note_state: NoteState,
     pad_state: PadState,
 ) -> Result<MidiInputConnection<()>> {
+    connect_by_name(None, port_index, tx, note_state, pad_state)
+}
+
+/// Connect to a MIDI input port by name (with index hint).
+pub fn connect_by_name(
+    port_name: Option<&str>,
+    port_index_hint: usize,
+    tx: SharedMidiTx,
+    note_state: NoteState,
+    pad_state: PadState,
+) -> Result<MidiInputConnection<()>> {
     let midi_in = MidiInput::new("mini_midi_synth")?;
     let ports = midi_in.ports();
-    let port = ports
-        .get(port_index)
-        .context("Invalid MIDI port index")?;
+
+    // Find port: try by name first, fall back to index
+    let port = if let Some(name) = port_name {
+        // Try index hint first (fast path)
+        let by_hint = ports.get(port_index_hint).and_then(|p| {
+            midi_in.port_name(p).ok().filter(|n| n == name).map(|_| p)
+        });
+        if let Some(p) = by_hint {
+            p
+        } else {
+            // Search all ports by name
+            ports.iter()
+                .find(|p| midi_in.port_name(p).ok().as_deref() == Some(name))
+                .context(format!("MIDI port not found: {name}"))?
+        }
+    } else {
+        ports.get(port_index_hint).context("Invalid MIDI port index")?
+    };
 
     let conn = midi_in
         .connect(

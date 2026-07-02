@@ -205,7 +205,7 @@ fn note_name(note: u8) -> String {
     format!("{name}{oct}")
 }
 
-type MidiReconnectFn = Box<dyn FnMut(usize) -> Result<(), String>>;
+type MidiReconnectFn = Box<dyn FnMut(&str) -> Result<(), String>>;
 
 pub struct App {
     pub _frame_count: u64,
