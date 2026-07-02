@@ -196,10 +196,7 @@ pub fn scan_sf2_files() -> Vec<(String, std::path::PathBuf)> {
 }
 
 fn sf2_dir() -> std::path::PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("mini_midi_synth")
-        .join("sf2")
+    crate::config::app_data_dir().join("sf2")
 }
 
 fn note_name(note: u8) -> String {

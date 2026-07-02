@@ -144,8 +144,36 @@ impl Default for Config {
     }
 }
 
+/// Base config directory (~/.config/mini_midi_synth or Android internal).
+pub fn app_config_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        std::env::var("MINI_SYNTH_DATA_DIR").ok().map(PathBuf::from)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        dirs::config_dir().map(|d| d.join("mini_midi_synth"))
+    }
+}
+
+/// Base data directory (~/.local/share/mini_midi_synth or Android internal).
+pub fn app_data_dir() -> PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        std::env::var("MINI_SYNTH_DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("mini_midi_synth")
+    }
+}
+
 fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("mini_midi_synth").join("config.json"))
+    app_config_dir().map(|d| d.join("config.json"))
 }
 
 impl Config {

@@ -446,7 +446,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
 
 /// Return user patch directory (~/.config/mini_midi_synth/presets/).
 fn user_preset_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("mini_midi_synth").join("presets"))
+    crate::config::app_config_dir().map(|d| d.join("presets"))
 }
 
 /// Load all presets from a directory recursively (subdirs = categories).
@@ -490,18 +490,12 @@ fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Patch>) {
 /// External patch directory: ~/.local/share/mini_midi_synth/presets/
 /// Place converted Surge presets here.
 pub fn external_preset_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("mini_midi_synth")
-        .join("presets")
+    crate::config::app_data_dir().join("presets")
 }
 
 /// Wavetable directory: ~/.local/share/mini_midi_synth/wavetables/
 pub fn wavetable_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("mini_midi_synth")
-        .join("wavetables")
+    crate::config::app_data_dir().join("wavetables")
 }
 
 /// Load all available presets: factory + external + user.
@@ -555,7 +549,7 @@ pub struct DrumKit {
 }
 
 fn drum_kit_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("mini_midi_synth").join("drum_kits"))
+    crate::config::app_config_dir().map(|d| d.join("drum_kits"))
 }
 
 pub fn save_drum_kit(kit: &DrumKit) -> Result<PathBuf> {
@@ -702,7 +696,7 @@ pub struct Performance {
 }
 
 fn performance_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("mini_midi_synth").join("performances"))
+    crate::config::app_config_dir().map(|d| d.join("performances"))
 }
 
 pub fn save_performance(perf: &Performance) -> Result<PathBuf> {
