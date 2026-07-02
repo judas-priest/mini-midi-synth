@@ -29,6 +29,102 @@ pub fn new_pad_state() -> PadState {
 /// Shared MIDI producer — allows reconnecting MIDI without restarting audio.
 pub type SharedMidiTx = Arc<Mutex<Producer<MidiEvent>>>;
 
+/// Parse a single MIDI message from `data`, update note/pad state, and push
+/// the resulting event into the ring buffer.  Returns the number of bytes
+/// consumed, or 0 on parse failure.
+pub fn parse_and_push(
+    data: &[u8],
+    tx: &SharedMidiTx,
+    note_state: &NoteState,
+    pad_state: &PadState,
+) -> usize {
+    let Ok(msg) = MidiMessage::try_from(data) else {
+        return 0;
+    };
+    let consumed = msg.bytes_size();
+
+    let event = match msg {
+        MidiMessage::NoteOn(ch, note, velocity) => {
+            log::info!("MIDI NoteOn ch={} note={} vel={}", ch.index(), u8::from(note), u8::from(velocity));
+            let channel = ch.index();
+            let n = u8::from(note);
+            let v = u8::from(velocity);
+            let state = if channel == 9 { pad_state } else { note_state };
+            if v == 0 {
+                state[n as usize].store(0, Ordering::Relaxed);
+            } else {
+                state[n as usize].store(v, Ordering::Relaxed);
+            }
+            Some(MidiEvent::NoteOn {
+                channel,
+                note: n,
+                velocity: v,
+            })
+        }
+        MidiMessage::NoteOff(ch, note, _) => {
+            let channel = ch.index();
+            let n = u8::from(note);
+            let state = if channel == 9 { pad_state } else { note_state };
+            state[n as usize].store(0, Ordering::Relaxed);
+            Some(MidiEvent::NoteOff { channel, note: n })
+        }
+        MidiMessage::PitchBendChange(ch, bend) => {
+            let raw = u16::from(bend) as f32;
+            let normalized = (raw - PITCH_BEND_CENTER) / PITCH_BEND_CENTER;
+            Some(MidiEvent::PitchBend { channel: ch.index(), value: normalized })
+        }
+        MidiMessage::ControlChange(ch, cc, val) => {
+            let channel = ch.index();
+            let cc_num = u8::from(cc);
+            let v = u8::from(val);
+            if cc_num == 1 {
+                Some(MidiEvent::ModWheel { channel, value: v as f32 / MIDI_MAX_VAL })
+            } else if (1..=119).contains(&cc_num)
+                && cc_num != 32
+            {
+                Some(MidiEvent::ControlChange { channel, cc: cc_num, value: v })
+            } else {
+                None
+            }
+        }
+        MidiMessage::ProgramChange(ch, program) => {
+            Some(MidiEvent::ProgramChange { channel: ch.index(), program: u8::from(program) })
+        }
+        MidiMessage::ChannelPressure(ch, pressure) => {
+            Some(MidiEvent::Aftertouch { channel: ch.index(), value: u8::from(pressure) as f32 / MIDI_MAX_VAL })
+        }
+        MidiMessage::PolyphonicKeyPressure(ch, note, pressure) => {
+            Some(MidiEvent::PolyAftertouch {
+                channel: ch.index(),
+                note: u8::from(note),
+                pressure: u8::from(pressure) as f32 / MIDI_MAX_VAL,
+            })
+        }
+        MidiMessage::SysEx(payload) => {
+            // SMK-37 Pro: F0 35 59 10 00 [7F|00] F7
+            // 7F = press, 00 = release
+            if payload.len() == 5
+                && u8::from(payload[0]) == 0x35
+                && u8::from(payload[1]) == 0x59
+                && u8::from(payload[2]) == 0x10
+            {
+                let pressed = u8::from(payload[4]) == 0x7F;
+                Some(MidiEvent::Navigate { pressed })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    if let Some(ev) = event {
+        if let Ok(mut tx) = tx.try_lock() {
+            let _ = tx.push(ev);
+        }
+    }
+
+    consumed
+}
+
 /// List available MIDI input ports.
 pub fn list_ports() -> Result<Vec<String>> {
     let midi_in = MidiInput::new("mini_midi_synth_list")?;
@@ -80,93 +176,16 @@ pub fn connect_by_name(
         ports.get(port_index_hint).context("Invalid MIDI port index")?
     };
 
+    let port_display = midi_in.port_name(port).unwrap_or_default();
+    log::info!("[midi] Connecting to port: {port_display}");
+
     let conn = midi_in
         .connect(
             port,
             "mini_midi_synth_in",
             move |_timestamp, data, _| {
-                if let Ok(msg) = MidiMessage::try_from(data) {
-                    let event = match msg {
-                        MidiMessage::NoteOn(ch, note, velocity) => {
-                            let channel = ch.index();
-                            let n = u8::from(note);
-                            let v = u8::from(velocity);
-                            let state = if channel == 9 { &pad_state } else { &note_state };
-                            if v == 0 {
-                                state[n as usize].store(0, Ordering::Relaxed);
-                            } else {
-                                state[n as usize].store(v, Ordering::Relaxed);
-                            }
-                            Some(MidiEvent::NoteOn {
-                                channel,
-                                note: n,
-                                velocity: v,
-                            })
-                        }
-                        MidiMessage::NoteOff(ch, note, _) => {
-                            let channel = ch.index();
-                            let n = u8::from(note);
-                            let state = if channel == 9 { &pad_state } else { &note_state };
-                            state[n as usize].store(0, Ordering::Relaxed);
-                            Some(MidiEvent::NoteOff { channel, note: n })
-                        }
-                        MidiMessage::PitchBendChange(ch, bend) => {
-                            let raw = u16::from(bend) as f32;
-                            let normalized = (raw - PITCH_BEND_CENTER) / PITCH_BEND_CENTER;
-                            Some(MidiEvent::PitchBend { channel: ch.index(), value: normalized })
-                        }
-                        MidiMessage::ControlChange(ch, cc, val) => {
-                            let channel = ch.index();
-                            let cc_num = u8::from(cc);
-                            let v = u8::from(val);
-                            if cc_num == 1 {
-                                Some(MidiEvent::ModWheel { channel, value: v as f32 / MIDI_MAX_VAL })
-                            } else if (1..=119).contains(&cc_num)
-                                && cc_num != 32
-                            {
-                                Some(MidiEvent::ControlChange { channel, cc: cc_num, value: v })
-                            } else {
-                                None
-                            }
-                        }
-                        MidiMessage::ProgramChange(ch, program) => {
-                            Some(MidiEvent::ProgramChange { channel: ch.index(), program: u8::from(program) })
-                        }
-                        MidiMessage::ChannelPressure(ch, pressure) => {
-                            Some(MidiEvent::Aftertouch { channel: ch.index(), value: u8::from(pressure) as f32 / MIDI_MAX_VAL })
-                        }
-                        MidiMessage::PolyphonicKeyPressure(ch, note, pressure) => {
-                            Some(MidiEvent::PolyAftertouch {
-                                channel: ch.index(),
-                                note: u8::from(note),
-                                pressure: u8::from(pressure) as f32 / MIDI_MAX_VAL,
-                            })
-                        }
-                        MidiMessage::SysEx(payload) => {
-                            // SMK-37 Pro: F0 35 59 10 00 [7F|00] F7
-                            // 7F = press, 00 = release
-                            if payload.len() == 5
-                                && u8::from(payload[0]) == 0x35
-                                && u8::from(payload[1]) == 0x59
-                                && u8::from(payload[2]) == 0x10
-                            {
-                                let pressed = u8::from(payload[4]) == 0x7F;
-                                Some(MidiEvent::Navigate { pressed })
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    };
-                    if let Some(ev) = event {
-                        // try_lock: never block the MIDI RT thread.
-                        // Lock is only contended during reconnection (GUI thread), so
-                        // dropping a single event during reconnect is acceptable.
-                        if let Ok(mut tx) = tx.try_lock() {
-                            let _ = tx.push(ev);
-                        }
-                    }
-                }
+                log::info!("[midi] Received {} bytes", data.len());
+                parse_and_push(data, &tx, &note_state, &pad_state);
             },
             (),
         )

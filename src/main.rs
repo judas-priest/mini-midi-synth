@@ -18,6 +18,16 @@ mod synth;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[cfg(target_os = "android")]
+use std::sync::OnceLock;
+
+#[cfg(target_os = "android")]
+static JNI_MIDI_TX: OnceLock<midi::SharedMidiTx> = OnceLock::new();
+#[cfg(target_os = "android")]
+static JNI_NOTE_STATE: OnceLock<midi::NoteState> = OnceLock::new();
+#[cfg(target_os = "android")]
+static JNI_PAD_STATE: OnceLock<midi::PadState> = OnceLock::new();
+
 use anyhow::Result;
 
 #[cfg(not(target_os = "android"))]
@@ -138,6 +148,14 @@ fn init_common() -> Result<CommonInit> {
 
     let midi_tx_shared: midi::SharedMidiTx = Arc::new(Mutex::new(midi_tx));
 
+    #[cfg(target_os = "android")]
+    {
+        let _ = JNI_MIDI_TX.set(midi_tx_shared.clone());
+        let _ = JNI_NOTE_STATE.set(note_state.clone());
+        let _ = JNI_PAD_STATE.set(pad_state.clone());
+        log::info!("[init] JNI MIDI bridge globals set");
+    }
+
     let program_change_atom = Arc::new(AtomicU8::new(255));
 
     let mut engine = synth::SynthEngine::new(config.audio.sample_rate as f32);
@@ -172,9 +190,18 @@ fn init_common() -> Result<CommonInit> {
     };
     let (audio_backend, actual_sr) =
         audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx)?;
+    log::info!("[init] Audio: sample_rate={actual_sr}");
+    eprintln!("[init] Audio: sample_rate={actual_sr}");
 
-    // MIDI
+    // MIDI — on Android, wait for BLE MIDI devices to fully initialize
+    #[cfg(target_os = "android")]
+    {
+        log::info!("[init] Waiting 2s for BLE MIDI devices to initialize...");
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
     let midi_port_names = midi::list_ports().unwrap_or_default();
+    log::info!("[init] MIDI ports: {midi_port_names:?}");
+    eprintln!("[init] MIDI ports: {midi_port_names:?}");
     let midi_port_idx = config
         .midi
         .port_name
@@ -183,6 +210,7 @@ fn init_common() -> Result<CommonInit> {
         .or(if midi_port_names.is_empty() { None } else { Some(0) });
 
     let midi_conn: Option<MidiInputConnection<()>> = midi_port_idx.and_then(|idx| {
+        log::info!("[init] Connecting MIDI port idx={idx}");
         midi::connect(idx, midi_tx_shared.clone(), note_state.clone(), pad_state.clone()).ok()
     });
 
@@ -748,9 +776,42 @@ fn run_gui(
 #[cfg(feature = "gui")]
 #[unsafe(no_mangle)]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_max_level(log::LevelFilter::Info)
+            .with_tag("MiniMidiSynth"),
+    );
+    log::info!("android_main started");
+
     // Set data dir from Android internal storage
     if let Some(path) = app.internal_data_path() {
         std::env::set_var("MINI_SYNTH_DATA_DIR", path.to_string_lossy().as_ref());
+        log::info!("data dir: {}", path.display());
     }
-    run_gui(app).expect("Failed to start synth");
+    if let Err(e) = run_gui(app) {
+        log::error!("run_gui failed: {e}");
+    }
+}
+
+/// JNI entry point: called from Java MidiBridge.onMidiData(byte[])
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_minimidisynth_MidiBridge_onMidiData<'local>(
+    mut env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+    data: jni::objects::JByteArray<'local>,
+) {
+    let Ok(bytes) = env.convert_byte_array(&data) else { return };
+    if bytes.is_empty() { return }
+
+    let (Some(tx), Some(ns), Some(ps)) = (
+        JNI_MIDI_TX.get(), JNI_NOTE_STATE.get(), JNI_PAD_STATE.get()
+    ) else { return };
+
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let consumed = midi::parse_and_push(&bytes[offset..], tx, ns, ps);
+        if consumed == 0 { break }
+        offset += consumed;
+    }
 }
