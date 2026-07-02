@@ -507,6 +507,7 @@ fn parse_sf2_file(path: &str) -> Result<std::sync::Arc<rustysynth::SoundFont>> {
 // GUI mode
 // ---------------------------------------------------------------------------
 #[cfg(feature = "gui")]
+#[cfg(not(target_os = "android"))]
 fn make_piano_icon() -> eframe::egui::IconData {
     const S: u32 = 64;
     let mut rgba = vec![0u8; (S * S * 4) as usize];
@@ -537,7 +538,10 @@ fn make_piano_icon() -> eframe::egui::IconData {
 }
 
 #[cfg(feature = "gui")]
-fn run_gui() -> Result<()> {
+fn run_gui(
+    #[cfg(target_os = "android")]
+    android_app: winit::platform::android::activity::AndroidApp,
+) -> Result<()> {
     use crate::cc_map::CcMap;
     use crate::synth::drum::NUM_DRUM_SLOTS;
 
@@ -694,14 +698,29 @@ fn run_gui() -> Result<()> {
     app.load_edited_params(1);
     app.send_initial_presets();
 
+    #[cfg(not(target_os = "android"))]
     let viewport = eframe::egui::ViewportBuilder::default()
         .with_app_id("mini_midi_synth")
         .with_inner_size([c.config.ui.window_width, c.config.ui.window_height])
         .with_min_inner_size([500.0, 300.0])
         .with_icon(make_piano_icon());
+
+    #[cfg(target_os = "android")]
+    let viewport = eframe::egui::ViewportBuilder::default()
+        .with_app_id("mini_midi_synth");
+
+    #[cfg(target_os = "android")]
+    let android_app_clone = android_app.clone();
+
     let options = eframe::NativeOptions {
         viewport,
+        #[cfg(not(target_os = "android"))]
         persist_window: true,
+        #[cfg(target_os = "android")]
+        event_loop_builder: Some(Box::new(move |builder| {
+            use winit::platform::android::EventLoopBuilderExtAndroid;
+            builder.with_android_app(android_app_clone);
+        })),
         ..Default::default()
     };
 
@@ -720,4 +739,18 @@ fn run_gui() -> Result<()> {
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Android entry point
+// ---------------------------------------------------------------------------
+#[cfg(target_os = "android")]
+#[cfg(feature = "gui")]
+#[unsafe(no_mangle)]
+fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    // Set data dir from Android internal storage
+    if let Some(path) = app.internal_data_path() {
+        std::env::set_var("MINI_SYNTH_DATA_DIR", path.to_string_lossy().as_ref());
+    }
+    run_gui(app).expect("Failed to start synth");
 }
