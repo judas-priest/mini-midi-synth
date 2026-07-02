@@ -7,11 +7,11 @@
 
     <application
         android:label="Mini MIDI Synth"
-        android:hasCode="false"
+        android:hasCode="true"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
 
         <activity
-            android:name="android.app.NativeActivity"
+            android:name="com.minimidisynth.SynthActivity"
             android:configChanges="orientation|keyboardHidden|screenSize|screenLayout"
             android:screenOrientation="landscape"
             android:exported="true">

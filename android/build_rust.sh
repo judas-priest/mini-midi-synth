@@ -7,6 +7,7 @@ export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-/home/dima/.local/opt/android-sdk/n
 cargo ndk \
     -t arm64-v8a \
     -P 30 \
+    --link-libcxx-shared \
     -o android/app/src/main/jniLibs \
     build --release \
     --no-default-features \
