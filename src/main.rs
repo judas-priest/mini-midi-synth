@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 
+#[cfg(not(target_os = "android"))]
 use cpal::HostId;
 use midir::MidiInputConnection;
 
@@ -37,6 +38,7 @@ fn suppress_alsa_errors() {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 fn find_host_idx(hosts: &[(HostId, &str)], name: &str) -> usize {
     hosts
         .iter()
@@ -52,13 +54,13 @@ fn find_midi_port(port_names: &[String], saved_name: &str) -> Option<usize> {
 struct CommonInit {
     config: Config,
     patches: Vec<preset::Patch>,
-    #[cfg(feature = "gui")]
+    #[cfg(all(feature = "gui", not(target_os = "android")))]
     available_hosts: Vec<(HostId, &'static str)>,
-    #[cfg(feature = "gui")]
+    #[cfg(all(feature = "gui", not(target_os = "android")))]
     host_name: &'static str,
-    #[cfg(feature = "gui")]
+    #[cfg(all(feature = "gui", not(target_os = "android")))]
     host_idx: usize,
-    #[cfg(feature = "gui")]
+    #[cfg(all(feature = "gui", not(target_os = "android")))]
     supported_sr: Vec<u32>,
     #[cfg(feature = "gui")]
     is_jack: bool,
@@ -100,17 +102,32 @@ struct CommonInit {
 fn init_common() -> Result<CommonInit> {
     let config = Config::load();
     let patches = preset::load_all_patches();
+
+    #[cfg(not(target_os = "android"))]
     let available_hosts = audio::available_hosts();
 
+    #[cfg(not(target_os = "android"))]
     let host_idx = find_host_idx(&available_hosts, &config.audio.backend);
+    #[cfg(not(target_os = "android"))]
     let host_id = available_hosts[host_idx].0;
-    #[cfg(feature = "gui")]
+    #[cfg(all(feature = "gui", not(target_os = "android")))]
     let host_name = available_hosts[host_idx].1;
     #[cfg(feature = "gui")]
-    let is_jack = host_name == "JACK";
+    let is_jack = {
+        #[cfg(not(target_os = "android"))]
+        { host_name == "JACK" }
+        #[cfg(target_os = "android")]
+        { false }
+    };
 
-    #[cfg(feature = "gui")]
+    #[cfg(all(feature = "gui", not(target_os = "android")))]
     let supported_sr = audio::supported_sample_rates(host_id);
+
+    #[cfg(target_os = "android")]
+    let host_id = {
+        // On Android, use the default host (AAudio)
+        cpal::default_host().id()
+    };
 
     let note_state = midi::new_note_state();
     let pad_state = midi::new_pad_state();
@@ -184,13 +201,13 @@ fn init_common() -> Result<CommonInit> {
     Ok(CommonInit {
         config,
         patches,
-        #[cfg(feature = "gui")]
+        #[cfg(all(feature = "gui", not(target_os = "android")))]
         available_hosts,
-        #[cfg(feature = "gui")]
+        #[cfg(all(feature = "gui", not(target_os = "android")))]
         host_name,
-        #[cfg(feature = "gui")]
+        #[cfg(all(feature = "gui", not(target_os = "android")))]
         host_idx,
-        #[cfg(feature = "gui")]
+        #[cfg(all(feature = "gui", not(target_os = "android")))]
         supported_sr,
         #[cfg(feature = "gui")]
         is_jack,
@@ -561,12 +578,18 @@ fn run_gui() -> Result<()> {
         ctrl_tx: c.ctrl_tx,
         sample_rate: c.actual_sr,
         config: c.config.clone(),
+        #[cfg(not(target_os = "android"))]
         current_host: c.host_name.to_string(),
+        #[cfg(target_os = "android")]
+        current_host: "AAudio".to_string(),
+        #[cfg(not(target_os = "android"))]
         available_hosts: c.available_hosts.clone(),
+        #[cfg(not(target_os = "android"))]
         supported_sample_rates: c.supported_sr,
         midi_port_names: c.midi_port_names,
         midi_connected_port: c.midi_connected_name,
         show_settings: false,
+        #[cfg(not(target_os = "android"))]
         selected_host_idx: c.host_idx,
         selected_sample_rate: c.config.audio.sample_rate,
         selected_buffer_size: c.config.audio.buffer_size,

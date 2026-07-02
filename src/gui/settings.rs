@@ -389,6 +389,8 @@ impl App {
                     .num_columns(2)
                     .spacing([12.0, 6.0])
                     .show(ui, |ui| {
+                        #[cfg(not(target_os = "android"))]
+                        {
                         ui.label("Backend:");
                         let host_name = self.available_hosts.get(self.selected_host_idx)
                             .map(|(_, n)| *n).unwrap_or("?");
@@ -414,6 +416,7 @@ impl App {
                                 }
                             });
                         ui.end_row();
+                        }
 
                         ui.label("Buffer Size:");
                         egui::ComboBox::from_id_salt("buffer")
@@ -435,8 +438,16 @@ impl App {
                 ui.add_space(theme::SP_SM);
                 ui.colored_label(theme::TEXT_SECONDARY, "Restart to apply audio changes.");
                 if ui.button("Save Audio Settings").clicked() {
+                    #[cfg(not(target_os = "android"))]
                     if let Some((_, host_name)) = self.available_hosts.get(self.selected_host_idx) {
                         self.config.audio.backend = host_name.to_string();
+                        self.config.audio.sample_rate = self.selected_sample_rate;
+                        self.config.audio.buffer_size = self.selected_buffer_size;
+                        self.save_config();
+                        self.show_toast("Audio saved. Restart to apply.", ToastKind::Info);
+                    }
+                    #[cfg(target_os = "android")]
+                    {
                         self.config.audio.sample_rate = self.selected_sample_rate;
                         self.config.audio.buffer_size = self.selected_buffer_size;
                         self.save_config();

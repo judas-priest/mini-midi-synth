@@ -15,7 +15,6 @@ use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use cpal::HostId;
 use eframe::egui;
 use rtrb::Producer;
 
@@ -221,13 +220,16 @@ pub struct App {
 
     pub config: Config,
     pub current_host: String,
-    pub available_hosts: Vec<(HostId, &'static str)>,
+    #[cfg(not(target_os = "android"))]
+    pub available_hosts: Vec<(cpal::HostId, &'static str)>,
+    #[cfg(not(target_os = "android"))]
     pub supported_sample_rates: Vec<u32>,
 
     pub midi_port_names: Vec<String>,
     pub midi_connected_port: Option<String>,
 
     pub show_settings: bool,
+    #[cfg(not(target_os = "android"))]
     pub selected_host_idx: usize,
     pub selected_sample_rate: u32,
     pub selected_buffer_size: u32,
@@ -1471,6 +1473,7 @@ impl App {
         self.midi_port_names = midi::list_ports().unwrap_or_default();
     }
 
+    #[cfg(not(target_os = "android"))]
     fn refresh_sample_rates(&mut self) {
         if let Some((host_id, _)) = self.available_hosts.get(self.selected_host_idx) {
             self.supported_sample_rates = crate::audio::supported_sample_rates(*host_id);
