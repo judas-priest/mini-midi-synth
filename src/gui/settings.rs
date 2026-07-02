@@ -361,8 +361,14 @@ impl App {
 
         if let Ok(_path) = preset::save_patch(&new_patch) {
             self.show_toast("Preset saved", ToastKind::Success);
-            self.patches.push(new_patch);
-            self.parts[part].patch_idx = self.patches.len() - 1;
+            // Replace existing preset with same name, or append
+            if let Some(idx) = self.patches.iter().position(|p| p.name == new_patch.name) {
+                self.patches[idx] = new_patch;
+                self.parts[part].patch_idx = idx;
+            } else {
+                self.patches.push(new_patch);
+                self.parts[part].patch_idx = self.patches.len() - 1;
+            }
             self.parts[part].params_dirty = false;
             self.save_config();
         }

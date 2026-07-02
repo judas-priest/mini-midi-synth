@@ -353,7 +353,7 @@ pub struct App {
     /// Result of an async file picker (zenity/kdialog subprocess). None = no pending pick.
     pub midi_seq_file_pick: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
     // Undo/redo for patch parameter editing
-    pub undo_stack: Vec<std::collections::BTreeMap<String, f32>>,
+    pub undo_stack: std::collections::VecDeque<std::collections::BTreeMap<String, f32>>,
     pub redo_stack: Vec<std::collections::BTreeMap<String, f32>>,
 }
 
@@ -1196,19 +1196,19 @@ impl App {
     /// Safe to call multiple times — only pushes if state differs from top of stack.
     pub(super) fn push_undo_snapshot(&mut self) {
         let current = &self.parts[self.active_part].edited_params;
-        if self.undo_stack.last() == Some(current) {
+        if self.undo_stack.back() == Some(current) {
             return; // no change since last snapshot
         }
-        self.undo_stack.push(current.clone());
+        self.undo_stack.push_back(current.clone());
         self.redo_stack.clear();
         if self.undo_stack.len() > Self::MAX_UNDO {
-            self.undo_stack.remove(0);
+            self.undo_stack.pop_front();
         }
     }
 
     fn undo(&mut self) {
         let part = self.active_part;
-        if let Some(snapshot) = self.undo_stack.pop() {
+        if let Some(snapshot) = self.undo_stack.pop_back() {
             self.redo_stack.push(self.parts[part].edited_params.clone());
             self.parts[part].edited_params = snapshot;
             self.send_edited_params(part);
@@ -1219,7 +1219,7 @@ impl App {
     fn redo(&mut self) {
         let part = self.active_part;
         if let Some(snapshot) = self.redo_stack.pop() {
-            self.undo_stack.push(self.parts[part].edited_params.clone());
+            self.undo_stack.push_back(self.parts[part].edited_params.clone());
             self.parts[part].edited_params = snapshot;
             self.send_edited_params(part);
             self.show_toast("Redo", ToastKind::Info);

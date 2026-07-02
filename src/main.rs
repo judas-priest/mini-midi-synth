@@ -729,7 +729,7 @@ fn run_gui(
         midi_seq_play_atom: c.midi_seq_play_atom,
         midi_seq_pos_atom: c.midi_seq_pos_atom,
         midi_seq_file_pick: None,
-        undo_stack: Vec::new(),
+        undo_stack: std::collections::VecDeque::new(),
         redo_stack: Vec::new(),
         toasts: Vec::new(),
     };
