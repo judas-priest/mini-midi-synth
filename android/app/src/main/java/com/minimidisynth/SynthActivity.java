@@ -34,13 +34,20 @@ public class SynthActivity extends NativeActivity {
     }
 
     private MidiManager mMidiManager;
+    // All access to mOpenDevices and mBridges happens on the main looper thread:
+    // - onCreate (main)
+    // - onDestroy (main)
+    // - OnDeviceOpenedListener callback (posted to main looper via handler)
+    // No synchronization needed.
     private final List<MidiDevice> mOpenDevices = new ArrayList<>();
     private final List<MidiBridge> mBridges = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        openPairedBluetoothMidiDevices();
         super.onCreate(savedInstanceState);
+        // BLE MIDI init AFTER super.onCreate() — Activity context is now fully available.
+        // android_main runs in a separate thread, so it won't block on this.
+        openPairedBluetoothMidiDevices();
     }
 
     @Override
@@ -80,8 +87,11 @@ public class SynthActivity extends NativeActivity {
         if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
                 != PackageManager.PERMISSION_GRANTED) {
             Log.i(TAG, "Requesting BLUETOOTH_CONNECT permission");
-            requestPermissions(
-                new String[]{android.Manifest.permission.BLUETOOTH_CONNECT}, 1);
+            // Post to handler — requesting permissions before Activity is fully
+            // visible can cause issues on some devices
+            new Handler(Looper.getMainLooper()).post(() ->
+                requestPermissions(
+                    new String[]{android.Manifest.permission.BLUETOOTH_CONNECT}, 1));
             return;
         }
 
