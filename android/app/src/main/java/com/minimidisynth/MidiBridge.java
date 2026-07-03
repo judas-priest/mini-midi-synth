@@ -15,7 +15,7 @@ public class MidiBridge extends MidiReceiver {
     private static final String TAG = "MiniMidiSynth";
 
     /** JNI native method — implemented in Rust (main.rs) */
-    public static native void onMidiData(byte[] data);
+    static native void onMidiData(byte[] data);
 
     private final MidiOutputPort mPort;
     private final String mDeviceName;
