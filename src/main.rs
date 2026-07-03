@@ -787,6 +787,13 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
             .with_max_level(log::LevelFilter::Info)
             .with_tag("MiniMidiSynth"),
     );
+
+    // Catch panics — without this, Rust panics silently kill the process
+    // with no error in logcat (looks like instant close, no crash dialog)
+    std::panic::set_hook(Box::new(|info| {
+        log::error!("PANIC: {info}");
+    }));
+
     log::info!("android_main started");
 
     // Set data dir from Android internal storage

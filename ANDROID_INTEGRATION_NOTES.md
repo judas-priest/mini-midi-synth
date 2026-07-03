@@ -189,3 +189,37 @@ adb shell "dumpsys audio" | grep "Devices:"
 # Скриншот
 adb shell screencap -p /sdcard/s.png && adb pull /sdcard/s.png /tmp/s.png
 ```
+
+---
+
+## 6. Крэши (мгновенное закрытие без ошибки)
+
+### Rust panic на Android = молчаливая смерть
+Rust panic по умолчанию просто убивает процесс. Нет диалога "приложение остановлено", нет ошибки в logcat. Выглядит как: нажал иконку → анимация открытия → мгновенное закрытие.
+
+**Решение — panic hook в android_main:**
+```rust
+std::panic::set_hook(Box::new(|info| {
+    log::error!("PANIC: {info}");
+}));
+```
+Устанавливать ПОСЛЕ `android_logger::init_once()`, но ПЕРЕД всем остальным кодом.
+
+### Частые причины мгновенного крэша:
+1. **`System.loadLibrary` не вызван** — UnsatisfiedLinkError в Java, видно в `adb logcat -s AndroidRuntime`
+2. **libc++_shared.so отсутствует** — dlopen failed, видно в logcat
+3. **Доступ к native_window до Resumed** — panic в winit/eframe
+4. **`unwrap()` на None** — файл не найден, config не загружен, путь не существует
+5. **Platform-specific код не загейчен** — libc, evdev, zenity и т.д.
+
+### Диагностика:
+```bash
+# Rust panic (после установки hook)
+adb logcat -s "MiniMidiSynth" | grep "PANIC"
+
+# Java crash (до загрузки native lib)
+adb logcat -s "AndroidRuntime" | grep "FATAL\|Exception"
+
+# Native crash (SIGSEGV и т.д.)
+adb logcat | grep "FATAL\|signal\|tombstone"
+```
