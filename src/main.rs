@@ -790,7 +790,12 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     // Catch panics — without this, Rust panics silently kill the process
     // with no error in logcat (looks like instant close, no crash dialog)
     std::panic::set_hook(Box::new(|info| {
-        log::error!("PANIC: {info}");
+        let msg = format!("PANIC: {info}");
+        log::error!("{msg}");
+        // Also write to stderr in case android_logger fails
+        eprintln!("{msg}");
+        // Give logger time to flush before abort kills the process
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }));
 
     log::info!("android_main started");
