@@ -183,7 +183,6 @@ pub fn connect_by_name(
             port,
             "mini_midi_synth_in",
             move |_timestamp, data, _| {
-                log::info!("[midi] Received {} bytes", data.len());
                 parse_and_push(data, &tx, &note_state, &pad_state);
             },
             (),

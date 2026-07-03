@@ -191,7 +191,6 @@ fn init_common() -> Result<CommonInit> {
     let (audio_backend, actual_sr) =
         audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx)?;
     log::info!("[init] Audio: sample_rate={actual_sr}");
-    eprintln!("[init] Audio: sample_rate={actual_sr}");
 
     // MIDI — on Android, BLE MIDI goes through Java MidiBridge → JNI, not midir.
     // midir (AMidi) doesn't receive BLE MIDI data and its polling thread wastes CPU.
@@ -200,7 +199,7 @@ fn init_common() -> Result<CommonInit> {
     #[cfg(target_os = "android")]
     let midi_port_names: Vec<String> = Vec::new();
 
-    eprintln!("[init] MIDI ports: {midi_port_names:?}");
+    log::info!("[init] MIDI ports: {midi_port_names:?}");
 
     #[cfg(not(target_os = "android"))]
     let midi_port_idx = config
