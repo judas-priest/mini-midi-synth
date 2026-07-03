@@ -107,6 +107,7 @@ struct CommonInit {
     midi_connected_name: Option<String>,
     patch_idx: usize,
     _audio_handle: audio::AudioBackend,
+    audio_disconnected: Arc<AtomicBool>,
 }
 
 fn init_common() -> Result<CommonInit> {
@@ -190,6 +191,7 @@ fn init_common() -> Result<CommonInit> {
     };
     let (audio_backend, actual_sr) =
         audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx)?;
+    let audio_disconnected = audio_backend.disconnected.clone();
     log::info!("[init] Audio: sample_rate={actual_sr}");
 
     // MIDI — on Android, BLE MIDI goes through Java MidiBridge → JNI, not midir.
@@ -276,6 +278,7 @@ fn init_common() -> Result<CommonInit> {
         midi_connected_name,
         patch_idx,
         _audio_handle: audio_backend,
+        audio_disconnected,
     })
 }
 
@@ -731,6 +734,7 @@ fn run_gui(
         undo_stack: std::collections::VecDeque::new(),
         redo_stack: Vec::new(),
         toasts: Vec::new(),
+        audio_disconnected: c.audio_disconnected.clone(),
     };
 
     app.load_edited_params(0);

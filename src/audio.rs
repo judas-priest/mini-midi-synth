@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{HostId, Stream};
 use rtrb::Consumer;
-use std::sync::{Arc, atomic::{AtomicU32, Ordering}};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicU32, Ordering}};
 
 use crate::synth::{ControlEvent, MidiEvent, SynthEngine};
 
@@ -73,6 +73,9 @@ pub fn supported_sample_rates(host_id: HostId) -> Vec<u32> {
 pub struct AudioBackend {
     #[allow(dead_code)]
     stream: Stream,
+    /// Set to true when the audio device disconnects (e.g. headphones unplugged).
+    /// GUI polls this to show a "restart app" message.
+    pub disconnected: Arc<AtomicBool>,
 }
 
 impl AudioBackend {
@@ -119,6 +122,8 @@ impl AudioBackend {
         let jack_sr_err = jack_sr.clone();
         let jack_sr_cb  = jack_sr.clone();
         let mut synth_sr = actual_sr;
+        let disconnected = Arc::new(AtomicBool::new(false));
+        let disconnected_err = disconnected.clone();
 
         let stream = device.build_output_stream(
             &stream_config,
@@ -174,7 +179,11 @@ impl AudioBackend {
                     if let Ok(sr) = sr_str.trim().parse::<u32>() {
                         jack_sr_err.store(sr, Ordering::Relaxed);
                     }
+                } else {
+                    // Device disconnected (headphones unplugged etc.)
+                    disconnected_err.store(true, Ordering::Relaxed);
                 }
+                log::info!("Audio stream error: {err}");
                 eprintln!("Audio stream error: {err}");
             },
             None,
@@ -187,7 +196,7 @@ impl AudioBackend {
         std::thread::sleep(std::time::Duration::from_millis(150));
         let final_sr = jack_sr.load(Ordering::Relaxed);
 
-        Ok((Self { stream }, final_sr))
+        Ok((Self { stream, disconnected }, final_sr))
     }
 
     /// Try requested SR + buffer, fall back step by step to device defaults.

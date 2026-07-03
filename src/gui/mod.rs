@@ -355,6 +355,8 @@ pub struct App {
     // Undo/redo for patch parameter editing
     pub undo_stack: std::collections::VecDeque<std::collections::BTreeMap<String, f32>>,
     pub redo_stack: Vec<std::collections::BTreeMap<String, f32>>,
+    // Audio device disconnect detection
+    pub audio_disconnected: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl eframe::App for App {
@@ -388,6 +390,11 @@ impl eframe::App for App {
             ctx.request_repaint_after(Duration::from_millis(33));
         } else {
             ctx.request_repaint_after(Duration::from_millis(100));
+        }
+
+        // Check for audio device disconnect (headphones unplugged etc.)
+        if self.audio_disconnected.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            self.show_toast("Audio disconnected — please restart app".to_string(), ToastKind::Error);
         }
 
         // Drain feedback from audio thread
