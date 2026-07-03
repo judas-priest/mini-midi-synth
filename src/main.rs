@@ -797,8 +797,8 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
 
     // Set data dir from Android internal storage
     if let Some(path) = app.internal_data_path() {
-        std::env::set_var("MINI_SYNTH_DATA_DIR", path.to_string_lossy().as_ref());
         log::info!("data dir: {}", path.display());
+        crate::config::set_android_data_dir(path.to_path_buf());
     }
     if let Err(e) = run_gui(app) {
         log::error!("run_gui failed: {e}");

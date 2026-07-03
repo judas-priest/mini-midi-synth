@@ -5,6 +5,14 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+#[cfg(target_os = "android")]
+static ANDROID_DATA_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "android")]
+pub fn set_android_data_dir(path: std::path::PathBuf) {
+    let _ = ANDROID_DATA_DIR.set(path);
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub audio: AudioSettings,
@@ -148,7 +156,7 @@ impl Default for Config {
 pub fn app_config_dir() -> Option<PathBuf> {
     #[cfg(target_os = "android")]
     {
-        std::env::var("MINI_SYNTH_DATA_DIR").ok().map(PathBuf::from)
+        ANDROID_DATA_DIR.get().cloned()
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -160,9 +168,8 @@ pub fn app_config_dir() -> Option<PathBuf> {
 pub fn app_data_dir() -> PathBuf {
     #[cfg(target_os = "android")]
     {
-        std::env::var("MINI_SYNTH_DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
+        ANDROID_DATA_DIR.get().cloned()
+            .unwrap_or_else(|| PathBuf::from("."))
     }
     #[cfg(not(target_os = "android"))]
     {
