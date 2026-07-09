@@ -355,8 +355,10 @@ pub struct App {
     // Undo/redo for patch parameter editing
     pub undo_stack: std::collections::VecDeque<std::collections::BTreeMap<String, f32>>,
     pub redo_stack: Vec<std::collections::BTreeMap<String, f32>>,
-    // Audio device disconnect detection
+    // Audio device disconnect detection + reconnect
     pub audio_disconnected: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub _audio_handle: Option<crate::audio::AudioBackend>,
+    pub midi_tx_shared: crate::midi::SharedMidiTx,
 }
 
 impl eframe::App for App {
@@ -394,7 +396,10 @@ impl eframe::App for App {
 
         // Check for audio device disconnect (headphones unplugged etc.)
         if self.audio_disconnected.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            self.show_toast("Audio disconnected — please restart app".to_string(), ToastKind::Error);
+            match self.reconnect_audio() {
+                Ok(()) => self.show_toast("Audio reconnected".to_string(), ToastKind::Success),
+                Err(e) => self.show_toast(format!("Audio reconnect failed: {e}"), ToastKind::Error),
+            }
         }
 
         // Drain feedback from audio thread

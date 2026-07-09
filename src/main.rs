@@ -735,6 +735,8 @@ fn run_gui(
         redo_stack: Vec::new(),
         toasts: Vec::new(),
         audio_disconnected: c.audio_disconnected.clone(),
+        _audio_handle: Some(c._audio_handle),
+        midi_tx_shared: c.midi_tx_shared.clone(),
     };
 
     app.load_edited_params(0);

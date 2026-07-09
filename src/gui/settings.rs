@@ -177,6 +177,72 @@ impl App {
         self.show_help = open;
     }
 
+    /// Recreate audio engine + stream after device disconnect.
+    /// Creates a new SynthEngine, ring buffers, and AudioBackend.
+    /// Updates all shared atoms and producers in the GUI.
+    pub(super) fn reconnect_audio(&mut self) -> anyhow::Result<()> {
+        use crate::synth;
+
+        // Drop old audio backend (dead stream + old synth engine)
+        self._audio_handle = None;
+
+        let host_id = cpal::default_host().id();
+        let sr = self.sample_rate;
+
+        // New ring buffers
+        let (midi_tx, midi_rx) = rtrb::RingBuffer::<synth::MidiEvent>::new(256);
+        let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(256);
+        let (feedback_tx, feedback_rx) = rtrb::RingBuffer::<synth::ParamFeedback>::new(64);
+
+        // Swap MIDI producer inside SharedMidiTx (for JNI bridge on Android)
+        if let Ok(mut guard) = self.midi_tx_shared.lock() {
+            *guard = midi_tx;
+        }
+
+        // New synth engine
+        let mut engine = synth::SynthEngine::new(sr as f32);
+        engine.set_patches(self.patches.clone());
+        engine.set_feedback_tx(feedback_tx);
+        engine.set_program_change_atom(self._program_change_atom.clone());
+
+        // Update shared atoms
+        self.drum_step_atom = engine.drum_engine.step_atom();
+        self.drum_play_atom = engine.drum_engine.play_atom();
+        self.drum_rec_atom = engine.drum_engine.rec_atom();
+        self.looper_atoms = engine.looper.atoms();
+        self.looper_display = engine.looper.display();
+        self.seq_target_atom = engine.seq_target_atom();
+        self.active_part_atom = engine.active_part_atom();
+        self.pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
+        self.scope_buf = engine.scope_buffer();
+        self.midi_seq_play_atom = engine.midi_player_play_atom();
+        self.midi_seq_pos_atom = engine.midi_player_pos_atom();
+
+        // New audio stream
+        let audio_config = crate::audio::AudioConfig {
+            host_id,
+            sample_rate: sr,
+            buffer_size: self.config.audio.buffer_size,
+        };
+        let (audio_backend, actual_sr) =
+            crate::audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx)?;
+
+        // Update GUI state
+        self.audio_disconnected = audio_backend.disconnected.clone();
+        self._audio_handle = Some(audio_backend);
+        self.ctrl_tx = ctrl_tx;
+        self.feedback_rx = Some(feedback_rx);
+        self.sample_rate = actual_sr;
+
+        // Re-send current patch to new engine
+        for part in 0..self.parts.len() {
+            self.send_edited_params(part);
+        }
+
+        log::info!("[reconnect] Audio restarted: {actual_sr}Hz");
+        Ok(())
+    }
+
     pub(super) fn drain_feedback(&mut self) {
         let mut param_changes: Vec<(&str, f32)> = Vec::new();
         let mut learned_cc: Option<(u8, &'static str)> = None;
