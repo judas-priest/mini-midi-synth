@@ -28,6 +28,7 @@ public class MidiBridge extends MidiReceiver {
     @Override
     public void onSend(byte[] data, int offset, int count, long timestamp)
             throws IOException {
+        Log.i(TAG, "onSend: " + count + " bytes from " + mDeviceName);
         if (count <= 0) return;
 
         byte[] slice;

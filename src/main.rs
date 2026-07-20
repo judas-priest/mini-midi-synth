@@ -827,25 +827,33 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     }
 }
 
-/// JNI: Java passes opened USB MidiDevice for direct AMidi access in audio callback.
+/// JNI: Java passes opened USB MidiDevice + output port numbers for AMidi.
+/// Opens all specified ports at once (no per-port race condition).
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_minimidisynth_SynthActivity_openUsbMidiNative<'local>(
-    env: jni::JNIEnv<'local>,
+    mut env: jni::JNIEnv<'local>,
     _class: jni::objects::JClass<'local>,
     midi_device: jni::objects::JObject<'local>,
-    port_number: jni::sys::jint,
+    port_numbers: jni::objects::JIntArray<'local>,
 ) {
     let Some(amidi_port) = AMIDI_PORT.get() else {
         log::warn!("[amidi] AMIDI_PORT not initialized yet");
         return;
     };
 
-    if amidi_port.open_from_java(env.get_raw(), midi_device.as_raw(), port_number) {
-        log::info!("[amidi] USB MIDI port {port_number} opened for zero-latency");
-    } else {
-        log::warn!("[amidi] Failed to open USB MIDI port {port_number}");
+    let len = match env.get_array_length(&port_numbers) {
+        Ok(l) => l as usize,
+        Err(_) => { log::warn!("[amidi] Failed to get port_numbers length"); return; }
+    };
+    let mut port_nums = vec![0i32; len];
+    if env.get_int_array_region(&port_numbers, 0, &mut port_nums).is_err() {
+        log::warn!("[amidi] Failed to read port_numbers array");
+        return;
     }
+
+    let opened = amidi_port.open_device(env.get_raw(), midi_device.as_raw(), &port_nums);
+    log::info!("[amidi] Opened {opened}/{} USB MIDI output ports", port_nums.len());
 }
 
 /// JNI entry point: called from Java MidiBridge.onMidiData(byte[])

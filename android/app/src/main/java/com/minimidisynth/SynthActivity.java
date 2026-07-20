@@ -142,7 +142,7 @@ public class SynthActivity extends NativeActivity {
         }
     }
 
-    private static native void openUsbMidiNative(MidiDevice device, int portNumber);
+    private static native void openUsbMidiNative(MidiDevice device, int[] portNumbers);
 
     /**
      * Open already-connected USB MIDI devices via MidiManager.
@@ -173,13 +173,18 @@ public class SynthActivity extends NativeActivity {
                     mOpenDevices.add(midiDevice);
                     Log.i(TAG, "USB MIDI opened: " + finalName);
 
-                    // Open ALL output ports via AMidi for zero-latency
+                    // Collect all output port numbers, open via AMidi in one call
                     MidiDeviceInfo.PortInfo[] ports = midiDevice.getInfo().getPorts();
+                    java.util.List<Integer> outputPorts = new java.util.ArrayList<>();
                     for (MidiDeviceInfo.PortInfo pi : ports) {
                         if (pi.getType() == MidiDeviceInfo.PortInfo.TYPE_OUTPUT) {
-                            Log.i(TAG, "AMidi: opening port " + pi.getPortNumber());
-                            openUsbMidiNative(midiDevice, pi.getPortNumber());
+                            outputPorts.add(pi.getPortNumber());
                         }
+                    }
+                    if (!outputPorts.isEmpty()) {
+                        int[] portArray = outputPorts.stream().mapToInt(Integer::intValue).toArray();
+                        Log.i(TAG, "AMidi: opening " + portArray.length + " output ports");
+                        openUsbMidiNative(midiDevice, portArray);
                     }
                 }
             }, new Handler(Looper.getMainLooper()));

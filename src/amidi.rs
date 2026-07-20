@@ -45,11 +45,16 @@ extern "C" {
     ) -> isize;
 }
 
-/// Thread-safe wrapper for AMidiOutputPort pointer.
-/// Set from JNI thread (Release), read from audio callback (Acquire).
+/// Max USB MIDI output ports to poll.
+#[cfg(target_os = "android")]
+const MAX_PORTS: usize = 4;
+
+/// Thread-safe wrapper for multiple AMidiOutputPort pointers.
+/// Ports are added from JNI thread (Release), polled from audio callback (Acquire).
+/// Supports up to MAX_PORTS ports simultaneously — no allocations.
 #[cfg(target_os = "android")]
 pub struct AmidiPort {
-    port: AtomicPtr<AMidiOutputPort>,
+    ports: [AtomicPtr<AMidiOutputPort>; MAX_PORTS],
     device: AtomicPtr<AMidiDevice>,
 }
 
@@ -64,85 +69,101 @@ unsafe impl Sync for AmidiPort {}
 impl AmidiPort {
     pub const fn new() -> Self {
         Self {
-            port: AtomicPtr::new(ptr::null_mut()),
+            ports: [
+                AtomicPtr::new(ptr::null_mut()),
+                AtomicPtr::new(ptr::null_mut()),
+                AtomicPtr::new(ptr::null_mut()),
+                AtomicPtr::new(ptr::null_mut()),
+            ],
             device: AtomicPtr::new(ptr::null_mut()),
         }
     }
 
-    /// Open AMidi port from a Java MidiDevice object.
+    /// Close all ports and release device. Call before opening new device.
+    pub fn close_all(&self) {
+        for slot in &self.ports {
+            let port = slot.swap(ptr::null_mut(), Ordering::AcqRel);
+            if !port.is_null() {
+                unsafe { AMidiOutputPort_close(port); }
+            }
+        }
+        let device = self.device.swap(ptr::null_mut(), Ordering::AcqRel);
+        if !device.is_null() {
+            unsafe { AMidiDevice_release(device); }
+        }
+    }
+
+    /// Open a USB MIDI device and all its output ports from a Java MidiDevice.
     /// Called from JNI thread (not audio thread).
-    pub fn open_from_java(
+    /// `port_numbers` is the list of output port indices to open.
+    pub fn open_device(
         &self,
         env: *mut jni::sys::JNIEnv,
         midi_device: jni::sys::jobject,
-        port_number: i32,
-    ) -> bool {
-        // Atomically remove old port first (audio thread will see null and skip)
-        let old_port = self.port.swap(ptr::null_mut(), Ordering::AcqRel);
-        let old_device = self.device.swap(ptr::null_mut(), Ordering::AcqRel);
-
-        // Close old resources after nulling pointers (audio thread no longer uses them)
-        if !old_port.is_null() { unsafe { AMidiOutputPort_close(old_port); } }
-        if !old_device.is_null() { unsafe { AMidiDevice_release(old_device); } }
+        port_numbers: &[i32],
+    ) -> usize {
+        self.close_all();
 
         let mut device: *mut AMidiDevice = ptr::null_mut();
         let status = unsafe { AMidiDevice_fromJava(env, midi_device, &mut device) };
         if status != 0 || device.is_null() {
             log::warn!("[amidi] AMidiDevice_fromJava failed: {status}");
-            return false;
+            return 0;
         }
-
-        let mut port: *mut AMidiOutputPort = ptr::null_mut();
-        let status = unsafe { AMidiOutputPort_open(device, port_number, &mut port) };
-        if status != 0 || port.is_null() {
-            log::warn!("[amidi] AMidiOutputPort_open failed: {status}");
-            unsafe { AMidiDevice_release(device); }
-            return false;
-        }
-
-        // Store new pointers — audio thread will pick them up via Acquire load
         self.device.store(device, Ordering::Release);
-        self.port.store(port, Ordering::Release);
-        log::info!("[amidi] USB MIDI port {port_number} opened");
-        true
+
+        let mut opened = 0usize;
+        for (i, &port_num) in port_numbers.iter().enumerate() {
+            if i >= MAX_PORTS { break; }
+
+            let mut port: *mut AMidiOutputPort = ptr::null_mut();
+            let status = unsafe { AMidiOutputPort_open(device, port_num, &mut port) };
+            if status == 0 && !port.is_null() {
+                self.ports[i].store(port, Ordering::Release);
+                log::info!("[amidi] USB MIDI port {port_num} opened (slot {i})");
+                opened += 1;
+            } else {
+                log::warn!("[amidi] AMidiOutputPort_open({port_num}) failed: {status}");
+            }
+        }
+
+        opened
     }
 
-    /// Poll for MIDI data. Non-blocking, RT-safe.
-    /// Call from audio callback. Returns num bytes or None.
+    /// Poll ALL open ports for MIDI data. Non-blocking, RT-safe.
+    /// Call from audio callback. Returns Some(nbytes) from first port with data.
     #[inline]
     pub fn receive(&self, buf: &mut [u8]) -> Option<usize> {
-        let port = self.port.load(Ordering::Acquire);
-        if port.is_null() { return None; }
+        for slot in &self.ports {
+            let port = slot.load(Ordering::Acquire);
+            if port.is_null() { continue; }
 
-        let mut opcode: i32 = 0;
-        let mut nbytes: usize = 0;
-        let mut timestamp: i64 = 0;
+            let mut opcode: i32 = 0;
+            let mut nbytes: usize = 0;
+            let mut timestamp: i64 = 0;
 
-        let rc = unsafe {
-            AMidiOutputPort_receive(
-                port, &mut opcode, buf.as_mut_ptr(),
-                buf.len(), &mut nbytes, &mut timestamp,
-            )
-        };
+            let rc = unsafe {
+                AMidiOutputPort_receive(
+                    port, &mut opcode, buf.as_mut_ptr(),
+                    buf.len(), &mut nbytes, &mut timestamp,
+                )
+            };
 
-        if rc > 0 && opcode == AMIDI_OPCODE_DATA && nbytes > 0 {
-            Some(nbytes)
-        } else {
-            None
+            if rc > 0 && opcode == AMIDI_OPCODE_DATA && nbytes > 0 {
+                return Some(nbytes);
+            }
         }
+        None
     }
 
     pub fn close(&self) {
-        let port = self.port.swap(ptr::null_mut(), Ordering::AcqRel);
-        if !port.is_null() { unsafe { AMidiOutputPort_close(port); } }
-        let device = self.device.swap(ptr::null_mut(), Ordering::AcqRel);
-        if !device.is_null() { unsafe { AMidiDevice_release(device); } }
+        self.close_all();
     }
 }
 
 #[cfg(target_os = "android")]
 impl Drop for AmidiPort {
-    fn drop(&mut self) { self.close(); }
+    fn drop(&mut self) { self.close_all(); }
 }
 
 /// Stub for non-Android platforms — all methods are no-ops.
