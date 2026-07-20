@@ -224,8 +224,12 @@ impl App {
             sample_rate: sr,
             buffer_size: self.config.audio.buffer_size,
         };
+        let amidi_port = crate::AMIDI_PORT.get().cloned()
+            .unwrap_or_else(|| std::sync::Arc::new(crate::amidi::AmidiPort::new()));
+
         let (audio_backend, actual_sr) =
-            crate::audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx)?;
+            crate::audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx,
+                amidi_port, self.note_state.clone(), self.pad_state.clone())?;
 
         // Update GUI state
         self.audio_disconnected = audio_backend.disconnected.clone();

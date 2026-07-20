@@ -84,6 +84,9 @@ impl AudioBackend {
         mut synth: SynthEngine,
         mut midi_rx: Consumer<MidiEvent>,
         mut ctrl_rx: Consumer<ControlEvent>,
+        amidi_port: std::sync::Arc<crate::amidi::AmidiPort>,
+        note_state: crate::midi::NoteState,
+        pad_state: crate::midi::PadState,
     ) -> Result<(Self, u32)> {
         let host = cpal::host_from_id(config.host_id)
             .map_err(|e| anyhow::anyhow!("Failed to init audio host: {e}"))?;
@@ -124,6 +127,9 @@ impl AudioBackend {
         let mut synth_sr = actual_sr;
         let disconnected = Arc::new(AtomicBool::new(false));
         let disconnected_err = disconnected.clone();
+        let amidi_port = amidi_port.clone();
+        let note_state = note_state.clone();
+        let pad_state = pad_state.clone();
 
         let stream = device.build_output_stream(
             &stream_config,
@@ -145,6 +151,35 @@ impl AudioBackend {
 
                     while frame_offset < total_frames {
                         let block_len = (total_frames - frame_offset).min(crate::synth::BLOCK_SIZE);
+
+                        // USB MIDI via AMidi (non-blocking, RT-safe, zero-latency)
+                        {
+                            let mut amidi_buf = [0u8; 256];
+                            while let Some(nbytes) = amidi_port.receive(&mut amidi_buf) {
+                                let mut off = 0;
+                                while off < nbytes {
+                                    if let Some((event, consumed)) = crate::midi::parse_midi_message(&amidi_buf[off..nbytes]) {
+                                        // Update GUI note display
+                                        match &event {
+                                            crate::synth::MidiEvent::NoteOn { channel, note, velocity } => {
+                                                let st = if *channel == 9 { &pad_state } else { &note_state };
+                                                if *velocity == 0 { st[*note as usize].store(0, Ordering::Relaxed); }
+                                                else { st[*note as usize].store(*velocity, Ordering::Relaxed); }
+                                            }
+                                            crate::synth::MidiEvent::NoteOff { channel, note } => {
+                                                let st = if *channel == 9 { &pad_state } else { &note_state };
+                                                st[*note as usize].store(0, Ordering::Relaxed);
+                                            }
+                                            _ => {}
+                                        }
+                                        synth.handle_event(event);
+                                        off += consumed;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
 
                         while let Ok(event) = midi_rx.pop() {
                             synth.handle_event(event);

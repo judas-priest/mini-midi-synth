@@ -22,6 +22,8 @@ use std::sync::{Arc, Mutex};
 #[cfg(target_os = "android")]
 use std::sync::OnceLock;
 
+static AMIDI_PORT: std::sync::OnceLock<std::sync::Arc<crate::amidi::AmidiPort>> = std::sync::OnceLock::new();
+
 #[cfg(target_os = "android")]
 static JNI_MIDI_TX: OnceLock<midi::SharedMidiTx> = OnceLock::new();
 #[cfg(target_os = "android")]
@@ -185,13 +187,20 @@ fn init_common() -> Result<CommonInit> {
     #[cfg(feature = "gui")]
     let midi_seq_pos_atom = engine.midi_player_pos_atom();
 
+    let amidi_port = {
+        let port = std::sync::Arc::new(crate::amidi::AmidiPort::new());
+        let _ = AMIDI_PORT.set(port.clone());
+        port
+    };
+
     let audio_config = audio::AudioConfig {
         host_id,
         sample_rate: config.audio.sample_rate,
         buffer_size: config.audio.buffer_size,
     };
     let (audio_backend, actual_sr) =
-        audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx)?;
+        audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx,
+            amidi_port, note_state.clone(), pad_state.clone())?;
     let audio_disconnected = audio_backend.disconnected.clone();
     log::info!("[init] Audio: sample_rate={actual_sr}");
 
