@@ -45,9 +45,10 @@ public class SynthActivity extends NativeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // BLE MIDI init AFTER super.onCreate() — Activity context is now fully available.
+        // MIDI init AFTER super.onCreate() — Activity context is now fully available.
         // android_main runs in a separate thread, so it won't block on this.
         openPairedBluetoothMidiDevices();
+        openUsbMidiDevices();
     }
 
     @Override
@@ -138,6 +139,42 @@ public class SynthActivity extends NativeActivity {
             } catch (Exception e) {
                 Log.w(TAG, "openBluetoothDevice error for " + name, e);
             }
+        }
+    }
+
+    /**
+     * Open already-connected USB MIDI devices via MidiManager.
+     * Unlike BLE, USB devices are available immediately without openBluetoothDevice().
+     */
+    private void openUsbMidiDevices() {
+        if (mMidiManager == null) {
+            mMidiManager = (MidiManager) getSystemService(Context.MIDI_SERVICE);
+        }
+        if (mMidiManager == null) return;
+
+        MidiDeviceInfo[] infos = mMidiManager.getDevices();
+        for (MidiDeviceInfo info : infos) {
+            // Skip non-USB devices (BLE handled separately)
+            int type = info.getType();
+            if (type != MidiDeviceInfo.TYPE_USB) continue;
+
+            String name = info.getProperties().getString(MidiDeviceInfo.PROPERTY_NAME);
+            if (name == null) name = "USB MIDI";
+            Log.i(TAG, "Found USB MIDI: " + name);
+
+            String finalName = name;
+            mMidiManager.openDevice(info, new MidiManager.OnDeviceOpenedListener() {
+                @Override
+                public void onDeviceOpened(MidiDevice midiDevice) {
+                    if (midiDevice == null) {
+                        Log.w(TAG, "USB MIDI open failed: " + finalName);
+                        return;
+                    }
+                    mOpenDevices.add(midiDevice);
+                    Log.i(TAG, "USB MIDI opened: " + finalName);
+                    connectBridge(midiDevice, finalName);
+                }
+            }, new Handler(Looper.getMainLooper()));
         }
     }
 
