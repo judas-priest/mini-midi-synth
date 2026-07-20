@@ -194,11 +194,17 @@ fn init_common() -> Result<CommonInit> {
     let audio_disconnected = audio_backend.disconnected.clone();
     log::info!("[init] Audio: sample_rate={actual_sr}");
 
-    // MIDI — midir works for USB MIDI on all platforms.
-    // On Android, BLE MIDI additionally goes through Java MidiBridge → JNI.
+    // MIDI — On Android, midir AMidi polling thread causes audio callback starvation
+    // (ring buffer fills up, no sound). BLE MIDI goes through Java MidiBridge → JNI.
+    // USB MIDI: user can connect manually via Settings, but no auto-connect at startup.
+    #[cfg(not(target_os = "android"))]
     let midi_port_names = midi::list_ports().unwrap_or_default();
+    #[cfg(target_os = "android")]
+    let midi_port_names: Vec<String> = Vec::new();
+
     log::info!("[init] MIDI ports: {midi_port_names:?}");
 
+    #[cfg(not(target_os = "android"))]
     let midi_port_idx = config
         .midi
         .port_name
@@ -206,14 +212,20 @@ fn init_common() -> Result<CommonInit> {
         .and_then(|name| find_midi_port(&midi_port_names, name))
         .or(if midi_port_names.is_empty() { None } else { Some(0) });
 
+    #[cfg(not(target_os = "android"))]
     let midi_conn: Option<MidiInputConnection<()>> = midi_port_idx.and_then(|idx| {
         midi::connect(idx, midi_tx_shared.clone(), note_state.clone(), pad_state.clone()).ok()
     });
+    #[cfg(target_os = "android")]
+    let midi_conn: Option<MidiInputConnection<()>> = None;
 
+    #[cfg(not(target_os = "android"))]
     let midi_connected_name = midi_port_idx
         .and_then(|idx| midi_port_names.get(idx))
         .filter(|_| midi_conn.is_some())
         .cloned();
+    #[cfg(target_os = "android")]
+    let midi_connected_name: Option<String> = None;
 
     let patch_idx = config
         .ui
