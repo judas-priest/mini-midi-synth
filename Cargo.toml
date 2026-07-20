@@ -39,7 +39,7 @@ log = "0.4"
 cpal = { version = "0.15", features = ["jack"] }
 libc = "0.2"
 
-# Android-only (cpal without jack)
+# Android-only
 [target.'cfg(target_os = "android")'.dependencies]
 cpal = { version = "0.15" }
 winit = { version = "0.30.7", features = ["android-native-activity"] }
@@ -62,3 +62,7 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# Use vendored cpal with LowLatency + Exclusive mode for Android
+[patch.crates-io]
+cpal = { path = "vendor/cpal" }
