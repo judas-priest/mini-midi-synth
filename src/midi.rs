@@ -29,18 +29,11 @@ pub fn new_pad_state() -> PadState {
 /// Shared MIDI producer — allows reconnecting MIDI without restarting audio.
 pub type SharedMidiTx = Arc<Mutex<Producer<MidiEvent>>>;
 
-/// Parse a single MIDI message from `data`, update note/pad state, and push
-/// the resulting event into the ring buffer.  Returns the number of bytes
-/// consumed, or 0 on parse failure.
-pub fn parse_and_push(
-    data: &[u8],
-    tx: &SharedMidiTx,
-    note_state: &NoteState,
-    pad_state: &PadState,
-) -> usize {
-    let Ok(msg) = MidiMessage::try_from(data) else {
-        return 0;
-    };
+/// Parse a single MIDI message from raw bytes.
+/// Returns (MidiEvent, bytes_consumed) or None on parse failure.
+/// Shared by parse_and_push (ring buffer path) and audio callback (direct path).
+pub fn parse_midi_message(data: &[u8]) -> Option<(MidiEvent, usize)> {
+    let msg = MidiMessage::try_from(data).ok()?;
     let consumed = msg.bytes_size();
 
     let event = match msg {
@@ -48,24 +41,10 @@ pub fn parse_and_push(
             let channel = ch.index();
             let n = u8::from(note);
             let v = u8::from(velocity);
-            let state = if channel == 9 { pad_state } else { note_state };
-            if v == 0 {
-                state[n as usize].store(0, Ordering::Relaxed);
-            } else {
-                state[n as usize].store(v, Ordering::Relaxed);
-            }
-            Some(MidiEvent::NoteOn {
-                channel,
-                note: n,
-                velocity: v,
-            })
+            Some(MidiEvent::NoteOn { channel, note: n, velocity: v })
         }
         MidiMessage::NoteOff(ch, note, _) => {
-            let channel = ch.index();
-            let n = u8::from(note);
-            let state = if channel == 9 { pad_state } else { note_state };
-            state[n as usize].store(0, Ordering::Relaxed);
-            Some(MidiEvent::NoteOff { channel, note: n })
+            Some(MidiEvent::NoteOff { channel: ch.index(), note: u8::from(note) })
         }
         MidiMessage::PitchBendChange(ch, bend) => {
             let raw = u16::from(bend) as f32;
@@ -78,9 +57,7 @@ pub fn parse_and_push(
             let v = u8::from(val);
             if cc_num == 1 {
                 Some(MidiEvent::ModWheel { channel, value: v as f32 / MIDI_MAX_VAL })
-            } else if (1..=119).contains(&cc_num)
-                && cc_num != 32
-            {
+            } else if (1..=119).contains(&cc_num) && cc_num != 32 {
                 Some(MidiEvent::ControlChange { channel, cc: cc_num, value: v })
             } else {
                 None
@@ -100,8 +77,6 @@ pub fn parse_and_push(
             })
         }
         MidiMessage::SysEx(payload) => {
-            // SMK-37 Pro: F0 35 59 10 00 [7F|00] F7
-            // 7F = press, 00 = release
             if payload.len() == 5
                 && u8::from(payload[0]) == 0x35
                 && u8::from(payload[1]) == 0x59
@@ -114,11 +89,41 @@ pub fn parse_and_push(
             }
         }
         _ => None,
-    };
-    if let Some(ev) = event {
-        if let Ok(mut tx) = tx.try_lock() {
-            let _ = tx.push(ev);
+    }?;
+
+    Some((event, consumed))
+}
+
+/// Parse a single MIDI message from `data`, update note/pad state, and push
+/// the resulting event into the ring buffer.  Returns the number of bytes
+/// consumed, or 0 on parse failure.
+pub fn parse_and_push(
+    data: &[u8],
+    tx: &SharedMidiTx,
+    note_state: &NoteState,
+    pad_state: &PadState,
+) -> usize {
+    let Some((event, consumed)) = parse_midi_message(data) else { return 0 };
+
+    // Update GUI note display
+    match &event {
+        MidiEvent::NoteOn { channel, note, velocity } => {
+            let state = if *channel == 9 { pad_state } else { note_state };
+            if *velocity == 0 {
+                state[*note as usize].store(0, Ordering::Relaxed);
+            } else {
+                state[*note as usize].store(*velocity, Ordering::Relaxed);
+            }
         }
+        MidiEvent::NoteOff { channel, note } => {
+            let state = if *channel == 9 { pad_state } else { note_state };
+            state[*note as usize].store(0, Ordering::Relaxed);
+        }
+        _ => {}
+    }
+
+    if let Ok(mut tx) = tx.try_lock() {
+        let _ = tx.push(event);
     }
 
     consumed

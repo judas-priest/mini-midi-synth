@@ -9,6 +9,7 @@ mod gui;
 mod input;
 mod key_action;
 mod midi;
+mod amidi;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod preset;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
