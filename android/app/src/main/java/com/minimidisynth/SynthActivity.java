@@ -142,6 +142,8 @@ public class SynthActivity extends NativeActivity {
         }
     }
 
+    private static native void openUsbMidiNative(MidiDevice device, int portNumber);
+
     /**
      * Open already-connected USB MIDI devices via MidiManager.
      * Unlike BLE, USB devices are available immediately without openBluetoothDevice().
@@ -154,9 +156,7 @@ public class SynthActivity extends NativeActivity {
 
         MidiDeviceInfo[] infos = mMidiManager.getDevices();
         for (MidiDeviceInfo info : infos) {
-            // Skip non-USB devices (BLE handled separately)
-            int type = info.getType();
-            if (type != MidiDeviceInfo.TYPE_USB) continue;
+            if (info.getType() != MidiDeviceInfo.TYPE_USB) continue;
 
             String name = info.getProperties().getString(MidiDeviceInfo.PROPERTY_NAME);
             if (name == null) name = "USB MIDI";
@@ -172,7 +172,15 @@ public class SynthActivity extends NativeActivity {
                     }
                     mOpenDevices.add(midiDevice);
                     Log.i(TAG, "USB MIDI opened: " + finalName);
-                    connectBridge(midiDevice, finalName);
+
+                    // Open ALL output ports via AMidi for zero-latency
+                    MidiDeviceInfo.PortInfo[] ports = midiDevice.getInfo().getPorts();
+                    for (MidiDeviceInfo.PortInfo pi : ports) {
+                        if (pi.getType() == MidiDeviceInfo.PortInfo.TYPE_OUTPUT) {
+                            Log.i(TAG, "AMidi: opening port " + pi.getPortNumber());
+                            openUsbMidiNative(midiDevice, pi.getPortNumber());
+                        }
+                    }
                 }
             }, new Handler(Looper.getMainLooper()));
         }

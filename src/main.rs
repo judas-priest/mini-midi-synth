@@ -827,6 +827,27 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     }
 }
 
+/// JNI: Java passes opened USB MidiDevice for direct AMidi access in audio callback.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_minimidisynth_SynthActivity_openUsbMidiNative<'local>(
+    env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+    midi_device: jni::objects::JObject<'local>,
+    port_number: jni::sys::jint,
+) {
+    let Some(amidi_port) = AMIDI_PORT.get() else {
+        log::warn!("[amidi] AMIDI_PORT not initialized yet");
+        return;
+    };
+
+    if amidi_port.open_from_java(env.get_raw(), midi_device.as_raw(), port_number) {
+        log::info!("[amidi] USB MIDI port {port_number} opened for zero-latency");
+    } else {
+        log::warn!("[amidi] Failed to open USB MIDI port {port_number}");
+    }
+}
+
 /// JNI entry point: called from Java MidiBridge.onMidiData(byte[])
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
