@@ -25,6 +25,8 @@ use std::sync::OnceLock;
 static AMIDI_PORT: std::sync::OnceLock<std::sync::Arc<crate::amidi::AmidiPort>> = std::sync::OnceLock::new();
 
 #[cfg(target_os = "android")]
+static AUDIO_PAUSED: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+#[cfg(target_os = "android")]
 static JNI_MIDI_TX: OnceLock<midi::SharedMidiTx> = OnceLock::new();
 #[cfg(target_os = "android")]
 static JNI_NOTE_STATE: OnceLock<midi::NoteState> = OnceLock::new();
@@ -193,6 +195,12 @@ fn init_common() -> Result<CommonInit> {
         port
     };
 
+    let audio_paused = Arc::new(AtomicBool::new(false));
+    #[cfg(target_os = "android")]
+    {
+        let _ = AUDIO_PAUSED.set(audio_paused.clone());
+    }
+
     let audio_config = audio::AudioConfig {
         host_id,
         sample_rate: config.audio.sample_rate,
@@ -200,7 +208,7 @@ fn init_common() -> Result<CommonInit> {
     };
     let (audio_backend, actual_sr) =
         audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx,
-            amidi_port, note_state.clone(), pad_state.clone())?;
+            amidi_port, note_state.clone(), pad_state.clone(), audio_paused)?;
     let audio_disconnected = audio_backend.disconnected.clone();
     log::info!("[init] Audio: sample_rate={actual_sr}");
 
@@ -895,5 +903,19 @@ pub extern "system" fn Java_com_minimidisynth_MidiBridge_onMidiData<'local>(
         let consumed = midi::parse_and_push(&bytes[offset..], tx, ns, ps);
         if consumed == 0 { break }
         offset += consumed;
+    }
+}
+
+/// JNI: pause/resume audio when app is backgrounded/foregrounded.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_minimidisynth_SynthActivity_setAudioPaused<'local>(
+    _env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+    paused: jni::sys::jboolean,
+) {
+    if let Some(flag) = AUDIO_PAUSED.get() {
+        flag.store(paused != 0, Ordering::Relaxed);
+        log::info!("[lifecycle] audio paused: {}", paused != 0);
     }
 }

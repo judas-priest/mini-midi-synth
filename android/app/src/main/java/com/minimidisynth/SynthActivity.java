@@ -79,6 +79,20 @@ public class SynthActivity extends NativeActivity {
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        setAudioPaused(true);
+        Log.i(TAG, "onPause — audio paused");
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        setAudioPaused(false);
+        Log.i(TAG, "onResume — audio resumed");
+    }
+
+    @Override
     protected void onDestroy() {
         mReconnectHandler.removeCallbacks(mReconnectRunnable);
         if (mMidiManager != null && mDeviceCallback != null) {
@@ -175,6 +189,7 @@ public class SynthActivity extends NativeActivity {
 
     private static native void openUsbMidiNative(MidiDevice device, int[] portNumbers);
     private static native void closeUsbMidiNative();
+    private static native void setAudioPaused(boolean paused);
 
     /**
      * Open already-connected USB MIDI devices via MidiManager.

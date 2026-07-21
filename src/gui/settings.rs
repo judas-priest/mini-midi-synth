@@ -227,9 +227,15 @@ impl App {
         let amidi_port = crate::AMIDI_PORT.get().cloned()
             .unwrap_or_else(|| std::sync::Arc::new(crate::amidi::AmidiPort::new()));
 
+        #[cfg(target_os = "android")]
+        let audio_paused = crate::AUDIO_PAUSED.get().cloned()
+            .unwrap_or_else(|| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        #[cfg(not(target_os = "android"))]
+        let audio_paused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
         let (audio_backend, actual_sr) =
             crate::audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx,
-                amidi_port, self.note_state.clone(), self.pad_state.clone())?;
+                amidi_port, self.note_state.clone(), self.pad_state.clone(), audio_paused)?;
 
         // Update GUI state
         self.audio_disconnected = audio_backend.disconnected.clone();

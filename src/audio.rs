@@ -76,6 +76,10 @@ pub struct AudioBackend {
     /// Set to true when the audio device disconnects (e.g. headphones unplugged).
     /// GUI polls this to show a "restart app" message.
     pub disconnected: Arc<AtomicBool>,
+    /// Set to true when the app is backgrounded (Android onPause).
+    /// Audio callback outputs silence when paused to save battery.
+    #[allow(dead_code)]
+    pub paused: Arc<AtomicBool>,
 }
 
 impl AudioBackend {
@@ -87,6 +91,7 @@ impl AudioBackend {
         amidi_port: std::sync::Arc<crate::amidi::AmidiPort>,
         note_state: crate::midi::NoteState,
         pad_state: crate::midi::PadState,
+        paused: Arc<AtomicBool>,
     ) -> Result<(Self, u32)> {
         let host = cpal::host_from_id(config.host_id)
             .map_err(|e| anyhow::anyhow!("Failed to init audio host: {e}"))?;
@@ -127,6 +132,7 @@ impl AudioBackend {
         let mut synth_sr = actual_sr;
         let disconnected = Arc::new(AtomicBool::new(false));
         let disconnected_err = disconnected.clone();
+        let paused_cb = paused.clone();
         let amidi_port = amidi_port.clone();
         let note_state = note_state.clone();
         let pad_state = pad_state.clone();
@@ -134,6 +140,11 @@ impl AudioBackend {
         let stream = device.build_output_stream(
             &stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                // If app is paused (backgrounded), output silence to save battery
+                if paused_cb.load(Ordering::Relaxed) {
+                    for sample in data.iter_mut() { *sample = 0.0; }
+                    return;
+                }
                 no_denormals::no_denormals(|| {
                     // If JACK changed the sample rate, update the synth immediately.
                     let new_sr = jack_sr_cb.load(Ordering::Relaxed);
@@ -231,7 +242,7 @@ impl AudioBackend {
         std::thread::sleep(std::time::Duration::from_millis(150));
         let final_sr = jack_sr.load(Ordering::Relaxed);
 
-        Ok((Self { stream, disconnected }, final_sr))
+        Ok((Self { stream, disconnected, paused }, final_sr))
     }
 
     /// Try requested SR + buffer, fall back step by step to device defaults.
