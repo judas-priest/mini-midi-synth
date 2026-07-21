@@ -45,6 +45,7 @@ public class SynthActivity extends NativeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // MIDI init AFTER super.onCreate() — Activity context is now fully available.
         // android_main runs in a separate thread, so it won't block on this.
         openPairedBluetoothMidiDevices();

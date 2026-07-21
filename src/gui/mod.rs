@@ -371,6 +371,13 @@ impl eframe::App for App {
         #[cfg(target_os = "android")]
         ctx.set_pixels_per_point(2.5);
 
+        #[cfg(target_os = "android")]
+        ctx.style_mut(|style| {
+            style.spacing.interact_size = egui::vec2(48.0, 36.0); // Material Design min touch target
+            style.spacing.button_padding = egui::vec2(12.0, 8.0);
+            style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+        });
+
         // Increase base font size and spacing
         ctx.style_mut(|style| {
             for (text_style, size) in [
