@@ -34,6 +34,30 @@ public class SynthActivity extends NativeActivity {
     }
 
     private MidiManager mMidiManager;
+
+    // BLE MIDI auto-reconnect with exponential backoff
+    private final Handler mReconnectHandler = new Handler(Looper.getMainLooper());
+    private int mReconnectAttempts = 0;
+    private static final int MAX_RECONNECT_ATTEMPTS = 10;
+    private static final long RECONNECT_BASE_DELAY_MS = 3000;
+
+    private final Runnable mReconnectRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (mReconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                Log.i(TAG, "BLE reconnect: max attempts reached, stopping");
+                return;
+            }
+            mReconnectAttempts++;
+            Log.i(TAG, "BLE reconnect attempt " + mReconnectAttempts);
+            openPairedBluetoothMidiDevices();
+            long delay = Math.min(RECONNECT_BASE_DELAY_MS * (1L << (mReconnectAttempts - 1)), 30000);
+            mReconnectHandler.postDelayed(this, delay);
+        }
+    };
+
+    // USB MIDI hot-plug
+    private MidiManager.DeviceCallback mDeviceCallback;
     // All access to mOpenDevices and mBridges happens on the main looper thread:
     // - onCreate (main)
     // - onDestroy (main)
@@ -49,11 +73,17 @@ public class SynthActivity extends NativeActivity {
         // MIDI init AFTER super.onCreate() — Activity context is now fully available.
         // android_main runs in a separate thread, so it won't block on this.
         openPairedBluetoothMidiDevices();
+        mReconnectHandler.postDelayed(mReconnectRunnable, RECONNECT_BASE_DELAY_MS);
         openUsbMidiDevices();
+        registerMidiDeviceCallback();
     }
 
     @Override
     protected void onDestroy() {
+        mReconnectHandler.removeCallbacks(mReconnectRunnable);
+        if (mMidiManager != null && mDeviceCallback != null) {
+            mMidiManager.unregisterDeviceCallback(mDeviceCallback);
+        }
         for (MidiBridge bridge : mBridges) {
             bridge.close();
         }
@@ -144,6 +174,7 @@ public class SynthActivity extends NativeActivity {
     }
 
     private static native void openUsbMidiNative(MidiDevice device, int[] portNumbers);
+    private static native void closeUsbMidiNative();
 
     /**
      * Open already-connected USB MIDI devices via MidiManager.
@@ -192,6 +223,33 @@ public class SynthActivity extends NativeActivity {
         }
     }
 
+    private void registerMidiDeviceCallback() {
+        if (mMidiManager == null) return;
+
+        mDeviceCallback = new MidiManager.DeviceCallback() {
+            @Override
+            public void onDeviceAdded(MidiDeviceInfo info) {
+                if (info.getType() == MidiDeviceInfo.TYPE_USB) {
+                    String name = info.getProperties().getString(MidiDeviceInfo.PROPERTY_NAME);
+                    Log.i(TAG, "USB MIDI hot-plug: connected " + name);
+                    openUsbMidiDevices();
+                }
+            }
+
+            @Override
+            public void onDeviceRemoved(MidiDeviceInfo info) {
+                if (info.getType() == MidiDeviceInfo.TYPE_USB) {
+                    String name = info.getProperties().getString(MidiDeviceInfo.PROPERTY_NAME);
+                    Log.i(TAG, "USB MIDI hot-plug: disconnected " + name);
+                    closeUsbMidiNative();
+                }
+            }
+        };
+
+        mMidiManager.registerDeviceCallback(mDeviceCallback, new Handler(Looper.getMainLooper()));
+        Log.i(TAG, "USB MIDI hot-plug callback registered");
+    }
+
     private void connectBridge(MidiDevice device, String name) {
         MidiDeviceInfo info = device.getInfo();
         MidiDeviceInfo.PortInfo[] ports = info.getPorts();
@@ -203,6 +261,7 @@ public class SynthActivity extends NativeActivity {
                     MidiBridge bridge = new MidiBridge(outPort, name);
                     outPort.connect(bridge);
                     mBridges.add(bridge);
+                    mReconnectAttempts = 0; // Reset backoff on success
                     Log.i(TAG, "BLE MIDI bridge: " + name + " port " + pi.getPortNumber());
                 }
             }

@@ -856,6 +856,19 @@ pub extern "system" fn Java_com_minimidisynth_SynthActivity_openUsbMidiNative<'l
     log::info!("[amidi] Opened {opened}/{} USB MIDI output ports", port_nums.len());
 }
 
+/// JNI: close AMidi ports when USB device disconnected
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_minimidisynth_SynthActivity_closeUsbMidiNative<'local>(
+    _env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+) {
+    if let Some(amidi_port) = AMIDI_PORT.get() {
+        amidi_port.close();
+        log::info!("[amidi] USB MIDI ports closed (device disconnected)");
+    }
+}
+
 /// JNI entry point: called from Java MidiBridge.onMidiData(byte[])
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
