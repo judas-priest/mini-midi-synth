@@ -367,6 +367,10 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // On Android high-DPI screens, set proper pixel ratio for crisp font rendering
+        #[cfg(target_os = "android")]
+        ctx.set_pixels_per_point(2.5);
+
         // Increase base font size and spacing
         ctx.style_mut(|style| {
             for (text_style, size) in [
