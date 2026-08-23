@@ -765,7 +765,14 @@ pub fn run_gui(
         last_config_save: std::time::Instant::now(),
         dsp_load: 0.0,
         global_dirty: false,
-        sf2_file_list: gui::scan_sf2_files(),
+        sf2_file_list: {
+            let scan = gui::scan_sf2_files();
+            for (dir, err) in &scan.unreadable {
+                log::warn!("[sf2] cannot read {}: {err}", dir.display());
+                eprintln!("[sf2] cannot read {}: {err}", dir.display());
+            }
+            scan.files
+        },
         sf2_keys_selected: None,
         sf2_keys_loaded_name: String::new(),
         sf2_drums_selected: None,

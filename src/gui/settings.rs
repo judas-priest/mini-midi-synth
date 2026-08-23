@@ -659,8 +659,28 @@ impl App {
 
                 ui.horizontal(|ui| {
                     if ui.button("\u{21BB} Scan").clicked() {
-                        self.sf2_file_list = scan_sf2_files();
+                        let scan = scan_sf2_files();
+                        // An empty list because a directory is unreadable is a
+                        // different problem from an empty list because there
+                        // are no files, and the user needs to be told which.
+                        for (dir, err) in &scan.unreadable {
+                            self.show_toast(
+                                format!("Cannot read {}: {err}", dir.display()),
+                                ToastKind::Error,
+                            );
+                        }
+                        self.sf2_file_list = scan.files;
                     }
+                    // Show where files are actually picked up from. On Android
+                    // this is the app's own storage: /sdcard/Download is
+                    // scanned too but is normally unreadable without storage
+                    // permissions this app does not request.
+                    #[cfg(target_os = "android")]
+                    ui.label(
+                        egui::RichText::new(format!("Put .sf2 in {}", sf2_dir().display()))
+                            .small()
+                            .color(theme::TEXT_SECONDARY),
+                    );
                     if ui.button("Open folder").clicked() {
                         let dir = sf2_dir();
                         let _ = std::fs::create_dir_all(&dir);

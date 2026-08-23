@@ -174,33 +174,53 @@ impl PartState {
     }
 }
 
+/// Result of scanning for .sf2 files, including directories that could not be
+/// read — so the UI can explain an empty list instead of just showing one.
+pub struct Sf2Scan {
+    pub files: Vec<(String, std::path::PathBuf)>,
+    pub unreadable: Vec<(std::path::PathBuf, String)>,
+}
+
 /// Scan for .sf2 files in the standard data directory.
-pub fn scan_sf2_files() -> Vec<(String, std::path::PathBuf)> {
-    let mut result = Vec::new();
-    // On Android, also scan /sdcard/Download for SF2 files
+pub fn scan_sf2_files() -> Sf2Scan {
+    let mut files: Vec<(String, std::path::PathBuf)> = Vec::new();
+    let mut unreadable = Vec::new();
+
+    // On Android /sdcard/Download needs storage permissions this app does not
+    // hold, so the scan usually fails there. That has to be reported rather
+    // than silently producing an empty list.
     #[cfg(target_os = "android")]
     let dirs_to_scan = vec![sf2_dir(), std::path::PathBuf::from("/sdcard/Download")];
     #[cfg(not(target_os = "android"))]
     let dirs_to_scan = vec![sf2_dir()];
 
     for dir in &dirs_to_scan {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("sf2") {
-                    let name = path.file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("?")
-                        .to_string();
-                    if !result.iter().any(|(n, _)| n == &name) {
-                        result.push((name, path));
+        match std::fs::read_dir(dir) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("sf2") {
+                        let name = path.file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("?")
+                            .to_string();
+                        if !files.iter().any(|(n, _)| n == &name) {
+                            files.push((name, path));
+                        }
                     }
+                }
+            }
+            Err(e) => {
+                // A missing private sf2 dir is normal on first run. Anything
+                // else — permission denied in particular — is worth surfacing.
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    unreadable.push((dir.clone(), e.to_string()));
                 }
             }
         }
     }
-    result.sort_by(|a, b| a.0.cmp(&b.0));
-    result
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    Sf2Scan { files, unreadable }
 }
 
 fn sf2_dir() -> std::path::PathBuf {
