@@ -1,30 +1,20 @@
-MIT License
+Copyright (c) 2026 Dmitry. All rights reserved.
 
-Copyright (c) 2026 Dmitry
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
+This software is proprietary. It is not licensed for redistribution,
+modification or use by third parties. No permission is granted to copy,
+publish, sublicense or distribute this software or derivative works.
 
 --------------------------------------------------------------------------------
 Third-party code vendored in this repository
 --------------------------------------------------------------------------------
 
-vendor/cpal              — Apache-2.0, see vendor/cpal/LICENSE
-vendor/rustysynth        — MIT, see vendor/rustysynth/Cargo.toml
-vendor/mi-plaits-dsp-rs  — MIT, see vendor/mi-plaits-dsp-rs/LICENSE.txt
+The directories below contain third-party code under their own licenses. Those
+licenses continue to apply to that code, including their attribution
+requirements, and are unaffected by the terms above.
+
+vendor/cpal              Apache-2.0    see vendor/cpal/LICENSE
+vendor/rustysynth        MIT           see vendor/rustysynth/Cargo.toml
+vendor/mi-plaits-dsp-rs  MIT           see vendor/mi-plaits-dsp-rs/LICENSE.txt
+
+Dependencies fetched from crates.io are covered by their own licenses; the
+allowed set is enforced by deny.toml.

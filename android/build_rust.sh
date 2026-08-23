@@ -13,4 +13,14 @@ cargo ndk \
     --no-default-features \
     --features gui,android-app
 
+# Keep the unstripped library so ndk-stack can symbolize crash dumps.
+# Not committed — see .gitignore.
+mkdir -p android/symbols/arm64-v8a
+cp target/aarch64-linux-android/release/libmini_midi_synth.so \
+   android/symbols/arm64-v8a/libmini_midi_synth.so
+
 echo "Done: android/app/src/main/jniLibs/arm64-v8a/libmini_midi_synth.so"
+echo "Symbols: android/symbols/arm64-v8a/libmini_midi_synth.so"
+echo
+echo "Symbolize a native crash with:"
+echo "  adb logcat | \$ANDROID_NDK_HOME/prebuilt/linux-x86_64/bin/ndk-stack -sym android/symbols/arm64-v8a"

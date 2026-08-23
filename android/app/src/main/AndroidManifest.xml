@@ -3,7 +3,8 @@
 
     <uses-feature android:name="android.software.midi" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
-<uses-permission android:name="android.permission.BLUETOOTH" />
+    <!-- Legacy Bluetooth permission, replaced by BLUETOOTH_CONNECT on API 31+ -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
@@ -11,6 +12,8 @@
         android:label="Mini MIDI Synth"
         android:icon="@mipmap/ic_launcher"
         android:hasCode="true"
+        android:allowBackup="true"
+        android:fullBackupContent="true"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
 
         <activity

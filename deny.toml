@@ -16,6 +16,10 @@ ignore = [
 
 [licenses]
 version = 2
+# This crate itself is proprietary (see LICENSE) and has no SPDX id, so
+# cargo-deny reports it as unlicensed. The check exists to police
+# dependencies, not us.
+private = { ignore = true }
 allow = [
     "MIT",
     "Apache-2.0",
