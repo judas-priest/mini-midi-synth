@@ -1275,6 +1275,60 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetPartVolume { part, volume });
     }
 
+    /// Pushes every per-part setting that is not carried by the patch itself.
+    ///
+    /// Needed after an audio reconnect, where the engine is brand new and
+    /// knows nothing about the GUI's state: without this the fresh engine has
+    /// default ranges, no panning, no transposition and no SF2 assignments.
+    pub(super) fn send_full_part_state(&mut self) {
+        for i in 0..self.parts.len() {
+            let p = &self.parts[i];
+            let (enabled, mute, volume) = (p.enabled, p.mute, p.volume);
+            let (min_note, max_note) = (p.min_note, p.max_note);
+            let (vel_min, vel_max) = (p.vel_min, p.vel_max);
+            let (pan, transpose) = (p.pan, p.transpose);
+            let (sf2_mode, sf2_program) = (p.sf2_mode, p.sf2_program);
+            let macro_vals = p.macro_vals;
+
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartVolume { part: i, volume });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartRange { part: i, min_note, max_note });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange { part: i, vel_min, vel_max });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: transpose });
+            for (index, value) in macro_vals.iter().enumerate() {
+                let _ = self.ctrl_tx.push(ControlEvent::SetMacro { part: i, index, value: *value });
+            }
+            if sf2_mode {
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                    part: i, program: sf2_program, bank: 0,
+                });
+            }
+        }
+    }
+
+    /// Re-sends the MIDI CC mapping to a freshly created engine.
+    pub(super) fn send_cc_map(&mut self) {
+        let _ = self.ctrl_tx.push(ControlEvent::SetCcMap { map: Box::new(self.cc_map) });
+    }
+
+    /// Re-sends the drum kit, tempo and pattern selection to a fresh engine.
+    pub(super) fn send_drum_state(&mut self) {
+        let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
+            patterns: Box::new(self.drum_patterns),
+            params: Box::new(self.drum_params),
+            bpm: self.drum_bpm,
+            swing: self.drum_swing,
+            volume: self.drum_volume,
+        });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPattern { pattern: self.drum_current_pattern });
+        let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
+        let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: self.looper_bars });
+        let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: self.looper_quantize });
+    }
+
     fn set_active_part(&mut self, part: usize) {
         self.active_part = part;
         self.active_part_atom.store(part as u8, std::sync::atomic::Ordering::Relaxed);

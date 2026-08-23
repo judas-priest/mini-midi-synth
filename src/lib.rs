@@ -163,7 +163,10 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     let pad_state = midi::new_pad_state();
 
     let (midi_tx, midi_rx) = rtrb::RingBuffer::<synth::MidiEvent>::new(256);
-    let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(256);
+    // 512 rather than 256: a full state resend (patches, per-part settings,
+    // macros, CC map, drum kit) is around 165 events in one burst, and an
+    // overflow there silently loses settings. 512 events is 16 KB.
+    let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(512);
     let (feedback_tx, feedback_rx) = rtrb::RingBuffer::<synth::ParamFeedback>::new(64);
 
     let midi_tx_shared: midi::SharedMidiTx = Arc::new(Mutex::new(midi_tx));

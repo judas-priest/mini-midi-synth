@@ -191,7 +191,8 @@ impl App {
 
         // New ring buffers
         let (midi_tx, midi_rx) = rtrb::RingBuffer::<synth::MidiEvent>::new(256);
-        let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(256);
+        // Must match the capacity in init_common — see the note there.
+        let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(512);
         let (feedback_tx, feedback_rx) = rtrb::RingBuffer::<synth::ParamFeedback>::new(64);
 
         // Swap MIDI producer inside SharedMidiTx (for JNI bridge on Android)
@@ -263,10 +264,14 @@ impl App {
         self.feedback_rx = Some(feedback_rx);
         self.sample_rate = actual_sr;
 
-        // Re-send current patch to new engine
-        for part in 0..self.parts.len() {
-            self.send_edited_params(part);
-        }
+        // Re-send the entire GUI state, not just the patches. Sending only
+        // patches left the fresh engine without global params, soundfonts,
+        // drum kit, part ranges, panning and the CC map — unplugging
+        // headphones silently reset half the session.
+        self.send_initial_presets();
+        self.send_full_part_state();
+        self.send_cc_map();
+        self.send_drum_state();
 
         log::info!("[reconnect] Audio restarted: {actual_sr}Hz");
         Ok(())
