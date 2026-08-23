@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [master, android-polish, audit-remediation]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ALSA and JACK headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libjack-jackd2-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      # No `cargo fmt --check` step on purpose: the existing tree is written in
+      # a compact style that rustfmt would rewrite across 72 files. rustfmt.toml
+      # exists for new code and editor integration only.
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+      - name: Headless build without GUI
+        run: cargo build --no-default-features --features desktop
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build native library
+        run: |
+          cargo ndk -t arm64-v8a -P 30 --link-libcxx-shared \
+            -o android/app/src/main/jniLibs \
+            build --release --no-default-features --features gui,android-app
+
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
