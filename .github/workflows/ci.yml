@@ -34,6 +34,14 @@ jobs:
       - name: Headless build without GUI
         run: cargo build --no-default-features --features desktop
 
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
   android:
     runs-on: ubuntu-latest
     steps:
