@@ -547,14 +547,23 @@ easy to swap by accident."
 
 ---
 
-### Task 5: Настроить rustfmt и запретить регресс
+### Task 5: Настроить rustfmt для нового кода, не переформатируя существующий
 
 **Files:**
 - Create: `rustfmt.toml`
 
+**Выполнено и пересмотрено по ходу работы.** Исходная версия задачи предполагала
+прогнать `cargo fmt` по всей базе. Проверка показала, что это плохая идея:
+диff вышел на 72 файла, +10497/−7085 строк. `src/synth/patch_params.rs` написан
+в компактном стиле, где параметры сгруппированы по смыслу — осцилляторы в одной
+строке, фильтры в другой; rustfmt разворачивает это в одно поле на строку и
+смысловая группировка теряется. Плюс `git blame` на 32k строк становится
+бесполезен. Форматирование откатано, конфигурация оставлена.
+
 - [ ] **Step 1: Создать конфигурацию**
 
-Кодовая база написана в компактном стиле с многими объявлениями в строку (`src/synth/patch_params.rs`). Полный `cargo fmt` переписал бы тысячи строк и похоронил историю в `git blame`. Поэтому конфигурация консервативная — она фиксирует то, что уже есть:
+Конфигурация нужна, чтобы новый код и «format on save» в редакторе давали
+предсказуемый результат, а не 100-символьные строки по умолчанию:
 
 ```toml
 edition = "2021"
@@ -562,31 +571,31 @@ max_width = 120
 use_small_heuristics = "Max"
 ```
 
-- [ ] **Step 2: Посмотреть масштаб расхождения**
+- [ ] **Step 2: НЕ запускать cargo fmt по всей базе**
 
 ```bash
-cargo fmt --check 2>&1 | grep -c "^Diff" || echo "0 diffs"
+cargo fmt --check 2>&1 | grep -c "^Diff"
 ```
 
-Запиши число. Если оно больше 200 — переформатирование всей базы отдельным коммитом того стоит, но **только отдельным коммитом**, чтобы не смешивать с содержательными правками.
+Число будет большим — это ожидаемо и не является поводом форматировать.
+Форматируй только файлы, которые и так создаёшь с нуля.
 
-- [ ] **Step 3: Переформатировать всё одним коммитом**
+- [ ] **Step 3: Не добавлять fmt-проверку в CI**
 
-```bash
-cargo fmt
-cargo test 2>&1 | grep "test result"
-```
-
-Ожидается: `test result: ok. 26 passed` — форматирование не меняет поведение.
+`cargo fmt --check` в CI провалится на существующем коде. В `.github/workflows/ci.yml`
+(Task 6) шага с `cargo fmt --check` быть не должно. Если понадобится проверять
+формат — только для новых файлов, через `git diff --name-only` и `rustfmt --check`
+по списку.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add -A
-git commit -m "style: apply rustfmt with project config
+git add rustfmt.toml
+git commit -m "style: add rustfmt config for new code
 
-Pure formatting, no behavior change. Separate commit so git blame on
-subsequent functional changes stays readable."
+Deliberately not reformatting the existing tree: cargo fmt produces a
+72-file, +10497/-7085 diff and unpacks the deliberately grouped parameter
+declarations in patch_params.rs into one field per line."
 ```
 
 ---
@@ -626,8 +635,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Formatting
-        run: cargo fmt --check
+      # No `cargo fmt --check` step: the existing tree is deliberately not
+      # rustfmt-formatted, see Task 5.
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
