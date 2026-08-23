@@ -44,6 +44,13 @@ public class SynthActivity extends NativeActivity {
     private final Runnable mReconnectRunnable = new Runnable() {
         @Override
         public void run() {
+            // A live bridge means we are done. Rescanning would open the same
+            // device again, append another MidiBridge, and every incoming note
+            // would then arrive in Rust once per accumulated bridge.
+            if (!mBridges.isEmpty()) {
+                Log.i(TAG, "BLE reconnect: bridge already connected, stopping");
+                return;
+            }
             if (mReconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
                 Log.i(TAG, "BLE reconnect: max attempts reached, stopping");
                 return;
@@ -65,6 +72,13 @@ public class SynthActivity extends NativeActivity {
     // No synchronization needed.
     private final List<MidiDevice> mOpenDevices = new ArrayList<>();
     private final List<MidiBridge> mBridges = new ArrayList<>();
+    /// Addresses of devices already opened, so a rescan does not open the same
+    /// device a second time and duplicate its MIDI stream.
+    private final Set<String> mOpenAddresses = new java.util.HashSet<>();
+
+    private boolean isAlreadyOpen(String address) {
+        return address != null && mOpenAddresses.contains(address);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -108,6 +122,7 @@ public class SynthActivity extends NativeActivity {
             }
         }
         mOpenDevices.clear();
+        mOpenAddresses.clear();
         super.onDestroy();
     }
 
@@ -166,6 +181,10 @@ public class SynthActivity extends NativeActivity {
         Handler handler = new Handler(Looper.getMainLooper());
         for (BluetoothDevice device : bonded) {
             String name = device.getName();
+            if (isAlreadyOpen(device.getAddress())) {
+                Log.i(TAG, "BLE MIDI already open, skipping: " + name);
+                continue;
+            }
             Log.i(TAG, "Trying BLE MIDI: " + name + " [" + device.getAddress() + "]");
             try {
                 mMidiManager.openBluetoothDevice(device,
@@ -176,6 +195,7 @@ public class SynthActivity extends NativeActivity {
                                 Log.w(TAG, "BLE MIDI failed: " + name);
                                 return;
                             }
+                            mOpenAddresses.add(device.getAddress());
                             mOpenDevices.add(midiDevice);
                             Log.i(TAG, "BLE MIDI opened: " + name);
                             connectBridge(midiDevice, name);
@@ -276,7 +296,11 @@ public class SynthActivity extends NativeActivity {
                     MidiBridge bridge = new MidiBridge(outPort, name);
                     outPort.connect(bridge);
                     mBridges.add(bridge);
-                    mReconnectAttempts = 0; // Reset backoff on success
+                    // Deliberately not resetting mReconnectAttempts: the
+                    // runnable already stops once mBridges is non-empty, and
+                    // resetting turned the exponential backoff into a
+                    // permanent 3-second rescan.
+                    mReconnectHandler.removeCallbacks(mReconnectRunnable);
                     Log.i(TAG, "BLE MIDI bridge: " + name + " port " + pi.getPortNumber());
                 }
             }
