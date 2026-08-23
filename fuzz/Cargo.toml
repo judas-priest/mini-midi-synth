@@ -1,0 +1,38 @@
+[package]
+name = "mini_midi_synth-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+# The synth is built without its GUI here: fuzzing the parsers needs none of
+# eframe, and skipping it makes the fuzz build far faster.
+[dependencies.mini_midi_synth]
+path = ".."
+default-features = false
+
+[[bin]]
+name = "parse_wt"
+path = "fuzz_targets/parse_wt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "import_midi_drums"
+path = "fuzz_targets/import_midi_drums.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_midi_message"
+path = "fuzz_targets/parse_midi_message.rs"
+test = false
+doc = false
+bench = false

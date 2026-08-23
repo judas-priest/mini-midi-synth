@@ -142,6 +142,54 @@ pub fn parse_and_push(
     consumed
 }
 
+/// Rejects Standard MIDI Files whose header would make the parser panic.
+///
+/// `midly` 0.5.3 panics with "attempt to negate with overflow" on an SMPTE
+/// timing field whose frame rate is not one of the four legal values — found by
+/// fuzzing `import_midi_drums`. Since the release profile is `panic = "abort"`,
+/// `catch_unwind` cannot save us: a user picking a malformed .mid would kill
+/// the process outright. So the header is checked before `midly` sees it.
+///
+/// Returns `Err` with a human-readable reason, `Ok(())` when the file is at
+/// least structurally plausible.
+pub fn check_smf_header(data: &[u8]) -> Result<(), &'static str> {
+    if data.len() < 14 {
+        return Err("file is too short to be a MIDI file");
+    }
+    if &data[0..4] != b"MThd" {
+        return Err("not a MIDI file (missing MThd header)");
+    }
+
+    // The MThd chunk length is 6 in every real file. A different value makes
+    // midly read the timing field from somewhere else and panic on it — the
+    // second crash the fuzzer found, with a declared length of 11.
+    if u32::from_be_bytes([data[4], data[5], data[6], data[7]]) != 6 {
+        return Err("MIDI header chunk has a non-standard length");
+    }
+
+    // Bytes 12..14 are the division field. Bit 15 clear means ticks per quarter
+    // note; set means SMPTE, where the high byte is the negated frame rate.
+    let division = i16::from_be_bytes([data[12], data[13]]);
+    if division >= 0 {
+        if division == 0 {
+            return Err("MIDI file declares zero ticks per beat");
+        }
+        return Ok(());
+    }
+
+    let fps = data[12] as i8;
+    match fps {
+        -24 | -25 | -29 | -30 => {
+            if data[13] == 0 {
+                Err("MIDI file declares zero ticks per SMPTE frame")
+            } else {
+                Ok(())
+            }
+        }
+        _ => Err("MIDI file declares an invalid SMPTE frame rate"),
+    }
+}
+
 /// List available MIDI input ports.
 pub fn list_ports() -> Result<Vec<String>> {
     let midi_in = MidiInput::new("mini_midi_synth_list")?;

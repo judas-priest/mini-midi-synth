@@ -238,6 +238,9 @@ impl MidiPlayer {
 pub fn parse_midi(raw: &[u8]) -> Result<MidiSeqData, String> {
     use midly::{Smf, TrackEventKind, MidiMessage};
 
+    // midly panics on some malformed headers, and the release profile aborts
+    // on panic — check before handing the bytes over. See check_smf_header.
+    crate::midi::check_smf_header(raw).map_err(|e| e.to_string())?;
     let smf = Smf::parse(raw).map_err(|e| format!("MIDI parse error: {e}"))?;
 
     let ticks_per_beat = match smf.header.timing {

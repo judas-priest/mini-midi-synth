@@ -607,6 +607,9 @@ pub fn import_midi_drums(path: &std::path::Path) -> Result<(Vec<DrumPattern>, f3
     use crate::synth::drum::{DRUM_NOTE_BASE, NUM_DRUM_SLOTS};
 
     let data = fs::read(path).context("Failed to read MIDI file")?;
+    // midly panics on some malformed headers, and the release profile aborts
+    // on panic — check before handing the bytes over. See check_smf_header.
+    crate::midi::check_smf_header(&data).map_err(|e| anyhow::anyhow!("{e}"))?;
     let smf = midly::Smf::parse(&data).map_err(|e| anyhow::anyhow!("MIDI parse error: {e}"))?;
 
     let ppq = match smf.header.timing {

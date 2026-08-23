@@ -71,6 +71,52 @@ fn pitch_bend_centre_is_zero() {
 }
 
 #[test]
+fn smf_header_check_rejects_what_makes_midly_panic() {
+    use mini_midi_synth::midi::check_smf_header;
+
+    // Found by fuzzing import_midi_drums: an SMPTE timing field with an
+    // illegal frame rate makes midly 0.5.3 panic with "attempt to negate with
+    // overflow". The release profile aborts on panic, so this must never
+    // reach the parser.
+    let crasher = [
+        0x4d, 0x54, 0x68, 0x64, // "MThd"
+        0x00, 0x00, 0x00, 0x06, // header length
+        0x00, 0x00, 0x00, 0x2d, // format, ntrks
+        0x80, 0xff, // division: SMPTE with fps = -128
+    ];
+    assert!(check_smf_header(&crasher).is_err(), "the known crasher must be rejected");
+
+    assert!(check_smf_header(&[]).is_err());
+    assert!(check_smf_header(b"not a midi file at all").is_err());
+
+    // Zero ticks per beat would divide by zero downstream.
+    let zero_ppq = [
+        0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06,
+        0x00, 0x01, 0x00, 0x02, 0x00, 0x00,
+    ];
+    assert!(check_smf_header(&zero_ppq).is_err());
+}
+
+#[test]
+fn smf_header_check_accepts_valid_headers() {
+    use mini_midi_synth::midi::check_smf_header;
+
+    // Ordinary metrical timing: 480 ticks per quarter note.
+    let metrical = [
+        0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06,
+        0x00, 0x01, 0x00, 0x02, 0x01, 0xe0,
+    ];
+    assert!(check_smf_header(&metrical).is_ok());
+
+    // Legal SMPTE: 25 fps, 40 ticks per frame.
+    let smpte = [
+        0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06,
+        0x00, 0x01, 0x00, 0x02, 0xe7, 0x28,
+    ];
+    assert!(check_smf_header(&smpte).is_ok(), "25 fps SMPTE is valid");
+}
+
+#[test]
 fn garbage_does_not_panic() {
     assert!(parse_midi_message(&[]).is_none());
     assert!(parse_midi_message(&[0xF7]).is_none());
