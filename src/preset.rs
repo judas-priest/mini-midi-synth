@@ -11,13 +11,39 @@ use std::sync::Arc;
 // Generic JSON save/load/list helpers
 // ---------------------------------------------------------------------------
 
+/// Turns a user-supplied preset name into a safe filename stem.
+///
+/// Names come from a text field, so `../../etc/foo` would otherwise write
+/// outside the preset directory. Everything that is not alphanumeric collapses
+/// into a single underscore, and an empty result falls back to a fixed name
+/// rather than producing a file called just `.json`.
+pub fn sanitize_preset_filename(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut last_was_sep = true; // leading separators are trimmed
+
+    for ch in name.to_lowercase().chars() {
+        if ch.is_alphanumeric() {
+            out.push(ch);
+            last_was_sep = false;
+        } else if !last_was_sep {
+            out.push('_');
+            last_was_sep = true;
+        }
+    }
+
+    while out.ends_with('_') {
+        out.pop();
+    }
+
+    if out.is_empty() { "preset".to_string() } else { out }
+}
+
 fn save_json<T: Serialize>(obj: &T, dir: Option<PathBuf>, name: &str) -> Result<PathBuf> {
     let dir = dir.context("Could not determine config directory")?;
     fs::create_dir_all(&dir)?;
-    let filename = name.to_lowercase().replace(' ', "_") + ".json";
-    let path = dir.join(filename);
+    let path = dir.join(sanitize_preset_filename(name) + ".json");
     let json = serde_json::to_string_pretty(obj)?;
-    fs::write(&path, json)?;
+    crate::config::write_atomic(&path, &json)?;
     Ok(path)
 }
 
@@ -498,17 +524,24 @@ pub fn wavetable_dir() -> PathBuf {
     crate::config::app_data_dir().join("wavetables")
 }
 
-/// Load all available presets: factory + external + user.
-pub fn load_all_patches() -> Vec<Patch> {
-    let mut presets = Vec::new();
-
-    // Factory presets (compiled in)
+/// Load only the presets compiled into the binary.
+///
+/// Unlike [`load_all_patches`] this never touches the filesystem, so its result
+/// is identical on every machine — which is what tests need.
+pub fn load_factory_patches() -> Vec<Patch> {
+    let mut presets = Vec::with_capacity(FACTORY_PRESETS.len());
     for (category, _, json) in FACTORY_PRESETS {
         if let Ok(mut p) = serde_json::from_str::<Patch>(json) {
             p.category = category.to_string();
             presets.push(p);
         }
     }
+    presets
+}
+
+/// Load all available presets: factory + external + user.
+pub fn load_all_patches() -> Vec<Patch> {
+    let mut presets = load_factory_patches();
 
     // External presets (~/.local/share/mini_midi_synth/presets/)
     // Converted Surge presets and other third-party presets go here.
@@ -527,10 +560,9 @@ pub fn load_all_patches() -> Vec<Patch> {
 pub fn save_patch(preset: &Patch) -> Result<PathBuf> {
     let dir = user_preset_dir().context("Could not determine config directory")?;
     fs::create_dir_all(&dir)?;
-    let filename = preset.name.to_lowercase().replace(' ', "_") + ".json";
-    let path = dir.join(filename);
+    let path = dir.join(sanitize_preset_filename(&preset.name) + ".json");
     let json = serde_json::to_string_pretty(preset)?;
-    fs::write(&path, json)?;
+    crate::config::write_atomic(&path, &json)?;
     Ok(path)
 }
 

@@ -183,14 +183,44 @@ fn config_path() -> Option<PathBuf> {
     app_config_dir().map(|d| d.join("config.json"))
 }
 
+/// Writes `contents` to `path` atomically: a crash mid-write leaves either the
+/// old file or the new one, never a truncated one. Android kills backgrounded
+/// processes without warning, which makes this more than theoretical.
+pub fn write_atomic(path: &std::path::Path, contents: &str) -> Result<()> {
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, contents)?;
+    fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 impl Config {
     pub fn load() -> Self {
         let Some(path) = config_path() else {
             return Self::default();
         };
-        match fs::read_to_string(&path) {
-            Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
-            Err(_) => Self::default(),
+        let Ok(contents) = fs::read_to_string(&path) else {
+            return Self::default();
+        };
+
+        match serde_json::from_str(&contents) {
+            Ok(config) => config,
+            Err(e) => {
+                // Keep the unparseable file. Autosave would overwrite it two
+                // seconds later and the user's settings would be gone for good.
+                let backup = path.with_extension("json.bad");
+                let _ = fs::write(&backup, &contents);
+                log::warn!(
+                    "[config] {} is not valid JSON ({e}); starting from defaults, original kept at {}",
+                    path.display(),
+                    backup.display()
+                );
+                eprintln!(
+                    "[config] Could not parse {}: {e}\n[config] Original saved as {}",
+                    path.display(),
+                    backup.display()
+                );
+                Self::default()
+            }
         }
     }
 
@@ -203,7 +233,7 @@ impl Config {
             fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(self)?;
-        fs::write(&path, json)?;
+        write_atomic(&path, &json)?;
         Ok(())
     }
 }
