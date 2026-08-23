@@ -178,10 +178,11 @@ impl PartState {
 /// Scan for .sf2 files in the standard data directory.
 pub fn scan_sf2_files() -> Vec<(String, std::path::PathBuf)> {
     let mut result = Vec::new();
-    let mut dirs_to_scan = vec![sf2_dir()];
     // On Android, also scan /sdcard/Download for SF2 files
     #[cfg(target_os = "android")]
-    dirs_to_scan.push(std::path::PathBuf::from("/sdcard/Download"));
+    let dirs_to_scan = vec![sf2_dir(), std::path::PathBuf::from("/sdcard/Download")];
+    #[cfg(not(target_os = "android"))]
+    let dirs_to_scan = vec![sf2_dir()];
 
     for dir in &dirs_to_scan {
         if let Ok(entries) = std::fs::read_dir(dir) {

@@ -82,17 +82,25 @@ pub struct AudioBackend {
     pub paused: Arc<AtomicBool>,
 }
 
+/// Everything the audio callback needs to share with the rest of the app.
+/// Grouped into a struct because passing eight positional arguments is both a
+/// clippy lint and an easy place to swap two `Arc<AtomicBool>` by mistake.
+pub struct AudioShared {
+    pub amidi_port: std::sync::Arc<crate::amidi::AmidiPort>,
+    pub note_state: crate::midi::NoteState,
+    pub pad_state: crate::midi::PadState,
+    pub paused: Arc<AtomicBool>,
+}
+
 impl AudioBackend {
     pub fn new(
         config: AudioConfig,
         mut synth: SynthEngine,
         mut midi_rx: Consumer<MidiEvent>,
         mut ctrl_rx: Consumer<ControlEvent>,
-        amidi_port: std::sync::Arc<crate::amidi::AmidiPort>,
-        note_state: crate::midi::NoteState,
-        pad_state: crate::midi::PadState,
-        paused: Arc<AtomicBool>,
+        shared: AudioShared,
     ) -> Result<(Self, u32)> {
+        let AudioShared { amidi_port, note_state, pad_state, paused } = shared;
         let host = cpal::host_from_id(config.host_id)
             .map_err(|e| anyhow::anyhow!("Failed to init audio host: {e}"))?;
         let device = host

@@ -206,9 +206,18 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         sample_rate: config.audio.sample_rate,
         buffer_size: config.audio.buffer_size,
     };
-    let (audio_backend, actual_sr) =
-        audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx,
-            amidi_port, note_state.clone(), pad_state.clone(), audio_paused)?;
+    let (audio_backend, actual_sr) = audio::AudioBackend::new(
+        audio_config,
+        engine,
+        midi_rx,
+        ctrl_rx,
+        audio::AudioShared {
+            amidi_port,
+            note_state: note_state.clone(),
+            pad_state: pad_state.clone(),
+            paused: audio_paused,
+        },
+    )?;
     let audio_disconnected = audio_backend.disconnected.clone();
     log::info!("[init] Audio: sample_rate={actual_sr}");
 
@@ -461,6 +470,12 @@ pub fn run_headless() -> Result<()> {
 
         // Drain feedback (ignore in CLI)
         while c.feedback_rx.pop().is_ok() {}
+
+        // Headless has no reconnect path (the GUI rebuilds the engine on the
+        // fly); say so instead of going silently mute.
+        if c.audio_disconnected.swap(false, Ordering::SeqCst) {
+            eprintln!("[cli] Audio device disconnected — restart to recover");
+        }
 
         // Process keyboard actions
         if let Some((_, ref rx)) = kb_rx {

@@ -233,9 +233,18 @@ impl App {
         #[cfg(not(target_os = "android"))]
         let audio_paused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        let (audio_backend, actual_sr) =
-            crate::audio::AudioBackend::new(audio_config, engine, midi_rx, ctrl_rx,
-                amidi_port, self.note_state.clone(), self.pad_state.clone(), audio_paused)?;
+        let (audio_backend, actual_sr) = crate::audio::AudioBackend::new(
+            audio_config,
+            engine,
+            midi_rx,
+            ctrl_rx,
+            crate::audio::AudioShared {
+                amidi_port,
+                note_state: self.note_state.clone(),
+                pad_state: self.pad_state.clone(),
+                paused: audio_paused,
+            },
+        )?;
 
         // Update GUI state
         self.audio_disconnected = audio_backend.disconnected.clone();

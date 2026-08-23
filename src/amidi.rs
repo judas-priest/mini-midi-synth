@@ -175,5 +175,8 @@ impl AmidiPort {
     pub const fn new() -> Self { Self }
     #[inline]
     pub fn receive(&self, _buf: &mut [u8]) -> Option<usize> { None }
+    /// Mirrors the Android implementation so call sites compile on every
+    /// platform; there is nothing to close when there is no NDK MIDI device.
+    #[allow(dead_code)]
     pub fn close(&self) {}
 }
