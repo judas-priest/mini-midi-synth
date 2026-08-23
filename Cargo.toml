@@ -5,8 +5,8 @@ edition = "2021"
 
 [lib]
 name = "mini_midi_synth"
-path = "src/main.rs"
-crate-type = ["cdylib"]
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "mini_midi_synth"
