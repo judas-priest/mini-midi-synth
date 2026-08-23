@@ -56,6 +56,13 @@ const MAX_PORTS: usize = 4;
 pub struct AmidiPort {
     ports: [AtomicPtr<AMidiOutputPort>; MAX_PORTS],
     device: AtomicPtr<AMidiDevice>,
+    /// Non-zero while the audio thread is inside an AMidi call. `close_all`
+    /// waits this out before releasing anything: an atomic pointer protects
+    /// the pointer, not the lifetime of what it points at, and unplugging a
+    /// USB keyboard mid-note used to free a port the callback was still using.
+    readers: std::sync::atomic::AtomicUsize,
+    /// Set before closing so `receive` stops entering.
+    closing: std::sync::atomic::AtomicBool,
 }
 
 #[cfg(target_os = "android")]
@@ -76,11 +83,23 @@ impl AmidiPort {
                 AtomicPtr::new(ptr::null_mut()),
             ],
             device: AtomicPtr::new(ptr::null_mut()),
+            readers: std::sync::atomic::AtomicUsize::new(0),
+            closing: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
     /// Close all ports and release device. Call before opening new device.
+    ///
+    /// Blocks until the audio thread has left `receive`. This runs on the JNI
+    /// thread, where waiting a few microseconds is fine, and it is the only
+    /// way to guarantee the callback is not inside `AMidiOutputPort_receive`
+    /// with a pointer we are about to free.
     pub fn close_all(&self) {
+        self.closing.store(true, Ordering::Release);
+        while self.readers.load(Ordering::Acquire) != 0 {
+            std::hint::spin_loop();
+        }
+
         for slot in &self.ports {
             let port = slot.swap(ptr::null_mut(), Ordering::AcqRel);
             if !port.is_null() {
@@ -91,6 +110,8 @@ impl AmidiPort {
         if !device.is_null() {
             unsafe { AMidiDevice_release(device); }
         }
+
+        self.closing.store(false, Ordering::Release);
     }
 
     /// Open a USB MIDI device and all its output ports from a Java MidiDevice.
@@ -132,8 +153,29 @@ impl AmidiPort {
 
     /// Poll ALL open ports for MIDI data. Non-blocking, RT-safe.
     /// Call from audio callback. Returns Some(nbytes) from first port with data.
+    ///
+    /// Registers as a reader for the duration so `close_all` cannot free a
+    /// port out from under the FFI call.
     #[inline]
     pub fn receive(&self, buf: &mut [u8]) -> Option<usize> {
+        if self.closing.load(Ordering::Acquire) {
+            return None;
+        }
+        self.readers.fetch_add(1, Ordering::AcqRel);
+        // Re-check: close_all may have set `closing` between the check above
+        // and the increment. If so, back out without touching a port pointer.
+        if self.closing.load(Ordering::Acquire) {
+            self.readers.fetch_sub(1, Ordering::AcqRel);
+            return None;
+        }
+
+        let result = self.receive_inner(buf);
+        self.readers.fetch_sub(1, Ordering::AcqRel);
+        result
+    }
+
+    #[inline]
+    fn receive_inner(&self, buf: &mut [u8]) -> Option<usize> {
         for slot in &self.ports {
             let port = slot.load(Ordering::Acquire);
             if port.is_null() { continue; }

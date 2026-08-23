@@ -882,7 +882,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_minimidisynth_SynthActivity_openUsbMidiNative<'local>(
-    mut env: jni::JNIEnv<'local>,
+    env: jni::JNIEnv<'local>,
     _class: jni::objects::JClass<'local>,
     midi_device: jni::objects::JObject<'local>,
     port_numbers: jni::objects::JIntArray<'local>,
@@ -923,7 +923,7 @@ pub extern "system" fn Java_com_minimidisynth_SynthActivity_closeUsbMidiNative<'
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_minimidisynth_MidiBridge_onMidiData<'local>(
-    mut env: jni::JNIEnv<'local>,
+    env: jni::JNIEnv<'local>,
     _class: jni::objects::JClass<'local>,
     data: jni::objects::JByteArray<'local>,
 ) {
