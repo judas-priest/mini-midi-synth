@@ -1,19 +1,28 @@
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-mod audio;
+pub mod audio;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-mod cc_map;
-mod config;
+pub mod cc_map;
+pub mod config;
 #[cfg(feature = "gui")]
 mod gui;
 #[cfg(target_os = "linux")]
 mod input;
 mod key_action;
-mod midi;
+pub mod midi;
 mod amidi;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-mod preset;
+pub mod preset;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-mod synth;
+pub mod synth;
+
+/// Diagnostic allocator: with `--features rt-assert`, any allocation or
+/// deallocation inside a region marked with `assert_no_alloc` aborts the
+/// process instead of silently costing an unbounded amount of time. Not
+/// enabled by default — it puts a thread-local check on every allocation in
+/// the program.
+#[cfg(feature = "rt-assert")]
+#[global_allocator]
+static RT_ALLOC: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 #[allow(unused_imports)]
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};

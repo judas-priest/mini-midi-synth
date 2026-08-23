@@ -24,6 +24,20 @@ fn soft_limit(x: f32) -> f32 {
     }
 }
 
+/// Runs `f` under the no-allocation assertion when the `rt-assert` feature is
+/// on, and unchanged otherwise. Keeps the callback body free of cfg noise.
+#[inline(always)]
+fn rt_guard<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(feature = "rt-assert")]
+    {
+        assert_no_alloc::assert_no_alloc(f)
+    }
+    #[cfg(not(feature = "rt-assert"))]
+    {
+        f()
+    }
+}
+
 pub struct AudioConfig {
     pub host_id: HostId,
     pub sample_rate: u32,
@@ -153,7 +167,7 @@ impl AudioBackend {
                     for sample in data.iter_mut() { *sample = 0.0; }
                     return;
                 }
-                no_denormals::no_denormals(|| {
+                rt_guard(|| no_denormals::no_denormals(|| {
                     // If JACK changed the sample rate, update the synth immediately.
                     let new_sr = jack_sr_cb.load(Ordering::Relaxed);
                     if new_sr != synth_sr {
@@ -225,7 +239,7 @@ impl AudioBackend {
 
                         frame_offset += block_len;
                     }
-                });
+                }));
             },
             move |err| {
                 let msg = err.to_string();

@@ -19,6 +19,9 @@ default = ["gui", "desktop"]
 gui = ["dep:eframe"]
 desktop = ["eframe/x11", "eframe/wayland"]
 android-app = ["eframe/android-native-activity"]
+# Diagnostic build: aborts if the audio callback allocates or frees memory.
+# Off by default — it puts a thread-local check on every allocation.
+rt-assert = ["dep:assert_no_alloc"]
 
 [dependencies]
 eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "persistence"], optional = true }
@@ -34,6 +37,7 @@ mi-plaits-dsp = { path = "vendor/mi-plaits-dsp-rs" }
 midly = "0.5"
 no_denormals = "0.1"
 log = "0.4"
+assert_no_alloc = { version = "1.1", optional = true }
 
 # Desktop-only
 [target.'cfg(target_os = "linux")'.dependencies]
