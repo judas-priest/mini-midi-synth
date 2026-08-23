@@ -47,7 +47,9 @@ pub struct LooperDisplay {
 impl LooperDisplay {
     pub fn new() -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self {
-            events: Vec::new(),
+            // Sized for the worst case up front: update_display runs on the
+            // audio thread, where growing this Vec means calling malloc.
+            events: Vec::with_capacity(MAX_LOOP_EVENTS),
             current_layer: 0,
         }))
     }
@@ -479,8 +481,18 @@ impl MidiLooper {
         out
     }
 
+    /// Publishes a snapshot of recorded events for the GUI timeline.
+    ///
+    /// Runs on the audio thread. `try_lock` never blocks and the vector is
+    /// pre-sized to MAX_LOOP_EVENTS so `push` cannot allocate. The `unlock`
+    /// when the guard drops is still a futex syscall; replacing this Mutex
+    /// with a triple buffer is recorded in docs/ARCHITECTURE.md.
     fn update_display(&self) {
         if let Ok(mut d) = self.display.try_lock() {
+            debug_assert!(
+                d.events.capacity() >= MAX_LOOP_EVENTS,
+                "display vector must never grow on the audio thread"
+            );
             d.events.clear();
             if self.loop_length_ticks > 0 {
                 let inv = 1.0 / self.loop_length_ticks as f32;

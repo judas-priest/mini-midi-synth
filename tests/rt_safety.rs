@@ -50,6 +50,24 @@ fn loading_a_patch_does_not_free_on_the_audio_thread() {
 }
 
 #[test]
+fn looper_control_events_do_not_allocate() {
+    // start_record / undo / clear all call update_display, which used to push
+    // up to MAX_LOOP_EVENTS entries into an empty Vec on the audio thread.
+    let mut engine = SynthEngine::new(SR);
+
+    let _ = engine.handle_control(ControlEvent::LooperRecord);
+    for note in 60..72u8 {
+        engine.handle_event(MidiEvent::NoteOn { channel: 0, note, velocity: 100 });
+    }
+
+    assert_no_alloc(|| {
+        let _ = engine.handle_control(ControlEvent::LooperTogglePlay);
+        let _ = engine.handle_control(ControlEvent::LooperUndo);
+        let _ = engine.handle_control(ControlEvent::LooperClear);
+    });
+}
+
+#[test]
 fn switching_between_wavetable_patches_does_not_free_in_rt() {
     // Loading a patch overwrites part.wavetable_data, dropping the previous
     // Arc<Vec<f32>>. With a wavetable patch on both sides that is a real free
