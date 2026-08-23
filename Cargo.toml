@@ -42,6 +42,13 @@ no_denormals = "0.1"
 log = "0.4"
 assert_no_alloc = { version = "1.1", optional = true }
 
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "dsp"
+harness = false
+
 # Desktop-only
 [target.'cfg(target_os = "linux")'.dependencies]
 cpal = { version = "0.15", features = ["jack"] }
