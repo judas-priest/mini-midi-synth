@@ -164,8 +164,20 @@ impl AudioBackend {
         let stream = device.build_output_stream(
             &stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                // If app is paused (backgrounded), output silence to save battery
+                // Backgrounded: output silence to save battery, but still apply
+                // every queued event. Skipping the drain lets the 256-slot
+                // rings fill up, and the GUI's pushes are then dropped on the
+                // floor — the engine would come back from onResume disagreeing
+                // with the UI about volumes, presets and which notes are held.
                 if paused_cb.load(Ordering::Relaxed) {
+                    while let Ok(event) = ctrl_rx.pop() {
+                        if let Some(spent) = synth.handle_control(event) {
+                            trash.dispose(crate::trash::Trash::Control(spent));
+                        }
+                    }
+                    while let Ok(event) = midi_rx.pop() {
+                        synth.handle_event(event);
+                    }
                     for sample in data.iter_mut() { *sample = 0.0; }
                     return;
                 }
