@@ -104,6 +104,8 @@ pub struct AudioShared {
     pub note_state: crate::midi::NoteState,
     pub pad_state: crate::midi::PadState,
     pub paused: Arc<AtomicBool>,
+    /// Where spent control events go instead of being freed in the callback.
+    pub trash: crate::trash::TrashTx,
 }
 
 impl AudioBackend {
@@ -114,7 +116,7 @@ impl AudioBackend {
         mut ctrl_rx: Consumer<ControlEvent>,
         shared: AudioShared,
     ) -> Result<(Self, u32)> {
-        let AudioShared { amidi_port, note_state, pad_state, paused } = shared;
+        let AudioShared { amidi_port, note_state, pad_state, paused, mut trash } = shared;
         let host = cpal::host_from_id(config.host_id)
             .map_err(|e| anyhow::anyhow!("Failed to init audio host: {e}"))?;
         let device = host
@@ -176,7 +178,11 @@ impl AudioBackend {
                     }
 
                     while let Ok(event) = ctrl_rx.pop() {
-                        synth.handle_control(event);
+                        // Heap-owning events come back out; free() belongs to
+                        // the GUI thread, not here.
+                        if let Some(spent) = synth.handle_control(event) {
+                            trash.dispose(crate::trash::Trash::Control(spent));
+                        }
                     }
 
                     let total_frames = data.len() / channels;

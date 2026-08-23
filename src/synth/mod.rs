@@ -106,6 +106,10 @@ pub struct ScopeBuffer {
     pub write_pos: std::sync::atomic::AtomicUsize,
 }
 
+impl Default for ScopeBuffer {
+    fn default() -> Self { Self::new() }
+}
+
 impl ScopeBuffer {
     pub fn new() -> Self {
         Self {
@@ -1048,6 +1052,8 @@ pub struct SynthEngine {
     patches: Vec<Patch>,
     preset_params_cache: Vec<PatchParams>,
     feedback_tx: Option<rtrb::Producer<ParamFeedback>>,
+    /// Where displaced heap objects go so the audio thread never calls free().
+    trash: Option<crate::trash::TrashTx>,
     program_change: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     global_params: GlobalParams,
     pickup_states: [PickupState; 128],
@@ -1303,7 +1309,7 @@ impl SynthEngine {
             spring_reverb: SpringReverb::new(sample_rate),
             cc_map: CcMap::default(),
             patches: Vec::new(), preset_params_cache: Vec::new(),
-            feedback_tx: None, program_change: None,
+            feedback_tx: None, trash: None, program_change: None,
             global_params: GlobalParams::default(),
             pickup_states: [PickupState::default(); 128],
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
@@ -1343,6 +1349,20 @@ impl SynthEngine {
         self.patches = patches;
     }
     pub fn set_feedback_tx(&mut self, tx: rtrb::Producer<ParamFeedback>) { self.feedback_tx = Some(tx); }
+    /// Gives the engine somewhere to put heap objects it displaces (soundfonts,
+    /// rustysynth instances) so they are not freed on the audio thread.
+    pub fn set_trash_tx(&mut self, tx: crate::trash::TrashTx) { self.trash = Some(tx); }
+
+    /// Sends a displaced soundfont to the GUI thread for freeing. A no-op when
+    /// nothing was displaced, and a plain drop when no queue has been wired up
+    /// (offline tests and benchmarks, where the audio thread does not exist).
+    fn dispose_sf2(&mut self, displaced: sampler::Displaced) {
+        if displaced.is_empty() { return; }
+        match self.trash.as_mut() {
+            Some(t) => t.dispose(crate::trash::Trash::Sf2(displaced)),
+            None => drop(displaced),
+        }
+    }
     pub fn scope_buffer(&self) -> std::sync::Arc<ScopeBuffer> { self.scope_buf.clone() }
     pub fn set_program_change_atom(&mut self, atom: std::sync::Arc<std::sync::atomic::AtomicU8>) {
         self.program_change = Some(atom);
@@ -1646,28 +1666,63 @@ impl SynthEngine {
         }
     }
 
-    pub fn handle_control(&mut self, event: ControlEvent) {
+    /// Applies a control event.
+    ///
+    /// Returns the event back when it owns heap memory, so the caller can hand
+    /// it to the trash queue instead of calling free() on the audio thread.
+    /// Returns `None` for the plain-data variants, which cost nothing to drop.
+    #[must_use = "heap-owning events must be sent to the trash queue"]
+    pub fn handle_control(&mut self, event: ControlEvent) -> Option<ControlEvent> {
         match event {
-            ControlEvent::LoadPatch(ev) => {
-                let LoadPatchEvent { part, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_seq, wavetable } = *ev;
+            ControlEvent::LoadPatch(mut ev) => {
+                // Take the contents out of the box rather than unboxing it:
+                // `*ev` would drop the allocation right here, on the audio
+                // thread. The emptied box travels back to the GUI thread.
+                let part = ev.part;
+                let params = ev.params; // PatchParams is Copy
+                let mod_matrix = std::mem::take(&mut ev.mod_matrix);
+                let mseg1 = ev.mseg1.take();
+                let mseg2 = ev.mseg2.take();
+                let pitch_seq = ev.pitch_seq.take();
+                let lfo_step_seq = ev.lfo_step_seq.take();
+                let wavetable = ev.wavetable.take();
                 if let Some(l) = self.parts.get_mut(part) {
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
                     // Sync macro values from preset into live part state
-                    // Load wavetable data if provided
-                    if let Some((data, frames, fsize)) = wavetable {
-                        l.wavetable_data = Some(data);
-                        l.wavetable_frames = frames;
-                        l.wavetable_frame_size = fsize;
-                    } else {
-                        l.wavetable_data = None;
-                    }
+                    // Load wavetable data if provided. `replace` hands the
+                    // previous Arc back into the event instead of dropping the
+                    // last reference here — a wavetable is a Vec<f32> of tens
+                    // of thousands of samples.
+                    let previous_wt = match wavetable {
+                        Some((data, frames, fsize)) => {
+                            l.wavetable_frames = frames;
+                            l.wavetable_frame_size = fsize;
+                            l.wavetable_data.replace(data)
+                        }
+                        None => l.wavetable_data.take(),
+                    };
+                    ev.wavetable = previous_wt.map(|d| (d, 0, 0));
                     l.macro_vals = params.macro_vals;
                     l.params = params;
                     l.mod_matrix = mod_matrix;
-                    if let Some(m) = mseg1 { l.mseg1 = m; }
-                    if let Some(m) = mseg2 { l.mseg2 = m; }
-                    if let Some(sq) = pitch_seq { l.pitch_seq = sq; }
+                    // Mseg owns a Vec<MsegSegment>, so plain assignment would
+                    // free the outgoing envelope on the audio thread. Swap it
+                    // into the event and let the GUI thread drop it.
+                    if let Some(mut m) = mseg1 {
+                        std::mem::swap(&mut l.mseg1, &mut m);
+                        ev.mseg1 = Some(m);
+                    }
+                    if let Some(mut m) = mseg2 {
+                        std::mem::swap(&mut l.mseg2, &mut m);
+                        ev.mseg2 = Some(m);
+                    }
+                    // Copy the pattern, keep our own step atom: see
+                    // PitchSequencer::adopt.
+                    if let Some(sq) = pitch_seq {
+                        l.pitch_seq.adopt(&sq);
+                        ev.pitch_seq = Some(sq);
+                    }
                     if let Some(ref sp) = lfo_step_seq {
                         for (i, lfo) in l.lfos.iter_mut().enumerate().take(4) {
                             lfo.apply_step_seq(&sp[i]);
@@ -1684,6 +1739,7 @@ impl SynthEngine {
                     );
                 }
                 self.reset_preset_pickups();
+                return Some(ControlEvent::LoadPatch(ev));
             }
             ControlEvent::SetPartEnabled { part, enabled } => {
                 if let Some(l) = self.parts.get_mut(part) {
@@ -1728,7 +1784,12 @@ impl SynthEngine {
                     }
                 }
             }
-            ControlEvent::SetCcMap { map } => { self.cc_map = *map; }
+            ControlEvent::SetCcMap { map } => {
+                // CcMap is Copy, so this reads through the box without
+                // consuming it; the allocation goes back to the GUI thread.
+                self.cc_map = *map;
+                return Some(ControlEvent::SetCcMap { map });
+            }
             ControlEvent::SetGlobalParam { key, value } => {
                 self.global_params.set(key, value);
                 if key == "pitch_bend_range" {
@@ -1778,12 +1839,14 @@ impl SynthEngine {
                 self.drum_engine.sequencer.undo();
             }
             ControlEvent::DrumLoadKit { patterns, params, bpm, swing, volume } => {
+                // Both arrays are Copy; the boxes travel back for freeing.
                 self.drum_engine.sequencer.patterns = *patterns;
                 self.drum_engine.params = *params;
                 self.drum_engine.sequencer.bpm = bpm;
                 self.drum_engine.sequencer.swing = swing;
                 self.drum_engine.volume = volume;
                 self.sampler.drum_volume = volume;
+                return Some(ControlEvent::DrumLoadKit { patterns, params, bpm, swing, volume });
             }
             ControlEvent::LooperRecord => { self.looper.start_record(); }
             ControlEvent::LooperStopRecord => { self.looper.stop_record(); }
@@ -1849,17 +1912,26 @@ impl SynthEngine {
                 self.arpeggiator.clear();
             }
             ControlEvent::LoadKeysSoundFont { soundfont } => {
-                self.sampler.load_keys_soundfont(soundfont);
+                // Clone bumps the Arc refcount; the original travels back to
+                // the GUI thread with the event, and whatever the sampler
+                // displaced goes to the trash queue.
+                let displaced = self.sampler.load_keys_soundfont(soundfont.clone());
+                self.dispose_sf2(displaced);
                 self.sampler.set_pitch_bend_range(self.global_params.pitch_bend_range as u8);
+                return Some(ControlEvent::LoadKeysSoundFont { soundfont });
             }
             ControlEvent::LoadDrumsSoundFont { soundfont } => {
-                self.sampler.load_drums_soundfont(soundfont);
+                let displaced = self.sampler.load_drums_soundfont(soundfont.clone());
+                self.dispose_sf2(displaced);
+                return Some(ControlEvent::LoadDrumsSoundFont { soundfont });
             }
             ControlEvent::UnloadKeysSoundFont => {
-                self.sampler.unload_keys();
+                let displaced = self.sampler.unload_keys();
+                self.dispose_sf2(displaced);
             }
             ControlEvent::UnloadDrumsSoundFont => {
-                self.sampler.unload_drums();
+                let displaced = self.sampler.unload_drums();
+                self.dispose_sf2(displaced);
             }
             ControlEvent::SetPartSf2Mode { part, enabled } => {
                 if let Some(l) = self.parts.get_mut(part) {
@@ -1875,7 +1947,9 @@ impl SynthEngine {
                 self.drum_engine.sf2_mode = enabled;
             }
             ControlEvent::SetSf2BlockSize { size } => {
-                self.sampler.set_block_size(size);
+                let (keys, drums) = self.sampler.set_block_size(size);
+                self.dispose_sf2(keys);
+                self.dispose_sf2(drums);
             }
             ControlEvent::SetSf2SampleOffset { ms } => {
                 self.sampler.set_sample_offset_ms(ms);
@@ -1914,7 +1988,18 @@ impl SynthEngine {
                 }
             }
             ControlEvent::MidiSeqLoad { data } => {
-                self.midi_player.load(data); // Box<MidiSeqData> passed directly, no re-boxing
+                // The Box moves into the player; what it displaced comes back
+                // out and goes to the GUI thread for freeing.
+                let (old_data, old_tracks) = self.midi_player.load(data);
+                if old_data.is_some() || !old_tracks.is_empty() {
+                    match self.trash.as_mut() {
+                        Some(t) => t.dispose(crate::trash::Trash::MidiSeq {
+                            data: old_data,
+                            tracks: old_tracks,
+                        }),
+                        None => drop((old_data, old_tracks)),
+                    }
+                }
             }
             ControlEvent::MidiSeqPlay { playing } => {
                 self.midi_player.playing = playing;
@@ -1964,13 +2049,21 @@ impl SynthEngine {
                 self.arpeggiator.set_params(enabled, mode, rate, octaves, gate);
             }
         }
+
+        // Every variant that owns heap memory returns early above; reaching
+        // here means the event was plain data and costs nothing to drop.
+        None
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
         for part in &mut self.parts { part.set_sample_rate(sample_rate); }
         self.drum_engine.set_sample_rate(sample_rate);
-        self.sampler.set_sample_rate(sample_rate);
+        // Called from the audio callback when JACK reports a rate change, so
+        // the rebuilt soundfonts must not be freed here.
+        let (keys, drums) = self.sampler.set_sample_rate(sample_rate);
+        self.dispose_sf2(keys);
+        self.dispose_sf2(drums);
         self.eq.set_sample_rate(sample_rate);
         self.compressor.set_sample_rate(sample_rate);
         self.overdrive.set_sample_rate(sample_rate);

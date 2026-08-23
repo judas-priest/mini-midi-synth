@@ -195,6 +195,10 @@ const SEQ_VEL_KEYS: [&str; 16] = [
     "seq_12_vel","seq_13_vel","seq_14_vel","seq_15_vel",
 ];
 
+impl Default for PitchSequencer {
+    fn default() -> Self { Self::new() }
+}
+
 impl PitchSequencer {
     pub fn new() -> Self {
         Self {
@@ -213,6 +217,22 @@ impl PitchSequencer {
 
     pub fn step_atom(&self) -> Arc<AtomicU8> {
         self.step_atom.clone()
+    }
+
+    /// Copies pattern data from `other`, keeping our own step atom.
+    ///
+    /// Used when a patch is loaded. Assigning the whole sequencer instead
+    /// would do two bad things: drop our `Arc<AtomicU8>` on the audio thread,
+    /// and leave the GUI watching an atom the engine no longer writes to, so
+    /// the step indicator would freeze after every patch change.
+    pub fn adopt(&mut self, other: &PitchSequencer) {
+        self.steps = other.steps;
+        self.length = other.length;
+        self.enabled = other.enabled;
+        self.rate = other.rate;
+        self.scale = other.scale;
+        self.swing = other.swing;
+        self.reset();
     }
 
     pub fn reset(&mut self) {

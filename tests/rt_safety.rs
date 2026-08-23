@@ -37,10 +37,41 @@ fn loading_a_patch_does_not_free_on_the_audio_thread() {
 
     let event = ControlEvent::load_patch_from(0, &patch);
 
-    // Before the trash queue exists this aborts: handle_control takes the event
-    // by value and drops the Box<LoadPatchEvent> right here, on what would be
-    // the audio thread.
+    // The event must come back out of the guarded region rather than being
+    // dropped inside it — that is exactly what the trash queue does in the
+    // real callback.
+    let mut spent = None;
     assert_no_alloc(|| {
-        engine.handle_control(event);
+        spent = engine.handle_control(event);
     });
+
+    assert!(spent.is_some(), "LoadPatch owns a Box and must be handed back for deferred freeing");
+    drop(spent);
+}
+
+#[test]
+fn switching_between_wavetable_patches_does_not_free_in_rt() {
+    // Loading a patch overwrites part.wavetable_data, dropping the previous
+    // Arc<Vec<f32>>. With a wavetable patch on both sides that is a real free
+    // on the audio thread.
+    let patches = preset::load_all_patches();
+    let with_wt: Vec<_> = patches.iter().filter(|p| p.wavetable_data.is_some()).cloned().collect();
+    if with_wt.len() < 2 {
+        // No wavetable presets installed on this machine — nothing to prove.
+        return;
+    }
+
+    let mut engine = SynthEngine::new(SR);
+    engine.set_patches(patches);
+
+    let first = ControlEvent::load_patch_from(0, &with_wt[0]);
+    let spent = engine.handle_control(first);
+    drop(spent);
+
+    let second = ControlEvent::load_patch_from(0, &with_wt[1]);
+    let mut spent = None;
+    assert_no_alloc(|| {
+        spent = engine.handle_control(second);
+    });
+    drop(spent);
 }

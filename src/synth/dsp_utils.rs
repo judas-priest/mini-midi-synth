@@ -26,6 +26,10 @@ pub struct DcBlocker {
     y1_r: f32,
 }
 
+impl Default for DcBlocker {
+    fn default() -> Self { Self::new() }
+}
+
 impl DcBlocker {
     pub fn new() -> Self {
         Self { x1_l: 0.0, y1_l: 0.0, x1_r: 0.0, y1_r: 0.0 }

@@ -60,6 +60,21 @@ pub const GM_PROGRAM_NAMES: [&str; 128] = [
     "Telephone Ring", "Helicopter", "Applause", "Gunshot",
 ];
 
+/// What a soundfont swap displaced. Must be dropped off the audio thread.
+#[derive(Default)]
+pub struct Displaced {
+    pub soundfont: Option<Arc<SoundFont>>,
+    pub synth: Option<Synthesizer>,
+}
+
+impl Displaced {
+    /// True when there is actually something to free — lets callers skip the
+    /// trash queue for no-op unloads.
+    pub fn is_empty(&self) -> bool {
+        self.soundfont.is_none() && self.synth.is_none()
+    }
+}
+
 /// Internal sub-synth: one rustysynth Synthesizer + its render buffers.
 struct SubSynth {
     soundfont: Option<Arc<SoundFont>>,
@@ -80,10 +95,22 @@ impl SubSynth {
         }
     }
 
-    fn rebuild(&mut self, sf: Option<Arc<SoundFont>>, sample_rate: i32, block_size: usize) {
+    /// Swaps in a new soundfont and returns whatever it displaced.
+    ///
+    /// The caller must move the returned `Displaced` off the audio thread —
+    /// the last `Arc` to a soundfont can be tens of megabytes, and dropping a
+    /// `Synthesizer` frees its voice pool. See `crate::trash`.
+    ///
+    /// Note: `Synthesizer::new` still *allocates* here, on the audio thread.
+    /// Moving construction to the GUI thread is tracked separately; this
+    /// change removes the frees, which are the larger and more frequent cost.
+    #[must_use = "the displaced soundfont and synth must be freed off the audio thread"]
+    fn rebuild(&mut self, sf: Option<Arc<SoundFont>>, sample_rate: i32, block_size: usize) -> Displaced {
+        let displaced = Displaced { soundfont: self.soundfont.take(), synth: self.synth.take() };
+
         let sf = match sf {
             Some(s) => s,
-            None => { self.synth = None; self.soundfont = None; return; }
+            None => return displaced,
         };
         let mut settings = SynthesizerSettings::new(sample_rate);
         settings.block_size = block_size;
@@ -99,6 +126,7 @@ impl SubSynth {
                 self.soundfont = None;
             }
         }
+        displaced
     }
 
     #[allow(dead_code)]
@@ -191,10 +219,12 @@ impl SamplerEngine {
         }
     }
 
-    /// Load SF2 for keys (parts A/B).
-    pub fn load_keys_soundfont(&mut self, sf: Arc<SoundFont>) {
+    /// Load SF2 for keys (parts A/B). The returned `Displaced` holds the
+    /// previous soundfont and synth and must be freed off the audio thread.
+    #[must_use = "the displaced soundfont must be freed off the audio thread"]
+    pub fn load_keys_soundfont(&mut self, sf: Arc<SoundFont>) -> Displaced {
         self.seq_channel_program = [255; 16]; // new synth instance — reset program cache
-        self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
+        let displaced = self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
         // Restore programs on new synth
         if let Some(synth) = &mut self.keys.synth {
             for i in 0..8 {
@@ -204,19 +234,23 @@ impl SamplerEngine {
                 }
             }
         }
+        displaced
     }
 
     /// Load SF2 for drums (ch9).
-    pub fn load_drums_soundfont(&mut self, sf: Arc<SoundFont>) {
-        self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
+    #[must_use = "the displaced soundfont must be freed off the audio thread"]
+    pub fn load_drums_soundfont(&mut self, sf: Arc<SoundFont>) -> Displaced {
+        self.drums.rebuild(Some(sf), self.sample_rate, self.block_size)
     }
 
-    pub fn unload_keys(&mut self) {
-        self.keys.rebuild(None, self.sample_rate, self.block_size);
+    #[must_use = "the displaced soundfont must be freed off the audio thread"]
+    pub fn unload_keys(&mut self) -> Displaced {
+        self.keys.rebuild(None, self.sample_rate, self.block_size)
     }
 
-    pub fn unload_drums(&mut self) {
-        self.drums.rebuild(None, self.sample_rate, self.block_size);
+    #[must_use = "the displaced soundfont must be freed off the audio thread"]
+    pub fn unload_drums(&mut self) -> Displaced {
+        self.drums.rebuild(None, self.sample_rate, self.block_size)
     }
 
     #[allow(dead_code)]
@@ -224,11 +258,14 @@ impl SamplerEngine {
     #[allow(dead_code)]
     pub fn drums_loaded(&self) -> bool { self.drums.is_loaded() }
 
-    pub fn set_block_size(&mut self, size: usize) {
+    /// Returns both displaced sub-synths (keys, drums) for deferred freeing.
+    #[must_use = "the displaced soundfonts must be freed off the audio thread"]
+    pub fn set_block_size(&mut self, size: usize) -> (Displaced, Displaced) {
         let size = size.clamp(8, MAX_BLOCK_SIZE);
         self.block_size = size;
+        let mut keys_displaced = Displaced::default();
         if let Some(sf) = self.keys.soundfont.clone() {
-            self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
+            keys_displaced = self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
             // Restore programs
             if let Some(synth) = &mut self.keys.synth {
                 for i in 0..8 {
@@ -239,19 +276,25 @@ impl SamplerEngine {
                 }
             }
         }
+        let mut drums_displaced = Displaced::default();
         if let Some(sf) = self.drums.soundfont.clone() {
-            self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
+            drums_displaced = self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
         }
+        (keys_displaced, drums_displaced)
     }
 
-    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+    #[must_use = "the displaced soundfonts must be freed off the audio thread"]
+    pub fn set_sample_rate(&mut self, sample_rate: f32) -> (Displaced, Displaced) {
         self.sample_rate = sample_rate as i32;
+        let mut keys_displaced = Displaced::default();
         if let Some(sf) = self.keys.soundfont.clone() {
-            self.load_keys_soundfont(sf);
+            keys_displaced = self.load_keys_soundfont(sf);
         }
+        let mut drums_displaced = Displaced::default();
         if let Some(sf) = self.drums.soundfont.clone() {
-            self.load_drums_soundfont(sf);
+            drums_displaced = self.load_drums_soundfont(sf);
         }
+        (keys_displaced, drums_displaced)
     }
 
     pub fn set_part_mode(&mut self, part: usize, enabled: bool) {

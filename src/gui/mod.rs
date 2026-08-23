@@ -360,6 +360,10 @@ pub struct App {
     pub audio_disconnected: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub _audio_handle: Option<crate::audio::AudioBackend>,
     pub midi_tx_shared: crate::midi::SharedMidiTx,
+    /// Heap objects the engine and the audio callback handed back. Dropping
+    /// them here is what keeps free() off the audio thread.
+    pub engine_trash_rx: crate::trash::TrashRx,
+    pub cb_trash_rx: crate::trash::TrashRx,
 }
 
 impl eframe::App for App {
@@ -416,6 +420,10 @@ impl eframe::App for App {
 
         // Drain feedback from audio thread
         self.drain_feedback();
+
+        // Free whatever the audio thread handed over this frame.
+        self.engine_trash_rx.drain();
+        self.cb_trash_rx.drain();
 
         // Pad performance switching (only when pad perf panel is open)
         if self.show_pad_perf {

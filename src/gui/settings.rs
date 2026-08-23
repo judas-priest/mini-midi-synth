@@ -199,10 +199,17 @@ impl App {
             *guard = midi_tx;
         }
 
+        // New trash queues for the new engine and callback. The old ones are
+        // replaced below; anything still in them belonged to the dead stream
+        // and is freed when the old receivers drop.
+        let (engine_trash_tx, engine_trash_rx) = crate::trash::channel();
+        let (cb_trash_tx, cb_trash_rx) = crate::trash::channel();
+
         // New synth engine
         let mut engine = synth::SynthEngine::new(sr as f32);
         engine.set_patches(self.patches.clone());
         engine.set_feedback_tx(feedback_tx);
+        engine.set_trash_tx(engine_trash_tx);
         engine.set_program_change_atom(self._program_change_atom.clone());
 
         // Update shared atoms
@@ -243,8 +250,11 @@ impl App {
                 note_state: self.note_state.clone(),
                 pad_state: self.pad_state.clone(),
                 paused: audio_paused,
+                trash: cb_trash_tx,
             },
         )?;
+        self.engine_trash_rx = engine_trash_rx;
+        self.cb_trash_rx = cb_trash_rx;
 
         // Update GUI state
         self.audio_disconnected = audio_backend.disconnected.clone();

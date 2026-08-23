@@ -148,6 +148,10 @@ pub struct PianoModel {
     active: bool,
 }
 
+impl Default for PianoModel {
+    fn default() -> Self { Self::new() }
+}
+
 impl PianoModel {
     pub fn new() -> Self {
         Self {

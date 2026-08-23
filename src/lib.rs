@@ -14,6 +14,7 @@ mod amidi;
 pub mod preset;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod synth;
+pub mod trash;
 
 /// Diagnostic allocator: with `--features rt-assert`, any allocation or
 /// deallocation inside a region marked with `assert_no_alloc` aborts the
@@ -122,6 +123,10 @@ struct CommonInit {
     patch_idx: usize,
     _audio_handle: audio::AudioBackend,
     audio_disconnected: Arc<AtomicBool>,
+    /// Heap objects handed back by the engine and the audio callback. Drained
+    /// (and thereby freed) on the GUI or headless main thread.
+    engine_trash_rx: trash::TrashRx,
+    cb_trash_rx: trash::TrashRx,
 }
 
 pub(crate) fn init_common() -> Result<CommonInit> {
@@ -173,9 +178,16 @@ pub(crate) fn init_common() -> Result<CommonInit> {
 
     let program_change_atom = Arc::new(AtomicU8::new(255));
 
+    // Two independent trash queues: rtrb producers cannot be cloned, and both
+    // the engine (displaced soundfonts) and the callback (spent control
+    // events) need somewhere to put heap objects they must not free.
+    let (engine_trash_tx, engine_trash_rx) = trash::channel();
+    let (cb_trash_tx, cb_trash_rx) = trash::channel();
+
     let mut engine = synth::SynthEngine::new(config.audio.sample_rate as f32);
     engine.set_patches(patches.clone());
     engine.set_feedback_tx(feedback_tx);
+    engine.set_trash_tx(engine_trash_tx);
     engine.set_program_change_atom(program_change_atom.clone());
     #[cfg(feature = "gui")]
     let drum_step_atom = engine.drum_engine.step_atom();
@@ -225,6 +237,7 @@ pub(crate) fn init_common() -> Result<CommonInit> {
             note_state: note_state.clone(),
             pad_state: pad_state.clone(),
             paused: audio_paused,
+            trash: cb_trash_tx,
         },
     )?;
     let audio_disconnected = audio_backend.disconnected.clone();
@@ -316,6 +329,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         patch_idx,
         _audio_handle: audio_backend,
         audio_disconnected,
+        engine_trash_rx,
+        cb_trash_rx,
     })
 }
 
@@ -479,6 +494,10 @@ pub fn run_headless() -> Result<()> {
 
         // Drain feedback (ignore in CLI)
         while c.feedback_rx.pop().is_ok() {}
+
+        // Free whatever the audio thread handed over.
+        c.engine_trash_rx.drain();
+        c.cb_trash_rx.drain();
 
         // Headless has no reconnect path (the GUI rebuilds the engine on the
         // fly); say so instead of going silently mute.
@@ -777,6 +796,8 @@ pub fn run_gui(
         audio_disconnected: c.audio_disconnected.clone(),
         _audio_handle: Some(c._audio_handle),
         midi_tx_shared: c.midi_tx_shared.clone(),
+        engine_trash_rx: c.engine_trash_rx,
+        cb_trash_rx: c.cb_trash_rx,
     };
 
     app.load_edited_params(0);

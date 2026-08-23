@@ -135,6 +135,10 @@ pub struct BassModel {
     sample_rate: f32,
 }
 
+impl Default for BassModel {
+    fn default() -> Self { Self::new() }
+}
+
 impl BassModel {
     pub fn new() -> Self {
         Self {

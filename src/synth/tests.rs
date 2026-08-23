@@ -281,10 +281,10 @@ fn tick_block_matches_tick() {
     let params = PatchParams::from_map(&patches[0].params);
     let params2 = params;
 
-    synth_a.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
+    let _ = synth_a.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
         part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_seq: None, wavetable: None,
     })));
-    synth_b.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
+    let _ = synth_b.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
         part: 0, params: params2, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_seq: None, wavetable: None,
     })));
 
@@ -324,7 +324,7 @@ fn run_preset_chain(preset_name: &str) {
         .unwrap_or_else(|| panic!("No preset '{preset_name}'"));
     let params = PatchParams::from_map(&patches[idx].params);
     synth.set_patches(patches);
-    synth.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
+    let _ = synth.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
         part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_seq: None, wavetable: None,
     })));
     synth.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
@@ -355,7 +355,7 @@ fn all_presets_no_nan_no_silence() {
     for patch in &patches {
         let mut synth = SynthEngine::new(44100.0);
         let params = PatchParams::from_map(&patch.params);
-        synth.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
+        let _ = synth.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
             part: 0,
             params,
             mod_matrix: ModMatrix::default(),
@@ -404,7 +404,7 @@ fn no_notes_produces_silence() {
     for patch in &patches {
         let mut synth = SynthEngine::new(44100.0);
         let params = PatchParams::from_map(&patch.params);
-        synth.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
+        let _ = synth.handle_control(ControlEvent::LoadPatch(Box::new(LoadPatchEvent {
             part: 0, params, mod_matrix: ModMatrix::default(), mseg1: None, mseg2: None, pitch_seq: None, lfo_step_seq: None, wavetable: None,
         })));
         // No notes — should be completely silent

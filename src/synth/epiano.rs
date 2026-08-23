@@ -68,6 +68,10 @@ pub struct ElectricPianoModel {
     active: bool,
 }
 
+impl Default for ElectricPianoModel {
+    fn default() -> Self { Self::new() }
+}
+
 impl ElectricPianoModel {
     pub fn new() -> Self {
         Self {
