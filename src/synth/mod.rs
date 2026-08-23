@@ -1613,6 +1613,29 @@ impl SynthEngine {
                 }
             }
             MidiEvent::ControlChange { cc, value, .. } => {
+                // Channel mode messages. 120 = All Sound Off, 123 = All Notes
+                // Off. Hardware sends these from the panic button and when the
+                // transport stops, so they take priority over any CC mapping.
+                if cc == 120 || cc == 123 {
+                    for part in &mut self.parts {
+                        for v in &mut part.voices {
+                            if v.active { v.note_off(); }
+                        }
+                        part.note_stack.clear();
+                        part.latch_held.clear();
+                        part.sustain_pedal = 0.0;
+                        part.sustained_notes = [false; 128];
+                    }
+                    self.sampler.all_notes_off();
+                    if let Some(off_note) = self.arpeggiator.flush_current_note() {
+                        for (i, part) in self.parts.iter_mut().enumerate() {
+                            if !part.enabled { continue; }
+                            if part.sf2_mode { self.sampler.note_off(i, off_note); }
+                            else { part.note_off(off_note); }
+                        }
+                    }
+                    return;
+                }
                 // Check assignable mod sources (CC1..CC4)
                 for i in 0..4 {
                     if cc == self.cc_numbers[i] {

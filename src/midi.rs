@@ -57,10 +57,16 @@ pub fn parse_midi_message(data: &[u8]) -> Option<(MidiEvent, usize)> {
             let v = u8::from(val);
             if cc_num == 1 {
                 Some(MidiEvent::ModWheel { channel, value: v as f32 / MIDI_MAX_VAL })
-            } else if (1..=119).contains(&cc_num) && cc_num != 32 {
-                Some(MidiEvent::ControlChange { channel, cc: cc_num, value: v })
-            } else {
+            } else if cc_num == 0 || cc_num == 32 {
+                // Bank select. Nothing downstream uses it and letting it
+                // through would collide with mapped parameters.
                 None
+            } else {
+                // Everything else, including channel mode messages 120-127.
+                // CC 120 (All Sound Off) and CC 123 (All Notes Off) are the
+                // panic button on hardware controllers and must reach the
+                // engine — the old 1..=119 filter swallowed them.
+                Some(MidiEvent::ControlChange { channel, cc: cc_num, value: v })
             }
         }
         MidiMessage::ProgramChange(ch, program) => {
