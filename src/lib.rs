@@ -8,6 +8,7 @@ mod gui;
 #[cfg(target_os = "linux")]
 mod input;
 mod key_action;
+pub mod metrics;
 pub mod midi;
 mod amidi;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
@@ -93,7 +94,7 @@ struct CommonInit {
     note_state: midi::NoteState,
     pad_state: midi::PadState,
     midi_tx_shared: midi::SharedMidiTx,
-    ctrl_tx: rtrb::Producer<synth::ControlEvent>,
+    ctrl_tx: metrics::CountingProducer<synth::ControlEvent>,
     feedback_rx: rtrb::Consumer<synth::ParamFeedback>,
     program_change_atom: Arc<AtomicU8>,
     #[cfg(feature = "gui")]
@@ -303,7 +304,7 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         note_state,
         pad_state,
         midi_tx_shared,
-        ctrl_tx,
+        ctrl_tx: metrics::CountingProducer::new(ctrl_tx),
         feedback_rx,
         program_change_atom,
         #[cfg(feature = "gui")]
@@ -762,6 +763,7 @@ pub fn run_gui(
         },
         pad_prev_state: [0u8; 16],
         last_config_save: std::time::Instant::now(),
+        dsp_load: 0.0,
         global_dirty: false,
         sf2_file_list: gui::scan_sf2_files(),
         sf2_keys_selected: None,

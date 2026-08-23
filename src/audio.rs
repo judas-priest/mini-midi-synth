@@ -164,6 +164,10 @@ impl AudioBackend {
         let stream = device.build_output_stream(
             &stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                // Instant::now is a vDSO read on Linux and Android, not a
+                // syscall, so it is safe to call from the callback.
+                let started = std::time::Instant::now();
+
                 // Backgrounded: output silence to save battery, but still apply
                 // every queued event. Skipping the drain lets the 256-slot
                 // rings fill up, and the GUI's pushes are then dropped on the
@@ -258,8 +262,12 @@ impl AudioBackend {
                         frame_offset += block_len;
                     }
                 }));
+
+                crate::metrics::METRICS
+                    .note_callback_time(started.elapsed().as_micros() as u32);
             },
             move |err| {
+                crate::metrics::METRICS.note_stream_error();
                 let msg = err.to_string();
                 if let Some(sr_str) = msg.strip_prefix("A backend-specific error has occurred: sample rate changed to: ") {
                     if let Ok(sr) = sr_str.trim().parse::<u32>() {

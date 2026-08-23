@@ -76,6 +76,9 @@ pub const TEXT_SF2_STATUS: Color32 = Color32::from_rgb(160, 160, 160);
 /// Pitch step label, XY pad axis label.
 pub const TEXT_OVERLAY: Color32 = Color32::from_gray(180);
 
+/// Something is wrong but the app still runs — dropped events, stream errors.
+pub const TEXT_WARN: Color32 = Color32::from_rgb(220, 90, 80);
+
 // ── Strokes / decorative lines ───────────────────────────────────────────────
 
 /// Subtle border on cells, pads (was gray(55/60), bumped for contrast).

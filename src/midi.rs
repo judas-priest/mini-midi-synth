@@ -128,8 +128,15 @@ pub fn parse_and_push(
         _ => {}
     }
 
-    if let Ok(mut tx) = tx.try_lock() {
-        let _ = tx.push(event);
+    // A lost event is a stuck note with no trace anywhere, so count both ways
+    // of losing one: a producer held by another thread and a full ring.
+    match tx.try_lock() {
+        Ok(mut tx) => {
+            if tx.push(event).is_err() {
+                crate::metrics::METRICS.note_midi_drop();
+            }
+        }
+        Err(_) => crate::metrics::METRICS.note_midi_drop(),
     }
 
     consumed

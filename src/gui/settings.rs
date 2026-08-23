@@ -260,7 +260,7 @@ impl App {
         // Update GUI state
         self.audio_disconnected = audio_backend.disconnected.clone();
         self._audio_handle = Some(audio_backend);
-        self.ctrl_tx = ctrl_tx;
+        self.ctrl_tx = crate::metrics::CountingProducer::new(ctrl_tx);
         self.feedback_rx = Some(feedback_rx);
         self.sample_rate = actual_sr;
 
