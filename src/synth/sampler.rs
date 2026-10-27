@@ -346,6 +346,28 @@ impl SamplerEngine {
         self.keys.midi(ch, 0x80, note as i32, 0);
     }
 
+    /// Sustain pedal (CC64) for all part channels of the keys synth.
+    /// rustysynth implements hold-pedal per channel: note-offs received while
+    /// the pedal is down keep sounding until it is released. Drum channel 9
+    /// is intentionally not sustained.
+    pub fn sustain_pedal(&mut self, on: bool) {
+        let val = if on { 127 } else { 0 };
+        for ch in 0..8usize {
+            self.keys.midi(ch as i32, 0xB0, 64, val);
+        }
+    }
+
+    /// Kill every sounding SF2 voice of one part. Clears the channel's hold
+    /// pedal first — `note_off_all_channel` respects it and would leave the
+    /// notes hanging otherwise. Used when a part switches patch or is disabled.
+    pub fn part_all_notes_off(&mut self, part: usize) {
+        let ch = (part as i32) % 16;
+        self.keys.midi(ch, 0xB0, 64, 0);
+        if let Some(synth) = &mut self.keys.synth {
+            synth.note_off_all_channel(ch, false);
+        }
+    }
+
     pub fn drum_note_on(&mut self, note: u8, velocity: u8) {
         self.drums.midi(9, 0x90, note as i32, velocity as i32);
     }

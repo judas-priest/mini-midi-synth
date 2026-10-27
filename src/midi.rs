@@ -109,7 +109,13 @@ pub fn parse_and_push(
     note_state: &NoteState,
     pad_state: &PadState,
 ) -> usize {
-    let Some((event, consumed)) = parse_midi_message(data) else { return 0 };
+    let Some((event, consumed)) = parse_midi_message(data) else {
+        log::debug!("[midi-in] unparsed bytes: {:02X?}", data);
+        return 0;
+    };
+    if let MidiEvent::ControlChange { cc, value, .. } = &event {
+        log::info!("[midi-in] CC{} = {}", cc, value);
+    }
 
     // Update GUI note display
     match &event {

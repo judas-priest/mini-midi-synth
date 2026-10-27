@@ -66,6 +66,14 @@ impl App {
             if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=2.0).fixed_decimals(2)).on_hover_text("Master drum volume").changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
             }
+
+            ui.separator();
+            if ui.checkbox(&mut self.drum_fixed_velocity, "V127")
+                .on_hover_text("Fixed velocity: every hit triggers at max (127). For controllers without velocity.").changed()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+                self.save_global_to_config();
+            }
         });
 
         // Pattern selector + length

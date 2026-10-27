@@ -852,6 +852,8 @@ pub struct DrumEngine {
     pub volume: f32,
     pub enabled: bool,
     pub sf2_mode: bool,
+    /// Velocity off: every hit triggers at 127 (velocity-less controllers)
+    pub fixed_velocity: bool,
     sample_rate: f32,
     /// Shared atom for GUI to read current step position.
     step_atom: Arc<AtomicU8>,
@@ -888,6 +890,7 @@ impl DrumEngine {
             volume: 0.8,
             enabled: true,
             sf2_mode: false,
+            fixed_velocity: false,
             sample_rate,
             step_atom: Arc::new(AtomicU8::new(0)),
             play_atom: Arc::new(AtomicU8::new(0)),
@@ -923,6 +926,7 @@ impl DrumEngine {
             return;
         }
         let slot = (note - DRUM_NOTE_BASE) as usize;
+        let velocity = if self.fixed_velocity { 127 } else { velocity };
         let vel = velocity as f32 / 127.0;
         self.trigger_slot(slot, vel);
     }

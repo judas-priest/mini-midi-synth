@@ -98,6 +98,8 @@ struct CommonInit {
     feedback_rx: rtrb::Consumer<synth::ParamFeedback>,
     program_change_atom: Arc<AtomicU8>,
     #[cfg(feature = "gui")]
+    sustain_atom: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(feature = "gui")]
     drum_step_atom: Arc<AtomicU8>,
     #[cfg(feature = "gui")]
     drum_play_atom: Arc<AtomicU8>,
@@ -206,6 +208,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     let seq_target_atom = engine.seq_target_atom();
     let active_part_atom = engine.active_part_atom();
     #[cfg(feature = "gui")]
+    let sustain_atom = engine.sustain_atom();
+    #[cfg(feature = "gui")]
     let pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
     #[cfg(feature = "gui")]
     let scope_buf = engine.scope_buffer();
@@ -307,6 +311,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         ctrl_tx: metrics::CountingProducer::new(ctrl_tx),
         feedback_rx,
         program_change_atom,
+        #[cfg(feature = "gui")]
+        sustain_atom,
         #[cfg(feature = "gui")]
         drum_step_atom,
         #[cfg(feature = "gui")]
@@ -711,7 +717,9 @@ pub fn run_gui(
         feedback_rx: Some(c.feedback_rx),
         cc_map: CcMap::from_config(&c.config),
         midi_learn_target: None,
+        pending_remove_part: None,
         _program_change_atom: c.program_change_atom,
+        sustain_atom: c.sustain_atom,
         show_help: false,
         global_params: {
             let mut gp = std::collections::BTreeMap::new();
@@ -728,6 +736,7 @@ pub fn run_gui(
         drum_patterns: [synth::drum::DrumPattern::default(); 8],
         drum_params: [synth::drum::DrumSlotParams::default(); NUM_DRUM_SLOTS],
         drum_volume: c.config.ui.drum_volume,
+        drum_fixed_velocity: c.config.ui.drum_fixed_velocity,
         drum_bpm: 120.0,
         drum_swing: 0.0,
         drum_playing: false,

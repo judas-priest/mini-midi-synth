@@ -719,7 +719,21 @@ pub struct PartConfig {
     /// SF2 program number (0-127).
     #[serde(default)]
     pub sf2_program: u8,
+    /// Per-part routing, persisted (older files default to neutral values).
+    #[serde(default)]
+    pub pan: f32,
+    #[serde(default)]
+    pub transpose: i8,
+    #[serde(default)]
+    pub mute: bool,
+    #[serde(default = "default_vel_min")]
+    pub vel_min: u8,
+    #[serde(default = "default_vel_max")]
+    pub vel_max: u8,
 }
+
+fn default_vel_min() -> u8 { 1 }
+fn default_vel_max() -> u8 { 127 }
 
 /// A saved split/part configuration.
 #[derive(Clone, Serialize, Deserialize)]

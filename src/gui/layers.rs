@@ -99,6 +99,30 @@ impl App {
             }
         });
 
+        // ── Middle-click removal confirmation ────────────────────────────
+        if let Some(p) = self.pending_remove_part {
+            let zone = if p < 4 { "A" } else { "B" };
+            let num = (p % 4) + 1;
+            let dialog = egui::Modal::new(egui::Id::new("remove_part_dialog")).show(ui.ctx(), |ui| {
+                ui.set_width(280.0);
+                ui.strong(format!("Remove part {zone}{num}?"));
+                ui.label("Its preset edits will be lost.");
+                ui.add_space(theme::SP_MD);
+                ui.horizontal(|ui| {
+                    if ui.button("Remove").clicked() {
+                        self.remove_part(p);
+                        self.pending_remove_part = None;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.pending_remove_part = None;
+                    }
+                });
+            });
+            if dialog.should_close() {
+                self.pending_remove_part = None;
+            }
+        }
+
         // ── Split point slider ───────────────────────────────────────────
         let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
         if split_on {
@@ -173,7 +197,7 @@ impl App {
 
                 // Remove: not for first part of each zone
                 let is_zone_first = part == 0 || part == 4;
-                if !is_zone_first && ui.small_button("✕").on_hover_text("Remove this part").clicked() {
+                if !is_zone_first && ui.small_button("Remove").on_hover_text("Remove this part").clicked() {
                     self.remove_part(part);
                 }
             });
@@ -196,6 +220,8 @@ impl App {
                         key_low: l.min_note, key_high: l.max_note,
                         param_overrides: l.edited_params.clone(),
                         sf2_mode: l.sf2_mode, sf2_program: l.sf2_program,
+                        pan: l.pan, transpose: l.transpose, mute: l.mute,
+                        vel_min: l.vel_min, vel_max: l.vel_max,
                     }
                 }).collect();
                 match preset::save_performance(&Performance {
@@ -238,10 +264,20 @@ impl App {
                         self.parts[i].edited_params = part.param_overrides.clone();
                         self.parts[i].sf2_mode = part.sf2_mode;
                         self.parts[i].sf2_program = part.sf2_program;
+                        self.parts[i].pan = part.pan;
+                        self.parts[i].transpose = part.transpose;
+                        self.parts[i].mute = part.mute;
+                        self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
+                        self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
                         self.send_edited_params(i);
                         self.send_part_enabled(i);
                         self.send_part_volume(i);
                         self.send_part_range(i);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan: part.pan });
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: part.transpose });
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: part.mute });
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange {
+                            part: i, vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: part.sf2_mode });
                         if part.sf2_mode {
                             let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
@@ -267,13 +303,17 @@ impl App {
             format!("[{zone}{num}]")
         };
         let color = if muted { egui::Color32::GRAY } else { egui::Color32::WHITE };
-        if ui.add(egui::Button::new(egui::RichText::new(&label).color(color)).selected(is_active))
-            .on_hover_text(format!("Switch to part {zone}{num}"))
-            .clicked() {
+        let tab = ui.add(egui::Button::new(egui::RichText::new(&label).color(color)).selected(is_active))
+            .on_hover_text(format!("Switch to part {zone}{num} (middle-click: remove)"));
+        if tab.clicked() {
             self.set_active_part(i);
             self.show_drums = false; self.show_looper = false;
             self.show_midi_seq = false; self.show_fx_chain = false;
             self.seq_target_atom.store(1, Ordering::Relaxed);
+        }
+        // Middle-click: remove with confirmation
+        if tab.middle_clicked() && !(i == 0 || i == 4) {
+            self.pending_remove_part = Some(i);
         }
     }
 

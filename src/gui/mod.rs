@@ -277,8 +277,12 @@ pub struct App {
     pub cc_map: CcMap,
     /// MIDI Learn target parameter key
     pub midi_learn_target: Option<&'static str>,
+    /// Part pending removal (middle-click on tab, confirmation dialog)
+    pub pending_remove_part: Option<usize>,
     /// Program change atom for patch feedback
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
+    pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Show help dialog
     pub show_help: bool,
     /// Global params display values (effects, volume, lfo rate)
@@ -291,6 +295,7 @@ pub struct App {
     pub drum_patterns: [DrumPattern; 8],
     pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
     pub drum_volume: f32,
+    pub drum_fixed_velocity: bool,
     pub drum_bpm: f32,
     pub drum_swing: f32,
     pub drum_playing: bool,
@@ -590,23 +595,21 @@ impl eframe::App for App {
         egui::TopBottomPanel::top("global_controls").show(ctx, |ui| {
             ui.add_space(theme::SP_SM);
             ui.horizontal(|ui| {
-                // Master Volume (global)
-                let mut vol = self.global_params.get("master_volume").copied().unwrap_or(0.8);
-                ui.label("Vol:");
-                let vol_r = ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
-                    .on_hover_text("Double-click to reset");
-                if vol_r.double_clicked() { vol = 0.8; }
-                if vol_r.changed() || vol_r.double_clicked() {
-                    self.global_params.insert("master_volume".into(), vol);
-                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_volume", value: vol });
-                    self.global_dirty = true;
+                // F1 Sustain (CC64) — reflects pedal/fader state, click to toggle
+                let sus = self.sustain_atom.load(std::sync::atomic::Ordering::Relaxed);
+                ui.label("F1 Sustain:");
+                let sus_btn = egui::Button::new(egui::RichText::new(if sus { "ON" } else { "OFF" })
+                    .color(if sus { egui::Color32::BLACK } else { theme::TEXT_MUTED }))
+                    .fill(if sus { theme::KEY_WHITE_ACTIVE } else { theme::BG_PAD_EMPTY });
+                if ui.add(sus_btn).on_hover_text("Sustain pedal (CC64): holds notes. Click to toggle.").clicked() {
+                    let _ = self.ctrl_tx.push(ControlEvent::SetSustain { on: !sus });
                 }
 
                 ui.separator();
 
-                // Master Tone (global)
+                // F2 Master Tone (global)
                 let mut tone = self.global_params.get("master_tone").copied().unwrap_or(20000.0);
-                ui.label("Tone:");
+                ui.label("F2 Tone:");
                 let tone_r = ui.add(egui::Slider::new(&mut tone, 200.0..=20000.0).logarithmic(true).suffix(" Hz").fixed_decimals(0))
                     .on_hover_text("Double-click to reset");
                 if tone_r.double_clicked() { tone = 20000.0; }
@@ -618,9 +621,9 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                // Reverb (global)
+                // F3 Reverb (global)
                 let mut reverb = self.global_params.get("reverb_mix").copied().unwrap_or(0.0);
-                ui.label("Reverb:");
+                ui.label("F3 Reverb:");
                 let rev_r = ui.add(egui::Slider::new(&mut reverb, 0.0..=1.0).fixed_decimals(2))
                     .on_hover_text("Double-click to reset");
                 if rev_r.double_clicked() { reverb = 0.0; }
@@ -632,15 +635,15 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                // Delay (global)
-                let mut delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
-                ui.label("Delay:");
-                let del_r = ui.add(egui::Slider::new(&mut delay, 0.0..=1.0).fixed_decimals(2))
+                // F4 Master Volume (global)
+                let mut vol = self.global_params.get("master_volume").copied().unwrap_or(0.8);
+                ui.label("F4 Vol:");
+                let vol_r = ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
                     .on_hover_text("Double-click to reset");
-                if del_r.double_clicked() { delay = 0.0; }
-                if del_r.changed() || del_r.double_clicked() {
-                    self.global_params.insert("delay_mix".into(), delay);
-                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "delay_mix", value: delay });
+                if vol_r.double_clicked() { vol = 0.8; }
+                if vol_r.changed() || vol_r.double_clicked() {
+                    self.global_params.insert("master_volume".into(), vol);
+                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_volume", value: vol });
                     self.global_dirty = true;
                 }
 
@@ -1075,6 +1078,7 @@ impl App {
         }
         // Send drum and part volumes to engine
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
         for i in 0..self.parts.len() {
             self.send_part_volume(i);
         }
@@ -1132,6 +1136,7 @@ impl App {
         self.config.ui.fader_delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
         self.config.ui.pitch_bend_range = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as u8;
         self.config.ui.drum_volume = self.drum_volume;
+        self.config.ui.drum_fixed_velocity = self.drum_fixed_velocity;
         if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
@@ -1378,6 +1383,7 @@ impl App {
             volume: self.drum_volume,
         });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPattern { pattern: self.drum_current_pattern });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: self.looper_bars });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: self.looper_quantize });

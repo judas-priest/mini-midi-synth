@@ -159,6 +159,9 @@ impl App {
                     .striped(true)
                     .show(ui, |ui| {
                         ui.strong("Control"); ui.strong("CC"); ui.strong("Parameter"); ui.end_row();
+                        // F1 is the sustain pedal: CC64 is never bound as a
+                        // parameter, so list it explicitly.
+                        ui.label("F1 (CC64)"); ui.label(""); ui.label("Sustain (hold notes)"); ui.end_row();
                         for (cc, binding) in self.cc_map.bindings.iter().enumerate().filter_map(|(i, b)| b.map(|b| (i as u8, b))) {
                             if binding.scope == crate::cc_map::ParamScope::Global {
                                 let ctrl = crate::cc_map::cc_to_control_name(cc);
@@ -221,6 +224,7 @@ impl App {
         self.looper_display = engine.looper.display();
         self.seq_target_atom = engine.seq_target_atom();
         self.active_part_atom = engine.active_part_atom();
+        self.sustain_atom = engine.sustain_atom();
         self.pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
         self.scope_buf = engine.scope_buffer();
         self.midi_seq_play_atom = engine.midi_player_play_atom();

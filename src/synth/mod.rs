@@ -204,6 +204,10 @@ pub enum ControlEvent {
     LooperSetLayerMute { layer: u8, mute: bool },
     LooperSetSolo { layer: Option<u8> },
     AllNotesOff,
+    /// GUI sustain toggle (F1): same path as CC64
+    SetSustain { on: bool },
+    /// Drums: force every hit to velocity 127
+    DrumSetFixedVelocity { fixed: bool },
     // SF2 sampler controls
     LoadKeysSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
     LoadDrumsSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
@@ -804,11 +808,14 @@ impl Part {
                         for voice in &mut self.voices {
                             if voice.active && voice.note == note { voice.note_off(); }
                         }
+                    } else {
+                        // Held by pedal — must be flagged so pedal-up releases it
+                        self.sustained_notes[note as usize] = true;
                     }
-                    // else hold the note
                 }
                 _ => {
                     // Default: hold all
+                    self.sustained_notes[note as usize] = true;
                 }
             }
         } else {
@@ -1061,6 +1068,8 @@ pub struct SynthEngine {
     seq_target: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Active part index (0-7), shared with GUI for looper part recording
     active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Sustain pedal state (CC64 from pedal/fader or GUI toggle), shared with GUI
+    sustain: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Oscilloscope ring buffer: 256 mono samples shared with GUI via atomics
     scope_buf: std::sync::Arc<ScopeBuffer>,
     scope_write: usize,
@@ -1314,6 +1323,7 @@ impl SynthEngine {
             pickup_states: [PickupState::default(); 128],
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
             scope_write: 0,
             midi_player: midi_player::MidiPlayer::new(),
@@ -1330,6 +1340,32 @@ impl SynthEngine {
 
     pub fn active_part_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
         self.active_part.clone()
+    }
+
+    pub fn sustain_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.sustain.clone()
+    }
+
+    /// Apply sustain pedal state (CC64 from pedal/fader, or GUI toggle).
+    /// On release, ALL sounding voices get note_off — stale sustained_notes
+    /// flags (patch switched while pedal was down, mono/latch holds) would
+    /// otherwise leave notes ringing forever.
+    fn set_sustain(&mut self, value: u8) {
+        let on = value >= 64;
+        self.sustain.store(on, std::sync::atomic::Ordering::Relaxed);
+        // SF2 voices: rustysynth applies hold-pedal per channel itself
+        self.sampler.sustain_pedal(on);
+        for part in &mut self.parts {
+            part.sustain_pedal = if on { 1.0 } else { 0.0 };
+            if !on {
+                for voice in &mut part.voices {
+                    if voice.active && !voice.is_releasing() {
+                        voice.note_off();
+                    }
+                }
+                part.sustained_notes = [false; 128];
+            }
+        }
     }
 
     pub fn pitch_seq_step_atoms(&self) -> Vec<std::sync::Arc<std::sync::atomic::AtomicU8>> {
@@ -1466,6 +1502,7 @@ impl SynthEngine {
                 let sampler_drums = self.sampler.drums_enabled();
                 if channel == 9 || (is_drum_note && drum_mode) {
                     if velocity > 0 {
+                        let velocity = if self.drum_engine.fixed_velocity { 127 } else { velocity };
                         // Record into sequencer if recording
                         if is_drum_note {
                             let slot = (note - 36) as usize;
@@ -1643,26 +1680,15 @@ impl SynthEngine {
                     }
                 }
                 // Dedicated mod sources: Breath (CC2), Expression (CC11), Sustain (CC64)
-                for part in &mut self.parts {
-                    match cc {
-                        2  => part.breath = value as f32 / 127.0,
-                        11 => part.expression = value as f32 / 127.0,
-                        64 => {
-                            let was_held = part.sustain_pedal > 0.5;
-                            part.sustain_pedal = if value >= 64 { 1.0 } else { 0.0 };
-                            // When pedal is released, release only voices that were held by sustain
-                            if was_held && part.sustain_pedal < 0.5 {
-                                for voice in &mut part.voices {
-                                    if voice.active && !voice.is_releasing()
-                                        && part.sustained_notes[voice.note as usize]
-                                    {
-                                        voice.note_off();
-                                    }
-                                }
-                                part.sustained_notes = [false; 128];
-                            }
+                if cc == 64 {
+                    self.set_sustain(value);
+                } else {
+                    for part in &mut self.parts {
+                        match cc {
+                            2  => part.breath = value as f32 / 127.0,
+                            11 => part.expression = value as f32 / 127.0,
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
                 // CcBinding is Copy — no heap allocation
@@ -1710,6 +1736,17 @@ impl SynthEngine {
                 let lfo_step_seq = ev.lfo_step_seq.take();
                 let wavetable = ev.wavetable.take();
                 if let Some(l) = self.parts.get_mut(part) {
+                    // Release anything the old patch left hanging: notes held
+                    // by the sustain pedal would otherwise ring forever under
+                    // the new patch (its envelope keeps the voice active).
+                    // SF2 voices live in rustysynth, not in l.voices.
+                    self.sampler.part_all_notes_off(part);
+                    for voice in &mut l.voices {
+                        if voice.active { voice.note_off(); }
+                    }
+                    l.sustained_notes = [false; 128];
+                    l.note_stack.clear();
+                    l.latch_held.clear();
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
                     // Sync macro values from preset into live part state
@@ -1766,6 +1803,15 @@ impl SynthEngine {
             }
             ControlEvent::SetPartEnabled { part, enabled } => {
                 if let Some(l) = self.parts.get_mut(part) {
+                    if !enabled {
+                        self.sampler.part_all_notes_off(part);
+                        for voice in &mut l.voices {
+                            if voice.active { voice.note_off(); }
+                        }
+                        l.sustained_notes = [false; 128];
+                        l.note_stack.clear();
+                        l.latch_held.clear();
+                    }
                     l.enabled = enabled;
                     if !enabled {
                         // Graceful note-off all voices
@@ -1911,7 +1957,14 @@ impl SynthEngine {
                     }
                 }
             }
+            ControlEvent::SetSustain { on } => {
+                self.set_sustain(if on { 127 } else { 0 });
+            }
+            ControlEvent::DrumSetFixedVelocity { fixed } => {
+                self.drum_engine.fixed_velocity = fixed;
+            }
             ControlEvent::AllNotesOff => {
+                self.sustain.store(false, std::sync::atomic::Ordering::Relaxed);
                 for part in &mut self.parts {
                     // Kill all active voices immediately
                     for v in &mut part.voices {

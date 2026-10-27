@@ -93,6 +93,9 @@ pub struct UiSettings {
     pub pitch_bend_range: u8,
     #[serde(default = "default_drum_volume")]
     pub drum_volume: f32,
+    /// Drum velocity off: all hits at 127 (for velocity-less controllers)
+    #[serde(default)]
+    pub drum_fixed_velocity: bool,
     #[serde(default = "default_layer_a_volume")]
     pub layer_a_volume: f32,
     #[serde(default = "default_layer_b_volume")]
@@ -142,6 +145,7 @@ impl Default for Config {
                 fader_delay: 0.0,
                 pitch_bend_range: 2,
                 drum_volume: 0.8,
+                drum_fixed_velocity: false,
                 layer_a_volume: 0.8,
                 layer_b_volume: 0.5,
                 pad_perf_map: Vec::new(),
