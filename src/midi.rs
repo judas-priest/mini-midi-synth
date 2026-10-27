@@ -113,8 +113,14 @@ pub fn parse_and_push(
         log::debug!("[midi-in] unparsed bytes: {:02X?}", data);
         return 0;
     };
-    if let MidiEvent::ControlChange { cc, value, .. } = &event {
-        log::info!("[midi-in] CC{} = {}", cc, value);
+    match &event {
+        MidiEvent::ControlChange { cc, value, .. } => {
+            eprintln!("[midi-in] CC{} = {}", cc, value);
+        }
+        MidiEvent::NoteOn { channel, note, velocity } => {
+            eprintln!("[midi-in] note ch{} n{} v{}", channel, note, velocity);
+        }
+        _ => {}
     }
 
     // Update GUI note display

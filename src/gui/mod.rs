@@ -597,35 +597,31 @@ impl eframe::App for App {
         egui::TopBottomPanel::top("global_controls").show(ctx, |ui| {
             ui.add_space(theme::SP_SM);
             ui.horizontal(|ui| {
-                // F1 Sustain (CC64) — reflects pedal/fader state, click to toggle
-                let sus = self.sustain_atom.load(std::sync::atomic::Ordering::Relaxed);
-                ui.label("F1 Sustain:");
-                let sus_btn = egui::Button::new(egui::RichText::new(if sus { "ON" } else { "OFF" })
-                    .color(if sus { egui::Color32::BLACK } else { theme::TEXT_MUTED }))
-                    .fill(if sus { theme::KEY_WHITE_ACTIVE } else { theme::BG_PAD_EMPTY });
-                if ui.add(sus_btn).on_hover_text("Sustain pedal (CC64): holds notes. Click to toggle.").clicked() {
-                    let _ = self.ctrl_tx.push(ControlEvent::SetSustain { on: !sus });
-                }
-
-                // Sustain release: single slider, a fraction of the default
-                // tail. Leftmost = OFF (patch/SF2 default), rightmost = full
-                // default tail, between = shortened tail (fraction of it).
-                ui.label("Pedal Rel:");
+                // Sustain: single slider replacing the ON/OFF button.
+                // Leftmost = pedal ignored (no sustain); rightmost = normal
+                // sustain with default tails; between = sustain whose
+                // pedal-up release is a fraction of the default (both engines).
+                let sus_lit = self.sustain_atom.load(std::sync::atomic::Ordering::Relaxed);
+                ui.label("Sustain:");
                 let mut pos = self.sustain_release.unwrap_or(0.0);
                 let label = if pos <= 0.005 {
                     "OFF".to_string()
                 } else if pos >= 0.995 {
-                    "default".to_string()
+                    "ON".to_string()
                 } else {
-                    format!("{:.0}% tail", pos * 100.0)
+                    format!("ON · {:.0}% rel", pos * 100.0)
                 };
-                let resp = ui.add(egui::Slider::new(&mut pos, 0.0..=1.0)
+                let mut slider_resp = ui.add(egui::Slider::new(&mut pos, 0.0..=1.0)
                     .show_value(false)
-                    .text(label))
-                    .on_hover_text("Sustain release: OFF = patch/SF2 default tails; between = shortened tail (a fraction of the default); rightmost = full default. Applies when the sustain pedal is lifted (synth and SF2).");
+                    .text(label));
+                if sus_lit {
+                    slider_resp = slider_resp.on_hover_text("Pedal currently HELD (CC64)");
+                }
+                let resp = slider_resp.on_hover_text(
+                    "Sustain: OFF = pedal ignored; ON = normal sustain with default tails; between = sustain with shortened pedal-up release (synth and SF2). Lights up while the pedal/fader is held.");
                 if resp.changed() {
                     self.sustain_release = if pos <= 0.005 { None } else { Some(pos.clamp(0.02, 1.0)) };
-                    let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { tail: self.sustain_release });
+                    let _ = self.ctrl_tx.push(ControlEvent::SetSustainSlider { pos: self.sustain_release });
                 }
 
                 ui.separator();
@@ -1102,7 +1098,7 @@ impl App {
         // Send drum and part volumes to engine
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
-        let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { tail: self.sustain_release });
+        let _ = self.ctrl_tx.push(ControlEvent::SetSustainSlider { pos: self.sustain_release });
         for i in 0..self.parts.len() {
             self.send_part_volume(i);
         }

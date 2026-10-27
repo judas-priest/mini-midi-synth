@@ -308,7 +308,7 @@ fn dsp_sustain_release_override() {
     // Override fraction 0.1 → tail = 0.1 * 0.3 = 0.03s: after ~100ms the
     // envelope is idle, far below the patch's natural decay (≈ 0.50).
     let mut e = engine_with_init_patch();
-    let _ = e.handle_control(ControlEvent::SetSustainRelease { tail: Some(0.1) });
+    let _ = e.handle_control(ControlEvent::SetSustainSlider { pos: Some(0.1) });
     pedal_down(&mut e);
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
@@ -327,7 +327,7 @@ fn key_release_uses_patch_release() {
     // patch tail still holds ≈ 0.7 * exp(-250/300) ≈ 0.30 — the assert
     // discriminates (a plain > 0.0 would pass even if the override leaked).
     let mut e = engine_with_init_patch();
-    let _ = e.handle_control(ControlEvent::SetSustainRelease { tail: Some(0.1) });
+    let _ = e.handle_control(ControlEvent::SetSustainSlider { pos: Some(0.1) });
     pedal_up(&mut e);
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     assert!(render_peak(&mut e, 200) > SILENCE, "no sound");

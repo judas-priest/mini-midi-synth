@@ -208,7 +208,9 @@ pub enum ControlEvent {
     SetSustain { on: bool },
     /// Optional DSP sustain-release: pedal-up releases active voices with this
     /// duration instead of the patch release. None = off (patch release).
-    SetSustainRelease { tail: Option<f32> },
+    /// Slider position: None = pedal ignored (OFF), Some(f) = sustain on,
+    /// pedal-up release = f * default tail (1.0 = full default).
+    SetSustainSlider { pos: Option<f32> },
     /// Drums: force every hit to velocity 127
     DrumSetFixedVelocity { fixed: bool },
     // SF2 sampler controls
@@ -1351,7 +1353,7 @@ impl SynthEngine {
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            sustain_release: None,
+            sustain_release: Some(1.0),
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
             scope_write: 0,
             midi_player: midi_player::MidiPlayer::new(),
@@ -1380,7 +1382,10 @@ impl SynthEngine {
     /// flags (patch switched while pedal was down, mono/latch holds) would
     /// otherwise leave notes ringing forever.
     fn set_sustain(&mut self, value: u8) {
-        let on = value >= 64;
+        let mut on = value >= 64;
+        if self.sustain_release.is_none() {
+            on = false; // Sustain slider at OFF: pedal is ignored entirely
+        }
         self.sustain.store(on, std::sync::atomic::Ordering::Relaxed);
         // SF2 voices: rustysynth applies hold-pedal per channel itself
         self.sampler.sustain_pedal(on);
@@ -2094,11 +2099,12 @@ impl SynthEngine {
             ControlEvent::SetSustain { on } => {
                 self.set_sustain(if on { 127 } else { 0 });
             }
-            ControlEvent::SetSustainRelease { tail } => {
-                // One knob, both engines. `tail` is a fraction of the default
-                // tail: None = off, 1.0 = full default, 0.5 = half-length tail.
-                self.sustain_release = tail;
-                let scale = tail.unwrap_or(1.0).clamp(0.02, 1.0);
+            ControlEvent::SetSustainSlider { pos } => {
+                // One knob, both engines. None = pedal ignored (OFF);
+                // Some(1.0) = normal sustain, default tails; Some(f) = sustain
+                // whose pedal-up release is a fraction f of the default.
+                self.sustain_release = pos;
+                let scale = pos.unwrap_or(1.0).clamp(0.02, 1.0);
                 self.sampler.set_release_time_scale(scale);
             }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
