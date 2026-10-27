@@ -52,3 +52,12 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
   (commit 1d11ee2, vendor patch, default 1.0 = file defaults). Restore as a
   GUI static setting "Pedal-up release: default / X ms", applies to both
   engines; never read CC64 value into it.
+
+## 8. Bank 2 (knobs/pads) config — MidiSuite под Wine не работает
+- Fader bank 2 передаёт события из коробки; knob bank 2 и pad bank 2 молчат
+  (проверено aseqdump: клава не шлёт ничего на этих банках — пустые назначения).
+- Назначения делаются только в MidiSuite (Win/Mac/Android). Под Wine приложение
+  запускается, но Flutter-окно не создаётся (BLE/WinUSB-плагины) — тупик.
+- Пути: телефон + приложение MidiSuite по BT, или Windows-машина/VM.
+- После назначения CC на кнобы банка 2 — забиндить через MIDI Learn; пэды банка 2
+  (фактически шлют ноты 74/77/81/83/84 на канале 1) — нацелить транспорт секвенсора.
