@@ -1611,11 +1611,11 @@ impl SynthEngine {
                         } else {
                             part.note_off(note); // raw: part matches by src_note
                         }
+                        // Whole-performance recording: tag with the part that
+                        // receives the off (looper replay routes per part id).
+                        self.looper.record_event(note, 0, i as u8);
                     }
-                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
-                    self.looper.record_event(note, 0, ap);
                 } else {
-                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         if !part.enabled || part.mute { continue; }
                         // Key range + velocity range check
@@ -1627,8 +1627,20 @@ impl SynthEngine {
                         } else {
                             part.note_on(note, velocity); // raw: part transposes internally
                         }
+                        // Whole-performance recording: tag the event with the
+                        // part that actually sounds it (looper replay routes
+                        // per part id).
+                        //
+                        // Accepted effects: (1) the matching off events below
+                        // are also recorded for parts that never sounded the
+                        // note (off loops don't range-check) — replayed offs
+                        // are harmless no-ops but consume looper event slots;
+                        // (2) split overlap (two parts covering the same note)
+                        // overwrites looper's single active_notes[note] slot —
+                        // the forced off at loop wrap releases only the last
+                        // part.
+                        self.looper.record_event(note, velocity, i as u8);
                     }
-                    self.looper.record_event(note, velocity, ap);
                 }
             }
             MidiEvent::NoteOff { channel, note } => {
@@ -1649,9 +1661,10 @@ impl SynthEngine {
                         } else {
                             part.note_off(note); // raw: part matches by src_note
                         }
+                        // Whole-performance recording: tag with the part that
+                        // receives the off (looper replay routes per part id).
+                        self.looper.record_event(note, 0, i as u8);
                     }
-                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
-                    self.looper.record_event(note, 0, ap);
                 }
             }
             MidiEvent::PitchBend { value, .. } => {

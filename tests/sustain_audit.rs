@@ -400,3 +400,41 @@ fn latch_mode_works_with_transpose() {
     let after = render_peak(&mut e, 200);
     assert!(after < SILENCE, "latch toggle-off did not release (peak {after})");
 }
+#[test]
+fn looper_records_all_sounding_parts() {
+    let mut e = engine_with_init_patch();
+    // Part A: full range (default). Part B: 60-127.
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 1, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartRange { part: 1, min_note: 60, max_note: 127 });
+    let _ = e.handle_control(ControlEvent::SetPartVolume { part: 1, volume: 1.0 });
+    // Record: two notes, one per part's range. Events land at distinct looper
+    // ticks, so a few blocks must be rendered between them (all events sent
+    // with no time in between would collapse onto tick 0 and cancel out).
+    let _ = e.handle_control(ControlEvent::LooperRecord);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 36, velocity: 127 });
+    let _ = render_peak(&mut e, 20);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 36 });
+    let _ = render_peak(&mut e, 20);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 84, velocity: 127 });
+    let _ = render_peak(&mut e, 20);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 84 });
+    // NOTE: LooperRecord is a no-op while already Recording (looper.rs:220-235);
+    // stopping uses LooperStopRecord, which moves Recording -> Playing.
+    let _ = e.handle_control(ControlEvent::LooperStopRecord);
+    // During playback both notes must sound again
+    let peak = render_peak(&mut e, 6000);
+    assert!(peak > 0.05, "looper playback produced no sound (peak {peak})");
+
+    // Negative: a note outside every part's range records nothing -> silent playback.
+    let mut e2 = engine_with_init_patch();
+    let _ = e2.handle_control(ControlEvent::SetPartRange { part: 0, min_note: 0, max_note: 59 });
+    let _ = e2.handle_control(ControlEvent::SetPartEnabled { part: 1, enabled: true });
+    let _ = e2.handle_control(ControlEvent::SetPartRange { part: 1, min_note: 60, max_note: 100 });
+    let _ = e2.handle_control(ControlEvent::LooperRecord);
+    e2.handle_event(MidiEvent::NoteOn { channel: 0, note: 110, velocity: 127 }); // outside 0-59 and 60-100
+    let _ = render_peak(&mut e2, 20);
+    e2.handle_event(MidiEvent::NoteOff { channel: 0, note: 110 });
+    let _ = e2.handle_control(ControlEvent::LooperStopRecord);
+    let silent_peak = render_peak(&mut e2, 4000);
+    assert!(silent_peak < 1e-3, "out-of-range note was recorded (peak {silent_peak})");
+}
