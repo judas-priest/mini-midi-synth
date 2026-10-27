@@ -208,7 +208,7 @@ pub enum ControlEvent {
     SetSustain { on: bool },
     /// Optional DSP sustain-release: pedal-up releases active voices with this
     /// duration instead of the patch release. None = off (patch release).
-    SetSustainRelease { seconds: Option<f32> },
+    SetSustainRelease { tail: Option<f32> },
     /// Drums: force every hit to velocity 127
     DrumSetFixedVelocity { fixed: bool },
     // SF2 sampler controls
@@ -1387,11 +1387,12 @@ impl SynthEngine {
         for part in &mut self.parts {
             part.sustain_pedal = if on { 1.0 } else { 0.0 };
             if !on {
-                if let Some(secs) = self.sustain_release {
-                    // Override: amp envelope released over `secs` regardless
-                    // of the patch's own release time. Two passes over note
-                    // numbers (stack array, no allocation) keep the borrows
-                    // of `part` disjoint.
+                // Fractional override: tail = fraction * the patch's own
+                // amp_release (see SetSustainRelease). Two passes over note
+                // numbers (stack array, no allocation) keep the borrows
+                // of `part` disjoint.
+                if let Some(f) = self.sustain_release {
+                    let secs = (f * part.params.amp_release.max(0.05)).max(0.02);
                     let mut needs = [false; 128];
                     for voice in &part.voices {
                         if voice.active && !voice.is_releasing() {
@@ -2093,8 +2094,12 @@ impl SynthEngine {
             ControlEvent::SetSustain { on } => {
                 self.set_sustain(if on { 127 } else { 0 });
             }
-            ControlEvent::SetSustainRelease { seconds } => {
-                self.sustain_release = seconds;
+            ControlEvent::SetSustainRelease { tail } => {
+                // One knob, both engines. `tail` is a fraction of the default
+                // tail: None = off, 1.0 = full default, 0.5 = half-length tail.
+                self.sustain_release = tail;
+                let scale = tail.unwrap_or(1.0).clamp(0.02, 1.0);
+                self.sampler.set_release_time_scale(scale);
             }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
                 self.drum_engine.fixed_velocity = fixed;

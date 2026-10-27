@@ -305,11 +305,10 @@ fn performance_part_config_roundtrip() {
 #[test]
 fn dsp_sustain_release_override() {
     // Init patch: amp_release 0.3s, amp_sustain 0.7, IIR sqrt release.
-    // Override 0.05s: after ~100ms the tail must be far below the patch's
-    // natural decay (0.7 * exp(-100/300) ≈ 0.50), so use 0.05s override and
-    // a generous threshold that the patch tail provably exceeds.
+    // Override fraction 0.1 → tail = 0.1 * 0.3 = 0.03s: after ~100ms the
+    // envelope is idle, far below the patch's natural decay (≈ 0.50).
     let mut e = engine_with_init_patch();
-    let _ = e.handle_control(ControlEvent::SetSustainRelease { seconds: Some(0.05) });
+    let _ = e.handle_control(ControlEvent::SetSustainRelease { tail: Some(0.1) });
     pedal_down(&mut e);
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
@@ -323,12 +322,12 @@ fn dsp_sustain_release_override() {
 
 #[test]
 fn key_release_uses_patch_release() {
-    // Override 0.05s vs patch release 0.3s. At ~250ms post-key-off the
+    // Fraction 0.1 (tail 0.03s) vs patch release 0.3s. At ~250ms post-key-off the
     // override envelope is fully idle (< SILENCE, ~180ms to Idle) while the
     // patch tail still holds ≈ 0.7 * exp(-250/300) ≈ 0.30 — the assert
     // discriminates (a plain > 0.0 would pass even if the override leaked).
     let mut e = engine_with_init_patch();
-    let _ = e.handle_control(ControlEvent::SetSustainRelease { seconds: Some(0.05) });
+    let _ = e.handle_control(ControlEvent::SetSustainRelease { tail: Some(0.1) });
     pedal_up(&mut e);
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     assert!(render_peak(&mut e, 200) > SILENCE, "no sound");
