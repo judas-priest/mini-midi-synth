@@ -1743,7 +1743,10 @@ impl SynthEngine {
                     }
                 }
                 // CcBinding is Copy — no heap allocation
-                if let Some(binding) = self.cc_map.bindings[cc as usize] {
+                // Defense in depth: even a hand-edited config binding on CC64
+                // must not steal the sustain pedal.
+                let binding = if cc == 64 { None } else { self.cc_map.bindings[cc as usize] };
+                if let Some(binding) = binding {
                     if self.check_pickup(cc, value, binding) {
                         let param_val = CcMap::cc_to_param(&binding, value);
                         if binding.scope == ParamScope::Global {

@@ -164,6 +164,10 @@ impl CcMap {
         // Overwrite from saved config
         for (cc_str, raw_binding) in &raw.bindings {
             let cc = *cc_str;
+            if cc == 64 {
+                // CC64 is the sustain pedal, never a parameter binding
+                continue;
+            }
             if (cc as usize) < 128 {
                 if let Some(static_key) = resolve_key(&raw_binding.param_key) {
                     let scope = find_param_meta(static_key).map(|m| m.scope).unwrap_or(ParamScope::Patch);

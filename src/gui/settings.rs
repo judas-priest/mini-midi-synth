@@ -351,6 +351,10 @@ impl App {
             }
         }
 
+        if let Some((64, _)) = learned_cc {
+            self.show_toast("CC64 is the sustain pedal — not assignable".to_string(), ToastKind::Error);
+        }
+        let learned_cc = learned_cc.filter(|&(cc, _)| cc != 64);
         if let Some((cc, target)) = learned_cc {
             if let Some(meta) = crate::cc_map::find_param_meta(target) {
                 self.cc_map.bindings[cc as usize] = Some(crate::cc_map::CcBinding {
