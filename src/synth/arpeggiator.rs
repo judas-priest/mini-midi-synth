@@ -148,6 +148,10 @@ impl Arpeggiator {
         (note_on_out, note_off_out)
     }
 
+    pub fn has_held_notes(&self) -> bool {
+        self.held_count > 0
+    }
+
     /// Returns note-off for any currently sounding arp note (used when arp is disabled or all notes off).
     pub fn flush_current_note(&mut self) -> Option<u8> {
         let note = self.current_note;

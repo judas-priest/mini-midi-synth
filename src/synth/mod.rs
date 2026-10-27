@@ -1368,6 +1368,25 @@ impl SynthEngine {
         }
     }
 
+    /// Last held arp key released: the arpeggiator resets pattern_len, so
+    /// tick() will never dispatch the pending gate-off — the sounding voice
+    /// would hang forever. Dispatch the off here (same routing as tick_block).
+    fn flush_arp_note_off(&mut self) {
+        if self.arpeggiator.has_held_notes() {
+            return; // tick() still owns gate-offs
+        }
+        if let Some(off) = self.arpeggiator.flush_current_note() {
+            for (i, part) in self.parts.iter_mut().enumerate() {
+                if !part.enabled { continue; }
+                let transposed = (off as i16 + part.transpose as i16).clamp(0, 127) as u8;
+                if part.sf2_mode { self.sampler.note_off(i, transposed); }
+                else { part.note_off(transposed); }
+            }
+            let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
+            self.looper.record_event(off, 0, ap);
+        }
+    }
+
     pub fn pitch_seq_step_atoms(&self) -> Vec<std::sync::Arc<std::sync::atomic::AtomicU8>> {
         self.parts.iter().map(|l| l.pitch_seq.step_atom()).collect()
     }
@@ -1533,16 +1552,18 @@ impl SynthEngine {
                     // Route through arpeggiator — it generates notes in tick_block
                     if velocity == 0 {
                         self.arpeggiator.note_off(note);
+                        self.flush_arp_note_off();
                     } else {
                         self.arpeggiator.note_on(note, velocity);
                     }
                 } else if velocity == 0 {
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         if !part.enabled { continue; }
+                        let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
                         if part.sf2_mode {
-                            self.sampler.note_off(i, note);
+                            self.sampler.note_off(i, transposed);
                         } else {
-                            part.note_off(note);
+                            part.note_off(transposed);
                         }
                     }
                     let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
@@ -1573,12 +1594,14 @@ impl SynthEngine {
                     }
                 } else if self.arpeggiator.enabled {
                     self.arpeggiator.note_off(note);
+                    self.flush_arp_note_off();
                 } else {
                     for (i, part) in self.parts.iter_mut().enumerate() {
+                        let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
                         if part.sf2_mode {
-                            self.sampler.note_off(i, note);
+                            self.sampler.note_off(i, transposed);
                         } else {
-                            part.note_off(note);
+                            part.note_off(transposed);
                         }
                     }
                     let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
@@ -2464,8 +2487,9 @@ impl SynthEngine {
                 if let Some(off_note) = arp_off {
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         if !part.enabled { continue; }
-                        if part.sf2_mode { self.sampler.note_off(i, off_note); }
-                        else { part.note_off(off_note); }
+                        let transposed = (off_note as i16 + part.transpose as i16).clamp(0, 127) as u8;
+                        if part.sf2_mode { self.sampler.note_off(i, transposed); }
+                        else { part.note_off(transposed); }
                     }
                     let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
                     self.looper.record_event(off_note, 0, ap);
