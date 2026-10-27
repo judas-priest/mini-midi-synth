@@ -37,3 +37,18 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
 - Problem: many layers play the full chord; bass gets muddy. User wants a per-layer mode "play only the root note" (lowest played note / detected chord root), transposed down an octave — bass layer follows the chord root while other layers play the chord.
 - Research when picked up: chord-root detection from held notes (same detection as #5), existing implementations (arpeggiator root mode, "bass follow" in workstations).
 - Depends on #5 (root detection).
+
+## 7. Custom sustain release (SR) — вернуть как статичную настройку
+- Research done 2026-10-27 (best practices: Ravenscroft 275, Ivory II, NI Claire).
+- Industry standard: TWO-VALUE model — release while pedal held (native/long) vs
+  release after pedal-up (user-configurable). NOT coupled to fader/pedal
+  position live: scaling the tail by pedal position makes fast pedal taps chop
+  tails and is unplayable (this exact failure was reverted in 59ed413).
+- Half-pedal (continuous pedal scaling release+resonance) needs a continuous
+  pedal with configurable Min/Max CC range — out of scope until such a pedal.
+- Re-pedal (quick off→on re-catch) already works.
+- Implementation exists in git history: DSP override `Envelope::note_off_for` +
+  `SetSustainRelease` (commit 9a200a4), SF2 vendor `set_release_time_scale`
+  (commit 1d11ee2, vendor patch, default 1.0 = file defaults). Restore as a
+  GUI static setting "Pedal-up release: default / X ms", applies to both
+  engines; never read CC64 value into it.
