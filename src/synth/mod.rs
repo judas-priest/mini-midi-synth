@@ -1639,12 +1639,27 @@ impl SynthEngine {
                 }
             }
             MidiEvent::ProgramChange { program, .. } => {
+                // Same hang-prevention as LoadPatch: release voices the old
+                // patch held (pedal holds, mono/latch holds) BEFORE anything
+                // else — including when the program is out of range and the
+                // cache lookup below bails.
+                self.sampler.part_all_notes_off(0);
+                if let Some(l) = self.parts.get_mut(0) {
+                    for voice in &mut l.voices {
+                        if voice.active { voice.note_off(); }
+                    }
+                    l.sustained_notes = [false; 128];
+                    l.note_stack.clear();
+                    l.latch_held.clear();
+                }
                 // In SF2 mode, change the SF2 program; in synth mode, change the synth patch
                 if self.parts.first().map(|l| l.sf2_mode).unwrap_or(false) {
                     self.sampler.set_part_program(0, program, 0);
                 } else if let Some(&params) = self.preset_params_cache.get(program as usize) {
                     if let Some(l) = self.parts.get_mut(0) {
                         l.params = params;
+                        l.min_note = params.min_note as u8;
+                        l.max_note = params.max_note as u8;
                         if let Some(patch) = self.patches.get(program as usize) {
                             l.mod_matrix.load_from_params(&patch.params);
                             l.pitch_seq.load_from_params(&patch.params);
