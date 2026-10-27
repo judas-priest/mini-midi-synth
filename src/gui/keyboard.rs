@@ -19,22 +19,28 @@ fn is_black_key(note: u8) -> bool {
 
 impl App {
     pub fn draw_keyboard(&self, ui: &mut egui::Ui) {
-        // Active notes label above keyboard
-        let active: Vec<String> = (0..128u8)
-            .filter_map(|i| {
-                let vel = self.note_state[i as usize].load(Ordering::Relaxed);
-                if vel > 0 {
-                    Some(note_name(i))
-                } else {
-                    None
-                }
-            })
+        // Active notes label above keyboard; detected chord in brackets, bold
+        let held: Vec<u8> = (0..128u8)
+            .filter(|i| self.note_state[*i as usize].load(Ordering::Relaxed) > 0)
             .collect();
+        let active: Vec<String> = held.iter().map(|n| note_name(*n)).collect();
 
         if active.is_empty() {
             ui.colored_label(theme::TEXT_DIM, " ");
         } else {
-            ui.label(active.join("  "));
+            let chord = crate::chord::detect(&held);
+            match chord {
+                Some(c) => {
+                    // Chord-only bold: two widgets side by side
+                    ui.horizontal(|ui| {
+                        ui.label(active.join("  "));
+                        ui.label(egui::RichText::new(format!("({})", c)).strong());
+                    });
+                }
+                None => {
+                    ui.label(active.join("  "));
+                }
+            }
         }
 
         ui.horizontal(|ui| {
