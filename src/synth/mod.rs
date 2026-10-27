@@ -1393,10 +1393,11 @@ impl SynthEngine {
             part.sustain_pedal = if on { 1.0 } else { 0.0 };
             if !on {
                 // Fractional override: tail = fraction * the patch's own
-                // amp_release (see SetSustainRelease). Two passes over note
-                // numbers (stack array, no allocation) keep the borrows
-                // of `part` disjoint.
-                if let Some(f) = self.sustain_release {
+                // amp_release. Full ON (f >= 0.995) takes the EXACT pre-slider
+                // path — plain note_off, default envelopes, no castration.
+                // Two passes over note numbers (stack array, no allocation)
+                // keep the borrows of `part` disjoint.
+                if let Some(f) = self.sustain_release.filter(|f| *f < 0.995) {
                     let secs = (f * part.params.amp_release.max(0.05)).max(0.02);
                     let mut needs = [false; 128];
                     for voice in &part.voices {
