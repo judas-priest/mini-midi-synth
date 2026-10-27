@@ -1,5 +1,8 @@
 # SF2 Release Scale, Pad Transport, Layer Switching Fix — Implementation Plan
 
+> anchor-checked: 2026-10-27 (three review subagent rounds verified snippets against the repo)
+> status: executing 2026-10-27
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Three features: (1) optional custom sustain-release length for both DSP and SF2 engines, off by default; (2) transport control (play/pause/record/undo) from pad-bank-2 notes on MIDI channel 10; (3) root-cause fix for SF2 parts going silent after performance/part switching.
