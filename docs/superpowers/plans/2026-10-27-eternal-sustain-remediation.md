@@ -1,7 +1,7 @@
 # Eternal Sustain Remediation Plan
 
 > anchor-checked: 2026-10-27 (three review subagents verified every file path, function name and replace-baseline against the repo; two review rounds)
-> status: executing 2026-10-27
+> status: executed 2026-10-27
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -61,7 +61,7 @@ SF2-only behaviors (pedal state across SF2 reload, `part_all_notes_off` on SF2 p
 - Create: `tests/sustain_audit.rs`
 - Reuse (copy helpers, do not modify): `tests/end_to_end.rs:12-49` (`render_peak`, `engine_with_init_patch`, `settle`)
 
-- [ ] **Step 1: Create `tests/sustain_audit.rs` with the helpers and all 15 tests**
+- [x] **Step 1: Create `tests/sustain_audit.rs` with the helpers and all 15 tests**
 
 ```rust
 //! Sustain-stick regression: no note may outlive its pedal/panic/preset-switch.
@@ -365,7 +365,7 @@ fn performance_part_config_roundtrip() {
 }
 ```
 
-- [ ] **Step 2: Run and record failures**
+- [x] **Step 2: Run and record failures**
 
 Run: `cargo test --test sustain_audit 2>&1 | tail -30`
 Expected pre-fix state — do NOT "fix" tests that already pass:
@@ -374,7 +374,7 @@ Expected pre-fix state — do NOT "fix" tests that already pass:
 - PASS (idempotency already holds): `repeated_cc123_is_idempotent`.
 Note: `performance_part_config_roundtrip` requires the PartConfig fields that already exist in the uncommitted tree (src/preset.rs:708-736). If it fails to compile, verify those fields first.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/sustain_audit.rs
@@ -388,7 +388,7 @@ git commit -m "test: sustain-stick regression matrix (15 cases)"
 **Files:**
 - Modify: `src/synth/sampler.rs` — struct `SamplerEngine` (line ~188): add field; `sustain_pedal` (~353); `load_keys_soundfont` (~225), `set_sample_rate` (~287), `set_block_size` (~263); `all_notes_off` (~424-429)
 
-- [ ] **Step 1: Add a pedal-state field to `SamplerEngine`**
+- [x] **Step 1: Add a pedal-state field to `SamplerEngine`**
 
 In the `SamplerEngine` struct add:
 
@@ -400,7 +400,7 @@ In the `SamplerEngine` struct add:
 
 Initialize with `sustain: false` in the constructor.
 
-- [ ] **Step 2: `sustain_pedal` remembers; `apply_sustain` re-applies**
+- [x] **Step 2: `sustain_pedal` remembers; `apply_sustain` re-applies**
 
 ```rust
     pub fn sustain_pedal(&mut self, on: bool) {
@@ -421,7 +421,7 @@ Initialize with `sustain: false` in the constructor.
     }
 ```
 
-- [ ] **Step 3: Call `apply_sustain()` at the end of `load_keys_soundfont`, `set_sample_rate`, `set_block_size`**
+- [x] **Step 3: Call `apply_sustain()` at the end of `load_keys_soundfont`, `set_sample_rate`, `set_block_size`**
 
 In each of the three methods, after the `rebuild` call and before the `return`, add:
 
@@ -431,7 +431,7 @@ In each of the three methods, after the `rebuild` call and before the `return`, 
 
 (`set_sample_rate` routes through `load_keys_soundfont`, so it fires twice there — harmless, idempotent.)
 
-- [ ] **Step 4: `all_notes_off` lifts the pedal first (rustysynth gates CC123 on it)**
+- [x] **Step 4: `all_notes_off` lifts the pedal first (rustysynth gates CC123 on it)**
 
 ```rust
     pub fn all_notes_off(&mut self) {
@@ -446,12 +446,12 @@ In each of the three methods, after the `rebuild` call and before the `return`, 
     }
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `cargo test --test sustain_audit 2>&1 | tail -20`
 Expected: no new failures (the panic-path DSP tests already pass; Task 3 makes the panic path lift the sampler pedal for SF2, which tests can't see). Run `cargo test --features rt-assert --test rt_safety` — must PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/synth/sampler.rs
@@ -465,7 +465,7 @@ git commit -m "fix: all_notes_off lifts rustysynth hold pedal; pedal survives SF
 **Files:**
 - Modify: `src/synth/mod.rs` CC120/123 block (~1652-1675), `ControlEvent::AllNotesOff` (~1966-1988)
 
-- [ ] **Step 1: CC120/123 handler — clear sustain state first**
+- [x] **Step 1: CC120/123 handler — clear sustain state first**
 
 The block currently loops parts clearing voices/flags directly. Replace its beginning so it reads:
 
@@ -488,7 +488,7 @@ The block currently loops parts clearing voices/flags directly. Replace its begi
 
 (the rest of the block — `self.sampler.all_notes_off();`, arpeggiator flush, `return;` — stays unchanged)
 
-- [ ] **Step 2: `ControlEvent::AllNotesOff` — same treatment**
+- [x] **Step 2: `ControlEvent::AllNotesOff` — same treatment**
 
 At the top of the `AllNotesOff` arm, replace
 
@@ -504,13 +504,13 @@ with
 
 (`set_sustain(0)` stores the atom, sends CC64=0 to the sampler and releases DSP voices; the existing loop that follows re-kills voices idempotently.)
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run: `cargo test --test sustain_audit 2>&1 | tail -20`
 Expected: `cc120_panic…`, `cc123_panic…`, `all_notes_off_releases_pedal_held_notes` PASS (they pass on DSP already; this task adds the sampler pedal-lift the tests cannot observe — verified by review against voice.rs:285).
 Run: `cargo test --features rt-assert --test rt_safety` — PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/synth/mod.rs
@@ -524,7 +524,7 @@ git commit -m "fix: panic paths (CC120/123, AllNotesOff) clear sustain and lift 
 **Files:**
 - Modify: `src/synth/mod.rs` NoteOn vel==0 branch (~1539-1547), NoteOff branch (~1567-1586), arpeggiator arp_off branch (~2460-2468)
 
-- [ ] **Step 1: Fix the vel==0 NoteOn branch**
+- [x] **Step 1: Fix the vel==0 NoteOn branch**
 
 Replace
 
@@ -555,7 +555,7 @@ with
                     }
 ```
 
-- [ ] **Step 2: Fix the NoteOff branch**
+- [x] **Step 2: Fix the NoteOff branch**
 
 Replace
 
@@ -592,7 +592,7 @@ with
 
 (Note: this loop no longer skips disabled parts — a part disabled mid-note must still receive the off; `part.note_off` on inactive voices is a no-op. `sf2_mode` parts keep getting the off for the same reason.)
 
-- [ ] **Step 3: Fix the arpeggiator off branch**
+- [x] **Step 3: Fix the arpeggiator off branch**
 
 Replace
 
@@ -617,7 +617,7 @@ with
                     }
 ```
 
-- [ ] **Step 3b: Flush the arp gate-off when the last held key is released (both note-off routes)**
+- [x] **Step 3b: Flush the arp gate-off when the last held key is released (both note-off routes)**
 
 `Arpeggiator::note_off` resets `pattern_len = 0` when the last held note goes (src/synth/arpeggiator.rs:101-105), so `tick()` never dispatches the pending `current_note` gate-off — the sounding arp voice hangs forever. There are TWO live note-off routes that must flush: `MidiEvent::NoteOn { velocity: 0 }` and `MidiEvent::NoteOff`.
 
@@ -698,13 +698,13 @@ with
 
 (No double-dispatch: when held notes remain, the helper returns early and `tick()` keeps owning gate-offs; when none remain, `pattern_len` is already 0 and `tick()` early-returns.)
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cargo test --test sustain_audit 2>&1 | tail -20`
 Expected: `transposed_part_note_off_stops_sound`, `arp_transposed_note_off_stops_sound` PASS.
 Run: `cargo test 2>&1 | grep -E 'FAILED|failures:' | head -5` — no failures anywhere.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/synth/mod.rs src/synth/arpeggiator.rs
@@ -718,7 +718,7 @@ git commit -m "fix: note-offs use the transposed note; arp flushes its gate-off 
 **Files:**
 - Modify: `src/synth/mod.rs` `MidiEvent::ProgramChange` (~1618-1637)
 
-- [ ] **Step 1: Add cleanup before state swap (hoisted above the cache lookup — the empty-cache case must still clean)**
+- [x] **Step 1: Add cleanup before state swap (hoisted above the cache lookup — the empty-cache case must still clean)**
 
 Replace the whole arm so it reads:
 
@@ -757,13 +757,13 @@ Replace the whole arm so it reads:
 
 (The `program_change` atom + feedback tail of the arm stays unchanged.)
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run: `cargo test --test sustain_audit 2>&1 | tail -20`
 Expected: `program_change_releases_pedal_held_notes` PASS.
 Run: `cargo test 2>&1 | grep -E 'FAILED|failures:' | head -5` — none.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/synth/mod.rs
@@ -777,7 +777,7 @@ git commit -m "fix: hardware ProgramChange releases voices and syncs key range l
 **Files:**
 - Modify: `src/synth/mod.rs` `set_sustain` (~1353-1369)
 
-- [ ] **Step 1: Extend the pedal-up branch**
+- [x] **Step 1: Extend the pedal-up branch**
 
 Replace `set_sustain` with:
 
@@ -805,12 +805,12 @@ Replace `set_sustain` with:
     }
 ```
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run: `cargo test --test sustain_audit 2>&1 | tail -20`
 Expected: `mono_pedal_up_clears_note_stack` PASS; no regressions (`cargo test 2>&1 | grep -E 'FAILED|failures:' | head -5` — none).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/synth/mod.rs
@@ -824,7 +824,7 @@ git commit -m "fix: pedal-up clears mono note stack and latch holds"
 **Files:**
 - Modify: `src/synth/mod.rs` `ControlEvent::SetPartMute` (~1824), `ControlEvent::SetPartSf2Mode` (~2012), `ControlEvent::SetPartSf2Program` (~2018)
 
-- [ ] **Step 1: `SetPartMute`**
+- [x] **Step 1: `SetPartMute`**
 
 Wrap the existing mute flag assignment:
 
@@ -849,7 +849,7 @@ Wrap the existing mute flag assignment:
 
 (Keep whatever the arm currently does with `l.mute`; only ensure the `mute` branch adds the release block.)
 
-- [ ] **Step 2: `SetPartSf2Mode`**
+- [x] **Step 2: `SetPartSf2Mode`**
 
 ```rust
             ControlEvent::SetPartSf2Mode { part, enabled } => {
@@ -868,7 +868,7 @@ Wrap the existing mute flag assignment:
             }
 ```
 
-- [ ] **Step 3: `SetPartSf2Program`**
+- [x] **Step 3: `SetPartSf2Program`**
 
 ```rust
             ControlEvent::SetPartSf2Program { part, program, bank } => {
@@ -878,12 +878,12 @@ Wrap the existing mute flag assignment:
             }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cargo test --test sustain_audit 2>&1 | tail -20` — `mute_releases_sounding_notes` PASS, no regressions.
 Run: `cargo test --features rt-assert --test rt_safety 2>&1 | grep 'test result'` — PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/synth/mod.rs
@@ -897,7 +897,7 @@ git commit -m "fix: mute and SF2 mode/program switches release voices"
 **Files:**
 - Modify: `src/synth/midi_player.rs:204-208` (`is_muted` filter), `src/synth/mod.rs` `ControlEvent::MidiSeqLoad` (~2058-2072) and the seq event dispatch (~2415-2452)
 
-- [ ] **Step 1: Mute must not swallow note-offs**
+- [x] **Step 1: Mute must not swallow note-offs**
 
 In `midi_player.rs` the drain loop pushes `(ch, data)` only when `!self.is_muted(ch)`. Change it to always pass `NoteOff` through:
 
@@ -912,7 +912,7 @@ In `midi_player.rs` the drain loop pushes `(ch, data)` only when `!self.is_muted
                 }
 ```
 
-- [ ] **Step 2: `MidiSeqLoad` drains the old file's notes**
+- [x] **Step 2: `MidiSeqLoad` drains the old file's notes**
 
 At the top of the `MidiSeqLoad` arm (before `self.midi_player.load(data)`), add:
 
@@ -927,7 +927,7 @@ At the top of the `MidiSeqLoad` arm (before `self.midi_player.load(data)`), add:
                 }
 ```
 
-- [ ] **Step 3: Note-off routed by the instrument that took the note-on**
+- [x] **Step 3: Note-off routed by the instrument that took the note-on**
 
 Add a field to `SynthEngine` (near `midi_seq_buf`):
 
@@ -987,7 +987,7 @@ Replace the `NoteOff` arm (mod.rs:2430-2443) with dispatch by the recorded route
                     },
 ```
 
-- [ ] **Step 3b: Reset `seq_route` in `MidiSeqLoad`**
+- [x] **Step 3b: Reset `seq_route` in `MidiSeqLoad`**
 
 Inside the `MidiSeqLoad` arm (after the Step 2 drain block), add:
 
@@ -995,11 +995,11 @@ Inside the `MidiSeqLoad` arm (after the Step 2 drain block), add:
                 self.seq_route = [0u8; 16];
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cargo test 2>&1 | grep -E 'FAILED|failures:' | head -5` — none. Run `cargo clippy --all-targets -- -D warnings 2>&1 | tail -3` — clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/synth/mod.rs src/synth/midi_player.rs
@@ -1013,7 +1013,7 @@ git commit -m "fix: MIDI player never swallows note-offs; note-offs follow note-
 **Files:**
 - Modify: `src/cc_map.rs` `from_config` (~160-181), `src/synth/mod.rs` binding application (~1695), `src/gui/settings.rs` learned-CC application (~350-361)
 
-- [ ] **Step 1: `from_config` skips index 64**
+- [x] **Step 1: `from_config` skips index 64**
 
 Inside the `for (cc_str, raw_binding) in &raw.bindings` loop, before writing the binding:
 
@@ -1026,7 +1026,7 @@ Inside the `for (cc_str, raw_binding) in &raw.bindings` loop, before writing the
 
 (This makes the Task 1 test `midi_learn_rejects_cc64` pass.)
 
-- [ ] **Step 2: Engine-side guard**
+- [x] **Step 2: Engine-side guard**
 
 Change
 
@@ -1043,7 +1043,7 @@ to
                 if let Some(binding) = binding {
 ```
 
-- [ ] **Step 3: GUI MIDI Learn rejects CC64**
+- [x] **Step 3: GUI MIDI Learn rejects CC64**
 
 In `drain_feedback` (settings.rs), replace
 
@@ -1063,12 +1063,12 @@ with
 
 (The existing body of the `if let Some((cc, target))` block — binding construction and `save_cc_map()` — stays unchanged.)
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cargo test --test sustain_audit 2>&1 | tail -5` — `midi_learn_rejects_cc64` PASS.
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -3` — clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/cc_map.rs src/synth/mod.rs src/gui/settings.rs
@@ -1082,7 +1082,7 @@ git commit -m "fix: CC64 can never be bound as a parameter (MIDI Learn, config, 
 **Files:**
 - Modify: `src/gui/mod.rs` `load_performance_by_name` (~1518-1553)
 
-- [ ] **Step 1: Disable parts the performance does not define**
+- [x] **Step 1: Disable parts the performance does not define**
 
 After the `for (i, part) in perf.parts.iter().enumerate()` loop inside the load branch (the function ends with a bare `true`, there is no toast), add:
 
@@ -1097,7 +1097,7 @@ After the `for (i, part) in perf.parts.iter().enumerate()` loop inside the load 
                     }
 ```
 
-- [ ] **Step 2: Verify compile and commit**
+- [x] **Step 2: Verify compile and commit**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -3` — clean.
 
@@ -1110,7 +1110,7 @@ git commit -m "fix: pad-performance load disables parts absent from the performa
 
 ### Task 11: Full gate
 
-- [ ] **Step 1: Run everything**
+- [x] **Step 1: Run everything**
 
 ```bash
 cargo clippy --all-targets -- -D warnings 2>&1 | tail -3
@@ -1122,7 +1122,7 @@ Expected: clippy clean; all suites `ok`; rt_safety `ok` (all new code is allocat
 
 Do NOT run `cargo fmt` on the whole tree (project rule).
 
-- [ ] **Step 2: Commit any leftovers**
+- [x] **Step 2: Commit any leftovers**
 
 ```bash
 git status --short

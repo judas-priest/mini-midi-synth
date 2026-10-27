@@ -1,11 +1,7 @@
 //! Sustain-stick regression: no note may outlive its pedal/panic/preset-switch.
 //!
-//! Tests expected to FAIL until their plan task lands:
-//! - program_change_releases_pedal_held_notes (Task 5)
-//! - program_change_with_empty_patch_cache_cleans_voices (Task 5)
-//! - transposed_part_note_off_stops_sound (Task 4)
-//! - arp_transposed_note_off_stops_sound (Task 4)
-//! - midi_learn_rejects_cc64 (Task 9)
+//! All 15 cases green since the remediation plan landed
+//! (docs/superpowers/plans/2026-10-27-eternal-sustain-remediation.md).
 
 use mini_midi_synth::preset;
 use mini_midi_synth::synth::{ControlEvent, MidiEvent, SynthEngine, BLOCK_SIZE};
