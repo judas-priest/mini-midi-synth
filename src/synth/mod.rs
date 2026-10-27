@@ -203,14 +203,9 @@ pub enum ControlEvent {
     LooperSetBpm { bpm: f32 },
     LooperSetLayerMute { layer: u8, mute: bool },
     LooperSetSolo { layer: Option<u8> },
+    SetSustain { on: bool },
     AllNotesOff,
     /// GUI sustain toggle (F1): same path as CC64
-    SetSustain { on: bool },
-    /// Optional DSP sustain-release: pedal-up releases active voices with this
-    /// duration instead of the patch release. None = off (patch release).
-    /// Slider position: None = pedal ignored (OFF), Some(f) = sustain on,
-    /// pedal-up release = f * default tail (1.0 = full default).
-    SetSustainSlider { pos: Option<f32> },
     /// Drums: force every hit to velocity 127
     DrumSetFixedVelocity { fixed: bool },
     // SF2 sampler controls
@@ -846,15 +841,6 @@ impl Part {
         self.update_held_range();
     }
 
-    /// Release all voices playing `note` with an explicit amp-release duration
-    /// (same voice-matching as `note_off`). Used by pedal-up when the optional
-    /// sustain-release override is on.
-    fn note_off_for(&mut self, raw_note: u8, seconds: f32) {
-        for voice in &mut self.voices {
-            if voice.active && voice.src_note == raw_note { voice.note_off_for(seconds); }
-        }
-    }
-
     fn has_active_notes(&self) -> bool {
         self.voices.iter().any(|v| v.active && !v.is_releasing())
     }
@@ -1093,8 +1079,6 @@ pub struct SynthEngine {
     active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64 from pedal/fader or GUI toggle), shared with GUI
     sustain: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Optional pedal-up release duration in seconds (None = patch release)
-    sustain_release: Option<f32>,
     /// Oscilloscope ring buffer: 256 mono samples shared with GUI via atomics
     scope_buf: std::sync::Arc<ScopeBuffer>,
     scope_write: usize,
@@ -1353,7 +1337,6 @@ impl SynthEngine {
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            sustain_release: Some(1.0),
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
             scope_write: 0,
             midi_player: midi_player::MidiPlayer::new(),
@@ -1389,27 +1372,9 @@ impl SynthEngine {
         for part in &mut self.parts {
             part.sustain_pedal = if on { 1.0 } else { 0.0 };
             if !on {
-                // Fractional override: tail = fraction * the patch's own
-                // amp_release. Full ON (f >= 0.995) takes the EXACT pre-slider
-                // path — plain note_off, default envelopes, no castration.
-                // Two passes over note numbers (stack array, no allocation)
-                // keep the borrows of `part` disjoint.
-                if let Some(f) = self.sustain_release.filter(|f| *f < 0.995) {
-                    let secs = (f * part.params.amp_release.max(0.05)).max(0.02);
-                    let mut needs = [false; 128];
-                    for voice in &part.voices {
-                        if voice.active && !voice.is_releasing() {
-                            needs[voice.src_note as usize] = true;
-                        }
-                    }
-                    for (note, &held) in needs.iter().enumerate() {
-                        if held { part.note_off_for(note as u8, secs); }
-                    }
-                } else {
-                    for voice in &mut part.voices {
-                        if voice.active && !voice.is_releasing() {
-                            voice.note_off();
-                        }
+                for voice in &mut part.voices {
+                    if voice.active && !voice.is_releasing() {
+                        voice.note_off();
                     }
                 }
                 part.sustained_notes = [false; 128];
@@ -1421,13 +1386,6 @@ impl SynthEngine {
         }
     }
 
-    /// F1 fader (CC64) — plain binary pedal, like a real piano damper:
-    /// fader at 64+ holds, below releases with the FULL native tail.
-    /// Position never scales the release (fast pedal taps chopping tails was
-    /// unplayable); tail length is the static Pedal Rel setting instead.
-    fn set_sustain_from_cc(&mut self, v: u8) {
-        if v >= 64 { self.set_sustain(127); } else { self.set_sustain(0); }
-    }
 
 
     /// Last held arp key released: the arpeggiator resets pattern_len, so
@@ -1812,9 +1770,7 @@ impl SynthEngine {
                 }
                 // Dedicated mod sources: Breath (CC2), Expression (CC11), Sustain (CC64)
                 if cc == 64 {
-                    // F1 fader = continuous sustain: bottom = OFF, elsewhere =
-                    // sustain with pedal-up tail fraction = fader position.
-                    self.set_sustain_from_cc(value);
+                    self.set_sustain(value);
                 } else {
                     for part in &mut self.parts {
                         match cc {
@@ -2105,19 +2061,11 @@ impl SynthEngine {
                     }
                 }
             }
-            ControlEvent::SetSustain { on } => {
-                self.set_sustain(if on { 127 } else { 0 });
-            }
-            ControlEvent::SetSustainSlider { pos } => {
-                // Static Pedal Rel setting (both engines). None = default
-                // tails; Some(f) = every pedal-up release takes f * default.
-                // Does not touch the pedal state itself.
-                self.sustain_release = pos;
-                let scale = pos.unwrap_or(1.0).clamp(0.02, 1.0);
-                self.sampler.set_release_time_scale(scale);
-            }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
                 self.drum_engine.fixed_velocity = fixed;
+            }
+            ControlEvent::SetSustain { on } => {
+                self.set_sustain(if on { 127 } else { 0 });
             }
             ControlEvent::AllNotesOff => {
                 self.set_sustain(0);

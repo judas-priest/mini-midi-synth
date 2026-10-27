@@ -283,8 +283,6 @@ pub struct App {
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
     pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Optional pedal-up release duration (None = off, patch release)
-    pub sustain_release: Option<f32>,
     /// Show help dialog
     pub show_help: bool,
     /// Global params display values (effects, volume, lfo rate)
@@ -597,28 +595,14 @@ impl eframe::App for App {
         egui::TopBottomPanel::top("global_controls").show(ctx, |ui| {
             ui.add_space(theme::SP_SM);
             ui.horizontal(|ui| {
-                // Pedal Rel: static release-length setting applied at every
-                // pedal-up. OFF (leftmost) = patch/SF2 default tails; moving
-                // right shortens the tail (right end ≈ full default again).
-                // The F1 fader itself is a plain binary pedal.
-                ui.label("Pedal Rel:");
-                let mut pos = self.sustain_release.map(|f| 0.02 + f * 0.98).unwrap_or(0.0);
-                let label = if pos <= 0.005 {
-                    "default".to_string()
-                } else {
-                    format!("{:.0}% tail", (0.02 + pos * 0.98) * 100.0)
-                };
-                let resp = ui.add(egui::Slider::new(&mut pos, 0.0..=1.0)
-                    .show_value(false)
-                    .text(label))
-                    .on_hover_text("Pedal release: OFF = patch/SF2 default tails; elsewhere = shortened tail (a fraction of the default, shortest near the left end, default at the right). Applies to every pedal-up, synth and SF2.");
-                if resp.changed() {
-                    self.sustain_release = if pos <= 0.005 {
-                        None
-                    } else {
-                        Some((0.02 + pos * 0.98).clamp(0.02, 1.0))
-                    };
-                    let _ = self.ctrl_tx.push(ControlEvent::SetSustainSlider { pos: self.sustain_release });
+                // F1 Sustain (CC64) — reflects pedal/fader state, click to toggle
+                let sus = self.sustain_atom.load(std::sync::atomic::Ordering::Relaxed);
+                ui.label("F1 Sustain:");
+                let sus_btn = egui::Button::new(egui::RichText::new(if sus { "ON" } else { "OFF" })
+                    .color(if sus { egui::Color32::BLACK } else { theme::TEXT_MUTED }))
+                    .fill(if sus { theme::KEY_WHITE_ACTIVE } else { theme::BG_PAD_EMPTY });
+                if ui.add(sus_btn).on_hover_text("Sustain pedal (CC64): holds notes. Click to toggle.").clicked() {
+                    let _ = self.ctrl_tx.push(ControlEvent::SetSustain { on: !sus });
                 }
 
                 ui.separator();
@@ -1095,7 +1079,6 @@ impl App {
         // Send drum and part volumes to engine
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
-        let _ = self.ctrl_tx.push(ControlEvent::SetSustainSlider { pos: self.sustain_release });
         for i in 0..self.parts.len() {
             self.send_part_volume(i);
         }
@@ -1154,7 +1137,6 @@ impl App {
         self.config.ui.pitch_bend_range = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as u8;
         self.config.ui.drum_volume = self.drum_volume;
         self.config.ui.drum_fixed_velocity = self.drum_fixed_velocity;
-        self.config.ui.sustain_release = self.sustain_release;
         if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
