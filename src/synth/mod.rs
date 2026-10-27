@@ -589,7 +589,7 @@ impl Part {
                 self.latch_held.push(raw_note);
                 // fall through to start voice below
             }
-            if self.latch_held.contains(&note) {
+            if self.latch_held.contains(&raw_note) {
                 // Start voice for new latch note
                 self.age_counter += 1;
                 let age = self.age_counter;

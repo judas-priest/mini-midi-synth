@@ -406,3 +406,20 @@ fn transpose_change_with_pedal_held_note_releases() {
     let after = render_peak(&mut e, 200);
     assert!(after < SILENCE, "pedal-up left orphaned voice after transpose change (peak {after})");
 }
+
+#[test]
+fn latch_mode_works_with_transpose() {
+    let mut e = engine_with_init_patch();
+    let mut patch = init_patch_mut();
+    patch.params.insert("play_mode".to_string(), 3.0); // latch
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
+    let _ = e.handle_control(ControlEvent::SetPartTranspose { part: 0, semitones: 7 });
+    // Latch toggle on: voice must start
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 100) > SILENCE, "latch + transpose: no voice started");
+    // Toggle off (same raw note releases the latched voice)
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "latch toggle-off did not release (peak {after})");
+}
