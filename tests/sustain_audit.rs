@@ -378,3 +378,31 @@ fn pad_transport_notes_do_not_trigger_drums() {
     let peak = render_peak(&mut e, 200);
     assert!(peak < SILENCE, "transport notes leaked into drum audio (peak {peak})");
 }
+
+#[test]
+fn transpose_change_midnote_does_not_orphan_voice() {
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetPartTranspose { part: 0, semitones: 0 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 100) > SILENCE, "no sound");
+    // Change transpose WHILE the note sounds
+    let _ = e.handle_control(ControlEvent::SetPartTranspose { part: 0, semitones: 7 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "transpose change orphaned the voice (peak {after})");
+}
+
+#[test]
+fn transpose_change_with_pedal_held_note_releases() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 20) > SILENCE, "note not held");
+    let _ = e.handle_control(ControlEvent::SetPartTranspose { part: 0, semitones: 5 });
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 0 });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "pedal-up left orphaned voice after transpose change (peak {after})");
+}

@@ -559,8 +559,12 @@ impl Part {
         ((self.rng_state >> 33) as f32) / (u32::MAX as f32)
     }
 
-    fn note_on(&mut self, note: u8, velocity: u8) {
+    /// Start a voice from a RAW (pre-transpose) MIDI note. Transposition is
+    /// applied internally: `voice.note` keeps the sounding pitch, `voice.src_note`
+    /// keeps the raw key so note-offs match across transpose changes.
+    fn note_on(&mut self, raw_note: u8, velocity: u8) {
         if !self.enabled { return; }
+        let note = (raw_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
         if note < self.min_note || note > self.max_note { return; }
         self.last_velocity = velocity as f32 / 127.0;
         self.last_note = note;
@@ -578,11 +582,11 @@ impl Part {
 
         // Latch mode: toggle note on/off
         if play_mode == 3 {
-            if let Some(pos) = self.latch_held.iter().position(|&n| n == note) {
+            if let Some(pos) = self.latch_held.iter().position(|&n| n == raw_note) {
                 self.latch_held.remove(pos);
-                for v in &mut self.voices { if v.active && v.note == note { v.note_off(); } }
+                for v in &mut self.voices { if v.active && v.src_note == raw_note { v.note_off(); } }
             } else {
-                self.latch_held.push(note);
+                self.latch_held.push(raw_note);
                 // fall through to start voice below
             }
             if self.latch_held.contains(&note) {
@@ -594,7 +598,7 @@ impl Part {
                 });
                 let prev_freq = self.last_note_freq;
                 let voice_params = self.build_voice_params();
-                self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
+                self.voices[idx].note_on(note, raw_note, velocity, age, &voice_params, prev_freq);
                 self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
                 self.lfos[0].trigger_mode(self.params.lfo1_trigger_mode as u8);
                 self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
@@ -608,8 +612,8 @@ impl Part {
 
         // Mono modes (1=mono, 2=mono-st single trigger, 3 handled above)
         if play_mode == 1 || play_mode == 2 {
-            self.note_stack.retain(|&n| n != note);
-            self.note_stack.push(note);
+            self.note_stack.retain(|&n| n != raw_note);
+            self.note_stack.push(raw_note);
             self.age_counter += 1;
             let age = self.age_counter;
             // Retrigger the single mono voice
@@ -620,9 +624,9 @@ impl Part {
             let voice_params = self.build_voice_params();
             let retrigger = play_mode == 2 && self.note_stack.len() > 1; // ST: don't retrigger env
             if retrigger {
-                self.voices[idx].retrigger_note(note, &voice_params);
+                self.voices[idx].retrigger_note(note, raw_note, &voice_params);
             } else {
-                self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
+                self.voices[idx].note_on(note, raw_note, velocity, age, &voice_params, prev_freq);
             }
             self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
             if !retrigger {
@@ -637,7 +641,7 @@ impl Part {
         }
 
         // Piano mode: if same key is already playing, don't retrigger — let it continue
-        if play_mode == 6 && self.voices.iter().any(|v| v.active && v.note == note) {
+        if play_mode == 6 && self.voices.iter().any(|v| v.active && v.src_note == raw_note) {
             return;
         }
 
@@ -677,7 +681,7 @@ impl Part {
             _ => None,
         };
         let voice_params = self.build_voice_params();
-        self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
+        self.voices[idx].note_on(note, raw_note, velocity, age, &voice_params, prev_freq);
         self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
         // Retrigger LFOs on note-on if flagged
         self.lfos[0].trigger_mode(self.params.lfo1_trigger_mode as u8);
@@ -768,7 +772,9 @@ impl Part {
         }
     }
 
-    fn note_off(&mut self, note: u8) {
+    /// Release voices matching the RAW (pre-transpose) note — see `note_on`.
+    fn note_off(&mut self, raw_note: u8) {
+        let note = (raw_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
         let play_mode = self.params.play_mode as u8;
 
         // Latch mode: notes released by toggling via note_on, not note_off
@@ -776,17 +782,18 @@ impl Part {
 
         // Mono modes: manage note stack
         if play_mode == 1 || play_mode == 2 {
-            self.note_stack.retain(|&n| n != note);
+            self.note_stack.retain(|&n| n != raw_note);
             if let Some(&prev_note) = self.note_stack.last() {
                 // Retrigger with the previous held note
                 let vp = self.build_voice_params();
+                let prev_transposed = (prev_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
                 if let Some(v) = self.voices.iter_mut().find(|v| v.active) {
-                    v.retrigger_note(prev_note, &vp);
+                    v.retrigger_note(prev_transposed, prev_note, &vp);
                     if play_mode == 1 { v.retrigger_envelope(); }
                 }
             } else {
                 for voice in &mut self.voices {
-                    if voice.active && voice.note == note { voice.note_off(); }
+                    if voice.active && voice.src_note == raw_note { voice.note_off(); }
                 }
                 if !self.has_active_notes() {
                     self.mseg1_state.release();
@@ -803,7 +810,7 @@ impl Part {
             match self.params.sustain_mode as u32 {
                 0 => {
                     // Hold all notes — don't release while pedal is down
-                    self.sustained_notes[note as usize] = true;
+                    self.sustained_notes[raw_note as usize] = true;
                 }
                 1 => {
                     // Release note only if other active non-releasing notes are held
@@ -811,21 +818,21 @@ impl Part {
                         .any(|v| v.note != note && v.active && !v.is_releasing());
                     if other_active {
                         for voice in &mut self.voices {
-                            if voice.active && voice.note == note { voice.note_off(); }
+                            if voice.active && voice.src_note == raw_note { voice.note_off(); }
                         }
                     } else {
                         // Held by pedal — must be flagged so pedal-up releases it
-                        self.sustained_notes[note as usize] = true;
+                        self.sustained_notes[raw_note as usize] = true;
                     }
                 }
                 _ => {
                     // Default: hold all
-                    self.sustained_notes[note as usize] = true;
+                    self.sustained_notes[raw_note as usize] = true;
                 }
             }
         } else {
             for voice in &mut self.voices {
-                if voice.active && voice.note == note { voice.note_off(); }
+                if voice.active && voice.src_note == raw_note { voice.note_off(); }
             }
         }
 
@@ -840,9 +847,9 @@ impl Part {
     /// Release all voices playing `note` with an explicit amp-release duration
     /// (same voice-matching as `note_off`). Used by pedal-up when the optional
     /// sustain-release override is on.
-    fn note_off_for(&mut self, note: u8, seconds: f32) {
+    fn note_off_for(&mut self, raw_note: u8, seconds: f32) {
         for voice in &mut self.voices {
-            if voice.active && voice.note == note { voice.note_off_for(seconds); }
+            if voice.active && voice.src_note == raw_note { voice.note_off_for(seconds); }
         }
     }
 
@@ -1388,7 +1395,7 @@ impl SynthEngine {
                     let mut needs = [false; 128];
                     for voice in &part.voices {
                         if voice.active && !voice.is_releasing() {
-                            needs[voice.note as usize] = true;
+                            needs[voice.src_note as usize] = true;
                         }
                     }
                     for (note, &held) in needs.iter().enumerate() {
@@ -1422,7 +1429,7 @@ impl SynthEngine {
                 if !part.enabled { continue; }
                 let transposed = (off as i16 + part.transpose as i16).clamp(0, 127) as u8;
                 if part.sf2_mode { self.sampler.note_off(i, transposed); }
-                else { part.note_off(transposed); }
+                else { part.note_off(off); } // raw: part matches by src_note
             }
             let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
             self.looper.record_event(off, 0, ap);
@@ -1631,7 +1638,7 @@ impl SynthEngine {
                         if part.sf2_mode {
                             self.sampler.note_off(i, transposed);
                         } else {
-                            part.note_off(transposed);
+                            part.note_off(note); // raw: part matches by src_note
                         }
                     }
                     let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
@@ -1647,7 +1654,7 @@ impl SynthEngine {
                         if part.sf2_mode {
                             self.sampler.note_on(i, transposed, velocity);
                         } else {
-                            part.note_on(transposed, velocity);
+                            part.note_on(note, velocity); // raw: part transposes internally
                         }
                     }
                     self.looper.record_event(note, velocity, ap);
@@ -1669,7 +1676,7 @@ impl SynthEngine {
                         if part.sf2_mode {
                             self.sampler.note_off(i, transposed);
                         } else {
-                            part.note_off(transposed);
+                            part.note_off(note); // raw: part matches by src_note
                         }
                     }
                     let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
@@ -1748,7 +1755,8 @@ impl SynthEngine {
                 if channel != 9 {
                     for part in &mut self.parts {
                         for voice in &mut part.voices {
-                            if voice.note == note && voice.active {
+                            // src_note = raw key; poly AT was always sent raw
+                            if voice.src_note == note && voice.active {
                                 voice.poly_aftertouch = pressure;
                             }
                         }
@@ -1964,6 +1972,10 @@ impl SynthEngine {
                 if let Some(l) = self.parts.get_mut(part) { l.pan = pan.clamp(-1.0, 1.0); }
             }
             ControlEvent::SetPartTranspose { part, semitones } => {
+                // DSP voices match note-offs by src_note (raw), so held voices
+                // stay releasable across the change. SF2 voices transpose
+                // engine-side and are covered by the state-change drains
+                // (SetPartSf2Mode/ProgramChange/panic) — no extra action here.
                 if let Some(l) = self.parts.get_mut(part) { l.transpose = semitones; }
             }
             ControlEvent::SetMacro { part, index, value } => {
@@ -2611,7 +2623,7 @@ impl SynthEngine {
                         if !part.enabled { continue; }
                         let transposed = (off_note as i16 + part.transpose as i16).clamp(0, 127) as u8;
                         if part.sf2_mode { self.sampler.note_off(i, transposed); }
-                        else { part.note_off(transposed); }
+                        else { part.note_off(off_note); } // raw: part matches by src_note
                     }
                     let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
                     self.looper.record_event(off_note, 0, ap);
@@ -2624,7 +2636,7 @@ impl SynthEngine {
                         if note < part.min_note || note > part.max_note { continue; }
                         if vel < part.vel_min || vel > part.vel_max { continue; }
                         if part.sf2_mode { self.sampler.note_on(i, transposed, vel); }
-                        else { part.note_on(transposed, vel); }
+                        else { part.note_on(note, vel); } // raw: part transposes internally
                     }
                     self.looper.record_event(note, vel, ap);
                 }
@@ -2642,13 +2654,13 @@ impl SynthEngine {
                         if part.sf2_mode {
                             self.sampler.note_on(pi, transposed, vel);
                         } else {
-                            part.note_on(transposed, vel);
+                            part.note_on(note, vel); // raw: part transposes internally
                         }
                     } else {
                         if part.sf2_mode {
                             self.sampler.note_off(pi, transposed);
                         } else {
-                            part.note_off(transposed);
+                            part.note_off(note); // raw: part matches by src_note
                         }
                     }
                 }

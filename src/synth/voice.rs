@@ -57,6 +57,9 @@ fn apply_velocity_curve(v: f32, curve: u8) -> f32 {
 #[derive(Clone)]
 pub struct Voice {
     pub(crate) note: u8,
+    /// RAW (pre-transpose) MIDI note the voice was started with. Off paths
+    /// match on this so a transpose change mid-note cannot orphan the voice.
+    pub(crate) src_note: u8,
     pub(crate) active: bool,
     /// Monotonic counter set at note-on for voice-stealing (oldest first).
     pub(crate) age: u64,
@@ -116,6 +119,7 @@ impl Voice {
     pub fn new(sample_rate: f32) -> Self {
         Self {
             note: 0,
+            src_note: 0,
             active: false,
             age: 0,
             poly_aftertouch: 0.0,
@@ -189,12 +193,14 @@ impl Voice {
     pub fn note_on(
         &mut self,
         note: u8,
+        src_note: u8,
         velocity: u8,
         age: u64,
         params: &VoiceParams,
         prev_freq: Option<f32>,
     ) {
         self.note = note;
+        self.src_note = src_note;
         self.active = true;
         self.age = age;
         let new_freq = midi_to_freq(note);
@@ -529,8 +535,9 @@ impl Voice {
 
     /// Mono Single Trigger: change pitch without retriggering envelopes.
     /// Used when a new note arrives while another is held (legato slide).
-    pub fn retrigger_note(&mut self, note: u8, params: &VoiceParams) {
+    pub fn retrigger_note(&mut self, note: u8, src_note: u8, params: &VoiceParams) {
         self.note = note;
+        self.src_note = src_note;
         let new_freq = midi_to_freq(note);
         self.target_freq = new_freq;
         self.log_target_freq = new_freq.ln();
