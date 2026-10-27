@@ -96,6 +96,9 @@ pub struct UiSettings {
     /// Drum velocity off: all hits at 127 (for velocity-less controllers)
     #[serde(default)]
     pub drum_fixed_velocity: bool,
+    /// Optional pedal-up release duration in seconds (None = off, patch release)
+    #[serde(default)]
+    pub sustain_release: Option<f32>,
     #[serde(default = "default_layer_a_volume")]
     pub layer_a_volume: f32,
     #[serde(default = "default_layer_b_volume")]
@@ -146,6 +149,7 @@ impl Default for Config {
                 pitch_bend_range: 2,
                 drum_volume: 0.8,
                 drum_fixed_velocity: false,
+                sustain_release: None,
                 layer_a_volume: 0.8,
                 layer_b_volume: 0.5,
                 pad_perf_map: Vec::new(),

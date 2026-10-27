@@ -300,3 +300,40 @@ fn performance_part_config_roundtrip() {
     assert_eq!(legacy.vel_min, 1);
     assert_eq!(legacy.vel_max, 127);
 }
+
+#[test]
+fn dsp_sustain_release_override() {
+    // Init patch: amp_release 0.3s, amp_sustain 0.7, IIR sqrt release.
+    // Override 0.05s: after ~100ms the tail must be far below the patch's
+    // natural decay (0.7 * exp(-100/300) ≈ 0.50), so use 0.05s override and
+    // a generous threshold that the patch tail provably exceeds.
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetSustainRelease { seconds: Some(0.05) });
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    pedal_up(&mut e); // pedal-held note released with the 0.05s override
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..150 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~100ms
+    let peak = render_peak(&mut e, 10);
+    assert!(peak < 0.15, "override release did not shorten the tail (peak {peak})");
+}
+
+#[test]
+fn key_release_uses_patch_release() {
+    // Override 0.05s vs patch release 0.3s. At ~250ms post-key-off the
+    // override envelope is fully idle (< SILENCE, ~180ms to Idle) while the
+    // patch tail still holds ≈ 0.7 * exp(-250/300) ≈ 0.30 — the assert
+    // discriminates (a plain > 0.0 would pass even if the override leaked).
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetSustainRelease { seconds: Some(0.05) });
+    pedal_up(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..375 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~250ms
+    let peak = render_peak(&mut e, 10);
+    assert!(peak > 0.15, "key release appears overridden by sustain-release (peak {peak})");
+}

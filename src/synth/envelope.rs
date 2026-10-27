@@ -157,6 +157,24 @@ impl Envelope {
         self.stage = EnvStage::Release;
     }
 
+    /// Note-off with an explicit release duration (seconds), overriding the
+    /// configured release rate. Used for the optional sustain-release setting.
+    pub fn note_off_for(&mut self, seconds: f32) {
+        if self.stage == EnvStage::Idle { return; }
+        self.stage = EnvStage::Release;
+        self.phase = 0.0; // Decay leaves phase at 1.0; without the reset a
+                          // sustained note under a Linear/Quadratic shape
+                          // would cut to zero instantly.
+        self.release_start = self.output;
+        let t = seconds.max(0.02);
+        // BOTH release representations must be set: IIR shapes read
+        // release_coeff, Linear/Quadratic shapes read phase_step_r
+        // (user-selectable via env_release_shape). Missing one silently
+        // keeps the patch release for that shape.
+        self.release_coeff = time_to_coeff(t, self.sample_rate);
+        self.phase_step_r = 1.0 / (t * self.sample_rate);
+    }
+
     pub fn is_idle(&self) -> bool {
         self.stage == EnvStage::Idle
     }

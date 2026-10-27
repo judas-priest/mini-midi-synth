@@ -723,6 +723,7 @@ pub fn run_gui(
         pending_remove_part: None,
         _program_change_atom: c.program_change_atom,
         sustain_atom: c.sustain_atom,
+        sustain_release: c.config.ui.sustain_release,
         show_help: false,
         global_params: {
             let mut gp = std::collections::BTreeMap::new();
