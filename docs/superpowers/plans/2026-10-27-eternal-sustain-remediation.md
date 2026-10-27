@@ -1,5 +1,8 @@
 # Eternal Sustain Remediation Plan
 
+> anchor-checked: 2026-10-27 (three review subagents verified every file path, function name and replace-baseline against the repo; two review rounds)
+> status: executing 2026-10-27
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Eliminate every path where notes ring forever after sustain/preset/part/fader/SF2 operations.
