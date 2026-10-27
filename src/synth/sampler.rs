@@ -286,6 +286,8 @@ impl SamplerEngine {
                         synth.process_midi_message(i as i32, 0xC0, self.part_program[i] as i32, 0);
                     }
                 }
+                // Rebuild made a fresh Synthesizer — re-apply the release scale
+                synth.set_release_time_scale(self.release_scale);
             }
         }
         let mut drums_displaced = Displaced::default();
