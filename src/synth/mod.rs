@@ -1364,6 +1364,10 @@ impl SynthEngine {
                     }
                 }
                 part.sustained_notes = [false; 128];
+                // All pedal-held voices are gone; stale mono/latch entries
+                // would resurrect them on the next key press (mono retrigger).
+                part.note_stack.clear();
+                part.latch_held.clear();
             }
         }
     }
