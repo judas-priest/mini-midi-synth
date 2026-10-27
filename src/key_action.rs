@@ -13,6 +13,7 @@ pub enum KeyAction {
     ToggleDrumsSynth,
     PrevPreset,
     NextPreset,
+    TogglePadPerf,
 }
 
 #[allow(dead_code)]
@@ -36,6 +37,7 @@ impl KeyAction {
             Self::ToggleDrumsSynth => "Toggle Drums/Synth",
             Self::PrevPreset => "Previous Preset",
             Self::NextPreset => "Next Preset",
+            Self::TogglePadPerf => "Toggle Pad Performances",
         }
     }
 
@@ -50,6 +52,7 @@ impl KeyAction {
             Self::ToggleDrumsSynth => "ToggleDrumsSynth".into(),
             Self::PrevPreset => "PrevPreset".into(),
             Self::NextPreset => "NextPreset".into(),
+            Self::TogglePadPerf => "TogglePadPerf".into(),
         }
     }
 
@@ -67,6 +70,7 @@ impl KeyAction {
             "ToggleDrumsSynth" => Some(Self::ToggleDrumsSynth),
             "PrevPreset" => Some(Self::PrevPreset),
             "NextPreset" => Some(Self::NextPreset),
+            "TogglePadPerf" => Some(Self::TogglePadPerf),
             _ => None,
         }
     }
@@ -82,6 +86,7 @@ impl KeyAction {
             Self::LooperUndo, Self::LooperClear,
             Self::DrumTogglePlay, Self::ToggleDrumsSynth,
             Self::PrevPreset, Self::NextPreset,
+            Self::TogglePadPerf,
         ]
     }
 }

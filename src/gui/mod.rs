@@ -1224,6 +1224,9 @@ impl App {
                         self.save_config();
                     }
                 }
+                KeyAction::TogglePadPerf => {
+                    self.show_pad_perf = !self.show_pad_perf;
+                }
             }
         }
     }

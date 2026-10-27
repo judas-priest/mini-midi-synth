@@ -97,6 +97,11 @@ impl App {
                 self.show_fx_chain = true; self.show_drums = false;
                 self.show_looper = false; self.show_midi_seq = false;
             }
+            // NAV long-press opens this too, but NAV SysEx only arrives over
+            // Bluetooth — USB users need a GUI path.
+            if ui.selectable_label(self.show_pad_perf, "Pads").on_hover_text("Pad Performances (assign performances to pads 36-51)").clicked() {
+                self.show_pad_perf = !self.show_pad_perf;
+            }
         });
 
         // ── Middle-click removal confirmation ────────────────────────────

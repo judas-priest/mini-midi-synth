@@ -551,6 +551,9 @@ pub fn run_headless() -> Result<()> {
                     KeyAction::PrevPreset | KeyAction::NextPreset => {
                         // Preset navigation not supported in headless mode
                     }
+                    KeyAction::TogglePadPerf => {
+                        // Pad performance panel is GUI-only
+                    }
                 }
             }
         }
