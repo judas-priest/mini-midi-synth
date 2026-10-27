@@ -1562,6 +1562,32 @@ impl SynthEngine {
                 let drum_mode = self.seq_target.load(std::sync::atomic::Ordering::Relaxed) == 0;
                 let sampler_drums = self.sampler.drums_enabled();
                 if channel == 9 || (is_drum_note && drum_mode) {
+                    // Pad bank 2 transport (notes outside the drum range 36-51):
+                    // 83 (B5) record, 82 (A#5) play/pause, 81 (A5) pause/stop,
+                    // 64 (E4) undo. Never reach the drum trigger path.
+                    if channel == 9 && velocity > 0 {
+                        match note {
+                            83 => {
+                                let rec = !self.drum_engine.sequencer.recording;
+                                self.drum_engine.set_recording(rec);
+                                return;
+                            }
+                            82 => {
+                                let playing = !self.drum_engine.sequencer.playing;
+                                self.drum_engine.set_playing(playing);
+                                return;
+                            }
+                            81 => {
+                                self.drum_engine.set_playing(false);
+                                return;
+                            }
+                            64 => {
+                                self.drum_engine.sequencer.undo();
+                                return;
+                            }
+                            _ => {}
+                        }
+                    }
                     if velocity > 0 {
                         let velocity = if self.drum_engine.fixed_velocity { 127 } else { velocity };
                         // Record into sequencer if recording

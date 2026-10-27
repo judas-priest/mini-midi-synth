@@ -910,6 +910,21 @@ impl DrumEngine {
         self.rec_atom.clone()
     }
 
+    /// Pad-transport record toggle: snapshots before enabling so undo
+    /// reverts exactly what this recording added (same as DrumSeqRecord).
+    pub fn set_recording(&mut self, on: bool) {
+        if on && !self.sequencer.recording {
+            self.sequencer.save_snapshot();
+        }
+        self.sequencer.recording = on;
+        self.rec_atom.store(on as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn set_playing(&mut self, on: bool) {
+        self.sequencer.playing = on;
+        self.play_atom.store(on as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         let step = self.step_atom.clone();
         let play = self.play_atom.clone();

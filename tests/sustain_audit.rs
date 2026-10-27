@@ -5,6 +5,7 @@
 
 use mini_midi_synth::preset;
 use mini_midi_synth::synth::{ControlEvent, MidiEvent, SynthEngine, BLOCK_SIZE};
+use std::sync::atomic::Ordering;
 
 const SR: f32 = 48_000.0;
 const SILENCE: f32 = 1e-3;
@@ -336,4 +337,44 @@ fn key_release_uses_patch_release() {
     for _ in 0..375 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~250ms
     let peak = render_peak(&mut e, 10);
     assert!(peak > 0.15, "key release appears overridden by sustain-release (peak {peak})");
+}
+
+#[test]
+fn pad_transport_controls_drum_seq() {
+    let mut e = engine_with_init_patch();
+    // NOTE: record_hit fires only while recording AND playing (drum.rs:799),
+    // so playback is enabled before recording the kick.
+    // record on (B5)
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
+    assert_eq!(e.drum_engine.rec_atom().load(Ordering::Relaxed), 1, "B5 did not start recording");
+    // play on (A#5) so record_hit actually captures
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 82, velocity: 127 });
+    assert_eq!(e.drum_engine.play_atom().load(Ordering::Relaxed), 1, "A#5 did not start playback");
+    // hit a kick while recording (goes through the normal drum path)
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 36, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 9, note: 36 });
+    // record off (B5 toggle)
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
+    assert_eq!(e.drum_engine.rec_atom().load(Ordering::Relaxed), 0, "B5 did not stop recording");
+    // undo (E4) must revert the recorded hit
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 64, velocity: 127 });
+    let pat = e.drum_engine.sequencer.current_pattern as usize;
+    let any_hit: bool = e.drum_engine.sequencer.patterns[pat]
+        .steps.iter().flatten()
+        .any(|s| s.velocity > 0);
+    assert!(!any_hit, "undo did not revert the recorded kick");
+    // pause (A5)
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 81, velocity: 127 });
+    assert_eq!(e.drum_engine.play_atom().load(Ordering::Relaxed), 0, "A5 did not pause playback");
+}
+
+#[test]
+fn pad_transport_notes_do_not_trigger_drums() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 82, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 81, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 64, velocity: 127 });
+    let peak = render_peak(&mut e, 200);
+    assert!(peak < SILENCE, "transport notes leaked into drum audio (peak {peak})");
 }
