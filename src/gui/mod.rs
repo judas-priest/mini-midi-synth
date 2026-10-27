@@ -1549,6 +1549,14 @@ impl App {
                 });
             }
         }
+        // Parts absent from the performance must not keep playing
+        // the previous patch with their old voices.
+        for i in perf.parts.len()..self.parts.len() {
+            if self.parts[i].enabled {
+                self.parts[i].enabled = false;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
+            }
+        }
         true
     }
 
