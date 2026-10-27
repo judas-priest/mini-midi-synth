@@ -78,3 +78,16 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
   locate the USB-MIDI SysEx dispatcher in the AC791N image).
 - Manual confirms: knobs/pads messages are configurable only via MidiSuite
   (smk37-firmware-custom-mod/firmware_work/manual_text.txt:115-121).
+
+## 9. F2 (Tone) не реагирует на ITCH wheel и mod wheel
+- Колёса (pitch/mod/itch) работают на синт-движок, но F2 (Master Tone) не
+  реагирует на их движение. Пользователь ожидает связь колёс с F2.
+- Уточнить у пользователя желаемое поведение при выборе решения.
+
+## 10. Хай-хет: закрытый хет должен глушить открытый (choke)
+- Сценарий: сыграл открытый хет → сыграл закрытый → открытый должен
+  заглохнуть (естественное поведение живой ударки). Сейчас — не заглохает.
+- В drum.rs есть CHOKE_GROUPS (crash chokes on retrigger) — проверить группы
+  хетов (open HH slot 46, closed HH 42, pedal HH 44): вероятно, closed/pedal
+  должны к choke-группе open HH, но с учётом того, что ЗАКРЫТЫЙ глушит
+  ОТКРЫТЫЙ (обратное — нет).
