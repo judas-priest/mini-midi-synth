@@ -1093,6 +1093,8 @@ pub struct SynthEngine {
     active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64 from pedal/fader or GUI toggle), shared with GUI
     sustain: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Sustain slider position ×1000 (0 = OFF, 1000 = full ON), GUI mirror
+    sustain_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU16>,
     /// Optional pedal-up release duration in seconds (None = patch release)
     sustain_release: Option<f32>,
     /// Oscilloscope ring buffer: 256 mono samples shared with GUI via atomics
@@ -1353,6 +1355,7 @@ impl SynthEngine {
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sustain_pos_atom: std::sync::Arc::new(std::sync::atomic::AtomicU16::new(1000)),
             sustain_release: Some(1.0),
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
             scope_write: 0,
@@ -1382,10 +1385,7 @@ impl SynthEngine {
     /// flags (patch switched while pedal was down, mono/latch holds) would
     /// otherwise leave notes ringing forever.
     fn set_sustain(&mut self, value: u8) {
-        let mut on = value >= 64;
-        if self.sustain_release.is_none() {
-            on = false; // Sustain slider at OFF: pedal is ignored entirely
-        }
+        let on = value >= 64;
         self.sustain.store(on, std::sync::atomic::Ordering::Relaxed);
         // SF2 voices: rustysynth applies hold-pedal per channel itself
         self.sampler.sustain_pedal(on);
@@ -1422,6 +1422,34 @@ impl SynthEngine {
                 part.latch_held.clear();
             }
         }
+    }
+
+    /// F1 fader (CC64) — continuous sustain control:
+    /// bottom (<= 2) = sustain OFF: held notes release with the fraction the
+    /// fader had just before dropping to the bottom, then pedal stays up;
+    /// elsewhere = sustain ON, pedal-up tail fraction = fader position
+    /// (top = full default tails).
+    fn set_sustain_from_cc(&mut self, v: u8) {
+        if v <= 2 {
+            self.set_sustain(0);
+            self.sustain_release = None;
+            self.sync_sustain_pos();
+            return;
+        }
+        let f = (v as f32 / 127.0).clamp(0.02, 1.0);
+        self.sustain_release = Some(f);
+        self.sampler.set_release_time_scale(f.clamp(0.02, 1.0));
+        self.sync_sustain_pos();
+        self.set_sustain(127);
+    }
+
+    fn sync_sustain_pos(&mut self) {
+        let v = self.sustain_release.map(|f| (f * 1000.0) as u16).unwrap_or(0);
+        self.sustain_pos_atom.store(v, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn sustain_pos_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU16> {
+        self.sustain_pos_atom.clone()
     }
 
     /// Last held arp key released: the arpeggiator resets pattern_len, so
@@ -1806,7 +1834,9 @@ impl SynthEngine {
                 }
                 // Dedicated mod sources: Breath (CC2), Expression (CC11), Sustain (CC64)
                 if cc == 64 {
-                    self.set_sustain(value);
+                    // F1 fader = continuous sustain: bottom = OFF, elsewhere =
+                    // sustain with pedal-up tail fraction = fader position.
+                    self.set_sustain_from_cc(value);
                 } else {
                     for part in &mut self.parts {
                         match cc {
@@ -2104,9 +2134,18 @@ impl SynthEngine {
                 // One knob, both engines. None = pedal ignored (OFF);
                 // Some(1.0) = normal sustain, default tails; Some(f) = sustain
                 // whose pedal-up release is a fraction f of the default.
+                if pos.is_none() {
+                    // Manual OFF: release held notes with the fraction the
+                    // slider had, then park at OFF.
+                    self.set_sustain(0);
+                }
                 self.sustain_release = pos;
                 let scale = pos.unwrap_or(1.0).clamp(0.02, 1.0);
                 self.sampler.set_release_time_scale(scale);
+                self.sync_sustain_pos();
+                if pos.is_some() {
+                    self.set_sustain(127);
+                }
             }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
                 self.drum_engine.fixed_velocity = fixed;

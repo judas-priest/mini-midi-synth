@@ -283,6 +283,8 @@ pub struct App {
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
     pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Sustain slider position ×1000 (0=OFF..1000=ON), engine mirror
+    pub sustain_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU16>,
     /// Optional pedal-up release duration (None = off, patch release)
     pub sustain_release: Option<f32>,
     /// Show help dialog
@@ -597,10 +599,15 @@ impl eframe::App for App {
         egui::TopBottomPanel::top("global_controls").show(ctx, |ui| {
             ui.add_space(theme::SP_SM);
             ui.horizontal(|ui| {
-                // Sustain: single slider replacing the ON/OFF button.
+                // Sustain: single slider — mirrors the F1 fader (CC64) live.
                 // Leftmost = pedal ignored (no sustain); rightmost = normal
                 // sustain with default tails; between = sustain whose
                 // pedal-up release is a fraction of the default (both engines).
+                let atom_pos = self.sustain_pos_atom.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0;
+                if (atom_pos - self.sustain_release.unwrap_or(0.0)).abs() > 0.001 {
+                    // Fader/engine moved the position — follow it.
+                    self.sustain_release = if atom_pos <= 0.005 { None } else { Some(atom_pos) };
+                }
                 let sus_lit = self.sustain_atom.load(std::sync::atomic::Ordering::Relaxed);
                 ui.label("Sustain:");
                 let mut pos = self.sustain_release.unwrap_or(0.0);

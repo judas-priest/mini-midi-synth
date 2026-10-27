@@ -303,39 +303,38 @@ fn performance_part_config_roundtrip() {
 }
 
 #[test]
-fn dsp_sustain_release_override() {
-    // Init patch: amp_release 0.3s, amp_sustain 0.7, IIR sqrt release.
-    // Override fraction 0.1 → tail = 0.1 * 0.3 = 0.03s: after ~100ms the
-    // envelope is idle, far below the patch's natural decay (≈ 0.50).
+fn fader_low_shortens_pedal_up_tail() {
+    // F1 fader model: CC64 position is both the hold and the tail fraction.
+    // Fader low (~0.08): hold notes, then fader to bottom -> pedal-up release
+    // is a fraction of the patch's amp_release -> short tail (init 0.3s).
     let mut e = engine_with_init_patch();
-    let _ = e.handle_control(ControlEvent::SetSustainSlider { pos: Some(0.1) });
-    pedal_down(&mut e);
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 10 });
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
-    pedal_up(&mut e); // pedal-held note released with the 0.05s override
+    assert!(render_peak(&mut e, 20) > SILENCE, "note not held at fader 10");
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 0 });
     let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
     for _ in 0..150 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~100ms
     let peak = render_peak(&mut e, 10);
-    assert!(peak < 0.15, "override release did not shorten the tail (peak {peak})");
+    assert!(peak < 0.15, "low fader did not shorten the pedal-up tail (peak {peak})");
 }
 
 #[test]
-fn key_release_uses_patch_release() {
-    // Fraction 0.1 (tail 0.03s) vs patch release 0.3s. At ~250ms post-key-off the
-    // override envelope is fully idle (< SILENCE, ~180ms to Idle) while the
-    // patch tail still holds ≈ 0.7 * exp(-250/300) ≈ 0.30 — the assert
-    // discriminates (a plain > 0.0 would pass even if the override leaked).
+fn fader_top_keeps_full_default_tails() {
+    // Fader at top (127): full ON — pedal-up takes the exact pre-slider
+    // plain-release path with the patch's full amp_release (0.3s on init).
     let mut e = engine_with_init_patch();
-    let _ = e.handle_control(ControlEvent::SetSustainSlider { pos: Some(0.1) });
-    pedal_up(&mut e);
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
-    assert!(render_peak(&mut e, 200) > SILENCE, "no sound");
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 });
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 20) > SILENCE, "note not held at fader 127");
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 0 });
     let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
     for _ in 0..375 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~250ms
     let peak = render_peak(&mut e, 10);
-    assert!(peak > 0.15, "key release appears overridden by sustain-release (peak {peak})");
+    assert!(peak > 0.15, "full ON lost the default tail (peak {peak})");
 }
 
 #[test]

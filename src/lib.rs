@@ -100,6 +100,8 @@ struct CommonInit {
     #[cfg(feature = "gui")]
     sustain_atom: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(feature = "gui")]
+    sustain_pos_atom: Arc<std::sync::atomic::AtomicU16>,
+    #[cfg(feature = "gui")]
     drum_step_atom: Arc<AtomicU8>,
     #[cfg(feature = "gui")]
     drum_play_atom: Arc<AtomicU8>,
@@ -210,6 +212,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     #[cfg(feature = "gui")]
     let sustain_atom = engine.sustain_atom();
     #[cfg(feature = "gui")]
+    let sustain_pos_atom = engine.sustain_pos_atom();
+    #[cfg(feature = "gui")]
     let pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
     #[cfg(feature = "gui")]
     let scope_buf = engine.scope_buffer();
@@ -313,6 +317,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         program_change_atom,
         #[cfg(feature = "gui")]
         sustain_atom,
+        #[cfg(feature = "gui")]
+        sustain_pos_atom,
         #[cfg(feature = "gui")]
         drum_step_atom,
         #[cfg(feature = "gui")]
@@ -723,6 +729,7 @@ pub fn run_gui(
         pending_remove_part: None,
         _program_change_atom: c.program_change_atom,
         sustain_atom: c.sustain_atom,
+        sustain_pos_atom: c.sustain_pos_atom,
         sustain_release: c.config.ui.sustain_release,
         show_help: false,
         global_params: {
