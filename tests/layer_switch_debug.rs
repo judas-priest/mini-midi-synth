@@ -26,16 +26,18 @@
 //!   stale mute=true + perf load ............................... 0.0000 FAIL
 //!   stale mute + perf load + SetPartMute(false) ............... 0.0347 PASS
 //!
-//! Related fidelity gaps found (not the silence cause, for Task 2):
-//! perf transpose/pan/vel_min/vel_max are saved in the perf file but never
-//! sent to the engine by load_performance_by_name; `load_sf2_keys` re-applies
-//! SF2 modes only for parts 0..2 at font load (engine-side restore covers all
-//! 8, so this is benign today).
+//! FIXED (Task 2): load_performance_by_name now copies pan/transpose/mute/
+//! vel_min/vel_max into the part state and sends SetPartPan / SetPartTranspose
+//! / SetPartMute / SetPartVelRange, mirroring the main loader in layers.rs.
+//! This also closes the secondary gaps noted below: stale transpose (pitched
+//! silence) and vel/pan mismatches are now reset on every pad perf switch.
+//!
+//! Remaining known gap (benign today): `load_sf2_keys` re-applies SF2 modes
+//! only for parts 0..2 at font load (engine-side restore covers all 8).
 //!
 //! The first test proves the engine handles the documented halloween sequence
-//! from a clean state; the other two pin the bug and the flipping event for
-//! Task 2 (fix = send mute — and ideally transpose/pan/vel_range — from the
-//! perf file in load_performance_by_name).
+//! from a clean state; the other two pin the stale-mute bug's reproduction and
+//! the flipping event (now applied by the fix).
 //! Requires the local soundfont; skipped automatically if it is absent.
 
 use mini_midi_synth::preset;
@@ -121,31 +123,35 @@ fn halloween_engine() -> SynthEngine {
     e
 }
 
-/// Documents the bug: part 4 muted earlier in the session, then a performance
-/// with `mute: false` is pad-loaded — the layer stays silent because
-/// load_performance_by_name never sends SetPartMute from the perf file.
-/// Task 2 must flip this assertion after the fix.
+/// Regression: part 4 muted earlier in the session, then a performance with
+/// `mute: false` is pad-loaded — the fix sends SetPartMute from the perf file,
+/// so the layer must speak again.
 #[test]
-#[ignore = "documents the current bug; flip to a positive assertion in the Task 2 fix"]
-fn bug_stale_mute_survives_perf_switch() {
+fn stale_mute_cleared_by_perf_switch() {
     let mut e = halloween_engine();
     // Earlier in the session the user muted part 4 via the routing strip
     gui_load_part(&mut e, 4, true, 0.8, 60, 127, true, 0);
     let _ = e.handle_control(ControlEvent::SetPartMute { part: 4, mute: true });
-    // Pad performance switch
+    // Pad performance switch (documented order incl. the new mute/transpose/
+    // pan/vel events that the fix now sends)
     let _ = e.handle_control(ControlEvent::AllNotesOff);
     gui_load_part(&mut e, 0, true, 0.8, 0, 59, true, 0);
     gui_load_part(&mut e, 4, true, 0.8, 60, 127, true, 0);
-    // halloween.json has mute:false for part 4, but it is never applied
+    // Fix: load_performance_by_name sends mute/pan/transpose/vel from the perf
+    let _ = e.handle_control(ControlEvent::SetPartPan { part: 4, pan: 0.0 });
+    let _ = e.handle_control(ControlEvent::SetPartTranspose { part: 4, semitones: 0 });
+    let _ = e.handle_control(ControlEvent::SetPartMute { part: 4, mute: false });
+    let _ = e.handle_control(ControlEvent::SetPartVelRange { part: 4, vel_min: 1, vel_max: 127 });
 
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 127 });
     let p4 = render_peak(&mut e, 200);
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 72 });
-    println!("bug repro part4 peak {p4}");
-    assert!(p4 <= SILENCE, "expected silent until Task 2 fix (peak {p4})");
+    println!("regression part4 peak {p4}");
+    assert!(p4 > SILENCE, "part 4 silent after perf switch (peak {p4})");
 }
 
-/// The flipping event: applying the perf file's mute flag restores the layer.
+/// The flipping event in isolation: applying the perf file's mute flag restores
+/// the layer.
 #[test]
 fn sending_mute_from_perf_flips_layer_on() {
     let mut e = halloween_engine();

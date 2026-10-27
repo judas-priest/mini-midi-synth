@@ -1540,10 +1540,20 @@ impl App {
             self.parts[i].edited_params = part.param_overrides.clone();
             self.parts[i].sf2_mode = part.sf2_mode;
             self.parts[i].sf2_program = part.sf2_program;
+            self.parts[i].pan = part.pan;
+            self.parts[i].transpose = part.transpose;
+            self.parts[i].mute = part.mute;
+            self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
+            self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
             self.send_edited_params(i);
             self.send_part_enabled(i);
             self.send_part_volume(i);
             self.send_part_range(i);
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan: part.pan });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: part.transpose });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: part.mute });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange {
+                part: i, vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max });
             // Restore SF2 mode for this part
             let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: part.sf2_mode });
             if part.sf2_mode {
