@@ -200,6 +200,9 @@ pub struct SamplerEngine {
     /// Sample start offset in samples — skip this many samples after note-on
     /// to compensate for slow SF2 attack envelopes.
     sample_offset: usize,
+    /// Last sustain state, re-applied after SF2 rebuilds (fresh rustysynth
+    /// channels start with hold_pedal=false).
+    sustain: bool,
 }
 
 impl SamplerEngine {
@@ -216,6 +219,7 @@ impl SamplerEngine {
             drum_volume: 1.0,
             seq_channel_program: [255; 16], // 255 = not yet initialised
             sample_offset: 0,
+            sustain: false,
         }
     }
 
@@ -234,6 +238,7 @@ impl SamplerEngine {
                 }
             }
         }
+        self.apply_sustain();
         displaced
     }
 
@@ -280,6 +285,7 @@ impl SamplerEngine {
         if let Some(sf) = self.drums.soundfont.clone() {
             drums_displaced = self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
         }
+        self.apply_sustain();
         (keys_displaced, drums_displaced)
     }
 
@@ -294,6 +300,7 @@ impl SamplerEngine {
         if let Some(sf) = self.drums.soundfont.clone() {
             drums_displaced = self.load_drums_soundfont(sf);
         }
+        self.apply_sustain();
         (keys_displaced, drums_displaced)
     }
 
@@ -351,6 +358,16 @@ impl SamplerEngine {
     /// the pedal is down keep sounding until it is released. Drum channel 9
     /// is intentionally not sustained.
     pub fn sustain_pedal(&mut self, on: bool) {
+        self.sustain = on;
+        let val = if on { 127 } else { 0 };
+        for ch in 0..8usize {
+            self.keys.midi(ch as i32, 0xB0, 64, val);
+        }
+    }
+
+    /// Re-send CC64 to the part channels after a rustysynth rebuild.
+    fn apply_sustain(&mut self) {
+        let on = self.sustain;
         let val = if on { 127 } else { 0 };
         for ch in 0..8usize {
             self.keys.midi(ch as i32, 0xB0, 64, val);
@@ -422,7 +439,11 @@ impl SamplerEngine {
     }
 
     pub fn all_notes_off(&mut self) {
+        // rustysynth defers note-offs while a channel hold pedal is down
+        // (voice.rs RELEASE_REQUESTED); lift CC64 everywhere before CC123.
+        self.sustain = false;
         for ch in 0..16 {
+            self.keys.midi(ch, 0xB0, 64, 0);
             self.keys.midi(ch, 0xB0, 123, 0);
             self.drums.midi(ch, 0xB0, 123, 0);
         }
