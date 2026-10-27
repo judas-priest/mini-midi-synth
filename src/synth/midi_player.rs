@@ -202,7 +202,10 @@ impl MidiPlayer {
                     }
                 }
                 d => {
-                    if !self.is_muted(ch) {
+                    // Note-offs must never be muted: a muted track's sounding
+                    // voice would otherwise hang forever.
+                    let is_note_off = matches!(d, SeqEventData::NoteOff { .. });
+                    if is_note_off || !self.is_muted(ch) {
                         out.push((ch, d.clone()));
                     }
                 }

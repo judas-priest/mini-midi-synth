@@ -1077,6 +1077,10 @@ pub struct SynthEngine {
     pub midi_player: midi_player::MidiPlayer,
     /// Reusable event buffer for midi_player.process_block (avoids per-block allocation)
     midi_seq_buf: Vec<(u8, midi_player::SeqEventData)>,
+    /// Per MIDI-file channel: 0 = DSP layer 0 took the last note-on,
+    /// 1 = SF2 took it, 2 = drums. Note-offs must follow the note-on's
+    /// route, even if the track instrument changed mid-note.
+    seq_route: [u8; 16],
     /// Per-part modulation state, refilled each block in `tick_block`.
     /// Held as a struct field to avoid per-block `Vec` allocation.
     layer_mods: [ModulationState; MAX_PARTS],
@@ -1328,6 +1332,7 @@ impl SynthEngine {
             scope_write: 0,
             midi_player: midi_player::MidiPlayer::new(),
             midi_seq_buf: Vec::new(),
+            seq_route: [0u8; 16],
             layer_mods: [ModulationState {
                 pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
             }; MAX_PARTS],
@@ -2128,6 +2133,15 @@ impl SynthEngine {
                 }
             }
             ControlEvent::MidiSeqLoad { data } => {
+                // The old file's sounding notes will never see their note-offs
+                // from the new event stream.
+                self.sampler.all_notes_off();
+                for part in &mut self.parts {
+                    for voice in &mut part.voices {
+                        if voice.active { voice.note_off(); }
+                    }
+                }
+                self.seq_route = [0u8; 16];
                 // The Box moves into the player; what it displaced comes back
                 // out and goes to the GUI thread for freeing.
                 let (old_data, old_tracks) = self.midi_player.load(data);
@@ -2474,6 +2488,7 @@ impl SynthEngine {
                 match evt {
                     midi_player::SeqEventData::NoteOn { note, velocity } => match instr {
                         midi_player::TrackInstrument::Drums => {
+                            self.seq_route[ch as usize] = 2;
                             let sf2 = self.drum_engine.sf2_mode;
                             if sf2 {
                                 self.sampler.drum_note_on(note, velocity);
@@ -2482,28 +2497,30 @@ impl SynthEngine {
                             }
                         }
                         midi_player::TrackInstrument::DspLayer0 => {
+                            self.seq_route[ch as usize] = 0;
                             if let Some(part) = self.parts.get_mut(0) {
                                 part.note_on(note, velocity);
                             }
                         }
                         midi_player::TrackInstrument::Sf2 { program } => {
+                            self.seq_route[ch as usize] = 1;
                             self.sampler.seq_program_set(ch, program);
                             self.sampler.seq_note_on(ch, note, velocity);
                         }
                     },
-                    midi_player::SeqEventData::NoteOff { note } => match instr {
-                        midi_player::TrackInstrument::Drums => {
-                            let sf2 = self.drum_engine.sf2_mode;
-                            if sf2 { self.sampler.drum_note_off(note); }
-                        }
-                        midi_player::TrackInstrument::DspLayer0 => {
+                    midi_player::SeqEventData::NoteOff { note } => match self.seq_route[ch as usize] {
+                        0 => {
                             if let Some(part) = self.parts.get_mut(0) {
                                 part.note_off(note);
                             }
                         }
-                        midi_player::TrackInstrument::Sf2 { .. } => {
-                            self.sampler.seq_note_off(ch, note);
-                        }
+                        1 => self.sampler.seq_note_off(ch, note),
+                        _ => {
+                            if let midi_player::TrackInstrument::Drums = instr {
+                                let sf2 = self.drum_engine.sf2_mode;
+                                if sf2 { self.sampler.drum_note_off(note); }
+                            }
+                        },
                     },
                     midi_player::SeqEventData::ProgramChange { program } => {
                         // Follow file program changes when in SF2 mode
