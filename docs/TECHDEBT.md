@@ -28,3 +28,12 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
 - Panic-path arp flushes (mod.rs ~1722/~2047/~2198) dispatch untransposed off_notes — harmless today (full drains follow) but drifts from `flush_arp_note_off`.
 - `SetPartEnabled{false}` runs its cleanup block twice (drain + legacy graceful note-off) — collapse.
 - `cargo deny`: rtrb 0.3.3 advisory RUSTSEC-2026-0274 — `cargo update -p rtrb` (→ 0.3.5).
+
+## 5. Chord detection for recording
+- Problem: sequencer/looper records every played note; user wants to play a chord shape and have a single chord recorded (smart chord capture), not N separate notes.
+- Research when picked up: chord detection algorithms (pitch-class-set → chord name/midi chord), how Smart Chord on M-VAVE / DAW chord tracks capture; likely: detect simultaneously-pressed notes within a window, collapse to one chord event.
+
+## 6. Root-note-only mode for a layer (bass split)
+- Problem: many layers play the full chord; bass gets muddy. User wants a per-layer mode "play only the root note" (lowest played note / detected chord root), transposed down an octave — bass layer follows the chord root while other layers play the chord.
+- Research when picked up: chord-root detection from held notes (same detection as #5), existing implementations (arpeggiator root mode, "bass follow" in workstations).
+- Depends on #5 (root detection).
