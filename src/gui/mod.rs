@@ -283,8 +283,6 @@ pub struct App {
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
     pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Sustain slider position ×1000 (0=OFF..1000=ON), engine mirror
-    pub sustain_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU16>,
     /// Optional pedal-up release duration (None = off, patch release)
     pub sustain_release: Option<f32>,
     /// Show help dialog
@@ -599,35 +597,27 @@ impl eframe::App for App {
         egui::TopBottomPanel::top("global_controls").show(ctx, |ui| {
             ui.add_space(theme::SP_SM);
             ui.horizontal(|ui| {
-                // Sustain: single slider — mirrors the F1 fader (CC64) live.
-                // Leftmost = pedal ignored (no sustain); rightmost = normal
-                // sustain with default tails; between = sustain whose
-                // pedal-up release is a fraction of the default (both engines).
-                let atom_pos = self.sustain_pos_atom.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0;
-                if (atom_pos - self.sustain_release.unwrap_or(0.0)).abs() > 0.001 {
-                    // Fader/engine moved the position — follow it.
-                    self.sustain_release = if atom_pos <= 0.005 { None } else { Some(atom_pos) };
-                }
-                let sus_lit = self.sustain_atom.load(std::sync::atomic::Ordering::Relaxed);
-                ui.label("Sustain:");
-                let mut pos = self.sustain_release.unwrap_or(0.0);
+                // Pedal Rel: static release-length setting applied at every
+                // pedal-up. OFF (leftmost) = patch/SF2 default tails; moving
+                // right shortens the tail (right end ≈ full default again).
+                // The F1 fader itself is a plain binary pedal.
+                ui.label("Pedal Rel:");
+                let mut pos = self.sustain_release.map(|f| 0.02 + f * 0.98).unwrap_or(0.0);
                 let label = if pos <= 0.005 {
-                    "OFF".to_string()
-                } else if pos >= 0.995 {
-                    "ON".to_string()
+                    "default".to_string()
                 } else {
-                    format!("ON · {:.0}% rel", pos * 100.0)
+                    format!("{:.0}% tail", (0.02 + pos * 0.98) * 100.0)
                 };
-                let mut slider_resp = ui.add(egui::Slider::new(&mut pos, 0.0..=1.0)
+                let resp = ui.add(egui::Slider::new(&mut pos, 0.0..=1.0)
                     .show_value(false)
-                    .text(label));
-                if sus_lit {
-                    slider_resp = slider_resp.on_hover_text("Pedal currently HELD (CC64)");
-                }
-                let resp = slider_resp.on_hover_text(
-                    "Sustain: OFF = pedal ignored; ON = normal sustain with default tails; between = sustain with shortened pedal-up release (synth and SF2). Lights up while the pedal/fader is held.");
+                    .text(label))
+                    .on_hover_text("Pedal release: OFF = patch/SF2 default tails; elsewhere = shortened tail (a fraction of the default, shortest near the left end, default at the right). Applies to every pedal-up, synth and SF2.");
                 if resp.changed() {
-                    self.sustain_release = if pos <= 0.005 { None } else { Some(pos.clamp(0.02, 1.0)) };
+                    self.sustain_release = if pos <= 0.005 {
+                        None
+                    } else {
+                        Some((0.02 + pos * 0.98).clamp(0.02, 1.0))
+                    };
                     let _ = self.ctrl_tx.push(ControlEvent::SetSustainSlider { pos: self.sustain_release });
                 }
 

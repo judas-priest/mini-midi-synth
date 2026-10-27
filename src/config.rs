@@ -96,9 +96,9 @@ pub struct UiSettings {
     /// Drum velocity off: all hits at 127 (for velocity-less controllers)
     #[serde(default)]
     pub drum_fixed_velocity: bool,
-    /// Sustain slider: None = pedal OFF, Some(f) = sustain with pedal-up
-    /// tail = fraction f of default (1.0 = full default tails).
-    #[serde(default = "default_sustain_release")]
+    /// Pedal Rel static setting: None = default tails, Some(f) = pedal-up
+    /// release is a fraction f of the default.
+    #[serde(default)]
     pub sustain_release: Option<f32>,
     #[serde(default = "default_layer_a_volume")]
     pub layer_a_volume: f32,
@@ -123,7 +123,6 @@ fn default_fader_reverb() -> f32 { 0.0 }
 fn default_fader_delay() -> f32 { 0.0 }
 fn default_pitch_bend_range() -> u8 { 2 }
 fn default_drum_volume() -> f32 { 0.8 }
-fn default_sustain_release() -> Option<f32> { Some(1.0) }
 fn default_layer_a_volume() -> f32 { 0.8 }
 fn default_layer_b_volume() -> f32 { 0.5 }
 
@@ -151,7 +150,7 @@ impl Default for Config {
                 pitch_bend_range: 2,
                 drum_volume: 0.8,
                 drum_fixed_velocity: false,
-                sustain_release: Some(1.0),
+                sustain_release: None,
                 layer_a_volume: 0.8,
                 layer_b_volume: 0.5,
                 pad_perf_map: Vec::new(),
