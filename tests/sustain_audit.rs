@@ -304,15 +304,17 @@ fn performance_part_config_roundtrip() {
 
 #[test]
 fn fader_low_shortens_pedal_up_tail() {
-    // F1 fader model: CC64 position is both the hold and the tail fraction.
-    // Fader low (~0.08): hold notes, then fader to bottom -> pedal-up release
-    // is a fraction of the patch's amp_release -> short tail (init 0.3s).
+    // F1 fader model: upper half holds, lower half releases with a tail
+    // proportional to depth below the mid-point. Hold at 100, sweep to 10:
+    // tail = 10/64 * 0.3s ≈ 0.05s.
     let mut e = engine_with_init_patch();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
-    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 10 });
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 100 });
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
-    assert!(render_peak(&mut e, 20) > SILENCE, "note not held at fader 10");
+    assert!(render_peak(&mut e, 20) > SILENCE, "note not held at fader 100");
+    // Sweep fader down to 10: pedal-up with a fraction-of-default tail
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 10 });
     e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 0 });
     let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
     for _ in 0..150 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~100ms

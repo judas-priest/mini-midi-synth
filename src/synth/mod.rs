@@ -1431,11 +1431,25 @@ impl SynthEngine {
     /// (top = full default tails).
     fn set_sustain_from_cc(&mut self, v: u8) {
         if v <= 2 {
-            self.set_sustain(0);
+            // OFF = the old button's OFF: parked first, so held notes release
+            // with the PLAIN default tails (no fractional castration).
             self.sustain_release = None;
+            self.set_sustain(0);
             self.sync_sustain_pos();
             return;
         }
+        if v < 64 {
+            // Lower half: pedal up, tail scales with how far below the
+            // mid-point the fader sits (v=63 ≈ default, v=3 ≈ near-cut).
+            let f = (v as f32 / 64.0).clamp(0.02, 1.0);
+            self.sustain_release = Some(f);
+            self.sampler.set_release_time_scale(f);
+            self.sync_sustain_pos();
+            self.set_sustain(0);
+            return;
+        }
+        // Upper half: sustain ON (hold). Fraction is parked for the release
+        // that will happen when the fader later drops.
         let f = (v as f32 / 127.0).clamp(0.02, 1.0);
         self.sustain_release = Some(f);
         self.sampler.set_release_time_scale(f.clamp(0.02, 1.0));
