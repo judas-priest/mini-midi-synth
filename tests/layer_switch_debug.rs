@@ -169,3 +169,44 @@ fn sending_mute_from_perf_flips_layer_on() {
     println!("flip part4 peak {p4}");
     assert!(p4 > SILENCE, "part 4 silent (peak {p4})");
 }
+
+/// Release-time scale (GM2 CC72 semantics, vendor patch): tail = peak over a
+/// fixed window after note-off, measured twice with the same notes — scale 1.0
+/// vs scale 0.05. Comparison, not absolutes — SC-55 piano samples have natural
+/// decay on top of the release. (Caveat: if a program's native release were
+/// already at the 10 ms pop-guard floor, both runs clamp identically; piano
+/// programs are well above it.)
+#[test]
+fn sf2_release_scale_shortens_tail() {
+    let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
+
+    fn tail_peak(scale: Option<f32>, sf: &std::sync::Arc<rustysynth::SoundFont>) -> f32 {
+        let mut e = SynthEngine::new(SR);
+        e.set_patches(preset::load_all_patches());
+        let _ = e.handle_control(ControlEvent::LoadKeysSoundFont { soundfont: sf.clone() });
+        let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+        let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true });
+        let _ = e.handle_control(ControlEvent::SetPartSf2Program { part: 0, program: 0, bank: 0 });
+        if let Some(s) = scale {
+            let _ = e.handle_control(ControlEvent::SetSf2ReleaseScale { scale: s });
+        }
+        e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+        let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+        for _ in 0..100 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // attack
+        e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+        for _ in 0..40 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~27ms into release
+        let mut peak = 0.0f32;
+        for _ in 0..20 {
+            l.fill(0.0); r.fill(0.0);
+            e.tick_block(&mut l, &mut r);
+            for i in 0..BLOCK_SIZE { peak = peak.max(l[i].abs()).max(r[i].abs()); }
+        }
+        peak
+    }
+
+    let default_tail = tail_peak(None, &sf);
+    let fast_tail = tail_peak(Some(0.05), &sf);
+    println!("sf2 tail default {default_tail}, scaled {fast_tail}");
+    assert!(fast_tail < default_tail * 0.5,
+        "release scale 0.05 did not halve the early tail ({fast_tail} vs {default_tail})");
+}

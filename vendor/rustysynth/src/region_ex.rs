@@ -43,6 +43,7 @@ impl RegionEx {
         region: &RegionPair,
         key: i32,
         _velocity: i32,
+        release_scale: f32,
     ) {
         // If the release time is shorter than 10 ms, it will be clamped to 10 ms to avoid pop noise.
 
@@ -59,7 +60,8 @@ impl RegionEx {
                 key,
             );
         let sustain = SoundFontMath::decibels_to_linear(-region.get_sustain_volume_envelope());
-        let release = SoundFontMath::max(region.get_release_volume_envelope(), 0.01_f32);
+        let release = region.get_release_volume_envelope() * release_scale;
+        let release = SoundFontMath::max(release, 0.01_f32);
 
         envelope.start(delay, attack, hold, decay, sustain, release);
     }

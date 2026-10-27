@@ -218,6 +218,8 @@ pub enum ControlEvent {
     SetDrumsSf2Mode { enabled: bool },
     SetSf2BlockSize { size: usize },
     SetSf2SampleOffset { ms: f32 },
+    /// Global SF2 release multiplier (GM2 CC72 semantics, 1.0 = file defaults)
+    SetSf2ReleaseScale { scale: f32 },
     // Pitch step sequencer
     SeqSetEnabled { part: usize, enabled: bool },
     SeqSetStep { part: usize, step: u8, pitch: i8, gate: bool, velocity: u8 },
@@ -2098,6 +2100,9 @@ impl SynthEngine {
                 let (keys, drums) = self.sampler.set_block_size(size);
                 self.dispose_sf2(keys);
                 self.dispose_sf2(drums);
+            }
+            ControlEvent::SetSf2ReleaseScale { scale } => {
+                self.sampler.set_release_time_scale(scale);
             }
             ControlEvent::SetSf2SampleOffset { ms } => {
                 self.sampler.set_sample_offset_ms(ms);

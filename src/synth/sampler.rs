@@ -203,6 +203,9 @@ pub struct SamplerEngine {
     /// Last sustain state, re-applied after SF2 rebuilds (fresh rustysynth
     /// channels start with hold_pedal=false).
     sustain: bool,
+    /// Global SF2 release multiplier, re-applied after SF2 rebuilds (fresh
+    /// rustysynth instances start at scale 1.0).
+    release_scale: f32,
 }
 
 impl SamplerEngine {
@@ -220,6 +223,7 @@ impl SamplerEngine {
             seq_channel_program: [255; 16], // 255 = not yet initialised
             sample_offset: 0,
             sustain: false,
+            release_scale: 1.0,
         }
     }
 
@@ -239,6 +243,9 @@ impl SamplerEngine {
             }
         }
         self.apply_sustain();
+        if let Some(synth) = &mut self.keys.synth {
+            synth.set_release_time_scale(self.release_scale);
+        }
         displaced
     }
 
@@ -362,6 +369,14 @@ impl SamplerEngine {
         let val = if on { 127 } else { 0 };
         for ch in 0..8usize {
             self.keys.midi(ch as i32, 0xB0, 64, val);
+        }
+    }
+
+    /// Global SF2 release multiplier (GM2 CC72 semantics). 1.0 = file defaults.
+    pub fn set_release_time_scale(&mut self, scale: f32) {
+        self.release_scale = scale;
+        if let Some(synth) = &mut self.keys.synth {
+            synth.set_release_time_scale(scale);
         }
     }
 
