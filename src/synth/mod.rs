@@ -1654,6 +1654,10 @@ impl SynthEngine {
                 // Off. Hardware sends these from the panic button and when the
                 // transport stops, so they take priority over any CC mapping.
                 if cc == 120 || cc == 123 {
+                    // Lift the sustain state everywhere first: rustysynth
+                    // gates CC123 on the channel hold pedal, and the GUI
+                    // sustain atom must not stay stuck ON.
+                    self.set_sustain(0);
                     for part in &mut self.parts {
                         for v in &mut part.voices {
                             if v.active { v.note_off(); }
@@ -1964,7 +1968,7 @@ impl SynthEngine {
                 self.drum_engine.fixed_velocity = fixed;
             }
             ControlEvent::AllNotesOff => {
-                self.sustain.store(false, std::sync::atomic::Ordering::Relaxed);
+                self.set_sustain(0);
                 for part in &mut self.parts {
                     // Kill all active voices immediately
                     for v in &mut part.voices {
