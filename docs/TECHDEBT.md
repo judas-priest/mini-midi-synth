@@ -61,3 +61,20 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
 - Пути: телефон + приложение MidiSuite по BT, или Windows-машина/VM.
 - После назначения CC на кнобы банка 2 — забиндить через MIDI Learn; пэды банка 2
   (фактически шлют ноты 74/77/81/83/84 на канале 1) — нацелить транспорт секвенсора.
+
+## 8.1 Bank 2 config via SysEx — feasibility audit (repos cloned to ~/Projects/mvave-research)
+- Transport from Linux: POSSIBLE. M-VAVE SysEx header F0 00 32 45..., handshake
+  F0 00 32 45 00 00 00 40 7F F7, proven over standard USB-MIDI ports by
+  smk37-firmware-custom-mod/tools/smk_ota_win.py (winmm → maps 1:1 to ALSA).
+  MidiSuite mobile works over BLE-MIDI → config protocol rides as ordinary
+  MIDI bytes (SysEx), no vendor USB transfers needed.
+- MISSING: the knob/pad assignment message format is undocumented in both
+  repos (fm1-custom-fw has FM-1 synth OTA/voice protocol only;
+  smk37-firmware-custom-mod is BLE-firmware patches + audio-only ASIO driver).
+- To obtain the protocol: capture MidiSuite traffic (Windows + loopMIDI, or
+  Android BLE HCI snoop log while assigning a bank-2 knob/pad), then write a
+  Python replay script via amidi/mido. Fallback: firmware RE
+  (firmware_work/analysis/functions_catalog.csv + docs/FIRMWARE_STRUCTURE.md
+  locate the USB-MIDI SysEx dispatcher in the AC791N image).
+- Manual confirms: knobs/pads messages are configurable only via MidiSuite
+  (smk37-firmware-custom-mod/firmware_work/manual_text.txt:115-121).
