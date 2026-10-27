@@ -2,6 +2,7 @@
 pub mod audio;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod cc_map;
+pub mod chord;
 pub mod config;
 #[cfg(feature = "gui")]
 mod gui;
