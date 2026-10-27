@@ -1871,7 +1871,15 @@ impl SynthEngine {
                 if let Some(l) = self.parts.get_mut(part) {
                     l.mute = mute;
                     if mute {
-                        for v in &mut l.voices { if v.active { v.note_off(); } }
+                        // A muted part must not keep sounding; SF2 voices live
+                        // in the sampler, not in l.voices.
+                        self.sampler.part_all_notes_off(part);
+                        for voice in &mut l.voices {
+                            if voice.active { voice.note_off(); }
+                        }
+                        l.sustained_notes = [false; 128];
+                        l.note_stack.clear();
+                        l.latch_held.clear();
                     }
                 }
             }
@@ -2056,12 +2064,22 @@ impl SynthEngine {
                 self.dispose_sf2(displaced);
             }
             ControlEvent::SetPartSf2Mode { part, enabled } => {
+                // Engine switch: both voice owners must be drained
+                self.sampler.part_all_notes_off(part);
                 if let Some(l) = self.parts.get_mut(part) {
+                    for voice in &mut l.voices {
+                        if voice.active { voice.note_off(); }
+                    }
+                    l.sustained_notes = [false; 128];
+                    l.note_stack.clear();
+                    l.latch_held.clear();
                     l.sf2_mode = enabled;
                 }
                 self.sampler.set_part_mode(part, enabled);
             }
             ControlEvent::SetPartSf2Program { part, program, bank } => {
+                // 0xC0 kills nothing in rustysynth: drain the channel first
+                self.sampler.part_all_notes_off(part);
                 self.sampler.set_part_program(part, program, bank);
             }
             ControlEvent::SetDrumsSf2Mode { enabled } => {
