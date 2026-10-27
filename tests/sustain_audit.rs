@@ -303,6 +303,20 @@ fn performance_part_config_roundtrip() {
 }
 
 #[test]
+fn init_performance_exists_and_loads() {
+    let perf = mini_midi_synth::preset::init_performance();
+    assert_eq!(perf.parts.len(), 1);
+    let p = &perf.parts[0];
+    assert!(p.enabled);
+    assert!(!p.sf2_mode);
+    assert_eq!(p.key_low, 0);
+    assert_eq!(p.key_high, 127);
+    let json = serde_json::to_string(&perf).expect("serialize");
+    let back: mini_midi_synth::preset::Performance = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back.name, "(Init)");
+}
+
+#[test]
 fn pad_transport_controls_drum_seq() {
     let mut e = engine_with_init_patch();
     // NOTE: record_hit fires only while recording AND playing (drum.rs:799),

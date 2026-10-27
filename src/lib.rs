@@ -768,7 +768,11 @@ pub fn run_gui(
         show_keybinds_window: false,
         keybind_capturing: None,
         perf_name: String::new(),
-        perf_list: preset::list_performances(),
+        perf_list: {
+            let mut perf_list = preset::list_performances();
+            perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
+            perf_list
+        },
         nav_press_time: None,
         show_pad_perf: false,
         pad_perf_map: {

@@ -760,3 +760,27 @@ pub fn list_performances() -> Vec<(String, PathBuf)> {
     list_json(performance_dir(), |p: &Performance| p.name.clone())
 }
 
+/// Built-in empty performance: single part A1 = Init preset, full range,
+/// no SF2. Served as the virtual "(Init)" entry of the perf list.
+pub fn init_performance() -> Performance {
+    Performance {
+        name: "(Init)".to_string(),
+        category: String::new(),
+        parts: vec![PartConfig {
+            patch_name: "Init".to_string(),
+            enabled: true,
+            volume: 0.8,
+            key_low: 0,
+            key_high: 127,
+            param_overrides: Default::default(),
+            sf2_mode: false,
+            sf2_program: 0,
+            pan: 0.0,
+            transpose: 0,
+            mute: false,
+            vel_min: 1,
+            vel_max: 127,
+        }],
+    }
+}
+

@@ -1519,11 +1519,18 @@ impl App {
     /// Load a performance by name (for pad perf switching).
     /// Returns true if found and loaded.
     fn load_performance_by_name(&mut self, name: &str) -> bool {
-        let path = self.perf_list.iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, p)| p.clone());
-        let Some(path) = path else { return false; };
-        let Ok(perf) = preset::load_performance(&path) else { return false; };
+        let perf = if name == "(Init)" {
+            preset::init_performance()
+        } else {
+            let path = self.perf_list.iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, p)| p.clone());
+            let Some(path) = path else { return false; };
+            match preset::load_performance(&path) {
+                Ok(p) => p,
+                Err(_) => return false,
+            }
+        };
         // AllNotesOff for smooth transition
         let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
         self.perf_name = perf.name.clone();

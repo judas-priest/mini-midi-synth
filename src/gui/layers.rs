@@ -234,24 +234,29 @@ impl App {
                     category: String::new(), parts,
                 }) {
                     Ok(_path) => { self.show_toast("Performance saved", ToastKind::Success);
-                                   self.perf_list = preset::list_performances(); }
+                                   self.perf_list = preset::list_performances();
+                                   self.perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new())); }
                     Err(e)    => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
             }
             ui.separator();
-            let mut load_perf: Option<std::path::PathBuf> = None;
+            let mut load_perf: Option<Performance> = None;
             egui::ComboBox::from_id_salt("perf_load")
                 .selected_text(if self.perf_list.is_empty() { "No performances" } else { "Load..." })
                 .width(120.0)
                 .show_ui(ui, |ui| {
                     for (name, path) in &self.perf_list {
                         if ui.selectable_label(false, name).clicked() {
-                            load_perf = Some(path.clone());
+                            if name == "(Init)" {
+                                load_perf = Some(preset::init_performance());
+                            } else {
+                                load_perf = preset::load_performance(path).ok();
+                            }
                         }
                     }
                 });
-            if let Some(path) = load_perf {
-                if let Ok(perf) = preset::load_performance(&path) {
+            if let Some(perf) = load_perf {
+                {
                     self.perf_name = perf.name.clone();
                     for i in 0..self.parts.len() {
                         self.parts[i].enabled = false;
