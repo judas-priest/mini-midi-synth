@@ -1,5 +1,7 @@
 # Chord Display, Init Performance, Whole-Performance Recording — Implementation Plan
 
+> status: executed 2026-10-27
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Three features: (1) chord-name display under the keyboard — pressed note names, with the detected chord in brackets, bold; (2) built-in empty "Init" performance; (3) looper records the whole performance (every sounding part), not just the active layer.
@@ -386,8 +388,8 @@ fn looper_records_all_sounding_parts() {
 
 ### Task 5: Full gate
 
-- [ ] **Step 1:** `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2` — clean; `cargo test 2>&1 | grep -E 'test result'` — all ok; `cargo test --features rt-assert --test rt_safety 2>&1 | grep 'test result'` — ok.
-- [ ] **Step 2:** Commit leftovers if any: `git add -A src tests && git commit -m "feat: chord display, init perf, whole-perf recording"`.
+- [x] **Step 1:** `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2` — clean; `cargo test 2>&1 | grep -E 'test result'` — all ok; `cargo test --features rt-assert --test rt_safety 2>&1 | grep 'test result'` — ok.
+- [x] **Step 2:** Commit leftovers if any: `git add -A src tests && git commit -m "feat: chord display, init perf, whole-perf recording"`.
 
 ---
 
