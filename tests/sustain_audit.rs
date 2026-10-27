@@ -1,4 +1,11 @@
 //! Sustain-stick regression: no note may outlive its pedal/panic/preset-switch.
+//!
+//! Tests expected to FAIL until their plan task lands:
+//! - program_change_releases_pedal_held_notes (Task 5)
+//! - program_change_with_empty_patch_cache_cleans_voices (Task 5)
+//! - transposed_part_note_off_stops_sound (Task 4)
+//! - arp_transposed_note_off_stops_sound (Task 4)
+//! - midi_learn_rejects_cc64 (Task 9)
 
 use mini_midi_synth::preset;
 use mini_midi_synth::synth::{ControlEvent, MidiEvent, SynthEngine, BLOCK_SIZE};
@@ -90,7 +97,7 @@ fn all_notes_off_releases_pedal_held_notes() {
     settle(&mut e);
     let after = render_peak(&mut e, 200);
     assert!(after < SILENCE, "AllNotesOff left pedal note ringing (peak {after})");
-    assert_eq!(e.sustain_atom().load(std::sync::atomic::Ordering::Relaxed), false,
+    assert!(!e.sustain_atom().load(std::sync::atomic::Ordering::Relaxed),
         "AllNotesOff left sustain atom ON");
 }
 
