@@ -1,7 +1,7 @@
 # SF2 Release Scale, Pad Transport, Layer Switching Fix — Implementation Plan
 
 > anchor-checked: 2026-10-27 (three review subagent rounds verified snippets against the repo)
-> status: executing 2026-10-27
+> status: executed 2026-10-27
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -62,7 +62,7 @@ Written BEFORE implementation. Task dispatches use a fresh subagent per task rec
 
 **Steps:**
 
-- [ ] **Step 1: Write `tests/layer_switch_debug.rs`** replicating the GUI event sequence for halloween.json against a real engine + SC-55.sf2, asserting both part 0 (note 48) and part 4 (note 72) produce sound:
+- [x] **Step 1: Write `tests/layer_switch_debug.rs`** replicating the GUI event sequence for halloween.json against a real engine + SC-55.sf2, asserting both part 0 (note 48) and part 4 (note 72) produce sound:
 
 ```rust
 //! Diagnosis: SF2 layer silent after performance load (halloween.json repro).
@@ -134,11 +134,11 @@ fn perf_load_both_sf2_layers_speak() {
 }
 ```
 
-- [ ] **Step 2: Run it** — `cargo test --test layer_switch_debug -- --nocapture`. If it FAILS on part 4: the bug is engine-side; bisect the event sequence (drop events one at a time, e.g. skip `SetPartSf2Program`, skip `SetPartRange`, reorder LoadPatch) and record which minimal sequence reproduces. If it PASSES: the bug is GUI-side (event NOT sent, or a different GUI action intervenes) — add `log::info!` trace to `load_performance_by_name` and to the NoteOn routing skip branches, run the app with `RUST_LOG=info`, press the pad + upper keys, read the log.
+- [x] **Step 2: Run it** — `cargo test --test layer_switch_debug -- --nocapture`. If it FAILS on part 4: the bug is engine-side; bisect the event sequence (drop events one at a time, e.g. skip `SetPartSf2Program`, skip `SetPartRange`, reorder LoadPatch) and record which minimal sequence reproduces. If it PASSES: the bug is GUI-side (event NOT sent, or a different GUI action intervenes) — add `log::info!` trace to `load_performance_by_name` and to the NoteOn routing skip branches, run the app with `RUST_LOG=info`, press the pad + upper keys, read the log.
 
-- [ ] **Step 3: Record root cause** in a comment block at the top of the test file (which hypothesis, exact minimal repro sequence). Do NOT fix yet — report findings.
+- [x] **Step 3: Record root cause** in a comment block at the top of the test file (which hypothesis, exact minimal repro sequence). Do NOT fix yet — report findings.
 
-- [ ] **Step 4: Commit** `git add tests/layer_switch_debug.rs && git commit -m "test: SF2 layer-switch diagnosis repro (root cause noted)"`
+- [x] **Step 4: Commit** `git add tests/layer_switch_debug.rs && git commit -m "test: SF2 layer-switch diagnosis repro (root cause noted)"`
 
 ---
 
@@ -146,10 +146,10 @@ fn perf_load_both_sf2_layers_speak() {
 
 **Files:** `src/synth/mod.rs` and/or `src/gui/mod.rs` (depends on Task 1 findings; the test from Task 1 must go green).
 
-- [ ] **Step 1:** Apply the minimal fix for the recorded root cause. Known-likely candidates: (a) `load_performance_by_name` must send `SetPartSf2Mode`/`SetPartSf2Program` AFTER any event that can reset sampler channel state, and `send_part_range` must stay last; (b) if engine-side: NoteOn routing skip must not gate SF2 parts on stale `min/max` — correct the ordering instead of the gate.
-- [ ] **Step 2:** Run `cargo test --test layer_switch_debug -- --nocapture` — both peaks > SILENCE.
-- [ ] **Step 3:** Run the whole suite — `cargo test 2>&1 | grep -E 'FAILED|failures:' | head -5` (expect none).
-- [ ] **Step 4:** Commit (stage exactly the files changed): `git add <files-from-step-1> && git commit -m "fix: <root cause from Task 1>"`.
+- [x] **Step 1:** Apply the minimal fix for the recorded root cause. Known-likely candidates: (a) `load_performance_by_name` must send `SetPartSf2Mode`/`SetPartSf2Program` AFTER any event that can reset sampler channel state, and `send_part_range` must stay last; (b) if engine-side: NoteOn routing skip must not gate SF2 parts on stale `min/max` — correct the ordering instead of the gate.
+- [x] **Step 2:** Run `cargo test --test layer_switch_debug -- --nocapture` — both peaks > SILENCE.
+- [x] **Step 3:** Run the whole suite — `cargo test 2>&1 | grep -E 'FAILED|failures:' | head -5` (expect none).
+- [x] **Step 4:** Commit (stage exactly the files changed): `git add <files-from-step-1> && git commit -m "fix: <root cause from Task 1>"`.
 
 ---
 
