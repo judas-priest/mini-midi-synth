@@ -273,6 +273,11 @@ impl AudioBackend {
                     if let Ok(sr) = sr_str.trim().parse::<u32>() {
                         jack_sr_err.store(sr, Ordering::Relaxed);
                     }
+                } else if msg.contains("xrun") {
+                    // Buffer over/under-run: a few dropped samples, the stream
+                    // itself keeps running. Tearing down and rebuilding the
+                    // whole engine here caused audible dropouts under load.
+                    // Real disconnects surface as different errors.
                 } else {
                     // Device disconnected (headphones unplugged etc.)
                     disconnected_err.store(true, Ordering::Relaxed);
