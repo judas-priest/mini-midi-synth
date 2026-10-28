@@ -1595,7 +1595,11 @@ impl SynthEngine {
                         let velocity = self.drum_engine.pad_velocity(note, velocity);
                         let note = self.drum_engine.remapped_note(note);
                         // Record into sequencer if recording
-                        if is_drum_note {
+                        // `note` here is the REMAPPED target (30..=55 legal). Only
+                        // 36..=51 maps to sequencer slots; skip recording other
+                        // targets (drop, don't clamp — clamping would corrupt
+                        // a neighbouring slot's pattern).
+                        if is_drum_note && (36..=51).contains(&note) {
                             let slot = (note - 36) as usize;
                             let sr = self.sample_rate;
                             if let Some((pat, _slot, step)) =
