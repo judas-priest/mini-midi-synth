@@ -779,6 +779,7 @@ pub fn run_gui(
         led_socket: None,
         led_socket_alive: None,
         led_socket_failed_at: None,
+        led_last_send: None,
         drum_kit_name: String::new(),
         drum_kit_list: preset::list_drum_kits(),
         drum_midi_import_path: String::new(),

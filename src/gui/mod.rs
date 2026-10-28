@@ -325,6 +325,7 @@ pub struct App {
     pub led_socket: Option<std::sync::mpsc::Sender<String>>,
     pub led_socket_alive: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub led_socket_failed_at: Option<std::time::Instant>,
+    pub led_last_send: Option<std::time::Instant>,
     // Drum kit save/load
     pub drum_kit_name: String,
     pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
