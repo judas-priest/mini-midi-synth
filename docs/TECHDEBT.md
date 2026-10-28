@@ -211,9 +211,14 @@ Critical 2 (set_sample_rate wipe, drum.rs:953) НЕ исправлены в mast
   (не ре-триггерить огибающую) + portamento (скольжение высоты, время N мс).
 - Движок полифонический: сделать режимом слоя (per-part): mono switch,
   legato switch, glide ms. Применять до полифонического распределения войсов.
-- Область действия: DSP-слой — нативно (legato+glide). SF2-слой — glide только
-  через pitch bend канала (сэмпл ускоряется/замедляется — норм звучит); true
-  legato на сэмплах невозможен (атака в сэмпле), эмуляция «доигрыванием»
-  старого сэмпла на новой высоте — костыль, не обещаем.
+- Область действия: DSP-слой — нативно (legato+glide). SF2-слой — glide через
+  pitch bend канала (сэмпл ускоряется/замедляется — норм звучит); legato на
+  сэмплах — ИНДУСТРИАЛЬНЫЙ приём «skip attack» (SFZ offset-опкод, Yamaha «_of»
+  сэмплы, Kontakt sample start offset): legato-нота стартует не с нуля, а с
+  offset за атакой + короткий кроссфейд со старой нотой (SFZ: off_time+attack
+  blend). rustysynth умеет startAddrsOffset (vendor/rustysynth/src/
+  instrument_region.rs:148) — legato-нота = voice со стартовой позицией
+  start+offset; offset конфигурируемый per-кит/слой (дефолт ~10-30 мс, искать
+  zero-crossing не обязательно, кроссфейд маскирует).
 
 
