@@ -1479,8 +1479,7 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetPadVel { table: Box::new(self.drum_pad_vel) });
     }
 
-    /// Wired up by the pad-vel panel in drums.rs (next task); allow until then.
-    #[allow(dead_code)]
+    /// Wired up by the pad-vel panel in drums.rs.
     fn save_drum_pad_vel(&mut self) {
         let key = self.drum_remap_key();
         self.config.sf2.drums_vels.insert(key, self.drum_pad_vel.to_vec());

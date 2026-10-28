@@ -102,6 +102,7 @@ impl App {
                 ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
                 ui.add_space(theme::SP_MD);
                 let mut new_remap = self.drum_remap;
+                let mut new_vels = self.drum_pad_vel;
                 let mut pad_row = |ui: &mut egui::Ui, pads: std::ops::Range<usize>, id: &str| {
                     egui::Grid::new(id).num_columns(8).spacing([8.0, 6.0]).show(ui, |ui| {
                         for p in pads {
@@ -118,6 +119,11 @@ impl App {
                                             ui.selectable_value(slot, *n, *name);
                                         }
                                     });
+                                let mut vel = new_vels[(note - 36) as usize];
+                                ui.add_sized([60.0, 0.0], egui::DragValue::new(&mut vel)
+                                    .range(0..=127)
+                                    .custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{}", v as i32) }));
+                                new_vels[(note - 36) as usize] = vel;
                             });
                         }
                     });
@@ -125,6 +131,7 @@ impl App {
                 pad_row(ui, 0..8, "remap_top");
                 pad_row(ui, 8..16, "remap_bot");
                 ui.add_space(theme::SP_MD);
+                let mut reset_clicked = false;
                 ui.horizontal(|ui| {
                     if ui.button("Copy top to bottom").on_hover_text("Copy pads 1-8 mapping to pads 9-16").clicked() {
                         for i in 0..8 { new_remap[(PAD_BOT_NOTES[i] - 36) as usize] = new_remap[(PAD_TOP_NOTES[i] - 36) as usize]; }
@@ -133,16 +140,31 @@ impl App {
                         for i in 0..8 { new_remap[(PAD_TOP_NOTES[i] - 36) as usize] = new_remap[(PAD_BOT_NOTES[i] - 36) as usize]; }
                     }
                     if ui.button("Reset").clicked() {
-                        for (i, v) in new_remap.iter_mut().enumerate() { *v = 36 + i as u8; }
+                        reset_clicked = true;
                     }
                     if ui.button("Close").clicked() {
                         self.show_drum_remap = false;
                     }
                 });
+                if reset_clicked {
+                    for (i, v) in new_remap.iter_mut().enumerate() { *v = 36 + i as u8; }
+                    new_vels = [0u8; 16];
+                    self.drum_remap = new_remap;
+                    self.drum_pad_vel = new_vels;
+                    self.push_drum_remap();
+                    self.push_drum_pad_vel();
+                    self.save_drum_remap();
+                    self.save_drum_pad_vel();
+                }
                 if new_remap != self.drum_remap {
                     self.drum_remap = new_remap;
                     self.push_drum_remap();
                     self.save_drum_remap();
+                }
+                if new_vels != self.drum_pad_vel {
+                    self.drum_pad_vel = new_vels;
+                    self.push_drum_pad_vel();
+                    self.save_drum_pad_vel();
                 }
             });
             if dialog.should_close() {
@@ -177,6 +199,17 @@ impl App {
                             ui.selectable_value(&mut sel, *n, *name);
                         }
                     });
+                ui.add_space(theme::SP_MD);
+                ui.label("Velocity (Off = dynamic):");
+                let mut vel = self.drum_pad_vel[idx];
+                ui.add_sized([80.0, 0.0], egui::DragValue::new(&mut vel)
+                    .range(0..=127)
+                    .custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{}", v as i32) }));
+                if vel != self.drum_pad_vel[idx] {
+                    self.drum_pad_vel[idx] = vel;
+                    self.push_drum_pad_vel();
+                    self.save_drum_pad_vel();
+                }
                 ui.add_space(theme::SP_MD);
                 if ui.button("Close").clicked() {
                     self.remap_pad = None;
