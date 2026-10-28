@@ -302,6 +302,7 @@ pub struct App {
     pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
     /// Drum note remap table: slot i plays mapped note drum_remap[i].
     pub drum_remap: [u8; 16],
+    pub show_drum_remap: bool,
     pub drum_volume: f32,
     pub drum_fixed_velocity: bool,
     pub drum_bpm: f32,

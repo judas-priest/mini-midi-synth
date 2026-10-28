@@ -76,33 +76,56 @@ impl App {
             }
         });
 
-        // Pad remap: incoming pad note -> internal slot
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Remap:");
-            let mut new_remap = self.drum_remap;
-            for (i, slot) in new_remap.iter_mut().enumerate() {
-                let pad_note = 36 + i as u8;
-                let sel = drum_slot_name(*slot);
-                egui::ComboBox::from_label(format!("P{}", pad_note))
-                    .width(74.0)
-                    .selected_text(sel)
-                    .show_ui(ui, |ui| {
-                        for (s, name) in drum_slot_names().iter().enumerate() {
-                            ui.selectable_value(slot, s as u8, *name);
-                        }
-                    });
+        // Pad remap: incoming pad note -> internal slot (modal, off the main screen)
+        if ui.selectable_label(self.show_drum_remap, "Remap")
+            .on_hover_text("Pad note -> drum sound mapping").clicked()
+        {
+            self.show_drum_remap = !self.show_drum_remap;
+        }
+
+        if self.show_drum_remap {
+            let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ui.ctx(), |ui| {
+                ui.set_width(340.0);
+                ui.strong("Pad → drum sound");
+                ui.label("Which sound each incoming pad note plays.");
+                ui.add_space(theme::SP_MD);
+                let mut new_remap = self.drum_remap;
+                egui::Grid::new("drum_remap_grid").num_columns(4).show(ui, |ui| {
+                    for (i, slot) in new_remap.iter_mut().enumerate() {
+                        let sel = drum_slot_name(*slot);
+                        ui.label(format!("Pad {}", 36 + i as u8));
+                        egui::ComboBox::from_id_salt(i)
+                            .width(96.0)
+                            .selected_text(sel)
+                            .show_ui(ui, |ui| {
+                                for (s, name) in drum_slot_names().iter().enumerate() {
+                                    ui.selectable_value(slot, s as u8, *name);
+                                }
+                            });
+                        if i % 2 == 1 { ui.end_row(); }
+                    }
+                });
+                ui.add_space(theme::SP_MD);
+                ui.horizontal(|ui| {
+                    if ui.button("Reset").clicked() {
+                        for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
+                        self.push_drum_remap();
+                        self.save_drum_remap();
+                    }
+                    if ui.button("Close").clicked() {
+                        self.show_drum_remap = false;
+                    }
+                });
+                if new_remap != self.drum_remap {
+                    self.drum_remap = new_remap;
+                    self.push_drum_remap();
+                    self.save_drum_remap();
+                }
+            });
+            if dialog.should_close() {
+                self.show_drum_remap = false;
             }
-            if new_remap != self.drum_remap {
-                self.drum_remap = new_remap;
-                self.push_drum_remap();
-                self.save_drum_remap();
-            }
-            if ui.button("Reset").clicked() {
-                for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
-                self.push_drum_remap();
-                self.save_drum_remap();
-            }
-        });
+        }
 
         // Pattern selector + length
         ui.horizontal(|ui| {
