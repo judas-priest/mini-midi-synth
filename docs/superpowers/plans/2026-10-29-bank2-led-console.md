@@ -571,7 +571,10 @@ pub fn is_console_note(note: u8) -> bool {
   `src/audio.rs:216` парсит через `parse_midi_message` ПРЯМО в аудио-колбэке,
   минуя parse_and_push: там консольные ноты обязаны молча дропаться (нельзя
   Mutex/allocation в RT — зеркала в GUI с AMidi-пути НЕТ, by design: Android
-  USB не водитель консоли). Найти dispatch события (~216) и обернуть push:
+  USB не водитель консоли). Найти dispatch события (~216, завершается
+  `synth.handle_event(event)` ~230 — НЕ `midi_tx.push`, там consumer-сторона)
+  и поставить guard ПЕРЕД всем per-event блоком, включая обновление
+  note/pad-атомиков:
 
 ```rust
                         // Bank-2 console notes (60..=67, 75..=80 ch9): drop —
@@ -585,8 +588,9 @@ pub fn is_console_note(note: u8) -> bool {
                         }
 ```
 
-(точные имена переменных — по реальному коду audio.rs:216; суть: guard перед
-push. Это RT-safe: только matches! на уже разобранном event.)
+(точные имена переменных — по реальному коду audio.rs:216-230; суть: guard
+перед `synth.handle_event` и до атомиков — консольная нота на AMidi-пути
+вообще не производит эффектов. RT-safe: только matches! на разобранном event.)
 
 - [ ] **Step 4: callers** — сигнатура parse_and_push не менялась: midir
   (midi.rs:264), JNI (lib.rs:991), три вызова midi::connect/connect_by_name
