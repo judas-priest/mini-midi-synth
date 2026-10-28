@@ -1373,9 +1373,11 @@ impl SynthEngine {
     }
 
     /// Apply sustain pedal state (CC64 from pedal/fader, or GUI toggle).
-    /// On release, ALL sounding voices get note_off — stale sustained_notes
-    /// flags (patch switched while pedal was down, mono/latch holds) would
-    /// otherwise leave notes ringing forever.
+    /// On release, voices whose key is STILL HELD (`keys_down`) keep sounding —
+    /// their own key-off will release them. Voices held by the pedal only
+    /// (`sustained_notes`) and stale mono/latch entries are released/cleared;
+    /// stale flags from a patch switch while the pedal was down would otherwise
+    /// leave notes ringing forever.
     fn set_sustain(&mut self, value: u8) {
         let on = value >= 64;
         self.sustain.store(on, std::sync::atomic::Ordering::Relaxed);
@@ -1384,14 +1386,24 @@ impl SynthEngine {
         for part in &mut self.parts {
             part.sustain_pedal = if on { 1.0 } else { 0.0 };
             if !on {
+                // Latch voices are released unconditionally (as before): a
+                // latched note is defined by latch_held, not by a held key —
+                // clearing latch_held below without releasing its keys_down
+                // would leave a voice that its own key-off can never stop
+                // (latch note_off early-returns).
+                for &n in &part.latch_held {
+                    part.keys_down[n as usize] = false;
+                }
                 for voice in &mut part.voices {
-                    if voice.active && !voice.is_releasing() {
+                    if voice.active && !voice.is_releasing()
+                        && !part.keys_down[voice.src_note as usize]
+                    {
                         voice.note_off();
                     }
                 }
                 part.sustained_notes = [false; 128];
-                // All pedal-held voices are gone; stale mono/latch entries
-                // would resurrect them on the next key press (mono retrigger).
+                // Pedal-only holds are gone; stale mono/latch entries would
+                // resurrect on the next key press (mono retrigger).
                 part.note_stack.clear();
                 part.latch_held.clear();
             }
