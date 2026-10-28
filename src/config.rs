@@ -53,6 +53,10 @@ pub struct Sf2Settings {
     /// Pad-note remap tables per drums kit (key = kit file name or "internal"), len 16.
     #[serde(default)]
     pub drums_remaps: std::collections::HashMap<String, Vec<u8>>,
+    /// Per-pad velocity overrides per drums kit (key = kit file name or
+    /// "internal"), len 16, 0 = off.
+    #[serde(default)]
+    pub drums_vels: std::collections::HashMap<String, Vec<u8>>,
     /// SF2 internal block size (samples). Higher = less CPU, more latency.
     #[serde(default = "default_sf2_block_size")]
     pub block_size: usize,
