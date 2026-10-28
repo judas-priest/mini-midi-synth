@@ -741,6 +741,7 @@ pub fn run_gui(
         drum_patterns: [synth::drum::DrumPattern::default(); 8],
         drum_params: [synth::drum::DrumSlotParams::default(); NUM_DRUM_SLOTS],
         drum_remap: core::array::from_fn(|i| 36 + i as u8),
+        drum_pad_vel: [0u8; 16],
         drum_kit_names: {
             let mut n: [String; 26] = Default::default();
             for (i, entry) in n.iter_mut().enumerate() {

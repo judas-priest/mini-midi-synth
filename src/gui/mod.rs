@@ -299,6 +299,7 @@ pub struct App {
     pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
     /// Drum note remap table: slot i plays mapped note drum_remap[i].
     pub drum_remap: [u8; 16],
+    pub drum_pad_vel: [u8; 16],
     /// Sound names per kit note (index = note - 30, range 30..=55); from the
     /// loaded SF2 kit (fallback: GM names for 36..=51, empty elsewhere)
     pub drum_kit_names: [String; 26],
@@ -1098,8 +1099,14 @@ impl App {
                 for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(i as u8).min(15); }
                 self.drum_remap = t;
             }
+            if let Some(v) = self.config.sf2.drums_vels.get("internal") {
+                let mut t = [0u8; 16];
+                for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
+                self.drum_pad_vel = t;
+            }
         }
         self.push_drum_remap();
+        self.push_drum_pad_vel();
         for i in 0..self.parts.len() {
             self.send_part_volume(i);
         }
@@ -1468,6 +1475,18 @@ impl App {
         let _ = self.config.save();
     }
 
+    fn push_drum_pad_vel(&mut self) {
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetPadVel { table: Box::new(self.drum_pad_vel) });
+    }
+
+    /// Wired up by the pad-vel panel in drums.rs (next task); allow until then.
+    #[allow(dead_code)]
+    fn save_drum_pad_vel(&mut self) {
+        let key = self.drum_remap_key();
+        self.config.sf2.drums_vels.insert(key, self.drum_pad_vel.to_vec());
+        let _ = self.config.save();
+    }
+
     /// Re-sends the drum kit, tempo and pattern selection to a fresh engine.
     pub(super) fn send_drum_state(&mut self) {
         let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
@@ -1480,6 +1499,7 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPattern { pattern: self.drum_current_pattern });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
         self.push_drum_remap();
+        self.push_drum_pad_vel();
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: self.looper_bars });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: self.looper_quantize });
@@ -1587,6 +1607,14 @@ impl App {
             for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
         }
         self.push_drum_remap();
+        if let Some(v) = self.config.sf2.drums_vels.get(&self.drum_remap_key()) {
+            let mut t = [0u8; 16];
+            for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
+            self.drum_pad_vel = t;
+        } else {
+            self.drum_pad_vel = [0u8; 16];
+        }
+        self.push_drum_pad_vel();
         self.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
         let _ = self.config.save();
     }
@@ -1613,6 +1641,8 @@ impl App {
         // Internal kit: reset to identity remap.
         for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
         self.push_drum_remap();
+        self.drum_pad_vel = [0u8; 16];
+        self.push_drum_pad_vel();
         let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
         let _ = self.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);
         self.config.sf2.drums_file_path = None;
