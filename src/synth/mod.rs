@@ -1738,6 +1738,7 @@ impl SynthEngine {
                         if voice.active { voice.note_off(); }
                     }
                     l.sustained_notes = [false; 128];
+                    l.keys_down = [false; 128];
                     l.note_stack.clear();
                     l.latch_held.clear();
                 }
@@ -1794,6 +1795,7 @@ impl SynthEngine {
                         part.latch_held.clear();
                         part.sustain_pedal = 0.0;
                         part.sustained_notes = [false; 128];
+                        part.keys_down = [false; 128];
                     }
                     self.sampler.all_notes_off();
                     self.drum_engine.reset_choke_state();
@@ -1881,6 +1883,7 @@ impl SynthEngine {
                         if voice.active { voice.note_off(); }
                     }
                     l.sustained_notes = [false; 128];
+                    l.keys_down = [false; 128];
                     l.note_stack.clear();
                     l.latch_held.clear();
                     l.min_note = params.min_note as u8;
@@ -1945,6 +1948,7 @@ impl SynthEngine {
                             if voice.active { voice.note_off(); }
                         }
                         l.sustained_notes = [false; 128];
+                        l.keys_down = [false; 128];
                         l.note_stack.clear();
                         l.latch_held.clear();
                     }
@@ -1968,6 +1972,7 @@ impl SynthEngine {
                             if voice.active { voice.note_off(); }
                         }
                         l.sustained_notes = [false; 128];
+                        l.keys_down = [false; 128];
                         l.note_stack.clear();
                         l.latch_held.clear();
                     }
@@ -2145,6 +2150,7 @@ impl SynthEngine {
                     part.latch_held.clear();
                     part.sustain_pedal = 0.0;
                     part.sustained_notes = [false; 128];
+                    part.keys_down = [false; 128];
                 }
                 self.sampler.all_notes_off();
                 self.drum_engine.reset_choke_state();
@@ -2188,6 +2194,7 @@ impl SynthEngine {
                         if voice.active { voice.note_off(); }
                     }
                     l.sustained_notes = [false; 128];
+                    l.keys_down = [false; 128];
                     l.note_stack.clear();
                     l.latch_held.clear();
                     l.sf2_mode = enabled;
