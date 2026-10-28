@@ -212,6 +212,8 @@ pub enum ControlEvent {
     DrumSetRemap { table: Box<[u8; 16]> },
     /// Drums: per-note choke group ids for the SF2 path, indexed (note-30) (0 = none)
     DrumSetChokeGroups { table: Box<[u8; 26]> },
+    /// Drums: per-pad velocity override (index = in_note-36, 0 = off)
+    DrumSetPadVel { table: Box<[u8; 16]> },
     // SF2 sampler controls
     LoadKeysSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
     LoadDrumsSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
@@ -1572,6 +1574,7 @@ impl SynthEngine {
                     }
                     if velocity > 0 {
                         let velocity = if self.drum_engine.fixed_velocity { 127 } else { velocity };
+                        let velocity = self.drum_engine.pad_velocity(note, velocity);
                         let note = self.drum_engine.remapped_note(note);
                         // Record into sequencer if recording
                         if is_drum_note {
@@ -2104,6 +2107,10 @@ impl SynthEngine {
             ControlEvent::DrumSetChokeGroups { table } => {
                 self.drum_engine.set_choke_groups(&table);
                 return Some(ControlEvent::DrumSetChokeGroups { table });
+            }
+            ControlEvent::DrumSetPadVel { table } => {
+                self.drum_engine.apply_pad_vel_vec(&*table);
+                return Some(ControlEvent::DrumSetPadVel { table });
             }
             ControlEvent::SetSustain { on } => {
                 self.set_sustain(if on { 127 } else { 0 });
