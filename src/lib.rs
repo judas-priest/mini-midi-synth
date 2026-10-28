@@ -740,6 +740,7 @@ pub fn run_gui(
         show_looper: false,
         drum_patterns: [synth::drum::DrumPattern::default(); 8],
         drum_params: [synth::drum::DrumSlotParams::default(); NUM_DRUM_SLOTS],
+        drum_remap: core::array::from_fn(|i| i as u8),
         drum_volume: c.config.ui.drum_volume,
         drum_fixed_velocity: c.config.ui.drum_fixed_velocity,
         drum_bpm: 120.0,

@@ -294,6 +294,8 @@ pub struct App {
     pub show_drums: bool,
     pub drum_patterns: [DrumPattern; 8],
     pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
+    /// Drum note remap table: slot i plays mapped note drum_remap[i].
+    pub drum_remap: [u8; 16],
     pub drum_volume: f32,
     pub drum_fixed_velocity: bool,
     pub drum_bpm: f32,
@@ -1079,6 +1081,7 @@ impl App {
         // Send drum and part volumes to engine
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+        self.push_drum_remap();
         for i in 0..self.parts.len() {
             self.send_part_volume(i);
         }
@@ -1376,6 +1379,26 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetCcMap { map: Box::new(self.cc_map) });
     }
 
+    /// Config key for the drum remap table: kit name, or "internal" kit.
+    fn drum_remap_key(&self) -> String {
+        if self.sf2_drums_loaded_name.is_empty() { "internal".to_string() }
+        else { self.sf2_drums_loaded_name.clone() }
+    }
+
+    /// Push the current remap table to the engine.
+    fn push_drum_remap(&mut self) {
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetRemap { table: Box::new(self.drum_remap) });
+    }
+
+    /// Persist the current remap table under the active kit key.
+    /// Called from the remap panel in drums.rs (pending task T6).
+    #[allow(dead_code)]
+    fn save_drum_remap(&mut self) {
+        let key = self.drum_remap_key();
+        self.config.sf2.drums_remaps.insert(key, self.drum_remap.to_vec());
+        let _ = self.config.save();
+    }
+
     /// Re-sends the drum kit, tempo and pattern selection to a fresh engine.
     pub(super) fn send_drum_state(&mut self) {
         let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
@@ -1387,6 +1410,7 @@ impl App {
         });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPattern { pattern: self.drum_current_pattern });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+        self.push_drum_remap();
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: self.looper_bars });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: self.looper_quantize });
@@ -1481,6 +1505,15 @@ impl App {
         if self.sf2_drums_enabled {
             let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
         }
+        // Load the per-kit remap table (identity if none saved for this kit).
+        if let Some(v) = self.config.sf2.drums_remaps.get(&self.drum_remap_key()) {
+            let mut t = [0u8; 16];
+            for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(i as u8).min(15); }
+            self.drum_remap = t;
+        } else {
+            for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
+        }
+        self.push_drum_remap();
         self.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
         let _ = self.config.save();
     }
@@ -1502,6 +1535,9 @@ impl App {
         self.sf2_drums_soundfont = None;
         self.sf2_drums_loaded_name.clear();
         self.sf2_drums_enabled = false;
+        // Internal kit: reset to identity remap.
+        for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
+        self.push_drum_remap();
         let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
         let _ = self.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);
         self.config.sf2.drums_file_path = None;
