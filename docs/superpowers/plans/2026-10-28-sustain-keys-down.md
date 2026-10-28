@@ -1,5 +1,7 @@
 # Sustain pedal-up: keys_down fix Implementation Plan
 
+status: executed 2026-10-28 (branch worktree-bugfix-batch, 4 commits 7250964..2f84ad7)
+
 anchor-checked: 2026-10-28 (независимое ревью на master @ 329faac; находки вшиты)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -51,7 +53,7 @@ cargo test --features rt-assert --test rt_safety
 **Files:**
 - Modify: `tests/sustain_audit.rs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Добавить в конец `tests/sustain_audit.rs` (helpers `engine_with_init_patch`, `pedal_down`, `pedal_up`, `render_peak`, `settle` уже есть в файле):
 
@@ -136,12 +138,12 @@ fn panic_after_held_pedal_up_kills_all() {
 }
 ```
 
-- [ ] **Step 2: Run, verify red/green split**
+- [x] **Step 2: Run, verify red/green split**
 
 Run: `cargo test --test sustain_audit -- --nocapture`
 Expected: RED — `held_key_survives_pedal_up`, `repedal_articulation_keeps_held_key`, `multi_held_keys_pedal_up_then_individual_offs` (падают на «pedal-up killed a held key»). GREEN — `duplicate_note_on_then_pedal_up_releases_once` и `panic_after_held_pedal_up_kills_all` (guard-тесты: паника/panic-CC убивают голоса независимо от keys_down) и все 22 существующих теста. Это ожидаемое разделение, не ошибка.
 
-- [ ] **Step 3: Commit (test-only, red)**
+- [x] **Step 3: Commit (test-only, red)**
 
 ```bash
 git add tests/sustain_audit.rs
@@ -153,7 +155,7 @@ git commit -m "test: held-key-through-pedal-up regression cases (red)"
 **Files:**
 - Modify: `src/synth/mod.rs` (Part struct ~line 460, Part::new ~line 503, note_on ~line 568, note_off ~line 779)
 
-- [ ] **Step 1: Add the field**
+- [x] **Step 1: Add the field**
 
 В struct `Part` после строки `sustained_notes: [bool; 128], // notes held by sustain pedal` (mod.rs:460):
 
@@ -167,7 +169,7 @@ git commit -m "test: held-key-through-pedal-up regression cases (red)"
             keys_down: [false; 128],
 ```
 
-- [ ] **Step 2: Set/clear in note_on / note_off**
+- [x] **Step 2: Set/clear in note_on / note_off**
 
 В `note_on` (mod.rs:568) после range-check `if note < self.min_note || note > self.max_note { return; }` (мод.rs:571) добавить:
 
@@ -191,7 +193,7 @@ git commit -m "test: held-key-through-pedal-up regression cases (red)"
                 for v in &mut self.voices { if v.active && v.src_note == raw_note { v.note_off(); } }
 ```
 
-- [ ] **Step 3: Build + run the new tests**
+- [x] **Step 3: Build + run the new tests**
 
 Run: `cargo test --test sustain_audit`
 Expected: компиляция зелёная; split как в Task 1 Step 2 (три regression-теста ещё красные — set_sustain ещё не изменён).
@@ -201,7 +203,7 @@ Expected: компиляция зелёная; split как в Task 1 Step 2 (т
 **Files:**
 - Modify: `src/synth/mod.rs:1369-1393`
 
-- [ ] **Step 1: Replace the unconditional sweep**
+- [x] **Step 1: Replace the unconditional sweep**
 
 Заменить тело pedal-up ветки в `set_sustain` и обновить doc-комментарий:
 
@@ -247,12 +249,12 @@ Expected: компиляция зелёная; split как в Task 1 Step 2 (т
 
 (Mono корректен и без доп. правок: pedal-up чистит `note_stack`; при физическом key-off по пустому стеку голос отпускается по `src_note`, mod.rs:797-800.)
 
-- [ ] **Step 2: Run sustain suite**
+- [x] **Step 2: Run sustain suite**
 
 Run: `cargo test --test sustain_audit`
 Expected: PASS — все 22 существующих + 5 новых тестов зелёные. Если `pedal_up_releases_held_notes` сломался — проверь, что в тесте клавиша отпущена ДО pedal-up (`keys_down[60] == false` → голос отпускается).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/synth/mod.rs
@@ -264,7 +266,7 @@ git commit -m "fix: pedal-up spares voices with keys still held (keys_down)"
 **Files:**
 - Modify: `src/synth/mod.rs` — 7 мест, где чистятся `sustained_notes`/`note_stack`/`latch_held`
 
-- [ ] **Step 1: Add the clear next to every sustained_notes reset**
+- [x] **Step 1: Add the clear next to every sustained_notes reset**
 
 Grep-якоря (номера строк могут сдвинуться на ±3 после Task 3): `sustained_notes = [false; 128]` встречается на mod.rs:1722, 1778, 1865, 1929, 1952, 2129, 2172 (не в `set_sustain` — там чистить нельзя, клавиши ещё держатся; блок :1937-1938 — второй cleanup в том же SetPartEnabled-пути, отдельной чистки не требует). В каждом из 7 мест добавить рядом (после `sustained_notes`):
 
@@ -276,7 +278,7 @@ l.keys_down = [false; 128];
 
 Линт-проверка: после правки `grep -n "keys_down = \[false" src/synth/mod.rs` должен показать 7 строк + 1 в `Part::new` (`keys_down: [false; 128],` — другая форма, не считается).
 
-- [ ] **Step 2: Run full gates**
+- [x] **Step 2: Run full gates**
 
 ```bash
 cargo clippy --all-targets -- -D warnings
@@ -285,7 +287,7 @@ cargo test --features rt-assert --test rt_safety
 ```
 Expected: всё зелёное (86+ тестов; rt_safety 4/4 — keys_down это фиксированный массив, аллокаций нет).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/synth/mod.rs
