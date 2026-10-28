@@ -1969,9 +1969,8 @@ impl SynthEngine {
                     // (rustysynth applies per-channel pan internally).  DSP parts
                     // get constant-power pan in tick_block.
                     if l.sf2_mode {
-                        let ch = part % 16;
                         let cc = (l.pan.clamp(-1.0, 1.0) * 0.5 + 0.5) * 127.0;
-                        self.sampler.set_channel_pan(ch, cc as i32);
+                        self.sampler.set_channel_pan(part, cc as i32);
                     }
                 }
             }
@@ -2170,9 +2169,8 @@ impl SynthEngine {
                     // (Re)apply the part's pan on the SF2 channel — CC10 was
                     // never sent while the part was in DSP mode.
                     if enabled {
-                        let ch = part % 16;
                         let cc = (l.pan.clamp(-1.0, 1.0) * 0.5 + 0.5) * 127.0;
-                        self.sampler.set_channel_pan(ch, cc as i32);
+                        self.sampler.set_channel_pan(part, cc as i32);
                     }
                 }
                 self.sampler.set_part_mode(part, enabled);

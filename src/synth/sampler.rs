@@ -189,9 +189,13 @@ pub struct SamplerEngine {
     keys: SubSynth,
     drums: SubSynth,
     pub block_size: usize,
-    part_sf2: [bool; 8],
-    part_program: [u8; 8],
-    part_bank: [u8; 8],
+    part_sf2: [bool; 16],
+    part_program: [u8; 16],
+    part_bank: [u8; 16],
+    /// Melodic SF2 channel per part (skips percussion ch9). None = DSP part
+    /// or no free channel. 16 parts, 15 melodic channels — the 16th SF2 part
+    /// stays DSP until a channel frees up.
+    part_channel: [Option<usize>; 16],
     drums_sf2: bool,
     sample_rate: i32,
     pub drum_volume: f32,
@@ -214,9 +218,10 @@ impl SamplerEngine {
             keys: SubSynth::new(),
             drums: SubSynth::new(),
             block_size: DEFAULT_BLOCK_SIZE,
-            part_sf2: [false; 8],
-            part_program: [0; 8],
-            part_bank: [0; 8],
+            part_sf2: [false; 16],
+            part_program: [0; 16],
+            part_bank: [0; 16],
+            part_channel: [None; 16],
             drums_sf2: false,
             sample_rate: sample_rate as i32,
             drum_volume: 1.0,
@@ -235,10 +240,11 @@ impl SamplerEngine {
         let displaced = self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
         // Restore programs on new synth
         if let Some(synth) = &mut self.keys.synth {
-            for i in 0..8 {
+            for (i, ch) in self.part_channel.iter().enumerate() {
+                let Some(ch) = ch else { continue };
                 if self.part_sf2[i] {
-                    synth.process_midi_message(i as i32, 0xB0, 0, self.part_bank[i] as i32);
-                    synth.process_midi_message(i as i32, 0xC0, self.part_program[i] as i32, 0);
+                    synth.process_midi_message(*ch as i32, 0xB0, 0, self.part_bank[i] as i32);
+                    synth.process_midi_message(*ch as i32, 0xC0, self.part_program[i] as i32, 0);
                 }
             }
         }
@@ -280,10 +286,11 @@ impl SamplerEngine {
             keys_displaced = self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
             // Restore programs
             if let Some(synth) = &mut self.keys.synth {
-                for i in 0..8 {
+                for (i, ch) in self.part_channel.iter().enumerate() {
+                    let Some(ch) = ch else { continue };
                     if self.part_sf2[i] {
-                        synth.process_midi_message(i as i32, 0xB0, 0, self.part_bank[i] as i32);
-                        synth.process_midi_message(i as i32, 0xC0, self.part_program[i] as i32, 0);
+                        synth.process_midi_message(*ch as i32, 0xB0, 0, self.part_bank[i] as i32);
+                        synth.process_midi_message(*ch as i32, 0xC0, self.part_program[i] as i32, 0);
                     }
                 }
                 // Rebuild made a fresh Synthesizer — re-apply the release scale
@@ -313,16 +320,43 @@ impl SamplerEngine {
         (keys_displaced, drums_displaced)
     }
 
+    /// Melodic channels 0..=8, 10..=15 — percussion channel 9 reserved.
+    const MELODIC_CHANNELS: [usize; 15] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15];
+
+    fn alloc_channel(&self) -> Option<usize> {
+        Self::MELODIC_CHANNELS
+            .iter()
+            .find(|c| !self.part_channel.contains(&Some(**c)))
+            .copied()
+    }
+
     pub fn set_part_mode(&mut self, part: usize, enabled: bool) {
-        if part < 8 { self.part_sf2[part] = enabled; }
+        if part >= 16 { return; }
+        if enabled && self.part_channel[part].is_none() {
+            self.part_channel[part] = self.alloc_channel();
+        } else if !enabled {
+            if let Some(ch) = self.part_channel[part].take() {
+                if let Some(synth) = &mut self.keys.synth {
+                    synth.note_off_all_channel(ch as i32, false);
+                }
+            }
+        }
+        self.part_sf2[part] = enabled;
+    }
+
+    /// Channel of an SF2-enabled part (None for DSP parts / unallocated).
+    fn part_channel_of(&self, part: usize) -> Option<usize> {
+        self.part_channel.get(part).copied().flatten()
     }
 
     pub fn set_part_program(&mut self, part: usize, program: u8, bank: u8) {
-        if part >= 8 { return; }
+        if part >= 16 { return; }
         self.part_program[part] = program;
         self.part_bank[part] = bank;
-        self.keys.midi(part as i32, 0xB0, 0, bank as i32);
-        self.keys.midi(part as i32, 0xC0, program as i32, 0);
+        if let Some(ch) = self.part_channel_of(part) {
+            self.keys.midi(ch as i32, 0xB0, 0, bank as i32);
+            self.keys.midi(ch as i32, 0xC0, program as i32, 0);
+        }
     }
 
     pub fn set_drums_enabled(&mut self, enabled: bool) {
@@ -334,16 +368,17 @@ impl SamplerEngine {
     }
 
     /// Per-channel pan (CC10) for SF2 parts — rustysynth applies it per voice.
-    pub fn set_channel_pan(&mut self, channel: usize, cc_value: i32) {
-        if channel >= 16 { return; }
-        self.keys.midi(channel as i32, 0xB0, 10, cc_value.clamp(0, 127));
+    pub fn set_channel_pan(&mut self, part: usize, cc_value: i32) {
+        if let Some(ch) = self.part_channel_of(part) {
+            self.keys.midi(ch as i32, 0xB0, 10, cc_value.clamp(0, 127));
+        }
     }
 
     pub fn set_layer_volume(&mut self, part: usize, volume: f32) {
-        if part >= 8 { return; }
-        let ch = (part as i32) % 16;
+        if part >= 16 { return; }
+        let Some(ch) = self.part_channel_of(part) else { return; };
         let cc_val = (volume * 127.0).round().clamp(0.0, 127.0) as i32;
-        self.keys.midi(ch, 0xB0, 7, cc_val);
+        self.keys.midi(ch as i32, 0xB0, 7, cc_val);
     }
 
     /// Set sample start offset in milliseconds (0-50).
@@ -354,9 +389,8 @@ impl SamplerEngine {
     }
 
     pub fn note_on(&mut self, part: usize, note: u8, velocity: u8) {
-        // rustysynth uses MIDI channels 0-15; map part to channel
-        let ch = (part as i32) % 16;
-        self.keys.midi(ch, 0x90, note as i32, velocity as i32);
+        let Some(ch) = self.part_channel_of(part) else { return; };
+        self.keys.midi(ch as i32, 0x90, note as i32, velocity as i32);
         // Skip initial samples to reduce perceived latency from slow SF2 attacks
         if self.sample_offset > 0 {
             self.keys.skip_samples(self.sample_offset, self.block_size);
@@ -364,8 +398,8 @@ impl SamplerEngine {
     }
 
     pub fn note_off(&mut self, part: usize, note: u8) {
-        let ch = (part as i32) % 16;
-        self.keys.midi(ch, 0x80, note as i32, 0);
+        let Some(ch) = self.part_channel_of(part) else { return; };
+        self.keys.midi(ch as i32, 0x80, note as i32, 0);
     }
 
     /// Sustain pedal (CC64) for all part channels of the keys synth.
@@ -375,8 +409,8 @@ impl SamplerEngine {
     pub fn sustain_pedal(&mut self, on: bool) {
         self.sustain = on;
         let val = if on { 127 } else { 0 };
-        for ch in 0..8usize {
-            self.keys.midi(ch as i32, 0xB0, 64, val);
+        for ch in self.part_channel.iter().flatten() {
+            self.keys.midi(*ch as i32, 0xB0, 64, val);
         }
     }
 
@@ -392,8 +426,8 @@ impl SamplerEngine {
     fn apply_sustain(&mut self) {
         let on = self.sustain;
         let val = if on { 127 } else { 0 };
-        for ch in 0..8usize {
-            self.keys.midi(ch as i32, 0xB0, 64, val);
+        for ch in self.part_channel.iter().flatten() {
+            self.keys.midi(*ch as i32, 0xB0, 64, val);
         }
     }
 
@@ -401,10 +435,10 @@ impl SamplerEngine {
     /// pedal first — `note_off_all_channel` respects it and would leave the
     /// notes hanging otherwise. Used when a part switches patch or is disabled.
     pub fn part_all_notes_off(&mut self, part: usize) {
-        let ch = (part as i32) % 16;
-        self.keys.midi(ch, 0xB0, 64, 0);
+        let Some(ch) = self.part_channel_of(part) else { return; };
+        self.keys.midi(ch as i32, 0xB0, 64, 0);
         if let Some(synth) = &mut self.keys.synth {
-            synth.note_off_all_channel(ch, false);
+            synth.note_off_all_channel(ch as i32, false);
         }
     }
 
