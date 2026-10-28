@@ -115,10 +115,10 @@ pub fn parse_and_push(
     };
     match &event {
         MidiEvent::ControlChange { cc, value, .. } => {
-            eprintln!("[midi-in] CC{} = {}", cc, value);
+            log::debug!("[midi-in] CC{} = {}", cc, value);
         }
         MidiEvent::NoteOn { channel, note, velocity } => {
-            eprintln!("[midi-in] note ch{} n{} v{}", channel, note, velocity);
+            log::debug!("[midi-in] note ch{} n{} v{}", channel, note, velocity);
         }
         _ => {}
     }
