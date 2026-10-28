@@ -265,3 +265,18 @@ docs/superpowers/plans/2026-10-29-bank2-led-console.md (executed). Компон�
 стрелки < > = вендор-SysEx F0 35 59 10 00 {7F|00} F7 (press/release, семья кнобов
 банка 2, id=10). Кнопки Octave/Bank MIDI не шлют (локальные). Следствие: 123/124
 надо отмаршрутизировать из «ноты канала 1» в мастер-транспорт (ControlEvent).
+
+## 16. Компаньон LED-консоли: автозапуск из синта (заявка 2026-10-29)
+Сейчас компаньон запускается вручную (`python3 ~/Projects/smk37_config/pad_console.py`).
+Хочется: галка led_companion on → синт сам spawned'ит процесс компаньона; off → убивает.
+
+Дизайн-заметки:
+- spawn: std::process::Command::new("python3").arg(pad_console.py) — путь в config
+  (led_companion_cmd), дефолт ~/Projects/smk37_config/pad_console.py.
+- kill при off: child.kill() + wait (зомби); осторожно с SIGTERM → компаньон чистит
+  сокет-файл по KeyboardInterrupt только — добавить обработку SIGTERM в компаньон.
+- Двойной запуск: компаньон при старте должен проверить «уже запущен?» (pid-файл
+  или попытка bind занятого сокета — EADDRINUSE → exit 0 тихо).
+- Life-cycle: если юзер убил компаньон руками — не респавнить до перевключения
+  галки (иначе war с пользователем) ИЛИ автореспавн с backoff — решить.
+- Не в v1: сейчас запуск вручную, это документировано.
