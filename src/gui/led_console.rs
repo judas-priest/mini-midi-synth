@@ -140,22 +140,28 @@ impl LedConsole {
         current_pattern: usize,
         mutes: &[bool; 8],
     ) -> [[u8; 3]; 8] {
-        // Row hue separation: TOP row = cold family (white / blue / cyan,
-        // black = disabled), BOTTOM row = warm family (green / red / amber).
-        // The families never overlap, so rows are distinguishable at a glance.
+        // Palette uses ONLY hues visually validated on this hardware (see
+        // PADS_NOTES.md bank-1 kit colors: FF0000/00FF00/FFFF00/0066FF/FF8000/
+        // FF00FF/FFFFFF render correctly; untested hues render unpredictably).
+        // TOP row = white / magenta / blue / orange; BOTTOM row = green / red /
+        // yellow / orange. Off = disabled everywhere.
+        const MENU_W: [u8; 3] = [0xFF, 0xFF, 0xFF]; // MENU button
+        const SEL: [u8; 3] = [0xFF, 0x00, 0xFF]; // selected: magenta
+        const AVAIL: [u8; 3] = [0x00, 0x66, 0xFF]; // available: blue
+        const MENU_ITEM: [u8; 3] = [0xFF, 0x80, 0x00]; // menu entry: orange
         let mut c = [[0u8; 3]; 8];
         if self.mode != Mode::Menu {
-            // slot 0 is the always-visible MENU button (bright white)
-            c[0] = [0xC8, 0xC8, 0xC8];
+            // slot 0 is the always-visible MENU button (white)
+            c[0] = MENU_W;
         }
         match self.mode {
             Mode::Home => {
                 // slot i (1..=7) <-> perf_list index i ("(Init)" at 0 has no slot)
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
                     if Some(i) == active_perf {
-                        *col = [0x00, 0xFF, 0xFF]; // selected: bright cyan
+                        *col = SEL;
                     } else if i < filled_perfs {
-                        *col = [0x00, 0x00, 0x90]; // available: dim blue
+                        *col = AVAIL;
                     } else {
                         *col = [0x00, 0x00, 0x00]; // empty: OFF
                     }
@@ -165,9 +171,9 @@ impl LedConsole {
                 // slot i (1..=7) <-> pattern i-1 (pattern 8 via Prev/Next)
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
                     if i - 1 == current_pattern {
-                        *col = [0x00, 0xFF, 0xFF]; // selected: bright cyan
+                        *col = SEL;
                     } else {
-                        *col = [0x00, 0x00, 0x90]; // available: dim blue
+                        *col = AVAIL;
                     }
                 }
             }
@@ -175,15 +181,15 @@ impl LedConsole {
                 // slot i (1..=7) <-> part i-1 (part 8 via GUI)
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
                     if mutes[i - 1] {
-                        *col = [0x00, 0x00, 0x00]; // muted: OFF (disabled = black)
+                        *col = [0x00, 0x00, 0x00]; // muted: OFF
                     } else {
-                        *col = [0x00, 0x50, 0xFF]; // sounding: bright blue
+                        *col = AVAIL;
                     }
                 }
             }
             Mode::Menu => {
                 for (i, col) in c.iter_mut().enumerate() {
-                    *col = if i < 3 { [0x50, 0x50, 0x50] } else { [0x00, 0x00, 0x00] };
+                    *col = if i < 3 { MENU_ITEM } else { [0x00, 0x00, 0x00] };
                 }
             }
         }
@@ -191,15 +197,18 @@ impl LedConsole {
     }
 
     /// Bottom-row (transport) colors: slots 8..=15 = pads 25..=32.
-    /// Warm family only (green/red/amber) — never collides with the top row.
+    /// Warm family (green/red/yellow) + orange nav; idle = OFF.
     pub fn bottom_colors(&self, playing: bool, recording: bool) -> [[u8; 3]; 8] {
-        let sys = [0x40, 0x35, 0x00]; // system buttons: dim amber
-        let mut c = [sys; 8];
-        c[0] = if playing { [0x00, 0xFF, 0x00] } else { [0x00, 0x40, 0x00] }; // green lit/dim
-        c[1] = if !playing && !recording { [0xFF, 0xDD, 0x00] } else { [0x40, 0x38, 0x00] }; // amber lit/dim
-        c[2] = if recording { [0xFF, 0x00, 0x00] } else { [0x40, 0x00, 0x00] }; // red lit/dim
-        c[3] = [0x50, 0x40, 0x00]; // Rew: dim amber
-        // slots 4..=7 (unused, Prev, Next, Undo) stay dim amber
+        let nav = [0xFF, 0x80, 0x00]; // nav/rew/undo: orange
+        let mut c = [[0x00, 0x00, 0x00]; 8]; // idle = OFF
+        c[0] = if playing { [0x00, 0xFF, 0x00] } else { [0x00, 0x00, 0x00] }; // green when playing
+        c[1] = if !playing && !recording { [0xFF, 0xFF, 0x00] } else { [0x00, 0x00, 0x00] }; // yellow when stopped
+        c[2] = if recording { [0xFF, 0x00, 0x00] } else { [0x00, 0x00, 0x00] }; // red when recording
+        c[3] = nav; // Rew
+        // slots 4..=7: unused, Prev, Next, Undo — orange nav
+        c[5] = nav;
+        c[6] = nav;
+        c[7] = nav;
         c
     }
 }
@@ -302,13 +311,13 @@ mod tests {
         let mut mutes = [false; 8];
         mutes[2] = true;
         let home = c.top_colors(Some(1), 3, 0, &mutes);
-        assert_eq!(home[0], [0xC8, 0xC8, 0xC8]); // MENU button (bright white)
-        assert_eq!(home[1], [0x00, 0xFF, 0xFF]); // selected (bright cyan)
-        assert_eq!(home[2], [0x00, 0x00, 0x90]); // available (dim blue)
+        assert_eq!(home[0], [0xFF, 0xFF, 0xFF]); // MENU button (white)
+        assert_eq!(home[1], [0xFF, 0x00, 0xFF]); // selected (magenta)
+        assert_eq!(home[2], [0x00, 0x66, 0xFF]); // available (blue)
         assert_eq!(home[7], [0x00, 0x00, 0x00]); // empty -> OFF
         c.mode = Mode::Menu;
         let menu = c.top_colors(None, 0, 0, &mutes);
-        assert_eq!(menu[0], [0x50, 0x50, 0x50]);
+        assert_eq!(menu[0], [0xFF, 0x80, 0x00]); // menu entry: orange
         assert_eq!(menu[4], [0x00, 0x00, 0x00]);
     }
 
@@ -317,7 +326,8 @@ mod tests {
         let c = LedConsole::new();
         let b = c.bottom_colors(true, false);
         assert_eq!(b[0], [0x00, 0xFF, 0x00]); // play lit
-        assert_eq!(b[4], [0x40, 0x35, 0x00]); // system buttons dim amber
+        assert_eq!(b[1], [0x00, 0x00, 0x00]); // stop off while playing
+        assert_eq!(b[5], [0xFF, 0x80, 0x00]); // nav (Prev) orange
         let b = c.bottom_colors(false, true);
         assert_eq!(b[2], [0xFF, 0x00, 0x00]); // rec lit
     }
