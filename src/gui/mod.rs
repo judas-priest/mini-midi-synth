@@ -1399,21 +1399,24 @@ impl App {
         else { self.sf2_drums_loaded_name.clone() }
     }
 
-    /// Extract the kit's own drum map (note -> instrument name) for the remap UI.
-    /// First instrument whose key ranges intersect 36..=51 wins.
+    /// Extract the kit's own drum map (note -> SAMPLE name) for the remap UI.
+    /// All instruments/presets are scanned; per-key sample names are collected.
     fn extract_kit_names(&mut self, sf: &rustysynth::SoundFont) {
         self.reset_kit_names();
+        let headers = sf.get_sample_headers();
+        let mut seen = [false; 16];
         for inst in sf.get_instruments() {
-            let mut touched = false;
             for r in inst.get_regions() {
                 let (lo, hi) = (r.get_key_range_start(), r.get_key_range_end());
                 if hi < 36 || lo > 51 { continue; }
-                touched = true;
+                let sid = r.get_sample_id();
+                if sid >= headers.len() { continue; }
+                let name = headers[sid].get_name().to_string();
                 for k in lo.max(36)..=hi.min(51) {
-                    self.drum_kit_names[(k - 36) as usize] = inst.get_name().to_string();
+                    let i = (k - 36) as usize;
+                    if !seen[i] { self.drum_kit_names[i] = name.clone(); seen[i] = true; }
                 }
             }
-            if touched { break; }
         }
     }
 
