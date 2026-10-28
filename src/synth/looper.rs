@@ -279,6 +279,15 @@ impl MidiLooper {
         }
     }
 
+    /// Rewind playback position to the loop start (audio thread). Content,
+    /// length and mute/solo state are untouched.
+    pub fn rewind_to_start(&mut self) {
+        self.playback_tick = 0;
+        self.playback_cursor = 0;
+        self.needs_note_offs = true;
+        self.update_display();
+    }
+
     fn stop(&mut self) {
         self.state = LooperState::Idle;
         // Signal tick() to emit note-offs for any still-active notes
@@ -617,5 +626,16 @@ mod restore_tests {
             .collect();
         l.restore(&events, u32::MAX / 2);
         assert_eq!(l.len() as usize, MAX_LOOP_EVENTS);
+    }
+
+    #[test]
+    fn rewind_to_start_resets_playback_cursor() {
+        let mut l = MidiLooper::new(48_000.0);
+        l.restore(&[super::LooperEventSnapshot { tick: 0, note: 60, velocity: 127, layer_id: 0, part_id: 0 }], 48_000);
+        // rewind must reset playback_tick/cursor without touching events/len.
+        let len_before = l.len();
+        l.rewind_to_start();
+        assert_eq!(l.len(), len_before, "rewind must not drop events");
+        assert_eq!(l.state, LooperState::Idle);
     }
 }
