@@ -1,5 +1,6 @@
 //! Bank-2 pad console state machine (pure logic, GUI thread only).
-//! Slots 0..=7 = top-row pads 17..=24 (notes 60..=67).
+//! Slots 0..=7 = top-row pads 17..=24 (notes 60..=67). Slot 0 (pad 17) is
+//! the always-visible MENU button; targets live on slots 1..=7.
 //! Prev/Next/Rewind arrive as actions from notes 78/79/80 (routed by caller).
 //! Engine-side transport notes 81/82/83 (mod.rs:1573-1598) never reach this
 //! module; console Undo is note 75 (engine's legacy 64-arm superseded).
@@ -109,10 +110,16 @@ impl LedConsole {
             self.mode = m;
             return None; // mode switch only; GUI repaints via snapshot
         }
+        if slot == 0 {
+            // always-visible MENU button (top-left): tap = open menu
+            self.mode = Mode::Menu;
+            return None;
+        }
+        // slots 1..=7 are targets, target index = slot - 1
         Some(match self.mode {
             Mode::Home => Action::LoadPerf(slot),
-            Mode::Pattern => Action::SelectPattern(slot),
-            Mode::Mute => Action::ToggleMute(slot),
+            Mode::Pattern => Action::SelectPattern(slot - 1),
+            Mode::Mute => Action::ToggleMute(slot - 1),
             Mode::Menu => unreachable!(),
         })
     }
@@ -134,9 +141,14 @@ impl LedConsole {
         mutes: &[bool; 8],
     ) -> [[u8; 3]; 8] {
         let mut c = [[0u8; 3]; 8];
+        if self.mode != Mode::Menu {
+            // slot 0 is the always-visible MENU button
+            c[0] = [0xC0, 0xC0, 0xC0];
+        }
         match self.mode {
             Mode::Home => {
-                for (i, col) in c.iter_mut().enumerate() {
+                // slot i (1..=7) <-> perf_list index i ("(Init)" at 0 has no slot)
+                for (i, col) in c.iter_mut().enumerate().skip(1) {
                     if Some(i) == active_perf {
                         *col = [0xFF, 0x80, 0x00];
                     } else if i < filled_perfs {
@@ -147,8 +159,9 @@ impl LedConsole {
                 }
             }
             Mode::Pattern => {
-                for (i, col) in c.iter_mut().enumerate() {
-                    if i == current_pattern {
+                // slot i (1..=7) <-> pattern i-1 (pattern 8 via Prev/Next)
+                for (i, col) in c.iter_mut().enumerate().skip(1) {
+                    if i - 1 == current_pattern {
                         *col = [0xFF, 0x80, 0x00];
                     } else {
                         *col = [0x30, 0x30, 0x30];
@@ -156,8 +169,9 @@ impl LedConsole {
                 }
             }
             Mode::Mute => {
-                for (i, col) in c.iter_mut().enumerate() {
-                    if mutes[i] {
+                // slot i (1..=7) <-> part i-1 (part 8 via GUI)
+                for (i, col) in c.iter_mut().enumerate().skip(1) {
+                    if mutes[i - 1] {
                         *col = [0x10, 0x10, 0x10];
                     } else {
                         *col = [0x00, 0x66, 0xFF];
@@ -244,7 +258,7 @@ mod tests {
         let now = Instant::now();
         c.on_event(PadEvent::Down(6), now);
         assert_eq!(c.on_event(PadEvent::Up(6), now + Duration::from_millis(30)),
-                   Some(Action::SelectPattern(6)));
+                   Some(Action::SelectPattern(5)));
     }
 
     #[test]
@@ -252,9 +266,22 @@ mod tests {
         let mut c = LedConsole::new();
         c.mode = Mode::Mute;
         let now = Instant::now();
+        c.on_event(PadEvent::Down(2), now);
+        assert_eq!(c.on_event(PadEvent::Up(2), now + Duration::from_millis(30)),
+                   Some(Action::ToggleMute(1)));
+    }
+
+    #[test]
+    fn menu_button_tap_opens_menu() {
+        let mut c = LedConsole::new();
+        let now = Instant::now();
         c.on_event(PadEvent::Down(0), now);
-        assert_eq!(c.on_event(PadEvent::Up(0), now + Duration::from_millis(30)),
-                   Some(Action::ToggleMute(0)));
+        assert_eq!(c.on_event(PadEvent::Up(0), now + Duration::from_millis(30)), None);
+        assert_eq!(c.mode, Mode::Menu);
+        // and a second tap on slot 0 inside the menu returns HOME
+        c.on_event(PadEvent::Down(0), now);
+        assert_eq!(c.on_event(PadEvent::Up(0), now + Duration::from_millis(30)), None);
+        assert_eq!(c.mode, Mode::Home);
     }
 
     #[test]
@@ -271,8 +298,9 @@ mod tests {
         let mut mutes = [false; 8];
         mutes[2] = true;
         let home = c.top_colors(Some(1), 3, 0, &mutes);
-        assert_eq!(home[1], [0xFF, 0x80, 0x00]); // active
-        assert_eq!(home[0], [0x30, 0x30, 0x30]); // filled
+        assert_eq!(home[0], [0xC0, 0xC0, 0xC0]); // MENU button
+        assert_eq!(home[1], [0xFF, 0x80, 0x00]); // active (perf_list idx 1)
+        assert_eq!(home[2], [0x30, 0x30, 0x30]); // filled
         assert_eq!(home[7], [0x00, 0x00, 0x00]); // empty -> LED off
         c.mode = Mode::Menu;
         let menu = c.top_colors(None, 0, 0, &mutes);
