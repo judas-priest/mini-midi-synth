@@ -333,6 +333,12 @@ impl SamplerEngine {
         self.drums_sf2
     }
 
+    /// Per-channel pan (CC10) for SF2 parts — rustysynth applies it per voice.
+    pub fn set_channel_pan(&mut self, channel: usize, cc_value: i32) {
+        if channel >= 16 { return; }
+        self.keys.midi(channel as i32, 0xB0, 10, cc_value.clamp(0, 127));
+    }
+
     pub fn set_layer_volume(&mut self, part: usize, volume: f32) {
         if part >= 8 { return; }
         let ch = (part as i32) % 16;

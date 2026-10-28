@@ -1963,7 +1963,17 @@ impl SynthEngine {
                 if let Some(l) = self.parts.get_mut(part) { l.vel_min = vel_min; l.vel_max = vel_max; }
             }
             ControlEvent::SetPartPan { part, pan } => {
-                if let Some(l) = self.parts.get_mut(part) { l.pan = pan.clamp(-1.0, 1.0); }
+                if let Some(l) = self.parts.get_mut(part) {
+                    l.pan = pan.clamp(-1.0, 1.0);
+                    // SF2: pass pan through as CC10 on the part's sampler channel
+                    // (rustysynth applies per-channel pan internally).  DSP parts
+                    // get constant-power pan in tick_block.
+                    if l.sf2_mode {
+                        let ch = part % 16;
+                        let cc = (l.pan.clamp(-1.0, 1.0) * 0.5 + 0.5) * 127.0;
+                        self.sampler.set_channel_pan(ch, cc as i32);
+                    }
+                }
             }
             ControlEvent::SetPartTranspose { part, semitones } => {
                 // DSP voices match note-offs by src_note (raw), so held voices
@@ -2157,6 +2167,13 @@ impl SynthEngine {
                     l.note_stack.clear();
                     l.latch_held.clear();
                     l.sf2_mode = enabled;
+                    // (Re)apply the part's pan on the SF2 channel — CC10 was
+                    // never sent while the part was in DSP mode.
+                    if enabled {
+                        let ch = part % 16;
+                        let cc = (l.pan.clamp(-1.0, 1.0) * 0.5 + 0.5) * 127.0;
+                        self.sampler.set_channel_pan(ch, cc as i32);
+                    }
                 }
                 self.sampler.set_part_mode(part, enabled);
             }

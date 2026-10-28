@@ -1643,8 +1643,21 @@ impl App {
         };
         // AllNotesOff for smooth transition
         let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+        // Legacy 8-part performances: zone B lived at indices 4..8.  In the
+        // 16-part layout zone B is 8..16 — relocate so A/B semantics survive.
+        let mut parts = perf.parts;
+        if parts.len() == 8 {
+            let legacy_b: Vec<_> = parts.drain(4..8).collect();
+            let empty_a = parts[0].clone();
+            parts.resize_with(8, || {
+                let mut c = empty_a.clone();
+                c.enabled = false;
+                c
+            });
+            parts.extend(legacy_b); // now: 0..4 = zone A, 4..8 empty, 8..12 = zone B
+        }
         self.perf_name = perf.name.clone();
-        for (i, part) in perf.parts.iter().enumerate() {
+        for (i, part) in parts.iter().enumerate() {
             if i >= self.parts.len() { break; }
             let patch_idx = self.patches.iter()
                 .position(|p| p.name == part.patch_name)
@@ -1681,7 +1694,7 @@ impl App {
         }
         // Parts absent from the performance must not keep playing
         // the previous patch with their old voices.
-        for i in perf.parts.len()..self.parts.len() {
+        for i in parts.len()..self.parts.len() {
             if self.parts[i].enabled {
                 self.parts[i].enabled = false;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
