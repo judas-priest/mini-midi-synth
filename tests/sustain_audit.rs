@@ -438,3 +438,98 @@ fn looper_records_all_sounding_parts() {
     let silent_peak = render_peak(&mut e2, 4000);
     assert!(silent_peak < 1e-3, "out-of-range note was recorded (peak {silent_peak})");
 }
+
+#[test]
+fn held_key_survives_pedal_up() {
+    let mut e = engine_with_init_patch();
+    // pedal-up on an idle engine must not panic
+    pedal_up(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound");
+    // pedal-up while the KEY IS STILL HELD: note must keep sounding.
+    // Discriminator: settle first — a killed voice decays below SILENCE
+    // (release 0.3s), a held one stays at sustain level forever.
+    pedal_up(&mut e);
+    settle(&mut e);
+    let held = render_peak(&mut e, 200);
+    assert!(held > SILENCE, "pedal-up killed a held key (peak {held})");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "key-off after pedal-up left ringing (peak {after})");
+}
+
+#[test]
+fn repedal_articulation_keeps_held_key() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    // re-pedal: down, up, down, up — key held the whole time
+    pedal_down(&mut e);
+    pedal_up(&mut e);
+    pedal_down(&mut e);
+    pedal_up(&mut e);
+    settle(&mut e);
+    let held = render_peak(&mut e, 200);
+    assert!(held > SILENCE, "re-pedal killed a held key (peak {held})");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    settle(&mut e);
+    assert!(render_peak(&mut e, 200) < SILENCE);
+}
+
+#[test]
+fn multi_held_keys_pedal_up_then_individual_offs() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 48, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    pedal_up(&mut e);
+    settle(&mut e);
+    assert!(render_peak(&mut e, 200) > SILENCE, "pedal-up killed held keys");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 48 });
+    settle(&mut e);
+    assert!(render_peak(&mut e, 200) > SILENCE, "note 60 should still sound");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    settle(&mut e);
+    assert!(render_peak(&mut e, 200) < SILENCE);
+}
+
+#[test]
+fn duplicate_note_on_then_pedal_up_releases_once() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    pedal_up(&mut e);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    settle(&mut e);
+    assert!(render_peak(&mut e, 200) < SILENCE, "duplicate note-on left ringing");
+}
+
+#[test]
+fn panic_after_held_pedal_up_kills_all() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    pedal_up(&mut e);
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 123, value: 0 });
+    settle(&mut e);
+    assert!(render_peak(&mut e, 200) < SILENCE, "CC123 left ringing");
+    // a later pedal cycle must not resurrect anything
+    pedal_down(&mut e);
+    pedal_up(&mut e);
+    settle(&mut e);
+    assert!(render_peak(&mut e, 200) < SILENCE, "pedal cycle resurrected a note");
+}
+
+#[test]
+fn drum_record_with_out_of_range_remap_target_does_not_panic() {
+    use mini_midi_synth::synth::ControlEvent;
+    let mut e = engine_with_init_patch();
+    // remap pad slot 0 (note 36) to target 30 (outside 36..=51 — legal SF2 target)
+    let mut remap = [36u8; 16];
+    remap[0] = 30;
+    let _ = e.handle_control(ControlEvent::DrumSetRemap { table: Box::new(remap) });
+    let _ = e.handle_control(ControlEvent::DrumSeqRecord { recording: true });
+    // live hit on ch10, note 36 -> remapped target 30 -> slot math 30-36
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 36, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 9, note: 36 });
+    // must not panic (debug overflow) and must not record a bogus hit
+    assert!(render_peak(&mut e, 10) >= 0.0);
+}

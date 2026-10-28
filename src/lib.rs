@@ -350,6 +350,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
 /// the entry point is `android_main` instead (see bottom of file).
 #[cfg(not(target_os = "android"))]
 pub fn desktop_main() -> Result<()> {
+    let _ = env_logger::try_init(); // RUST_LOG-gated; Android uses android_logger
+
     #[cfg(target_os = "linux")]
     suppress_alsa_errors();
 

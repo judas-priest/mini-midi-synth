@@ -951,14 +951,36 @@ impl DrumEngine {
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        // Preserve everything user-facing: StepSequencer timing takes sample_rate
+        // as a parameter (no stored sr), voice coefficients are the only thing
+        // that must be rebuilt. Stale choke holders are reset (panic-path rule).
         let step = self.step_atom.clone();
         let play = self.play_atom.clone();
         let rec = self.rec_atom.clone();
+        let params = self.params;
+        let sequencer = std::mem::replace(&mut self.sequencer, StepSequencer::new());
+        let volume = self.volume;
+        let enabled = self.enabled;
+        let sf2_mode = self.sf2_mode;
+        let fixed_velocity = self.fixed_velocity;
+        let remap = self.remap;
+        let pad_vel = self.pad_vel;
+        let choke_groups = self.choke_groups;
         self.sample_rate = sample_rate;
         *self = Self::new(sample_rate);
         self.step_atom = step;
         self.play_atom = play;
         self.rec_atom = rec;
+        self.params = params;
+        self.sequencer = sequencer;
+        self.volume = volume;
+        self.enabled = enabled;
+        self.sf2_mode = sf2_mode;
+        self.fixed_velocity = fixed_velocity;
+        self.remap = remap;
+        self.pad_vel = pad_vel;
+        self.choke_groups = choke_groups;
+        self.group_last_note = [0u8; NUM_CHOKE_GROUPS];
     }
 
     /// Translate an incoming pad note to its target kit note.

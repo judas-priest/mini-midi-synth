@@ -218,7 +218,7 @@ impl App {
             if sel != self.drum_remap[idx] {
                 // detach any other pad mapped to this instrument, then attach this pad
                 for (i, v) in self.drum_remap.iter_mut().enumerate() {
-                    if *v == sel && i != idx { *v = i as u8; }
+                    if *v == sel && i != idx { *v = (36 + i) as u8; }
                 }
                 self.drum_remap[idx] = sel;
                 self.push_drum_remap();

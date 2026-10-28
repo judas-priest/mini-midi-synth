@@ -201,6 +201,12 @@ pub enum ControlEvent {
     LooperSetBars { bars: u8 },
     LooperSetQuantize { quantize: u8 },
     LooperSetBpm { bpm: f32 },
+    /// Restore recorded looper content after an audio reconnect. The payload
+    /// owns heap memory and is handed back from handle_control for disposal.
+    LooperRestore {
+        events: Box<[crate::synth::looper::LooperEventSnapshot]>,
+        loop_length_ticks: u32,
+    },
     LooperSetLayerMute { layer: u8, mute: bool },
     LooperSetSolo { layer: Option<u8> },
     SetSustain { on: bool },
@@ -458,6 +464,7 @@ struct Part {
     alt_unipolar: f32,      // current alternate unipolar value
     release_vel: f32,       // last note-off velocity
     sustained_notes: [bool; 128], // notes held by sustain pedal
+    keys_down: [bool; 128],   // raw key physically held (pedal-up must spare these)
     breath: f32,            // CC2, 0..1
     expression: f32,        // CC11, 0..1
     sustain_pedal: f32,     // CC64: 0.0 or 1.0
@@ -501,6 +508,7 @@ impl Part {
             rand_bipolar: 0.0, rand_unipolar: 0.5,
             alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
             sustained_notes: [false; 128],
+            keys_down: [false; 128],
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
             cached_mod_sources: mod_matrix::ModSources {
@@ -569,6 +577,8 @@ impl Part {
         if !self.enabled { return; }
         let note = (raw_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
         if note < self.min_note || note > self.max_note { return; }
+        debug_assert!(raw_note < 128);
+        self.keys_down[raw_note as usize] = true;
         self.last_velocity = velocity as f32 / 127.0;
         self.last_note = note;
 
@@ -587,6 +597,7 @@ impl Part {
         if play_mode == 3 {
             if let Some(pos) = self.latch_held.iter().position(|&n| n == raw_note) {
                 self.latch_held.remove(pos);
+                self.keys_down[raw_note as usize] = false;
                 for v in &mut self.voices { if v.active && v.src_note == raw_note { v.note_off(); } }
             } else {
                 self.latch_held.push(raw_note);
@@ -777,6 +788,7 @@ impl Part {
 
     /// Release voices matching the RAW (pre-transpose) note — see `note_on`.
     fn note_off(&mut self, raw_note: u8) {
+        self.keys_down[raw_note as usize] = false;
         let note = (raw_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
         let play_mode = self.params.play_mode as u8;
 
@@ -1367,9 +1379,11 @@ impl SynthEngine {
     }
 
     /// Apply sustain pedal state (CC64 from pedal/fader, or GUI toggle).
-    /// On release, ALL sounding voices get note_off — stale sustained_notes
-    /// flags (patch switched while pedal was down, mono/latch holds) would
-    /// otherwise leave notes ringing forever.
+    /// On release, voices whose key is STILL HELD (`keys_down`) keep sounding —
+    /// their own key-off will release them. Voices held by the pedal only
+    /// (`sustained_notes`) and stale mono/latch entries are released/cleared;
+    /// stale flags from a patch switch while the pedal was down would otherwise
+    /// leave notes ringing forever.
     fn set_sustain(&mut self, value: u8) {
         let on = value >= 64;
         self.sustain.store(on, std::sync::atomic::Ordering::Relaxed);
@@ -1378,14 +1392,24 @@ impl SynthEngine {
         for part in &mut self.parts {
             part.sustain_pedal = if on { 1.0 } else { 0.0 };
             if !on {
+                // Latch voices are released unconditionally (as before): a
+                // latched note is defined by latch_held, not by a held key —
+                // clearing latch_held below without releasing its keys_down
+                // would leave a voice that its own key-off can never stop
+                // (latch note_off early-returns).
+                for &n in &part.latch_held {
+                    part.keys_down[n as usize] = false;
+                }
                 for voice in &mut part.voices {
-                    if voice.active && !voice.is_releasing() {
+                    if voice.active && !voice.is_releasing()
+                        && !part.keys_down[voice.src_note as usize]
+                    {
                         voice.note_off();
                     }
                 }
                 part.sustained_notes = [false; 128];
-                // All pedal-held voices are gone; stale mono/latch entries
-                // would resurrect them on the next key press (mono retrigger).
+                // Pedal-only holds are gone; stale mono/latch entries would
+                // resurrect on the next key press (mono retrigger).
                 part.note_stack.clear();
                 part.latch_held.clear();
             }
@@ -1577,7 +1601,11 @@ impl SynthEngine {
                         let velocity = self.drum_engine.pad_velocity(note, velocity);
                         let note = self.drum_engine.remapped_note(note);
                         // Record into sequencer if recording
-                        if is_drum_note {
+                        // `note` here is the REMAPPED target (30..=55 legal). Only
+                        // 36..=51 maps to sequencer slots; skip recording other
+                        // targets (drop, don't clamp — clamping would corrupt
+                        // a neighbouring slot's pattern).
+                        if is_drum_note && (36..=51).contains(&note) {
                             let slot = (note - 36) as usize;
                             let sr = self.sample_rate;
                             if let Some((pat, _slot, step)) =
@@ -1720,6 +1748,7 @@ impl SynthEngine {
                         if voice.active { voice.note_off(); }
                     }
                     l.sustained_notes = [false; 128];
+                    l.keys_down = [false; 128];
                     l.note_stack.clear();
                     l.latch_held.clear();
                 }
@@ -1776,6 +1805,7 @@ impl SynthEngine {
                         part.latch_held.clear();
                         part.sustain_pedal = 0.0;
                         part.sustained_notes = [false; 128];
+                        part.keys_down = [false; 128];
                     }
                     self.sampler.all_notes_off();
                     self.drum_engine.reset_choke_state();
@@ -1863,6 +1893,7 @@ impl SynthEngine {
                         if voice.active { voice.note_off(); }
                     }
                     l.sustained_notes = [false; 128];
+                    l.keys_down = [false; 128];
                     l.note_stack.clear();
                     l.latch_held.clear();
                     l.min_note = params.min_note as u8;
@@ -1927,6 +1958,7 @@ impl SynthEngine {
                             if voice.active { voice.note_off(); }
                         }
                         l.sustained_notes = [false; 128];
+                        l.keys_down = [false; 128];
                         l.note_stack.clear();
                         l.latch_held.clear();
                     }
@@ -1950,6 +1982,7 @@ impl SynthEngine {
                             if voice.active { voice.note_off(); }
                         }
                         l.sustained_notes = [false; 128];
+                        l.keys_down = [false; 128];
                         l.note_stack.clear();
                         l.latch_held.clear();
                     }
@@ -2066,6 +2099,11 @@ impl SynthEngine {
                 self.looper.quantize = looper::Quantize::from_index(quantize);
             }
             ControlEvent::LooperSetBpm { bpm } => { self.looper.bpm = bpm; }
+            ControlEvent::LooperRestore { events, loop_length_ticks } => {
+                self.looper.restore(&events, loop_length_ticks);
+                // Heap-owning payload: hand it back for GUI-thread disposal.
+                return Some(ControlEvent::LooperRestore { events, loop_length_ticks });
+            }
             ControlEvent::LooperSetLayerMute { layer, mute } => {
                 let note_offs = self.looper.set_layer_mute(layer, mute);
                 for &(note, vel, part_id) in &note_offs {
@@ -2127,6 +2165,7 @@ impl SynthEngine {
                     part.latch_held.clear();
                     part.sustain_pedal = 0.0;
                     part.sustained_notes = [false; 128];
+                    part.keys_down = [false; 128];
                 }
                 self.sampler.all_notes_off();
                 self.drum_engine.reset_choke_state();
@@ -2170,6 +2209,7 @@ impl SynthEngine {
                         if voice.active { voice.note_off(); }
                     }
                     l.sustained_notes = [false; 128];
+                    l.keys_down = [false; 128];
                     l.note_stack.clear();
                     l.latch_held.clear();
                     l.sf2_mode = enabled;
