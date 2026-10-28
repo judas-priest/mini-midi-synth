@@ -90,13 +90,13 @@ impl App {
                 36, 37, 38, 39, 44, 45, 47, 46, // bottom row, pads 9-16
             ];
             let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ui.ctx(), |ui| {
-                ui.set_width(780.0);
-                ui.strong("Pad → drum sound");
+                ui.set_width(860.0);
+                ui.strong("Pad Remap");
                 ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
                 ui.add_space(theme::SP_MD);
                 let mut new_remap = self.drum_remap;
                 let mut pad_row = |ui: &mut egui::Ui, pads: std::ops::Range<usize>, id: &str| {
-                    egui::Grid::new(id).num_columns(8).show(ui, |ui| {
+                    egui::Grid::new(id).num_columns(8).spacing([8.0, 6.0]).show(ui, |ui| {
                         for p in pads {
                             let note = NOTE_OF_PAD[p];
                             let slot = &mut new_remap[(note - 36) as usize];
@@ -104,7 +104,7 @@ impl App {
                             ui.vertical_centered(|ui| {
                                 ui.label(format!("{}", p + 1));
                                 egui::ComboBox::from_id_salt(p)
-                                    .width(80.0)
+                                    .width(96.0)
                                     .selected_text(sel)
                                     .show_ui(ui, |ui| {
                                         for (s, name) in drum_slot_names().iter().enumerate() {
@@ -136,6 +136,42 @@ impl App {
             });
             if dialog.should_close() {
                 self.show_drum_remap = false;
+            }
+        }
+
+        // Single-pad remap: click a drawn pad on the main screen
+        if let Some(s) = self.remap_pad {
+            let name = drum_slot_name(s as u8);
+            let cur = self.drum_remap.iter().position(|&v| v as usize == s).unwrap_or(s);
+            let mut sel = cur;
+            let dialog = egui::Modal::new(egui::Id::new("remap_pad_dialog")).show(ui.ctx(), |ui| {
+                ui.set_width(300.0);
+                ui.strong(format!("\"{}\" plays from:", name));
+                ui.add_space(theme::SP_MD);
+                egui::ComboBox::from_label("Pad")
+                    .width(120.0)
+                    .selected_text(format!("Pad {}", sel + 1))
+                    .show_ui(ui, |ui| {
+                        for p in 0..16usize {
+                            ui.selectable_value(&mut sel, p, format!("Pad {}", p + 1));
+                        }
+                    });
+                ui.add_space(theme::SP_MD);
+                if ui.button("Close").clicked() {
+                    self.remap_pad = None;
+                }
+            });
+            if sel != cur {
+                // detach the pad that triggered this slot before, attach the new one
+                for (i, v) in self.drum_remap.iter_mut().enumerate() {
+                    if *v as usize == s && i != sel { *v = i as u8; }
+                }
+                self.drum_remap[sel] = s as u8;
+                self.push_drum_remap();
+                self.save_drum_remap();
+            }
+            if dialog.should_close() {
+                self.remap_pad = None;
             }
         }
 

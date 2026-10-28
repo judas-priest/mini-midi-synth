@@ -11,3 +11,9 @@
 
 [target.aarch64-linux-android]
 linker = "/home/dima/.local/opt/android-sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
+
+# Desktop only: mold linker cuts link times dramatically (no effect on the
+# Android cross-build above, which sets its own NDK clang linker).
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]

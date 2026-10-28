@@ -18,7 +18,7 @@ fn is_black_key(note: u8) -> bool {
 }
 
 impl App {
-    pub fn draw_keyboard(&self, ui: &mut egui::Ui) {
+    pub fn draw_keyboard(&mut self, ui: &mut egui::Ui) {
         // Active notes label above keyboard; detected chord in brackets, bold
         let held: Vec<u8> = (0..128u8)
             .filter(|i| self.note_state[*i as usize].load(Ordering::Relaxed) > 0)
@@ -127,6 +127,9 @@ impl App {
             );
             let pad_origin = pad_resp.rect.min;
 
+            // Click a drawn pad -> remap dialog for that sound
+            let mut clicked_slot: Option<usize> = None;
+
             // Top row (cyan)
             for col in 0..8u8 {
                 let note = PAD_TOP[col as usize];
@@ -142,6 +145,9 @@ impl App {
                 };
                 pad_painter.rect_filled(pr, 3.0, color);
                 pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, theme::STROKE_PAD_BORDER), egui::StrokeKind::Outside);
+                if ui.interact(pr, egui::Id::new("pad_top").with(col), egui::Sense::click()).clicked() {
+                    clicked_slot = Some((note - 36) as usize);
+                }
             }
 
             // Bottom row (pink)
@@ -159,6 +165,14 @@ impl App {
                 };
                 pad_painter.rect_filled(pr, 3.0, color);
                 pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, theme::STROKE_PAD_BORDER), egui::StrokeKind::Outside);
+                if ui.interact(pr, egui::Id::new("pad_bot").with(col), egui::Sense::click()).clicked() {
+                    clicked_slot = Some((note - 36) as usize);
+                }
+            }
+
+            if let Some(s) = clicked_slot {
+                self.remap_pad = Some(s);
+                self.show_drum_remap = false;
             }
         });
     }
