@@ -84,17 +84,23 @@ impl App {
         }
 
         if self.show_drum_remap {
+            // Hardware pad k (1..16) sends this stock note (SMK-37 factory map).
+            const NOTE_OF_PAD: [u8; 16] = [
+                40, 41, 42, 43, 48, 49, 50, 51, // top row, pads 1-8
+                36, 37, 38, 39, 44, 45, 47, 46, // bottom row, pads 9-16
+            ];
             let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ui.ctx(), |ui| {
                 ui.set_width(340.0);
                 ui.strong("Pad → drum sound");
-                ui.label("Which sound each incoming pad note plays.");
+                ui.label("Which sound each physical pad plays.");
                 ui.add_space(theme::SP_MD);
                 let mut new_remap = self.drum_remap;
                 egui::Grid::new("drum_remap_grid").num_columns(4).show(ui, |ui| {
-                    for (i, slot) in new_remap.iter_mut().enumerate() {
+                    for (p, note) in NOTE_OF_PAD.iter().enumerate() {
+                        let slot = &mut new_remap[(*note - 36) as usize];
                         let sel = drum_slot_name(*slot);
-                        ui.label(format!("Pad {}", 36 + i as u8));
-                        egui::ComboBox::from_id_salt(i)
+                        ui.label(format!("Pad {}", p + 1));
+                        egui::ComboBox::from_id_salt(p)
                             .width(96.0)
                             .selected_text(sel)
                             .show_ui(ui, |ui| {
@@ -102,7 +108,7 @@ impl App {
                                     ui.selectable_value(slot, s as u8, *name);
                                 }
                             });
-                        if i % 2 == 1 { ui.end_row(); }
+                        if p % 2 == 1 { ui.end_row(); }
                     }
                 });
                 ui.add_space(theme::SP_MD);
