@@ -148,7 +148,6 @@ impl LedConsole {
         const MENU_W: [u8; 3] = [0xFF, 0xFF, 0xFF]; // MENU button
         const SEL: [u8; 3] = [0xFF, 0x00, 0xFF]; // selected: magenta
         const AVAIL: [u8; 3] = [0x00, 0x66, 0xFF]; // available: blue
-        const MENU_ITEM: [u8; 3] = [0xFF, 0x80, 0x00]; // menu entry: orange
         let mut c = [[0u8; 3]; 8];
         if self.mode != Mode::Menu {
             // slot 0 is the always-visible MENU button (white)
@@ -168,28 +167,37 @@ impl LedConsole {
                 }
             }
             Mode::Pattern => {
-                // slot i (1..=7) <-> pattern i-1 (pattern 8 via Prev/Next)
+                // slot i (1..=7) <-> pattern i-1 (pattern 8 via Prev/Next).
+                // Pattern mode speaks YELLOW (selected = magenta marker).
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
                     if i - 1 == current_pattern {
                         *col = SEL;
                     } else {
-                        *col = AVAIL;
+                        *col = [0xFF, 0xFF, 0x00]; // available: yellow
                     }
                 }
             }
             Mode::Mute => {
-                // slot i (1..=7) <-> part i-1 (part 8 via GUI)
+                // slot i (1..=7) <-> part i-1 (part 8 via GUI).
+                // Mute mode speaks GREEN (muted = OFF).
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
                     if mutes[i - 1] {
                         *col = [0x00, 0x00, 0x00]; // muted: OFF
                     } else {
-                        *col = AVAIL;
+                        *col = [0x00, 0xFF, 0x00]; // sounding: green
                     }
                 }
             }
             Mode::Menu => {
+                // menu items are color-coded to what the row becomes after
+                // picking them: HOME -> blue perfs, PATTERN -> yellow, MUTE -> green
                 for (i, col) in c.iter_mut().enumerate() {
-                    *col = if i < 3 { MENU_ITEM } else { [0x00, 0x00, 0x00] };
+                    *col = match i {
+                        0 => AVAIL,                 // HOME: blue (perfs)
+                        1 => [0xFF, 0xFF, 0x00],    // PATTERN: yellow
+                        2 => [0x00, 0xFF, 0x00],    // MUTE: green
+                        _ => [0x00, 0x00, 0x00],
+                    };
                 }
             }
         }
@@ -317,7 +325,9 @@ mod tests {
         assert_eq!(home[7], [0x00, 0x00, 0x00]); // empty -> OFF
         c.mode = Mode::Menu;
         let menu = c.top_colors(None, 0, 0, &mutes);
-        assert_eq!(menu[0], [0xFF, 0x80, 0x00]); // menu entry: orange
+        assert_eq!(menu[0], [0x00, 0x66, 0xFF]); // HOME: blue
+        assert_eq!(menu[1], [0xFF, 0xFF, 0x00]); // PATTERN: yellow
+        assert_eq!(menu[2], [0x00, 0xFF, 0x00]); // MUTE: green
         assert_eq!(menu[4], [0x00, 0x00, 0x00]);
     }
 
