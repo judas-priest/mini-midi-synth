@@ -47,13 +47,15 @@ cargo test --features rt-assert --test rt_safety
 - NoteOff без NoteOn / двойной NoteOff: pending=None, no-op (тест).
 - Холд в MUTE/PATTERN → меню; холд в Menu → остаёмся в Menu (no-op, тест).
 - missing field — config без `led_companion` → serde default false (тест).
-- socket отсутствует/умер: клиент молча ретраит раз в 2с, GUI не блокируется
-  (mpsc в отдельный тред; тест не нужен — код изоляции тривиален).
+- socket отсутствует: connect мгновенно ECONNREFUSED, retry раз в 2с; умер
+  writer — alive-флаг, тот же retry; GUI не блокируется (mpsc в отдельный тред).
+  (Зависший backlog-сокет — не обрабатывается, задокументировано.)
 - Значение цвета: слоты 20–24 в меню тёмные; пустой слот перфа = 000000+FF
   (LED off, допустимый валидный цвет — тест snapshot).
 - clock skew — неприменимо (Instant монотонные часы одного процесса).
-- external-call timeout — unix socket connect с таймаутом 100ms в отдельном
-  треде; GUI никогда не блокируется.
+- external-call timeout — connect к /tmp-сокету без таймаута, но в GUI-кадре
+  раз в 2с (ECONNREFUSED мгновенен); живой write — только в writer-треде,
+  GUI никогда не блокируется на I/O.
 - concurrent writers к сокету — один writer-тред, mpsc сериализует.
 
 ---
@@ -62,11 +64,13 @@ cargo test --features rt-assert --test rt_safety
 
 **Files:**
 - Create: `src/gui/led_console.rs` (модуль + `#[cfg(test)] mod tests`)
-- Modify: `src/gui/mod.rs` (только `mod led_console;` — в конце Task 2)
+- Modify: `src/gui/mod.rs` (сразу `pub mod led_console;` — иначе модуль не
+  компилируется и красной фазы не будет)
 
 - [ ] **Step 1: написать failing-тесты** — создать `src/gui/led_console.rs`
   ТОЛЬКО с типами, struct и тестами (БЕЗ `impl LedConsole` — методы не
-  существуют, тесты не скомпилируются; это и есть красная фаза):
+  существуют, тесты не скомпилируются; это и есть красная фаза), и объявить
+  модуль в `src/gui/mod.rs` (`pub mod led_console;` в списке модулей).
 
 ```rust
 //! Bank-2 pad console state machine (pure logic, GUI thread only).
@@ -79,8 +83,9 @@ use std::time::{Duration, Instant};
 const HOLD: Duration = Duration::from_millis(500);
 
 /// Top-row mode.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Mode {
+    #[default]
     Home,
     Pattern,
     Mute,
@@ -94,6 +99,8 @@ pub enum PadEvent {
     Down(usize),
     /// NoteOff on a top-row pad (slot 0..=7).
     Up(usize),
+    /// Bottom-row: Undo (note 75).
+    Undo,
     /// Bottom-row nav: Prev (note 78).
     Prev,
     /// Bottom-row nav: Next (note 79).
@@ -106,6 +113,7 @@ pub enum Action {
     LoadPerf(usize),
     SelectPattern(usize),
     ToggleMute(usize),
+    Undo,
     StepPerf(i32),
     StepPattern(i32),
 }
@@ -113,6 +121,12 @@ pub enum Action {
 pub struct LedConsole {
     mode: Mode,
     pending: Option<(usize, Instant)>,
+}
+
+impl Default for LedConsole {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 ```
 
@@ -227,6 +241,23 @@ mod tests {
         let b = c.bottom_colors(false, true);
         assert_eq!(b[2], [0xFF, 0x00, 0x00]); // rec lit
     }
+
+    #[test]
+    fn hold_in_menu_stays_menu() {
+        let mut c = LedConsole::new();
+        c.mode = Mode::Menu;
+        let now = Instant::now();
+        c.on_event(PadEvent::Down(6), now);
+        assert_eq!(c.tick(now + Duration::from_millis(510)), Some(Mode::Menu));
+        assert_eq!(c.on_event(PadEvent::Up(6), now + Duration::from_millis(600)), None);
+        assert_eq!(c.mode, Mode::Menu);
+    }
+
+    #[test]
+    fn undo_action_passes_through() {
+        let mut c = LedConsole::new();
+        assert_eq!(c.on_event(PadEvent::Undo, Instant::now()), Some(Action::Undo));
+    }
 }
 ```
 
@@ -281,6 +312,7 @@ impl LedConsole {
                     None // hold consumed by tick()
                 }
             }
+            PadEvent::Undo => Some(Action::Undo),
             PadEvent::Prev => Some(self.step(-1)),
             PadEvent::Next => Some(self.step(1)),
         }
@@ -468,48 +500,49 @@ git add src/synth/looper.rs src/synth/mod.rs
 git commit -m "feat: looper rewind_to_start + LooperRewind control event"
 ```
 
-### Task 3: MIDI-роутинг — swallow консольных нот в parse_and_push
+### Task 3: MIDI-роутинг — swallow консольных нот через глобальный канал
 
 **Files:**
-- Modify: `src/midi.rs` (тип ConsoleTx, параметр parse_and_push, connect/connect_by_name)
-- Modify: `src/lib.rs` (~275: оба вызова midi::connect/connect_by_name — grep)
-- Test: существующие тесты midi_parse (cargo test --test midi_parse) не должны сломаться
+- Modify: `src/midi.rs` (static CONSOLE_TX, is_console_note, swallow в parse_and_push)
+- Modify: `src/lib.rs` (init_common: создать mpsc-канал, set CONSOLE_TX, поле CommonInit.console_rx)
+- Modify: `src/gui/mod.rs` (App.console_rx берётся из CommonInit)
 
-- [ ] **Step 1: тип канала** — в `src/midi.rs` рядом с `pub type NoteState`:
+Канал — глобальный `static` (паттерн `JNI_MIDI_TX`, lib.rs:180): desktop midir,
+JNI и будущие пути получают его бесплатно, сигнатура parse_and_push НЕ меняется.
+
+- [ ] **Step 1: тип канала + предикат** — в `src/midi.rs` рядом с
+  `pub type NoteState` (~16):
 
 ```rust
-/// Console pads (bank-2 notes 60..=67, 78..=80 on ch9) are mirrored to the GUI
-/// instead of the audio ring: (note, is_on).
-pub type ConsoleTx = std::sync::Arc<std::sync::Mutex<Option<std::sync::mpsc::Sender<(u8, bool)>>>>;
+/// Console pads (bank-2 notes 60..=67 and 75..=80 on ch9) are mirrored to the
+/// GUI instead of the audio ring: (note, is_on). Note 64 deliberately NOT in
+/// the range: it is the engine-side Undo transport note (mod.rs:1592).
+pub type ConsoleTx = std::sync::Mutex<Option<std::sync::mpsc::Sender<(u8, bool)>>>;
+pub static CONSOLE_TX: std::sync::OnceLock<ConsoleTx> = std::sync::OnceLock::new();
 
-/// Notes owned by the LED console (bank-2 pads), channel 9.
 pub fn is_console_note(note: u8) -> bool {
-    (60..=67).contains(&note) || (78..=80).contains(&note)
+    (60..=67).contains(&note) || (75..=80).contains(&note)
 }
 ```
 
-- [ ] **Step 2: swallow в parse_and_push** — сигнатура
-  `pub fn parse_and_push(data, tx, note_state, pad_state)` → добавить параметр
-  `console_tx: &ConsoleTx` последним. После парса, ДО push в ring (там, где
-  event разбирается для pad_state — блок «Update GUI note display» оставить
-  как есть, чтобы пэды вспыхивали в GUI), вставить:
+(static требует Sync: Mutex<Option<Sender>> — Sync ✓; Sender внутри Mutex.)
+
+- [ ] **Step 2: swallow в parse_and_push** — сразу после разбора event
+  (после блока логгирования ~116-124, ДО «Update GUI note display» и ДО
+  финального push в ring, который найти в конце функции — `match tx.try_lock()`
+  ~145-152):
 
 ```rust
     // LED-console notes: mirror to GUI, never reach the audio engine.
-    let console_hit = matches!(
-        &event,
-        MidiEvent::NoteOn { channel: 9, note, .. } if is_console_note(*note)
-    ) || matches!(
-        &event,
-        MidiEvent::NoteOff { channel: 9, note } if is_console_note(*note)
-    );
-    if console_hit {
-        let is_on = matches!(event, MidiEvent::NoteOn { .. });
-        let note = match &event {
-            MidiEvent::NoteOn { note, .. } | MidiEvent::NoteOff { note, .. } => *note,
-            _ => unreachable!(),
-        };
-        if let Ok(guard) = console_tx.lock() {
+    // vel-0 NoteOn == note-off convention: map to is_on=false.
+    let (console_note, is_on) = match &event {
+        MidiEvent::NoteOn { channel: 9, note, velocity, .. } if *velocity > 0 && is_console_note(*note) => (Some(*note), true),
+        MidiEvent::NoteOn { channel: 9, note, .. } if is_console_note(*note) => (Some(*note), false),
+        MidiEvent::NoteOff { channel: 9, note } if is_console_note(*note) => (Some(*note), false),
+        _ => (None, false),
+    };
+    if let Some(note) = console_note {
+        if let Ok(guard) = CONSOLE_TX.get_or_init(Default::default).lock() {
             if let Some(sender) = guard.as_ref() {
                 let _ = sender.send((note, is_on));
             }
@@ -518,38 +551,37 @@ pub fn is_console_note(note: u8) -> bool {
     }
 ```
 
-Важно: return ДО `tx.push(...)` — найти в конце функции реальный push
-(`let _ = tx.lock()...push(event)` / `tx.0.lock().push`) и убедиться, что
-console-ветка его не достигает.
-
-- [ ] **Step 3: обновить все callers parse_and_push** — grep `parse_and_push(`:
-  midir-колбэк в connect/connect_by_name (замыкание получает console_tx
-  параметром и пробрасывает), AMIDI-путь если зовёт parse_and_push (grep
-  в src/), тесты midi_parse (передать `Arc::new(Mutex::new(None))`).
-  connect/connect_by_name получают параметр `console_tx: ConsoleTx` и
-  прокидывают в замыкание.
-
-- [ ] **Step 4: создать канал в lib.rs** — рядом с `midi_tx_shared` (~176):
+- [ ] **Step 3: создание канала в init_common (lib.rs)** — рядом с
+  `JNI_MIDI_TX.set(...)` (~180):
 
 ```rust
-    let console_tx: midi::ConsoleTx = Arc::new(std::sync::Mutex::new(None));
+    let (console_snd, console_rx) = std::sync::mpsc::channel::<(u8, bool)>();
+    let _ = CONSOLE_TX.set(std::sync::Mutex::new(Some(console_snd)));
 ```
 
-прокинуть в оба вызова midi::connect/connect_by_name (~275) и сохранить в
-App/структуре (поле `pub console_tx: midi::ConsoleTx`, инициализация в
-конструкторе — место, где создаётся midi_tx_shared; на Android-ветке тоже).
+Поле `pub console_rx: std::sync::mpsc::Receiver<(u8, bool)>` добавить в struct
+`CommonInit` (~81, рядом с midi_tx_shared) и в её конструктор (~295 — рядом с
+местом, где передаётся midi_tx_shared). Дочитывать: все места, где CommonInit
+конструируется (desktop + android ветки, grep `CommonInit {`).
+
+- [ ] **Step 4: callers** — сигнатура parse_and_push не менялась: midir
+  (midi.rs:264), JNI (lib.rs:991), три вызова midi::connect/connect_by_name
+  (lib.rs:275, 574, 676) — правок не требуют. Тесты midi_parse/end_to_end зовут
+  parse_midi_message — не трогаются. Проверить grep `parse_and_push(` —
+  сигнатурных правок быть не должно.
 
 - [ ] **Step 5: прогнать**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test`
-Expected: PASS (включая midi_parse с новым аргументом).
+Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src/midi.rs src/lib.rs
-git commit -m "feat: mirror bank-2 console notes to GUI channel (swallow from engine)"
+git commit -m "feat: mirror bank-2 console notes to GUI via global CONSOLE_TX"
 ```
+
 
 ### Task 4: GUI-интеграция — автомат, действия, LED-снимок
 
@@ -560,25 +592,32 @@ git commit -m "feat: mirror bank-2 console notes to GUI channel (swallow from en
 - [ ] **Step 1: подключить модуль** — в `src/gui/mod.rs` к списку модулей:
   `pub mod led_console;`. Если в Task 1 ставился `#[allow(dead_code)]` — снять.
 
-App-поля (рядом с `drum_current_pattern`):
+App-поля (рядом с `drum_current_pattern` ~315):
 
 ```rust
     pub console: led_console::LedConsole,
-    pub console_rx: Option<std::sync::mpsc::Receiver<(u8, bool)>>,
     pub led_snapshot: [[u8; 3]; 16],
     pub led_dirty: bool,
     pub led_socket: Option<std::sync::mpsc::Sender<String>>,
+    pub led_socket_alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub led_socket_failed_at: Option<std::time::Instant>,
 ```
 
-инициализация в App::new / lib.rs App-литерале (grep место литерала — там, где
-`drum_current_pattern: 0,`): `console: led_console::LedConsole::new()`,
-`console_rx: None`, `led_snapshot: [[0;3];16]`, `led_dirty: true`,
-`led_socket: None`, `led_socket_failed_at: None`. `console_rx` заполняется при
-старте midi (в lib.rs рядом с console_tx: `let (console_tx_snd, console_rx) =
-mpsc::channel(); *console_tx.lock().unwrap() = Some(console_tx_snd);` — канал
-создаётся ОДИН раз в init_common, Receiver уходит в App-литерал как
-`console_rx: Some(console_rx)`).
+инициализация в App-литерале (lib.rs ~695+, где `drum_current_pattern: 0,`):
+`console: led_console::LedConsole::default()`, `led_snapshot: [[0;3];16]`,
+`led_dirty: true`, `led_socket: None`,
+`led_socket_alive: Arc::new(AtomicBool::new(true))`, `led_socket_failed_at: None`.
+Receiver консоли берётся из CommonInit (Task 3 Step 3): у `run_gui`-стороны
+доступ к `c.console_rx` (CommonInit → App): в App-литерал добавить
+`console_rx: Some(c.console_rx),` и поле App:
+`pub console_rx: Option<std::sync::mpsc::Receiver<(u8, bool)>>,`
+(если CommonInit потребляется в нескольких местах — Receiver нельзя клонировать;
+передавать `Some(c.console_rx)` в единственном месте построения App; если
+потоков построения App два — glm-исполнитель выбирает единственный desktop-путь
+и для android-пути создаёт канал заново... ЗАПРЕЩЕНО: канал один. Если desktop
+и android строят App из одного CommonInit — ок; если два разных CommonInit —
+создать канал в каждом (CONSOLE_TX.set второй раз вернёт Err — допустимо,
+swallow перестанет работать на той ветке, где set не удался; пометить в отчёте).
 
 - [ ] **Step 2: обработка событий** — в главном цикле App (update/draw, где
   поллятся атомы — grep `drum_play_atom` в gui/mod.rs update), добавить poll:
@@ -586,13 +625,13 @@ mpsc::channel(); *console_tx.lock().unwrap() = Some(console_tx_snd);` — кан
 ```rust
         // Bank-2 console pads -> state machine -> actions
         let mut acts: Vec<led_console::Action> = Vec::new();
-        let mut repaint = false;
         if let Some(rx) = &self.console_rx {
             while let Ok((note, is_on)) = rx.try_recv() {
                 let now = std::time::Instant::now();
                 let ev = match (note, is_on) {
                     (60..=67, true) => Some(led_console::PadEvent::Down((note - 60) as usize)),
                     (60..=67, false) => Some(led_console::PadEvent::Up((note - 60) as usize)),
+                    (75, true) => Some(led_console::PadEvent::Undo),
                     (78, true) => Some(led_console::PadEvent::Prev),
                     (79, true) => Some(led_console::PadEvent::Next),
                     (80, true) => {
@@ -603,14 +642,10 @@ mpsc::channel(); *console_tx.lock().unwrap() = Some(console_tx_snd);` — кан
                 };
                 if let Some(ev) = ev {
                     if let Some(a) = self.console.on_event(ev, now) { acts.push(a); }
-                    repaint = true;
                 }
             }
         }
-        if let Some(m) = self.console.tick(std::time::Instant::now()) {
-            let _ = m; // Mode::Menu — snapshot пересчитается ниже
-            repaint = true;
-        }
+        let _ = self.console.tick(std::time::Instant::now()); // hold -> Menu (snapshot below)
         for a in acts { self.execute_console_action(a); }
 ```
 
@@ -620,10 +655,12 @@ mpsc::channel(); *console_tx.lock().unwrap() = Some(console_tx_snd);` — кан
     fn execute_console_action(&mut self, action: led_console::Action) {
         match action {
             led_console::Action::LoadPerf(i) => {
-                let names = self.performance_names_console();
-                if let Some(name) = names.get(i) {
-                    if self.load_performance_by_name(name) {
-                        log::info!("[console] perf {} loaded", i + 1);
+                // perf_list: Vec<(String, PathBuf)>, index 0 = "(Init)" (lib.rs:789).
+                // Console slots = perf_list indices 0..=7.
+                if let Some((name, _)) = self.perf_list.get(i) {
+                    let name = name.clone();
+                    if self.load_performance_by_name(&name) {
+                        log::info!("[console] perf slot {} loaded ({})", i + 1, name);
                     }
                 }
             }
@@ -638,14 +675,17 @@ mpsc::channel(); *console_tx.lock().unwrap() = Some(console_tx_snd);` — кан
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part: i, mute });
                 }
             }
+            led_console::Action::Undo => {
+                let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqUndo);
+            }
             led_console::Action::StepPerf(dir) => {
-                let n = self.performance_names_console().len();
+                let n = self.perf_list.len();
                 if n == 0 { return; }
                 let cur = self.active_perf_console().unwrap_or(0);
                 let next = (cur as i32 + dir).rem_euclid(n as i32) as usize;
-                let names = self.performance_names_console();
-                if let Some(name) = names.get(next) {
-                    self.load_performance_by_name(name);
+                if let Some((name, _)) = self.perf_list.get(next) {
+                    let name = name.clone();
+                    self.load_performance_by_name(&name);
                 }
             }
             led_console::Action::StepPattern(dir) => {
@@ -656,21 +696,21 @@ mpsc::channel(); *console_tx.lock().unwrap() = Some(console_tx_snd);` — кан
         }
     }
 
-    fn performance_names_console(&self) -> Vec<String> {
-        crate::preset::performance_names()
-    }
-
+    /// Index of the current performance in perf_list (None if unknown).
     fn active_perf_console(&self) -> Option<usize> {
-        self.active_performance_name.as_ref().and_then(|n| {
-            crate::preset::performance_names().iter().position(|x| x == n)
-        })
+        self.perf_list.iter().position(|(n, _)| n == &self.perf_name)
     }
 ```
 
-(`active_performance_name` — проверить реальное поле в App, grep
-`load_performance_by_name` использования: чем запоминается текущий перф;
-если поле другое — использовать его. `preset::performance_names` — добавить в
-Task 5. `parts[i].mute` — сверить имя поля, grep `mute` в gui/mod.rs PartView.)
+(ИСТОЧНИК ИСТИНЫ по перфам: `self.perf_list: Vec<(String, PathBuf)>` с
+`"(Init)"` на индексе 0 (lib.rs:789, layers.rs:241) и `self.perf_name: String`
+(gui/mod.rs:342) — НЕ пресетовый скан каталога: `load_performance_by_name`
+резолвит имена через perf_list, сторонний список сломает загрузку.
+`load_performance_by_name` должен обновлять `perf_name` — сверить (grep его
+тела ~1669); если не обновляет — присвоить `self.perf_name = name` после
+успешной загрузки. `parts[i].mute` — сверить имя поля, grep `pub mute` в
+gui/mod.rs. Заметка на поля: perf_list обновляется в layers.rs — если юзер
+сохранил новый перф, не открывая Layers, список может быть stale; v1 accepts.)
 
 - [ ] **Step 3: LED-снимок** — там же в update, после poll:
 
@@ -682,7 +722,7 @@ Task 5. `parts[i].mute` — сверить имя поля, grep `mute` в gui/m
         for (i, part) in self.parts.iter().take(8).enumerate() {
             mutes[i] = part.mute;
         }
-        let filled = crate::preset::performance_names().len();
+        let filled = self.perf_list.len().min(8);
         let top = self.console.top_colors(self.active_perf_console(), filled,
                                           self.drum_current_pattern as usize, &mutes);
         let bottom = self.console.bottom_colors(playing, recording);
@@ -718,14 +758,15 @@ git add src/gui/mod.rs src/gui/led_console.rs
 git commit -m "feat: wire bank-2 console into GUI (actions, snapshots, transport LEDs)"
 ```
 
-### Task 5: config-тумблер + performance_names + socket-клиент-тред
+### Task 5: config-тумблер + socket-клиент с живостью (alive/retry/dirty)
 
 **Files:**
 - Modify: `src/config.rs` (UiSettings.led_companion)
-- Modify: `src/preset.rs` (performance_names())
-- Modify: `src/gui/settings.rs` (checkbox в настройках) / `src/gui/mod.rs` (writer-тред spawn)
+- Modify: `src/gui/settings.rs` (checkbox в настройках)
+- Modify: `src/gui/mod.rs` (подключение/retry/отключение + writer-тред)
+- Test: `tests/config_led.rs` (новый)
 
-- [ ] **Step 1: config** — в `UiSettings` рядом с `split_point`:
+- [ ] **Step 1: config** — в `UiSettings` рядом с `split_point` (~83):
 
 ```rust
     /// Bank-2 LED console companion (unix socket). Off = never connect.
@@ -733,8 +774,7 @@ git commit -m "feat: wire bank-2 console into GUI (actions, snapshots, transport
     pub led_companion: bool,
 ```
 
-Тест в существующем config-тесте (или новый в tests/preset_collision.rs-стиле —
-маленький, в tests/config_led.rs):
+Тест `tests/config_led.rs`:
 
 ```rust
 #[test]
@@ -745,42 +785,19 @@ fn led_companion_defaults_false() {
 }
 ```
 
-(проверить: UiSettings pub + serde; если private — тест через полный Config.)
+(проверить: UiSettings pub + serde — конфиг-паттерн соседей совпадает.)
 
-- [ ] **Step 2: preset::performance_names** — в `src/preset.rs` рядом с
-  `performance_dir` (preset.rs:799):
-
-```rust
-/// Sorted stems of all performance files (console perf slots 1..=8).
-pub fn performance_names() -> Vec<String> {
-    let Some(dir) = performance_dir() else { return Vec::new(); };
-    let mut names: Vec<String> = std::fs::read_dir(&dir)
-        .ok()
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().map_or(false, |x| x == "json"))
-                .filter_map(|e| e.path().file_stem().and_then(|s| s.to_str().map(str::to_string)))
-                .collect()
-        })
-        .unwrap_or_default();
-    names.sort();
-    names
-}
-```
-
-- [ ] **Step 3: writer-тред + тумблер** — в gui (модуль settings.rs, секция
-  аудио-настроек — grep, где рендерятся checkbox'ы настроек, например
-  `split_point` UI): checkbox:
+- [ ] **Step 2: подключение/переподключение в update** — в gui/mod.rs update
+  (рядом с poll-блоком Task 4):
 
 ```rust
-                ui.checkbox(&mut self.config.ui.led_companion, "LED companion (bank-2 pads)");
-```
-
-Логика подключения — в gui/mod.rs update (раз в кадр дешёвая проверка):
-
-```rust
-        // LED companion socket: spawn writer thread on demand
-        if self.config.ui.led_companion && self.led_socket.is_none()
+        // LED companion socket lifecycle
+        use std::sync::atomic::Ordering;
+        if !self.config.ui.led_companion {
+            if self.led_socket.take().is_some() {
+                log::info!("[console] companion disabled");
+            }
+        } else if self.led_socket.is_none()
             && self.led_socket_failed_at
                 .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
                 .unwrap_or(true)
@@ -788,15 +805,22 @@ pub fn performance_names() -> Vec<String> {
             match std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock") {
                 Ok(stream) => {
                     let (tx, rx) = std::sync::mpsc::channel::<String>();
+                    let alive = self.led_socket_alive.clone();
+                    alive.store(true, Ordering::Relaxed);
                     std::thread::spawn(move || {
                         use std::io::Write;
                         let mut stream = stream;
                         for msg in rx {
-                            if stream.write_all(msg.as_bytes()).is_err() { break; }
+                            if stream.write_all(msg.as_bytes()).is_err() {
+                                alive.store(false, Ordering::Relaxed);
+                                break;
+                            }
                         }
+                        alive.store(false, Ordering::Relaxed);
                     });
                     self.led_socket = Some(tx);
                     self.led_socket_failed_at = None;
+                    self.led_dirty = true; // отправить полный STATE сразу после коннекта
                     log::info!("[console] companion connected");
                 }
                 Err(_) => {
@@ -804,24 +828,28 @@ pub fn performance_names() -> Vec<String> {
                 }
             }
         }
-        if !self.config.ui.led_companion && self.led_socket.is_some() {
-            self.led_socket = None; // drop sender: thread exits, no more paints
+        // writer умер (компаньон перезапускается) — забыть сокет, retry через 2с
+        if self.led_socket.is_some() && !self.led_socket_alive.load(Ordering::Relaxed) {
+            self.led_socket = None;
+            self.led_socket_failed_at = Some(std::time::Instant::now());
         }
 ```
 
-App-поля: `led_socket_failed_at: Option<std::time::Instant>` (добавить к Task 4
-полям). connect БЕЗ таймаута блокирует GUI — приемлемо? /tmp-сокет: если никто
-не слушает, connect мгновенно ECONNREFUSED. Риск: зависший компаньон-сокет
-(принял backlog, не accept'ит) — редкость; если параноить — set_nonblocking
-+ connect loop. Оставляем простой вариант, documented.
+- [ ] **Step 3: checkbox в настройках** — settings.rs, секция аудио/MIDI
+  настроек (grep `split_point` UI или другой checkbox):
+
+```rust
+                ui.checkbox(&mut self.config.ui.led_companion, "LED companion (bank-2 pads)");
+```
 
 - [ ] **Step 4: прогнать + commit**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test
-git add src/config.rs src/preset.rs src/gui/settings.rs src/gui/mod.rs
-git commit -m "feat: led_companion toggle, performance_names, socket writer"
+git add src/config.rs src/gui/settings.rs src/gui/mod.rs tests/config_led.rs
+git commit -m "feat: led_companion toggle, resilient socket client (retry/alive/dirty-on-connect)"
 ```
+
 
 ### Task 6: Компаньон pad_console.py
 
@@ -829,7 +857,9 @@ git commit -m "feat: led_companion toggle, performance_names, socket writer"
 - Create: `~/Projects/smk37_config/pad_console.py` (вне репо синта — hardware tooling)
 - Test: unit-самотест `--selftest` (framing + slot→addr, без BLE)
 
-- [ ] **Step 1: написать компаньон**:
+- [ ] **Step 1: написать компаньон** — dbus-вызовы В ТОЙ ЖЕ ФОРМЕ, что smk.py
+  (`Interface(bus.get_object(...), "org.bluez.GattCharacteristic1")`), BLE
+  reconnect циклом снаружи socket-accept:
 
 ```python
 #!/usr/bin/env python3
@@ -838,6 +868,7 @@ git commit -m "feat: led_companion toggle, performance_names, socket writer"
 Listens on /tmp/mini_midi_synth_led.sock, receives "STATE c0 c1 ... c15"
 (c* = RRGGBB hex; slots 0-7 = pads 17-24, slots 8-15 = pads 25-32) and paints
 the keyboard LEDs over BLE GATT WITHOUT commit (RAM-only, instant).
+BLE dies -> reconnect loop. Synth disconnects -> back to accept().
 
 Run: python3 pad_console.py
 """
@@ -847,7 +878,7 @@ import dbus
 SOCK = "/tmp/mini_midi_synth_led.sock"
 BUS = "org.bluez"
 BASE = "/org/bluez/hci0/dev_D8_31_0D_19_D1_0C"
-W = BASE + "/service0060/char0061"   # write characteristic (smk.py)
+CHAR = BASE + "/service0060/char0061"   # write characteristic (smk.py)
 
 def slot_addr(slot: int) -> int:
     # slots 0-7 -> pads 17-24; slots 8-15 -> pads 25-32
@@ -856,16 +887,15 @@ def slot_addr(slot: int) -> int:
 def frame(cmd: int, payload: bytes) -> bytes:
     return b"\x00\x59" + bytes([cmd, len(payload), 0x00, 0x00]) + payload + bytes([(~sum(payload)) & 0xFF])
 
-def paint(wch, slot: int, rgb: bytes):
+def paint(iface, slot: int, rgb: bytes):
     a = slot_addr(slot)
     payload = bytes([0x05, a & 0xFF, (a >> 8) & 0xFF, 0x00, 0x00, 4, 0x00, 0x00]) + rgb + b"\xff"
-    wch.WriteValue(dbus.Array([dbus.Byte(b) for b in frame(0x22, payload)], signature="y"),
-                   {"type": "command"})
+    iface.WriteValue(dbus.Array([dbus.Byte(b) for b in frame(0x22, payload)], signature="y"),
+                     {"type": "command"})
 
 def selftest():
     assert slot_addr(0) == 1467 and slot_addr(7) == 1467 + 74 * 7
     assert slot_addr(8) == 2059 and slot_addr(15) == 2059 + 74 * 7
-    # paint payload: 8-byte header + 3 color bytes + 0xFF flag = 12 bytes
     payload = bytes([0x05, 0xCB, 0x09, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xE0, 0xFF, 0xFF])
     f = frame(0x22, payload)
     assert f[:6] == b"\x00\x59\x22\x0c\x00\x00", f[:6].hex()
@@ -873,64 +903,77 @@ def selftest():
     assert f[-1] == (~sum(payload)) & 0xFF
     print("selftest ok")
 
+def ble_connect(bus):
+    while True:
+        try:
+            obj = bus.get_object(BUS, CHAR)
+            iface = dbus.Interface(obj, "org.bluez.GattCharacteristic1")
+            # probe: commit-frame как в smk.py (cp = 05 00 00 00 00 00 00 00)
+            iface.WriteValue(dbus.Array([dbus.Byte(b) for b in frame(0x22, bytes(8))], signature="y"),
+                             {"type": "command"})
+            print("BLE ready")
+            return iface
+        except Exception as e:
+            print("BLE not ready:", e)
+            time.sleep(3)
+
 def main():
     if "--selftest" in sys.argv:
         selftest(); return
     bus = dbus.SystemBus()
-    while True:  # BLE connect loop
-        try:
-            wch = bus.get_object(BUS, W)
-            wch.WriteValue(dbus.Array([dbus.Byte(b) for b in frame(0x22, b"")], signature="y"),
-                           {"type": "command"})  # probe write (empty) — если исключение, девайс не готов
-            break
-        except Exception:
-            time.sleep(3)
-    print("BLE ready")
     try:
         os.unlink(SOCK)
     except FileNotFoundError:
         pass
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(SOCK); srv.listen(1)
-    last = [None] * 16
-    while True:
-        conn, _ = srv.accept()
-        print("synth connected")
-        buf = b""
-        while True:
-            data = conn.recv(4096)
-            if not data:
-                break
-            buf += data
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                parts = line.decode(errors="replace").split()
-                if parts and parts[0] == "STATE" and len(parts) == 17:
-                    try:
-                        colors = [bytes.fromhex(p) for p in parts[1:]]
-                    except ValueError:
-                        continue
-                    for slot, rgb in enumerate(colors):
-                        if rgb != last[slot]:
-                            try:
-                                paint(wch, slot, rgb)
-                            except Exception:
-                                sys.exit(3)  # BLE died -> reconnect loop
-                            last[slot] = rgb
-        print("synth disconnected")
-        conn.close()
+    print("listening on", SOCK)
+    while True:  # BLE lifetime loop: один BLE-коннект на много synth-сессий
+        iface = ble_connect(bus)
+        last = [None] * 16
+        try:
+            while True:  # accept loop: synth может переподключаться без BLE-reconnect
+                conn, _ = srv.accept()
+                print("synth connected")
+                buf = b""
+                try:
+                    while True:
+                        data = conn.recv(4096)
+                        if not data:
+                            break
+                        buf += data
+                        while b"\n" in buf:
+                            line, buf = buf.split(b"\n", 1)
+                            parts = line.decode(errors="replace").split()
+                            if parts and parts[0] == "STATE" and len(parts) == 17:
+                                try:
+                                    colors = [bytes.fromhex(p) for p in parts[1:]]
+                                except ValueError:
+                                    continue
+                                for slot, rgb in enumerate(colors):
+                                    if rgb != last[slot]:
+                                        paint(iface, slot, rgb)
+                                        last[slot] = rgb
+                except Exception as e:
+                    print("paint failed:", e)
+                    break  # BLE умер -> внешний цикл переподключит
+                finally:
+                    conn.close()
+                    print("synth disconnected")
+        except KeyboardInterrupt:
+            break
+    try:
+        os.unlink(SOCK)
+    except FileNotFoundError:
+        pass
 
 if __name__ == "__main__":
     main()
 ```
 
-(Реюз smk.py-протокола: frame/checksum/адреса — источник PADS_NOTES.md.
-ВНИМАНИЕ: `dbus.Interface(wch, "org.bluez.GattCharacteristic1").WriteValue` —
-сверить с smk.py, как там вызывается WriteValue (прямо на object proxy или
-через Interface) и использовать ТОТ ЖЕ способ. Probe-write пустого payload
-может быть проигнорирован девайсом — если смущает, заменить probe на `rd`
-цвета слота 0 (read-запрос как в smk.py: frame(0x23,...)) — реализуй probe
-через чтение, безопаснее: см. smk.py rd().)
+Дизайн reconnect: paint-failure → break из inner → внешний while переподключает
+BLE, состояние last сбрасывается → следующий STATE перерисует всё. Synth
+disconnect → accept ждёт нового. Ctrl-C убирает сокет-файл.
 
 - [ ] **Step 2: selftest**
 
@@ -938,17 +981,18 @@ Run: `python3 ~/Projects/smk37_config/pad_console.py --selftest`
 Expected: `selftest ok`.
 
 - [ ] **Step 3: ручной smoke (пользователь рядом)** — запустить компаньон,
-  `echo "STATE FF8000 000000 ..." | socat - UNIX-CONNECT:/tmp/mini_midi_synth_led.sock`
-  или из синта; пользователь смотрит LED. BLE-проверка без клавы невозможна —
-  пометить как Manual в Task 8.
+  `echo "STATE FF8000 303030 303030 303030 303030 303030 303030 303030 202020 202020 202020 202020 202020 202020 202020 202020" | socat - UNIX-CONNECT:/tmp/mini_midi_synth_led.sock`;
+  пользователь видит: пэд 17 оранжевый, 18–24 серые, нижняя строка dim.
+  Пометить как Manual в Task 8.
 
 - [ ] **Step 4: Commit (в репо smk37_config)**
 
 ```bash
-cd ~/Projects/smk37_config && git add pad_console.py && git commit -m "feat: pad_console companion — LED paint over GATT, RAM-only"
+cd ~/Projects/smk37_config && git add pad_console.py && git commit -m "feat: pad_console companion — LED paint over GATT, RAM-only, auto-reconnect"
 ```
 
 (smk37_config — git-репо; если нет — `git init` по необходимости, отчёт.)
+
 
 ### Task 7: Прошивка нот пэдов банка 2 (железо, постоянная)
 
@@ -965,10 +1009,10 @@ cd ~/Projects/smk37_config && git add pad_console.py && git commit -m "feat: pad
 | 26 | 9 | 81 | 2129 |
 | 27 | 10 | 83 | 2203 |
 | 28 | 11 | 80 | 2277 |
-| 29 | 12 | 76 (резерв, не используется) | 2351 |
+| 29 | 12 | 76 (резерв) | 2351 |
 | 30 | 13 | 78 | 2425 |
 | 31 | 14 | 79 | 2499 |
-| 32 | 15 | 64 | 2573 |
+| 32 | 15 | 75 | 2573 |
 
 ВАЖНО: цвета пэдов НЕ трогать — читать текущие [R][G][B][flag] и писать их же
 в новой записи. Флаг у 17–24 обязателен FF (иначе LED off), у 25–32 сохранить
