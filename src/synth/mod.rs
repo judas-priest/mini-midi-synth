@@ -1586,6 +1586,8 @@ impl SynthEngine {
                             }
                         }
                         if sampler_drums {
+                            let choke = self.drum_engine.sf2_choke_take(note);
+                            if choke != 0 { self.sampler.drum_note_off(choke); }
                             self.sampler.drum_note_on(note, velocity);
                         } else {
                             self.drum_engine.note_on(note, velocity);
@@ -1771,6 +1773,7 @@ impl SynthEngine {
                         part.sustained_notes = [false; 128];
                     }
                     self.sampler.all_notes_off();
+                    self.drum_engine.reset_choke_state();
                     if let Some(off_note) = self.arpeggiator.flush_current_note() {
                         for (i, part) in self.parts.iter_mut().enumerate() {
                             if !part.enabled { continue; }
@@ -2104,6 +2107,7 @@ impl SynthEngine {
                     part.sustained_notes = [false; 128];
                 }
                 self.sampler.all_notes_off();
+                self.drum_engine.reset_choke_state();
                 // Clear arpeggiator held notes
                 if let Some(off_note) = self.arpeggiator.flush_current_note() {
                     for (i, part) in self.parts.iter_mut().enumerate() {
@@ -2562,6 +2566,8 @@ impl SynthEngine {
                             self.seq_route[ch as usize] = 2;
                             let sf2 = self.drum_engine.sf2_mode;
                             if sf2 {
+                                let choke = self.drum_engine.sf2_choke_take(note);
+                                if choke != 0 { self.sampler.drum_note_off(choke); }
                                 self.sampler.drum_note_on(note, velocity);
                             } else {
                                 self.drum_engine.note_on(note, velocity);
@@ -2678,7 +2684,12 @@ impl SynthEngine {
             out_l += drum_l; out_r += drum_r;
             for i in 0..drum_triggers.count {
                 let (slot, vel) = drum_triggers.triggers[i];
-                self.sampler.drum_note_on(drum::DRUM_NOTE_BASE + slot, vel);
+                let note = drum::DRUM_NOTE_BASE + slot;
+                if self.drum_engine.sf2_mode {
+                    let choke = self.drum_engine.sf2_choke_take(note);
+                    if choke != 0 { self.sampler.drum_note_off(choke); }
+                }
+                self.sampler.drum_note_on(note, vel);
             }
 
             // Effects chain with cached params — skip when mix=0 to save CPU
