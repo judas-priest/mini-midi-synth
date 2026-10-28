@@ -35,6 +35,9 @@ const CHOKE_GROUPS: [u8; NUM_DRUM_SLOTS] = [
 ];
 
 const NUM_CHOKE_GROUPS: usize = 2;
+/// Kit sample note range reachable by remap (SF2 kits place samples here).
+pub const KIT_NOTE_LO: u8 = 30;
+pub const KIT_NOTE_HI: u8 = 55;
 
 pub const DRUM_NAMES: [&str; NUM_DRUM_SLOTS] = [
     "Kick", "Side Stick", "Snare", "Clap",
@@ -858,9 +861,10 @@ pub struct DrumEngine {
     pub fixed_velocity: bool,
     /// Incoming pad note -> internal slot. remap[note-36] = slot (0..16).
     pub remap: [u8; NUM_DRUM_SLOTS],
-    /// Per-slot choke group ids for the SF2 path. Defaults to the GM layout
-    /// (CHOKE_GROUPS); replaced per-kit by the GUI from the kit's sample names.
-    pub choke_groups: [u8; NUM_DRUM_SLOTS],
+    /// Per-note choke group ids for the SF2 path, indexed by (note - 30).
+    /// Defaults to the GM layout (CHOKE_GROUPS shifted); replaced per-kit by
+    /// the GUI from the kit's sample names.
+    pub choke_groups: [u8; 26],
     /// SF2 choke: last triggered note per choke group (0 = none).
     group_last_note: [u8; NUM_CHOKE_GROUPS],
     sample_rate: f32,
@@ -900,8 +904,13 @@ impl DrumEngine {
             enabled: true,
             sf2_mode: false,
             fixed_velocity: false,
-            remap: core::array::from_fn(|i| i as u8),
-            choke_groups: CHOKE_GROUPS,
+            remap: core::array::from_fn(|i| DRUM_NOTE_BASE + i as u8),
+            choke_groups: {
+                // GM table covers notes 36..=51 -> indices 6..=21 of the 30..=55 range
+                let mut t = [0u8; 26];
+                for (i, g) in CHOKE_GROUPS.iter().enumerate() { t[i + 6] = *g; }
+                t
+            },
             group_last_note: [0u8; NUM_CHOKE_GROUPS],
             sample_rate,
             step_atom: Arc::new(AtomicU8::new(0)),
@@ -948,13 +957,13 @@ impl DrumEngine {
         self.rec_atom = rec;
     }
 
-    /// Translate an incoming pad note to its target GM note (DRUM_NOTE_BASE + slot).
-    /// Notes outside the drum range pass through unchanged.
+    /// Translate an incoming pad note to its target kit note.
+    /// The remap table holds full target notes (default: identity 36..=51), so
+    /// SF2 kits can be played over their full sample range (30..=55).  Incoming
+    /// notes outside 36..=51 pass through unchanged.
     pub fn remapped_note(&self, note: u8) -> u8 {
         match note.wrapping_sub(DRUM_NOTE_BASE) {
-            i if (i as usize) < NUM_DRUM_SLOTS => {
-                DRUM_NOTE_BASE.saturating_add(self.remap[i as usize].min((NUM_DRUM_SLOTS - 1) as u8))
-            }
+            i if (i as usize) < NUM_DRUM_SLOTS => self.remap[i as usize],
             _ => note,
         }
     }
@@ -962,13 +971,13 @@ impl DrumEngine {
     /// SF2 choke: returns the previous note held by this note's choke group
     /// (0 = none) and records `note` as the new holder.  The caller sends a
     /// MIDI note-off for the returned note to the SF2 channel before the
-    /// note-on.  Notes outside 36..=51 return 0.  DSP choke is handled inside
-    /// trigger_slot and does not use this.
+    /// note-on.  Notes outside the kit range 30..=55 return 0.  DSP choke is
+    /// handled inside trigger_slot and does not use this.
     pub fn sf2_choke_take(&mut self, note: u8) -> u8 {
-        if note < DRUM_NOTE_BASE { return 0; }
-        let slot = (note - DRUM_NOTE_BASE) as usize;
-        if slot >= NUM_DRUM_SLOTS { return 0; }
-        let g = self.choke_groups[slot] as usize;
+        if note < KIT_NOTE_LO || note > KIT_NOTE_HI { return 0; }
+        let i = (note - KIT_NOTE_LO) as usize;
+        if i >= self.choke_groups.len() { return 0; }
+        let g = self.choke_groups[i] as usize;
         if g == 0 { return 0; }
         let prev = self.group_last_note[g - 1];
         self.group_last_note[g - 1] = note;
@@ -980,16 +989,18 @@ impl DrumEngine {
         self.group_last_note = [0u8; NUM_CHOKE_GROUPS];
     }
 
-    /// Install a per-kit choke table (SF2 path). Also clears group state.
-    pub fn set_choke_groups(&mut self, t: &[u8; NUM_DRUM_SLOTS]) {
+    /// Install a per-kit choke table (SF2 path), indexed note-30. Also clears group state.
+    pub fn set_choke_groups(&mut self, t: &[u8; 26]) {
         self.choke_groups = *t;
         self.group_last_note = [0u8; NUM_CHOKE_GROUPS];
     }
 
-    /// Load a remap table from config (short vecs are padded with identity, long truncated).
+    /// Load a remap table from config (short vecs padded with identity notes,
+    /// long truncated, values clamped to the kit range 30..=55).
     pub fn apply_remap_vec(&mut self, v: &[u8]) {
         for (i, slot) in self.remap.iter_mut().enumerate() {
-            *slot = v.get(i).copied().unwrap_or(i as u8).min((NUM_DRUM_SLOTS - 1) as u8);
+            let ident = DRUM_NOTE_BASE + i as u8;
+            *slot = v.get(i).copied().unwrap_or(ident).clamp(30, 55);
         }
     }
 

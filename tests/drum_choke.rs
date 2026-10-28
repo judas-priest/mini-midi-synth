@@ -51,7 +51,7 @@ fn tc6_reset_clears_state() {
 fn tc7_choke_uses_remapped_note() {
     // контракт caller'а: сначала remapped_note(), потом sf2_choke_take()
     let mut e = DrumEngine::new(48_000.0);
-    e.remap[(40 - DRUM_NOTE_BASE) as usize] = 10; // pad note 40 -> slot 10 (note 46, Open HH)
+    e.remap[(40 - DRUM_NOTE_BASE) as usize] = 46; // pad note 40 -> kit note 46 (Open HH)
     let n = e.remapped_note(40);
     e.sf2_choke_take(n);
     assert_eq!(e.sf2_choke_take(42), n);

@@ -86,8 +86,18 @@ impl App {
 
         if self.show_drum_remap {
             let kit_names = self.drum_kit_names.clone();
+            // selectable kit notes 30..=55 that have a sample
+            let kit_notes: Vec<(u8, &str)> = (0..26)
+                .filter(|&i| !kit_names[i].is_empty())
+                .map(|i| (30 + i as u8, kit_names[i].as_str()))
+                .collect();
+            let name_of = |v: u8| -> String {
+                if (30..=55).contains(&v) && !kit_names[(v - 30) as usize].is_empty() {
+                    kit_names[(v - 30) as usize].clone()
+                } else { format!("note {}", v) }
+            };
             let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ui.ctx(), |ui| {
-                ui.set_width(860.0);
+                ui.set_width(900.0);
                 ui.strong("Pad Remap");
                 ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
                 ui.add_space(theme::SP_MD);
@@ -97,15 +107,15 @@ impl App {
                         for p in pads {
                             let note = if p < 8 { PAD_TOP_NOTES[p] } else { PAD_BOT_NOTES[p - 8] };
                             let slot = &mut new_remap[(note - 36) as usize];
-                            let sel = kit_names[*slot as usize].clone();
+                            let sel = name_of(*slot);
                             ui.vertical_centered(|ui| {
                                 ui.label(format!("{}", p + 1));
                                 egui::ComboBox::from_id_salt(p)
-                                    .width(110.0)
+                                    .width(120.0)
                                     .selected_text(sel)
                                     .show_ui(ui, |ui| {
-                                        for (s, name) in kit_names.iter().enumerate() {
-                                            ui.selectable_value(slot, s as u8, name.clone());
+                                        for (n, name) in kit_notes.iter() {
+                                            ui.selectable_value(slot, *n, *name);
                                         }
                                     });
                             });
@@ -116,10 +126,14 @@ impl App {
                 pad_row(ui, 8..16, "remap_bot");
                 ui.add_space(theme::SP_MD);
                 ui.horizontal(|ui| {
+                    if ui.button("Copy top to bottom").on_hover_text("Copy pads 1-8 mapping to pads 9-16").clicked() {
+                        for i in 0..8 { new_remap[(PAD_BOT_NOTES[i] - 36) as usize] = new_remap[(PAD_TOP_NOTES[i] - 36) as usize]; }
+                    }
+                    if ui.button("Copy bottom to top").on_hover_text("Copy pads 9-16 mapping to pads 1-8").clicked() {
+                        for i in 0..8 { new_remap[(PAD_TOP_NOTES[i] - 36) as usize] = new_remap[(PAD_BOT_NOTES[i] - 36) as usize]; }
+                    }
                     if ui.button("Reset").clicked() {
-                        for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
-                        self.push_drum_remap();
-                        self.save_drum_remap();
+                        for (i, v) in new_remap.iter_mut().enumerate() { *v = 36 + i as u8; }
                     }
                     if ui.button("Close").clicked() {
                         self.show_drum_remap = false;
@@ -143,17 +157,24 @@ impl App {
             let idx = (note - 36) as usize;
             let mut sel = self.drum_remap[idx];
             let kit_names = self.drum_kit_names.clone();
+            let kit_notes: Vec<(u8, &str)> = (0..26)
+                .filter(|&i| !kit_names[i].is_empty())
+                .map(|i| (30 + i as u8, kit_names[i].as_str()))
+                .collect();
+            let sel_name = if (30..=55).contains(&sel) && !kit_names[(sel - 30) as usize].is_empty() {
+                kit_names[(sel - 30) as usize].clone()
+            } else { format!("note {}", sel) };
             let dialog = egui::Modal::new(egui::Id::new("remap_pad_dialog")).show(ui.ctx(), |ui| {
                 ui.set_width(300.0);
                 ui.strong(format!("Pad {}", p + 1));
                 ui.label("Instrument:");
                 ui.add_space(theme::SP_MD);
                 egui::ComboBox::from_id_salt("remap_instrument")
-                    .width(160.0)
-                    .selected_text(kit_names[sel as usize].clone())
+                    .width(200.0)
+                    .selected_text(sel_name)
                     .show_ui(ui, |ui| {
-                        for (s, name) in kit_names.iter().enumerate() {
-                            ui.selectable_value(&mut sel, s as u8, name.clone());
+                        for (n, name) in kit_notes.iter() {
+                            ui.selectable_value(&mut sel, *n, *name);
                         }
                     });
                 ui.add_space(theme::SP_MD);

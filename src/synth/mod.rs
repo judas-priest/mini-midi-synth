@@ -210,8 +210,8 @@ pub enum ControlEvent {
     DrumSetFixedVelocity { fixed: bool },
     /// Drums: pad-note -> internal slot table (index = in_note-36, value = slot)
     DrumSetRemap { table: Box<[u8; 16]> },
-    /// Drums: per-slot choke group ids for the SF2 path (0 = no choke)
-    DrumSetChokeGroups { table: Box<[u8; 16]> },
+    /// Drums: per-note choke group ids for the SF2 path, indexed (note-30) (0 = none)
+    DrumSetChokeGroups { table: Box<[u8; 26]> },
     // SF2 sampler controls
     LoadKeysSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
     LoadDrumsSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },

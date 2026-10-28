@@ -296,8 +296,9 @@ pub struct App {
     pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
     /// Drum note remap table: slot i plays mapped note drum_remap[i].
     pub drum_remap: [u8; 16],
-    /// Sound names per slot; from the loaded SF2 kit (fallback: GM names)
-    pub drum_kit_names: [String; 16],
+    /// Sound names per kit note (index = note - 30, range 30..=55); from the
+    /// loaded SF2 kit (fallback: GM names for 36..=51, empty elsewhere)
+    pub drum_kit_names: [String; 26],
     pub show_drum_remap: bool,
     /// Remap dialog for a single hardware pad (0..16), from drawn-pad click
     pub remap_pad: Option<usize>,
@@ -1396,8 +1397,8 @@ impl App {
     /// Config key for the drum remap table: kit name, or "internal" kit.
     /// Derive SF2 choke groups from the kit's sample names: hat-ish sounds ->
     /// group 1 (mutual), crash/cymbal -> group 2, everything else 0.
-    fn derive_choke_groups(&self) -> [u8; 16] {
-        let mut t = [0u8; 16];
+    fn derive_choke_groups(&self) -> [u8; 26] {
+        let mut t = [0u8; 26];
         for (i, name) in self.drum_kit_names.iter().enumerate() {
             let n = name.to_lowercase();
             if n.contains("hat") || n.contains("hh") {
@@ -1425,16 +1426,16 @@ impl App {
     fn extract_kit_names(&mut self, sf: &rustysynth::SoundFont) {
         self.reset_kit_names();
         let headers = sf.get_sample_headers();
-        let mut seen = [false; 16];
+        let mut seen = [false; 26];
         for inst in sf.get_instruments() {
             for r in inst.get_regions() {
                 let (lo, hi) = (r.get_key_range_start(), r.get_key_range_end());
-                if hi < 36 || lo > 51 { continue; }
+                if hi < 30 || lo > 55 { continue; }
                 let sid = r.get_sample_id();
                 if sid >= headers.len() { continue; }
                 let name = headers[sid].get_name().to_string();
-                for k in lo.max(36)..=hi.min(51) {
-                    let i = (k - 36) as usize;
+                for k in lo.max(30)..=hi.min(55) {
+                    let i = (k - 30) as usize;
                     if !seen[i] { self.drum_kit_names[i] = name.clone(); seen[i] = true; }
                 }
             }
@@ -1442,8 +1443,12 @@ impl App {
     }
 
     fn reset_kit_names(&mut self) {
-        self.drum_kit_names = crate::synth::drum::DRUM_NAMES
-            .iter().map(|s| s.to_string()).collect::<Vec<_>>().try_into().unwrap();
+        for (i, n) in self.drum_kit_names.iter_mut().enumerate() {
+            let note = 30 + i as u8;
+            *n = if (36..=51).contains(&note) {
+                crate::synth::drum::DRUM_NAMES[(note - 36) as usize].to_string()
+            } else { String::new() };
+        }
     }
 
     /// Push the current remap table to the engine.
@@ -1569,8 +1574,10 @@ impl App {
         }
         // Load the per-kit remap table (identity if none saved for this kit).
         if let Some(v) = self.config.sf2.drums_remaps.get(&self.drum_remap_key()) {
+            // migrate legacy slot-encoded values (0..16) to kit notes (+36)
+            let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
             let mut t = [0u8; 16];
-            for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(i as u8).min(15); }
+            for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(36 + i as u8).clamp(30, 55); }
             self.drum_remap = t;
         } else {
             for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }

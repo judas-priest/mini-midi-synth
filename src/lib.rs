@@ -740,8 +740,17 @@ pub fn run_gui(
         show_looper: false,
         drum_patterns: [synth::drum::DrumPattern::default(); 8],
         drum_params: [synth::drum::DrumSlotParams::default(); NUM_DRUM_SLOTS],
-        drum_remap: core::array::from_fn(|i| i as u8),
-        drum_kit_names: crate::synth::drum::DRUM_NAMES.iter().map(|s| s.to_string()).collect::<Vec<_>>().try_into().unwrap(),
+        drum_remap: core::array::from_fn(|i| 36 + i as u8),
+        drum_kit_names: {
+            let mut n: [String; 26] = Default::default();
+            for (i, entry) in n.iter_mut().enumerate() {
+                let note = 30 + i as u8;
+                *entry = if (36..=51).contains(&note) {
+                    crate::synth::drum::DRUM_NAMES[(note - 36) as usize].to_string()
+                } else { String::new() };
+            }
+            n
+        },
         show_drum_remap: false,
         remap_pad: None,
         drum_volume: c.config.ui.drum_volume,

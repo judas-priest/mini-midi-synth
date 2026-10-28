@@ -8,17 +8,17 @@ fn tc1_identity_by_default() {
 }
 
 #[test]
-fn tc2_remap_translates_to_other_slot() {
+fn tc2_remap_translates_to_other_note() {
     let mut eng = DrumEngine::new(48_000.0);
-    eng.remap[(40 - DRUM_NOTE_BASE) as usize] = 0; // pad note 40 -> kick slot
-    assert_eq!(eng.remapped_note(40), DRUM_NOTE_BASE); // 36
+    eng.remap[(40 - DRUM_NOTE_BASE) as usize] = 46; // pad note 40 -> kit note 46 (Open HH)
+    assert_eq!(eng.remapped_note(40), 46);
 }
 
 #[test]
 fn tc3_full_range() {
     let mut eng = DrumEngine::new(48_000.0);
-    eng.remap[0] = (NUM_DRUM_SLOTS - 1) as u8; // note 36 -> slot 15
-    assert_eq!(eng.remapped_note(36), DRUM_NOTE_BASE + 15); // 51
+    eng.remap[0] = 51; // note 36 -> kit note 51 (Closed Hat)
+    assert_eq!(eng.remapped_note(36), 51);
 }
 
 #[test]
@@ -35,13 +35,14 @@ fn tc4_out_of_range_passthrough_no_panic() {
 fn tc7_normalize_short_vec() {
     // нормализация вектора из конфига: короткий/длинный не паникует, короткий дополняется identity
     let mut eng = DrumEngine::new(48_000.0);
-    eng.apply_remap_vec(&[7, 1]);
-    assert_eq!(eng.remapped_note(36), 36 + 7);
+    eng.apply_remap_vec(&[46, 51]);
+    assert_eq!(eng.remapped_note(36), 46);
+    assert_eq!(eng.remapped_note(37), 51);
     assert_eq!(eng.remapped_note(38), 38); // незаданные позиции = identity
-    eng.apply_remap_vec(&[0u8; 20]); // длиннее 16 — берутся первые 16
+    eng.apply_remap_vec(&[36u8; 20]); // длиннее 16 — берутся первые 16
     assert_eq!(eng.remapped_note(36), 36);
-    eng.apply_remap_vec(&[200]); // значение > 15 клампится
-    assert_eq!(eng.remapped_note(36), DRUM_NOTE_BASE + 15);
+    eng.apply_remap_vec(&[200]); // значение вне 30..=55 клампится
+    assert_eq!(eng.remapped_note(36), 55);
 }
 
 #[test]
@@ -55,11 +56,11 @@ fn tc5_translation_is_stateless_and_stable() {
     // переведённая нота для off обязана совпадать с on (иначе SF2-войс зависает);
     // note_on не должен мутировать таблицу
     let mut eng = DrumEngine::new(48_000.0);
-    eng.remap[(40 - DRUM_NOTE_BASE) as usize] = 0;
+    eng.remap[(40 - DRUM_NOTE_BASE) as usize] = 46;
     let on = eng.remapped_note(40);
     eng.note_on(40, 100);
     eng.note_off(40);
     let off = eng.remapped_note(40);
     assert_eq!(on, off);
-    assert_eq!(on, DRUM_NOTE_BASE);
+    assert_eq!(on, 46);
 }
