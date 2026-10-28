@@ -233,12 +233,6 @@ fn note_name(note: u8) -> String {
     format!("{name}{oct}")
 }
 
-/// Slot names for the drum remap UI (order matches drum_remap indices).
-pub fn drum_slot_names() -> [&'static str; 16] { crate::synth::drum::DRUM_NAMES }
-
-/// Name of the internal slot a pad note is remapped to.
-pub fn drum_slot_name(slot: u8) -> &'static str { crate::synth::drum::DRUM_NAMES[slot as usize] }
-
 type MidiReconnectFn = Box<dyn FnMut(&str) -> Result<(), String>>;
 
 pub struct App {
@@ -302,6 +296,8 @@ pub struct App {
     pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
     /// Drum note remap table: slot i plays mapped note drum_remap[i].
     pub drum_remap: [u8; 16],
+    /// Sound names per slot; from the loaded SF2 kit (fallback: GM names)
+    pub drum_kit_names: [String; 16],
     pub show_drum_remap: bool,
     /// Remap dialog for a single hardware pad (0..16), from drawn-pad click
     pub remap_pad: Option<usize>,
@@ -1403,6 +1399,29 @@ impl App {
         else { self.sf2_drums_loaded_name.clone() }
     }
 
+    /// Extract the kit's own drum map (note -> instrument name) for the remap UI.
+    /// First instrument whose key ranges intersect 36..=51 wins.
+    fn extract_kit_names(&mut self, sf: &rustysynth::SoundFont) {
+        self.reset_kit_names();
+        for inst in sf.get_instruments() {
+            let mut touched = false;
+            for r in inst.get_regions() {
+                let (lo, hi) = (r.get_key_range_start(), r.get_key_range_end());
+                if hi < 36 || lo > 51 { continue; }
+                touched = true;
+                for k in lo.max(36)..=hi.min(51) {
+                    self.drum_kit_names[(k - 36) as usize] = inst.get_name().to_string();
+                }
+            }
+            if touched { break; }
+        }
+    }
+
+    fn reset_kit_names(&mut self) {
+        self.drum_kit_names = crate::synth::drum::DRUM_NAMES
+            .iter().map(|s| s.to_string()).collect::<Vec<_>>().try_into().unwrap();
+    }
+
     /// Push the current remap table to the engine.
     fn push_drum_remap(&mut self) {
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetRemap { table: Box::new(self.drum_remap) });
@@ -1516,8 +1535,9 @@ impl App {
         };
         self.sf2_drums_soundfont = Some(sf.clone());
         let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
-        let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf });
+        let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
         self.sf2_drums_loaded_name = name;
+        self.extract_kit_names(&sf);
         self.show_toast("Drums SF2 loaded", ToastKind::Success);
         if self.sf2_drums_enabled {
             let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
@@ -1552,6 +1572,7 @@ impl App {
         self.sf2_drums_soundfont = None;
         self.sf2_drums_loaded_name.clear();
         self.sf2_drums_enabled = false;
+        self.reset_kit_names();
         // Internal kit: reset to identity remap.
         for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
         self.push_drum_remap();
