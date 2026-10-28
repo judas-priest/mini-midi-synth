@@ -208,6 +208,8 @@ pub enum ControlEvent {
     /// GUI sustain toggle (F1): same path as CC64
     /// Drums: force every hit to velocity 127
     DrumSetFixedVelocity { fixed: bool },
+    /// Drums: pad-note -> internal slot table (index = in_note-36, value = slot)
+    DrumSetRemap { table: Box<[u8; 16]> },
     // SF2 sampler controls
     LoadKeysSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
     LoadDrumsSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
@@ -1568,6 +1570,7 @@ impl SynthEngine {
                     }
                     if velocity > 0 {
                         let velocity = if self.drum_engine.fixed_velocity { 127 } else { velocity };
+                        let note = self.drum_engine.remapped_note(note);
                         // Record into sequencer if recording
                         if is_drum_note {
                             let slot = (note - 36) as usize;
@@ -1588,6 +1591,7 @@ impl SynthEngine {
                             self.drum_engine.note_on(note, velocity);
                         }
                     } else {
+                        let note = self.drum_engine.remapped_note(note);
                         if sampler_drums {
                             self.sampler.drum_note_off(note);
                         } else {
@@ -1645,6 +1649,7 @@ impl SynthEngine {
             }
             MidiEvent::NoteOff { channel, note } => {
                 if channel == 9 {
+                    let note = self.drum_engine.remapped_note(note);
                     if self.sampler.drums_enabled() {
                         self.sampler.drum_note_off(note);
                     } else {
@@ -2076,6 +2081,11 @@ impl SynthEngine {
             }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
                 self.drum_engine.fixed_velocity = fixed;
+            }
+            ControlEvent::DrumSetRemap { table } => {
+                // The box travels back for freeing on the GUI thread.
+                self.drum_engine.apply_remap_vec(&*table);
+                return Some(ControlEvent::DrumSetRemap { table });
             }
             ControlEvent::SetSustain { on } => {
                 self.set_sustain(if on { 127 } else { 0 });
