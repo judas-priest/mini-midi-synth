@@ -1,5 +1,7 @@
 # Drum Per-Pad Velocity Override Implementation Plan
 
+anchor-checked: 2026-10-28 (двойное ревью против репозитория)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Per-пэд velocity-оверрайд: фиксированная сила удара (1–127) или Off на каждый пэд, сохраняется per-SF2-кит, правится в Remap-модалке.
