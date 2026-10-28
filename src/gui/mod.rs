@@ -233,6 +233,12 @@ fn note_name(note: u8) -> String {
     format!("{name}{oct}")
 }
 
+/// Slot names for the drum remap UI (order matches drum_remap indices).
+pub fn drum_slot_names() -> [&'static str; 16] { crate::synth::drum::DRUM_NAMES }
+
+/// Name of the internal slot a pad note is remapped to.
+pub fn drum_slot_name(slot: u8) -> &'static str { crate::synth::drum::DRUM_NAMES[slot as usize] }
+
 type MidiReconnectFn = Box<dyn FnMut(&str) -> Result<(), String>>;
 
 pub struct App {
@@ -1391,8 +1397,7 @@ impl App {
     }
 
     /// Persist the current remap table under the active kit key.
-    /// Called from the remap panel in drums.rs (pending task T6).
-    #[allow(dead_code)]
+    /// Called from the remap panel in drums.rs.
     fn save_drum_remap(&mut self) {
         let key = self.drum_remap_key();
         self.config.sf2.drums_remaps.insert(key, self.drum_remap.to_vec());
