@@ -294,7 +294,7 @@ docs/superpowers/plans/2026-10-29-bank2-led-console.md (executed). Компон�
 GATT-коннектов в длинноживущих процессах (BlueZ reconnect patterns: коалесцcing
 reconnect, exponential backoff, watchdog по notify-таймауту, Device1.Connected
 properties-watch через DBus-signals вместо polling) и как это делают готовые
-инструменты (bluetoothd поведение,panion-процессы в проектах типа轻MidiBridge/
+инструменты (bluetoothd поведение, companion-процессы в проектах типа MidiBridge,
 Snoop37 editor). Затем спека: (a) компаньон: DBus-watch на Connected клавы,
 reconnect-backoff, различать «клава off» vs «bluez stale cache» (см. PROTOCOL.md);
 (б) синт: пересоздание console_rx/socket при reconnect_audio (сейчас console_rx
