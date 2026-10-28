@@ -44,6 +44,7 @@ assert_no_alloc = { version = "1.1", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+tempfile = "3"
 
 [[bench]]
 name = "dsp"
