@@ -186,6 +186,30 @@ impl App {
     pub(super) fn reconnect_audio(&mut self) -> anyhow::Result<()> {
         use crate::synth;
 
+        // Snapshot looper content from the display shadow BEFORE the old
+        // engine (which owns the recorder) is dropped with the dead stream.
+        let looper_snap: Vec<crate::synth::looper::LooperEventSnapshot>;
+        let looper_len_ticks: u32;
+        {
+            let mut snap = Vec::new();
+            let mut len_ticks = 0u32;
+            if let Ok(d) = self.looper_display.lock() {
+                len_ticks = d.loop_length_ticks;
+                if len_ticks > 0 {
+                    let inv_len = len_ticks as f32;
+                    snap = d.events.iter().map(|e| crate::synth::looper::LooperEventSnapshot {
+                        tick: (e.position * inv_len) as u32,
+                        note: e.note,
+                        velocity: e.velocity,
+                        layer_id: e.layer_id,
+                        part_id: e.part_id,
+                    }).collect();
+                }
+            }
+            looper_snap = snap;
+            looper_len_ticks = len_ticks;
+        }
+
         // Drop old audio backend (dead stream + old synth engine)
         self._audio_handle = None;
 
@@ -276,6 +300,15 @@ impl App {
         self.send_full_part_state();
         self.send_cc_map();
         self.send_drum_state();
+
+        if !looper_snap.is_empty() && looper_len_ticks > 0 {
+            let n = looper_snap.len();
+            let _ = self.ctrl_tx.push(crate::synth::ControlEvent::LooperRestore {
+                events: looper_snap.into_boxed_slice(),
+                loop_length_ticks: looper_len_ticks,
+            });
+            log::info!("[reconnect] looper restored: {n} events");
+        }
 
         log::info!("[reconnect] Audio restarted: {actual_sr}Hz");
         Ok(())

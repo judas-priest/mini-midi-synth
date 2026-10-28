@@ -38,10 +38,21 @@ pub struct LooperDisplayEvent {
     pub part_id: u8,
 }
 
+/// Serialisable event snapshot for looper restore across audio reconnects.
+#[derive(Clone, Copy)]
+pub struct LooperEventSnapshot {
+    pub tick: u32,    // sample offset from loop start
+    pub note: u8,
+    pub velocity: u8, // 0 = note-off
+    pub layer_id: u8,
+    pub part_id: u8,
+}
+
 /// Shared display state for GUI (updated on record/undo/clear, not every sample).
 pub struct LooperDisplay {
     pub events: Vec<LooperDisplayEvent>,
     pub current_layer: u8,
+    pub loop_length_ticks: u32, // source of truth for GUI snapshot; 0 = none
 }
 
 impl LooperDisplay {
@@ -51,6 +62,7 @@ impl LooperDisplay {
             // audio thread, where growing this Vec means calling malloc.
             events: Vec::with_capacity(MAX_LOOP_EVENTS),
             current_layer: 0,
+            loop_length_ticks: 0,
         }))
     }
 }
@@ -84,7 +96,7 @@ struct LoopEvent {
     part_id: u8,    // which synth part this was recorded on
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum LooperState {
     Idle,
     Recording,   // first pass: establishing loop length
@@ -310,6 +322,43 @@ impl MidiLooper {
         self.update_display();
     }
 
+    /// Number of recorded events.
+    #[allow(dead_code)]
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> u16 { self.len }
+
+    /// Restore recorded content from a GUI-side snapshot (audio thread).
+    /// Zero-alloc: copies up to MAX_LOOP_EVENTS from the borrowed slice.
+    pub fn restore(&mut self, events: &[LooperEventSnapshot], loop_length_ticks: u32) {
+        self.len = 0;
+        self.playback_tick = 0;
+        self.playback_cursor = 0;
+        self.needs_note_offs = false;
+        self.active_notes = [255; 128];
+        self.active_note_layers = [0; 128];
+        self.loop_length_ticks = loop_length_ticks;
+        self.state = LooperState::Idle;
+        for ev in events {
+            if self.len as usize >= MAX_LOOP_EVENTS { break; }
+            self.events[self.len as usize] = LoopEvent {
+                tick: ev.tick,
+                note: ev.note,
+                velocity: ev.velocity,
+                layer_id: ev.layer_id,
+                part_id: ev.part_id,
+            };
+            self.len += 1;
+        }
+        // Layer bookkeeping: restored events may reference layers of the old
+        // engine; undo() targets current_layer, so advance to the max seen.
+        self.current_layer = events.iter().map(|e| e.layer_id).max().unwrap_or(0);
+        // Fresh engine: mute/solo are at defaults; events keep their old
+        // layer_ids, which stay valid because ids are copied 1:1.
+        self.atoms.state.store(LooperState::Idle.to_u8(), Ordering::Relaxed);
+        self.update_atoms();
+        self.update_display();
+    }
+
     /// Mute/unmute a layer. Returns note-offs for currently sounding notes from that layer.
     pub fn set_layer_mute(&mut self, layer: u8, mute: bool) -> [(u8, u8, u8); MAX_SIMULTANEOUS] {
         let mut out = [(0u8, 0u8, 255u8); MAX_SIMULTANEOUS];
@@ -508,6 +557,7 @@ impl MidiLooper {
                 }
             }
             d.current_layer = self.current_layer;
+            d.loop_length_ticks = self.loop_length_ticks;
         }
     }
 
@@ -521,4 +571,51 @@ impl MidiLooper {
         self.atoms.layer_count.store(self.current_layer + 1, Ordering::Relaxed);
     }
 
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+
+    fn snap(tick: u32, note: u8, vel: u8) -> LooperEventSnapshot {
+        LooperEventSnapshot { tick, note, velocity: vel, layer_id: 0, part_id: 0 }
+    }
+
+    #[test]
+    fn restore_carries_content_and_length() {
+        let mut l = MidiLooper::new(48_000.0);
+        l.restore(&[snap(0, 60, 127), snap(24_000, 60, 0)], 48_000);
+        assert_eq!(l.len(), 2);
+        assert_eq!(l.loop_length_ticks, 48_000);
+        assert_eq!(l.state, LooperState::Idle);
+    }
+
+    #[test]
+    fn restore_sets_current_layer_to_max() {
+        let mut l = MidiLooper::new(48_000.0);
+        let events = vec![
+            LooperEventSnapshot { tick: 0, note: 60, velocity: 127, layer_id: 2, part_id: 0 },
+            LooperEventSnapshot { tick: 100, note: 62, velocity: 127, layer_id: 0, part_id: 0 },
+        ];
+        l.restore(&events, 48_000);
+        assert_eq!(l.current_layer, 2);
+    }
+
+    #[test]
+    fn empty_restore_is_noop() {
+        let mut l = MidiLooper::new(48_000.0);
+        l.restore(&[], 0);
+        assert_eq!(l.len(), 0);
+        assert_eq!(l.loop_length_ticks, 0);
+    }
+
+    #[test]
+    fn restore_caps_at_max_events() {
+        let mut l = MidiLooper::new(48_000.0);
+        let events: Vec<LooperEventSnapshot> = (0..MAX_LOOP_EVENTS + 100)
+            .map(|i| snap(i as u32, 60, 127))
+            .collect();
+        l.restore(&events, u32::MAX / 2);
+        assert_eq!(l.len() as usize, MAX_LOOP_EVENTS);
+    }
 }

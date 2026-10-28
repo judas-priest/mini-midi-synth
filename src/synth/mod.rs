@@ -201,6 +201,12 @@ pub enum ControlEvent {
     LooperSetBars { bars: u8 },
     LooperSetQuantize { quantize: u8 },
     LooperSetBpm { bpm: f32 },
+    /// Restore recorded looper content after an audio reconnect. The payload
+    /// owns heap memory and is handed back from handle_control for disposal.
+    LooperRestore {
+        events: Box<[crate::synth::looper::LooperEventSnapshot]>,
+        loop_length_ticks: u32,
+    },
     LooperSetLayerMute { layer: u8, mute: bool },
     LooperSetSolo { layer: Option<u8> },
     SetSustain { on: bool },
@@ -2093,6 +2099,11 @@ impl SynthEngine {
                 self.looper.quantize = looper::Quantize::from_index(quantize);
             }
             ControlEvent::LooperSetBpm { bpm } => { self.looper.bpm = bpm; }
+            ControlEvent::LooperRestore { events, loop_length_ticks } => {
+                self.looper.restore(&events, loop_length_ticks);
+                // Heap-owning payload: hand it back for GUI-thread disposal.
+                return Some(ControlEvent::LooperRestore { events, loop_length_ticks });
+            }
             ControlEvent::LooperSetLayerMute { layer, mute } => {
                 let note_offs = self.looper.set_layer_mute(layer, mute);
                 for &(note, vel, part_id) in &note_offs {
