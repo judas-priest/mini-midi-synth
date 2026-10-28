@@ -1504,6 +1504,12 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: self.looper_bars });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: self.looper_quantize });
+        // Choke semantics survive reconnect even if the SF2 restore path bails
+        // (missing file). For the internal kit (no SF2 loaded) this pushes a
+        // derived table over the engine's GM default — harmless: `sf2_choke_take`
+        // is only called in the SF2 branch, the DSP path uses the hardcoded
+        // CHOKE_GROUPS, and load_sf2_drums overwrites it for SF2 kits.
+        self.push_drum_choke_groups();
     }
 
     fn set_active_part(&mut self, part: usize) {
