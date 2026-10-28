@@ -854,6 +854,8 @@ pub struct DrumEngine {
     pub sf2_mode: bool,
     /// Velocity off: every hit triggers at 127 (velocity-less controllers)
     pub fixed_velocity: bool,
+    /// Incoming pad note -> internal slot. remap[note-36] = slot (0..16).
+    pub remap: [u8; NUM_DRUM_SLOTS],
     sample_rate: f32,
     /// Shared atom for GUI to read current step position.
     step_atom: Arc<AtomicU8>,
@@ -891,6 +893,11 @@ impl DrumEngine {
             enabled: true,
             sf2_mode: false,
             fixed_velocity: false,
+            remap: {
+                let mut r = [0u8; NUM_DRUM_SLOTS];
+                for (i, v) in r.iter_mut().enumerate() { *v = i as u8; }
+                r
+            },
             sample_rate,
             step_atom: Arc::new(AtomicU8::new(0)),
             play_atom: Arc::new(AtomicU8::new(0)),
@@ -934,6 +941,22 @@ impl DrumEngine {
         self.step_atom = step;
         self.play_atom = play;
         self.rec_atom = rec;
+    }
+
+    /// Translate an incoming pad note to its target GM note (DRUM_NOTE_BASE + slot).
+    /// Notes outside the drum range pass through unchanged.
+    pub fn remapped_note(&self, note: u8) -> u8 {
+        match note.wrapping_sub(DRUM_NOTE_BASE) {
+            i if (i as usize) < NUM_DRUM_SLOTS => DRUM_NOTE_BASE + self.remap[i as usize],
+            _ => note,
+        }
+    }
+
+    /// Load a remap table from config (short vecs are padded with identity, long truncated).
+    pub fn apply_remap_vec(&mut self, v: &[u8]) {
+        for (i, slot) in self.remap.iter_mut().enumerate() {
+            *slot = v.get(i).copied().unwrap_or(i as u8).min((NUM_DRUM_SLOTS - 1) as u8);
+        }
     }
 
     pub fn note_on(&mut self, note: u8, velocity: u8) {
