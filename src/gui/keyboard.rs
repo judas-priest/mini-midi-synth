@@ -132,7 +132,32 @@ impl App {
             // Click a drawn pad -> remap dialog for that hardware pad (position = pad number)
             let mut clicked_pad: Option<usize> = None;
 
-            // Top row (cyan)
+            // Pad color by the category of the sound it triggers (remap-aware)
+            let pad_color = |note: u8| -> egui::Color32 {
+                let i = (note - 36) as usize;
+                let target = self.drum_remap[i] as usize;
+                let kit_idx = target.wrapping_sub(30);
+                let name = if kit_idx < self.drum_kit_names.len() {
+                    self.drum_kit_names[kit_idx].to_lowercase()
+                } else {
+                    String::new()
+                };
+                if name.contains("hat") || name.contains("hh") {
+                    egui::Color32::from_rgb(212, 200, 70)   // hats: yellow
+                } else if name.contains("crash") || name.contains("cymbal") || name.contains("ride") || name.contains("china") {
+                    egui::Color32::from_rgb(235, 140, 50)   // cymbals: orange
+                } else if name.contains("tom") {
+                    egui::Color32::from_rgb(90, 135, 225)   // toms: blue
+                } else if name.contains("kick") {
+                    egui::Color32::from_rgb(190, 65, 65)    // kick: red
+                } else if name.contains("snare") {
+                    egui::Color32::from_rgb(85, 185, 95)    // snare: green
+                } else {
+                    egui::Color32::from_rgb(200, 95, 185)   // perc/clap/rim: magenta
+                }
+            };
+
+            // Top row
             for col in 0..8u8 {
                 let note = PAD_TOP_NOTES[col as usize];
                 let vel = self.pad_state[note as usize].load(Ordering::Relaxed);
@@ -143,7 +168,7 @@ impl App {
                 let color = if vel > 0 {
                     egui::Color32::WHITE
                 } else {
-                    theme::PAD_CYAN
+                    pad_color(note)
                 };
                 pad_painter.rect_filled(pr, 3.0, color);
                 pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, theme::STROKE_PAD_BORDER), egui::StrokeKind::Outside);
@@ -152,7 +177,7 @@ impl App {
                 }
             }
 
-            // Bottom row (pink)
+            // Bottom row
             for col in 0..8u8 {
                 let note = PAD_BOT_NOTES[col as usize];
                 let vel = self.pad_state[note as usize].load(Ordering::Relaxed);
@@ -163,7 +188,7 @@ impl App {
                 let color = if vel > 0 {
                     egui::Color32::WHITE
                 } else {
-                    theme::PAD_PINK
+                    pad_color(note)
                 };
                 pad_painter.rect_filled(pr, 3.0, color);
                 pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, theme::STROKE_PAD_BORDER), egui::StrokeKind::Outside);
