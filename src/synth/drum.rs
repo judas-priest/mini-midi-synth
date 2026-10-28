@@ -858,6 +858,9 @@ pub struct DrumEngine {
     pub fixed_velocity: bool,
     /// Incoming pad note -> internal slot. remap[note-36] = slot (0..16).
     pub remap: [u8; NUM_DRUM_SLOTS],
+    /// Per-slot choke group ids for the SF2 path. Defaults to the GM layout
+    /// (CHOKE_GROUPS); replaced per-kit by the GUI from the kit's sample names.
+    pub choke_groups: [u8; NUM_DRUM_SLOTS],
     /// SF2 choke: last triggered note per choke group (0 = none).
     group_last_note: [u8; NUM_CHOKE_GROUPS],
     sample_rate: f32,
@@ -898,6 +901,7 @@ impl DrumEngine {
             sf2_mode: false,
             fixed_velocity: false,
             remap: core::array::from_fn(|i| i as u8),
+            choke_groups: CHOKE_GROUPS,
             group_last_note: [0u8; NUM_CHOKE_GROUPS],
             sample_rate,
             step_atom: Arc::new(AtomicU8::new(0)),
@@ -964,7 +968,7 @@ impl DrumEngine {
         if note < DRUM_NOTE_BASE { return 0; }
         let slot = (note - DRUM_NOTE_BASE) as usize;
         if slot >= NUM_DRUM_SLOTS { return 0; }
-        let g = CHOKE_GROUPS[slot] as usize;
+        let g = self.choke_groups[slot] as usize;
         if g == 0 { return 0; }
         let prev = self.group_last_note[g - 1];
         self.group_last_note[g - 1] = note;
@@ -973,6 +977,12 @@ impl DrumEngine {
 
     /// Clear choke state (AllNotesOff / panic paths).
     pub fn reset_choke_state(&mut self) {
+        self.group_last_note = [0u8; NUM_CHOKE_GROUPS];
+    }
+
+    /// Install a per-kit choke table (SF2 path). Also clears group state.
+    pub fn set_choke_groups(&mut self, t: &[u8; NUM_DRUM_SLOTS]) {
+        self.choke_groups = *t;
         self.group_last_note = [0u8; NUM_CHOKE_GROUPS];
     }
 

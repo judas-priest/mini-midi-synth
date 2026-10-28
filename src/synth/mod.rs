@@ -210,6 +210,8 @@ pub enum ControlEvent {
     DrumSetFixedVelocity { fixed: bool },
     /// Drums: pad-note -> internal slot table (index = in_note-36, value = slot)
     DrumSetRemap { table: Box<[u8; 16]> },
+    /// Drums: per-slot choke group ids for the SF2 path (0 = no choke)
+    DrumSetChokeGroups { table: Box<[u8; 16]> },
     // SF2 sampler controls
     LoadKeysSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
     LoadDrumsSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
@@ -2089,6 +2091,10 @@ impl SynthEngine {
                 // The box travels back for freeing on the GUI thread.
                 self.drum_engine.apply_remap_vec(&*table);
                 return Some(ControlEvent::DrumSetRemap { table });
+            }
+            ControlEvent::DrumSetChokeGroups { table } => {
+                self.drum_engine.set_choke_groups(&table);
+                return Some(ControlEvent::DrumSetChokeGroups { table });
             }
             ControlEvent::SetSustain { on } => {
                 self.set_sustain(if on { 127 } else { 0 });

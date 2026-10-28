@@ -1394,6 +1394,27 @@ impl App {
     }
 
     /// Config key for the drum remap table: kit name, or "internal" kit.
+    /// Derive SF2 choke groups from the kit's sample names: hat-ish sounds ->
+    /// group 1 (mutual), crash/cymbal -> group 2, everything else 0.
+    fn derive_choke_groups(&self) -> [u8; 16] {
+        let mut t = [0u8; 16];
+        for (i, name) in self.drum_kit_names.iter().enumerate() {
+            let n = name.to_lowercase();
+            if n.contains("hat") || n.contains("hh") {
+                t[i] = 1;
+            } else if n.contains("crash") || n.contains("cymbal") {
+                t[i] = 2;
+            }
+        }
+        t
+    }
+
+    fn push_drum_choke_groups(&mut self) {
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetChokeGroups {
+            table: Box::new(self.derive_choke_groups()),
+        });
+    }
+
     fn drum_remap_key(&self) -> String {
         if self.sf2_drums_loaded_name.is_empty() { "internal".to_string() }
         else { self.sf2_drums_loaded_name.clone() }
@@ -1541,6 +1562,7 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
         self.sf2_drums_loaded_name = name;
         self.extract_kit_names(&sf);
+        self.push_drum_choke_groups();
         self.show_toast("Drums SF2 loaded", ToastKind::Success);
         if self.sf2_drums_enabled {
             let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
@@ -1576,6 +1598,7 @@ impl App {
         self.sf2_drums_loaded_name.clear();
         self.sf2_drums_enabled = false;
         self.reset_kit_names();
+        self.push_drum_choke_groups(); // back to GM choke layout
         // Internal kit: reset to identity remap.
         for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
         self.push_drum_remap();
