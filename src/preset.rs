@@ -753,7 +753,24 @@ pub fn save_performance(perf: &Performance) -> Result<PathBuf> {
 }
 
 pub fn load_performance(path: &std::path::Path) -> Result<Performance> {
-    load_json(path, "performance")
+    let mut perf: Performance = load_json(path, "performance")?;
+    migrate_performance_parts(&mut perf.parts);
+    Ok(perf)
+}
+
+/// 16-part layout migration: legacy 8-part performances kept zone B at
+/// indices 4..8 — relocate it to 8..12 so A/B semantics survive.
+pub fn migrate_performance_parts(parts: &mut Vec<PartConfig>) {
+    if parts.len() == 8 {
+        let legacy_b: Vec<_> = parts.drain(4..8).collect();
+        let empty = parts[0].clone();
+        parts.resize_with(8, || {
+            let mut c = empty.clone();
+            c.enabled = false;
+            c
+        });
+        parts.extend(legacy_b); // 0..4 = zone A, 4..8 empty, 8..12 = zone B
+    }
 }
 
 pub fn list_performances() -> Vec<(String, PathBuf)> {
