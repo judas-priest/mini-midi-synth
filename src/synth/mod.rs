@@ -458,6 +458,7 @@ struct Part {
     alt_unipolar: f32,      // current alternate unipolar value
     release_vel: f32,       // last note-off velocity
     sustained_notes: [bool; 128], // notes held by sustain pedal
+    keys_down: [bool; 128],   // raw key physically held (pedal-up must spare these)
     breath: f32,            // CC2, 0..1
     expression: f32,        // CC11, 0..1
     sustain_pedal: f32,     // CC64: 0.0 or 1.0
@@ -501,6 +502,7 @@ impl Part {
             rand_bipolar: 0.0, rand_unipolar: 0.5,
             alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
             sustained_notes: [false; 128],
+            keys_down: [false; 128],
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
             cached_mod_sources: mod_matrix::ModSources {
@@ -569,6 +571,8 @@ impl Part {
         if !self.enabled { return; }
         let note = (raw_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
         if note < self.min_note || note > self.max_note { return; }
+        debug_assert!(raw_note < 128);
+        self.keys_down[raw_note as usize] = true;
         self.last_velocity = velocity as f32 / 127.0;
         self.last_note = note;
 
@@ -587,6 +591,7 @@ impl Part {
         if play_mode == 3 {
             if let Some(pos) = self.latch_held.iter().position(|&n| n == raw_note) {
                 self.latch_held.remove(pos);
+                self.keys_down[raw_note as usize] = false;
                 for v in &mut self.voices { if v.active && v.src_note == raw_note { v.note_off(); } }
             } else {
                 self.latch_held.push(raw_note);
@@ -777,6 +782,7 @@ impl Part {
 
     /// Release voices matching the RAW (pre-transpose) note — see `note_on`.
     fn note_off(&mut self, raw_note: u8) {
+        self.keys_down[raw_note as usize] = false;
         let note = (raw_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
         let play_mode = self.params.play_mode as u8;
 
