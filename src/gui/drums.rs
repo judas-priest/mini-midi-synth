@@ -90,27 +90,33 @@ impl App {
                 36, 37, 38, 39, 44, 45, 47, 46, // bottom row, pads 9-16
             ];
             let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ui.ctx(), |ui| {
-                ui.set_width(340.0);
+                ui.set_width(780.0);
                 ui.strong("Pad → drum sound");
-                ui.label("Which sound each physical pad plays.");
+                ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
                 ui.add_space(theme::SP_MD);
                 let mut new_remap = self.drum_remap;
-                egui::Grid::new("drum_remap_grid").num_columns(4).show(ui, |ui| {
-                    for (p, note) in NOTE_OF_PAD.iter().enumerate() {
-                        let slot = &mut new_remap[(*note - 36) as usize];
-                        let sel = drum_slot_name(*slot);
-                        ui.label(format!("Pad {}", p + 1));
-                        egui::ComboBox::from_id_salt(p)
-                            .width(96.0)
-                            .selected_text(sel)
-                            .show_ui(ui, |ui| {
-                                for (s, name) in drum_slot_names().iter().enumerate() {
-                                    ui.selectable_value(slot, s as u8, *name);
-                                }
+                let mut pad_row = |ui: &mut egui::Ui, pads: std::ops::Range<usize>, id: &str| {
+                    egui::Grid::new(id).num_columns(8).show(ui, |ui| {
+                        for p in pads {
+                            let note = NOTE_OF_PAD[p];
+                            let slot = &mut new_remap[(note - 36) as usize];
+                            let sel = drum_slot_name(*slot);
+                            ui.vertical_centered(|ui| {
+                                ui.label(format!("{}", p + 1));
+                                egui::ComboBox::from_id_salt(p)
+                                    .width(80.0)
+                                    .selected_text(sel)
+                                    .show_ui(ui, |ui| {
+                                        for (s, name) in drum_slot_names().iter().enumerate() {
+                                            ui.selectable_value(slot, s as u8, *name);
+                                        }
+                                    });
                             });
-                        if p % 2 == 1 { ui.end_row(); }
-                    }
-                });
+                        }
+                    });
+                };
+                pad_row(ui, 0..8, "remap_top");
+                pad_row(ui, 8..16, "remap_bot");
                 ui.add_space(theme::SP_MD);
                 ui.horizontal(|ui| {
                     if ui.button("Reset").clicked() {
