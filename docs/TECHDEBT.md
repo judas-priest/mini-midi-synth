@@ -111,3 +111,10 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
   пересборка потока вне колбэка (set_sample_rate в audio.rs:148 безопасен),
   либо сделать Voice::set_sample_rate аллокационно-чистым (перевыделять в
   trash/на control-потоке).
+
+USB-конфиг (2026-10-28, проверено эмпирически): конфиг-протокол (00 59-фреймы)
+по USB НЕ существует. Порты: Private (hw:2,0,0) = OTA/identity — на handshake
+F0 00 32 45 00 00 00 40 7F F7 отвечает статичной identity-строкой, конфиг-фреймы
+в любых обёртках (raw / F0 / 00 32 45-обёртка / после echo-back) молчат;
+Master (hw:2,0,1) — обычный MIDI; hw:2,0,2 — мёртв. Конфиг только GATT AE40
+по BLE (smk.py).
