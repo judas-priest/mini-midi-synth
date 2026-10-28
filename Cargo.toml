@@ -67,8 +67,10 @@ cpal = { version = "0.15" }
 
 [profile.release]
 opt-level = 3
-lto = "fat"
-codegen-units = 1
+# fat LTO + codegen-units=1 removed for fast iteration builds (was: 50s+ per
+# release).  Re-enable for Android/ship builds:
+#   lto = "fat"
+#   codegen-units = 1
 panic = "abort"
 # `debuginfo` rather than `symbols`: the function name table survives, so a
 # native crash in logcat is readable via ndk-stack, while the DWARF sections
