@@ -1,4 +1,5 @@
 # Hygiene fixes (#2 eprintln, #3 preset collisions, #4 looper reconnect, #9 dead API) Implementation Plan
+status: executed 2026-10-28 (branch worktree-bugfix-batch, commits 1a3b830..f7ca743; follow-up: suffix-ownership fix a83a0e0)
 
 anchor-checked: 2026-10-28 (независимое ревью на master @ 329faac; находки вшиты)
 
@@ -42,7 +43,7 @@ cargo test --features rt-assert --test rt_safety
 
 Существование API: `preset::Patch` без `Default` — собирать тестовые патчи через `preset::load_factory_patches()[0].clone()` и править `name` (герметично: factory presets компилированы в бинарник, FS не читается). `save_patch` в текущем коде пишет только в реальный user-каталог (preset.rs:560-567) — тесты НЕ должны его звать; они тестируют новые `_in(dir)`-варианты из Task 2. До Task 2 тесты не компилируются — красная фаза здесь ограничена прогоном после Task 2 Step 1? Нет: TDD-порядок — Task 1 добавляет тесты, Task 2 делает их компилируемыми и зелёными; interim-прогон `cargo test --test preset_collision` ожидаемо падает компиляцией (это и есть красная фаза для несуществующего API).
 
-- [ ] **Step 1: Add tempfile to dev-dependencies**
+- [x] **Step 1: Add tempfile to dev-dependencies**
 
 В `Cargo.toml`, секция `[dev-dependencies]` (создать, если нет):
 
@@ -51,7 +52,7 @@ cargo test --features rt-assert --test rt_safety
 tempfile = "3"
 ```
 
-- [ ] **Step 2: Write the tests**
+- [x] **Step 2: Write the tests**
 
 ```rust
 //! Preset filename collision/legacy-migration contract (review finding #3).
@@ -120,12 +121,12 @@ fn legacy_filename_migrated_on_load() {
 }
 ```
 
-- [ ] **Step 3: Verify red**
+- [x] **Step 3: Verify red**
 
 Run: `cargo test --test preset_collision`
 Expected: не компилируется — `save_patch_in`/`load_presets_from_dir` не существуют (красная фаза для нового API; логика коллизий будет проверена в Task 2).
 
-- [ ] **Step 4: Commit (red)**
+- [x] **Step 4: Commit (red)**
 
 ```bash
 git add tests/preset_collision.rs Cargo.toml Cargo.lock
@@ -137,7 +138,7 @@ git commit -m "test: preset collision + legacy migration contracts (red)"
 **Files:**
 - Modify: `src/preset.rs` — `save_json` (:41-48), новый `resolve_save_path`, новый `migrate_preset_filename`, `load_presets_from_dir` (:480-514 → pub), `save_patch` (:560-567 → `_in`-вариант), `save_performance` (:755), `save_drum_kit` (:587)
 
-- [ ] **Step 1: Shared collision resolver + save_json**
+- [x] **Step 1: Shared collision resolver + save_json**
 
 Точное сравнение имён (НЕ sanitized-stem: «bass lead» и «bass-lead!» дают один stem, но это разные пресеты). После `sanitize_preset_filename` добавить:
 
@@ -186,7 +187,7 @@ fn save_json<T: Serialize>(
 
 Вызовы остаются совместимы по сигнатуре (`save_drum_kit`, `save_performance`) — правки не требуют.
 
-- [ ] **Step 2: save_patch — testable `_in` variant + collision check**
+- [x] **Step 2: save_patch — testable `_in` variant + collision check**
 
 Заменить `save_patch` (preset.rs:558-567):
 
@@ -209,7 +210,7 @@ pub fn save_patch(preset: &Patch) -> Result<PathBuf> {
 
 (`#[allow(dead_code)]` снять — функция вызывается из settings.rs:470.)
 
-- [ ] **Step 3: Legacy filename migration**
+- [x] **Step 3: Legacy filename migration**
 
 После `resolve_save_path` добавить (pub — вызывается из `load_presets_from_dir` и тестов):
 
@@ -241,12 +242,12 @@ pub fn migrate_preset_filename(path: &std::path::Path, name: &str) {
 
 Нюанс: миграция переименует и файлы, переименованные пользователем вручную нестандартно — осознанный trade-off (после первого запуска условие самопогашается). В `list_json` (:57-77, performances/kit) миграцию НЕ добавлять — после rename в листинге пришлось бы перечитывать актуальное имя файла, а главный субъект находки #3 — пресеты и повторное сохранение; коллизии kit/perf уже закрыты `resolve_save_path` (YAGNI). `list_json` остаётся без изменений.
 
-- [ ] **Step 4: Run preset tests + roundtrip**
+- [x] **Step 4: Run preset tests + roundtrip**
 
 Run: `cargo test --test preset_collision && cargo test --test preset_roundtrip`
 Expected: все зелёные; (b)/(c)/(d) зелёные (были red), (a) guard зелёный; roundtrip не сломан.
 
-- [ ] **Step 5: Gates + commit**
+- [x] **Step 5: Gates + commit**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test
@@ -259,18 +260,18 @@ git commit -m "fix: preset saves never silently overwrite; migrate legacy filena
 **Files:**
 - Modify: `src/synth/voice.rs:513-517` (метод), `src/synth/envelope.rs:162-176` (метод)
 
-- [ ] **Step 1: Delete both methods**
+- [x] **Step 1: Delete both methods**
 
 Удалить `Voice::note_off_for` (voice.rs:515-517, с doc-комментарием) и `Envelope::note_off_for` (envelope.rs:162-176). Ноль вызовов по репо (проверено аудитом; перепроверить: `grep -rn "note_off_for" src/ tests/` — останутся только определения).
 
-- [ ] **Step 2: Gates**
+- [x] **Step 2: Gates**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test
 ```
 Expected: зелёные.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/synth/voice.rs src/synth/envelope.rs
@@ -282,7 +283,7 @@ git commit -m "refactor: remove dead note_off_for API (revert remnant of 59ed413
 **Files:**
 - Modify: `src/midi.rs:117-124`, `src/lib.rs:352` (`desktop_main`), `Cargo.toml` (dependencies)
 
-- [ ] **Step 1: Replace eprintln**
+- [x] **Step 1: Replace eprintln**
 
 ```rust
     match &event {
@@ -296,7 +297,7 @@ git commit -m "refactor: remove dead note_off_for API (revert remnant of 59ed413
     }
 ```
 
-- [ ] **Step 2: Init desktop logger**
+- [x] **Step 2: Init desktop logger**
 
 В `Cargo.toml` `[dependencies]`:
 
@@ -317,14 +318,14 @@ pub fn desktop_main() -> Result<()> {
 
 `run_headless` вызывается из `desktop_main` (init уже случился); Android-путь (`android_main`, lib.rs:~895 `android_logger::init_once`) не трогать.
 
-- [ ] **Step 3: Gates**
+- [x] **Step 3: Gates**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 ```
 Expected: зелёные (midi.rs в RT-зоне не используется — `parse_and_push` вызывается из midir/JNI потоков; `parse_midi_message` в аудиопотоке не тронут).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/midi.rs src/lib.rs Cargo.toml Cargo.lock
@@ -336,7 +337,7 @@ git commit -m "fix: replace per-message eprintln with log::debug; init desktop l
 **Files:**
 - Modify: `src/synth/looper.rs` (LooperDisplay.loop_length_ticks, LooperEventSnapshot, restore, unit-тесты), `src/synth/mod.rs` (`ControlEvent::LooperRestore` + handle_control), `src/gui/settings.rs:186-282` (`reconnect_audio`)
 
-- [ ] **Step 1: looper.rs — loop length in display + snapshot type + restore**
+- [x] **Step 1: looper.rs — loop length in display + snapshot type + restore**
 
 В `LooperDisplay` (looper.rs:42-45) добавить поле (инициализация `loop_length_ticks: 0` в `LooperDisplay::new`, looper.rs:47-55):
 
@@ -459,7 +460,7 @@ mod restore_tests {
 }
 ```
 
-- [ ] **Step 2: mod.rs — ControlEvent::LooperRestore**
+- [x] **Step 2: mod.rs — ControlEvent::LooperRestore**
 
 В enum `ControlEvent` (рядом с `LooperSetQuantize`, grep `LooperSetQuantize`):
 
@@ -482,7 +483,7 @@ mod restore_tests {
 
 Heap-owning вариант обязан вернуться через `Some(...)` до комментария «Every variant that owns heap memory returns early above» (mod.rs:2310-2311).
 
-- [ ] **Step 3: settings.rs — snapshot before drop, restore after reconnect**
+- [x] **Step 3: settings.rs — snapshot before drop, restore after reconnect**
 
 В `reconnect_audio` (settings.rs:186) ПЕРЕД `self._audio_handle = None;` (settings.rs:190) — движок живёт внутри бэкенда и умрёт при drop, снимаем содержимое из display (источник длины — новое поле `loop_length_ticks`, не реконструкция из bpm/bars: движок фиксирует длину на момент записи, looper.rs:225, а bpm/bars могли поменять после):
 
@@ -524,7 +525,7 @@ Heap-owning вариант обязан вернуться через `Some(...)
 
 Лупер остаётся в Idle после reconnect — контент сохранён, старт воспроизведения за пользователем (существующие кнопки/пэды).
 
-- [ ] **Step 4: Run gates + looper restore unit tests**
+- [x] **Step 4: Run gates + looper restore unit tests**
 
 ```bash
 cargo clippy --all-targets -- -D warnings
@@ -533,7 +534,7 @@ cargo test --features rt-assert --test rt_safety
 ```
 Expected: зелёные, включая `restore_tests`. RT-инвариант: `restore` — копирование в фиксированный массив + pre-sized display-Vec, аллокаций нет; Box-payload уходит в trash (`Trash::Control`, audio.rs:178-200).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/synth/looper.rs src/synth/mod.rs src/gui/settings.rs
