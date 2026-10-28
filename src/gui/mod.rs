@@ -13,6 +13,7 @@ mod fx_chain;
 mod macros;
 mod theme;
 pub mod keybinds;
+pub mod led_console;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
