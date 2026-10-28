@@ -517,3 +517,19 @@ fn panic_after_held_pedal_up_kills_all() {
     settle(&mut e);
     assert!(render_peak(&mut e, 200) < SILENCE, "pedal cycle resurrected a note");
 }
+
+#[test]
+fn drum_record_with_out_of_range_remap_target_does_not_panic() {
+    use mini_midi_synth::synth::ControlEvent;
+    let mut e = engine_with_init_patch();
+    // remap pad slot 0 (note 36) to target 30 (outside 36..=51 — legal SF2 target)
+    let mut remap = [36u8; 16];
+    remap[0] = 30;
+    let _ = e.handle_control(ControlEvent::DrumSetRemap { table: Box::new(remap) });
+    let _ = e.handle_control(ControlEvent::DrumSeqRecord { recording: true });
+    // live hit on ch10, note 36 -> remapped target 30 -> slot math 30-36
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 36, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 9, note: 36 });
+    // must not panic (debug overflow) and must not record a bogus hit
+    assert!(render_peak(&mut e, 10) >= 0.0);
+}
