@@ -303,11 +303,13 @@ impl App {
 
         if !looper_snap.is_empty() && looper_len_ticks > 0 {
             let n = looper_snap.len();
-            let _ = self.ctrl_tx.push(crate::synth::ControlEvent::LooperRestore {
+            match self.ctrl_tx.push(crate::synth::ControlEvent::LooperRestore {
                 events: looper_snap.into_boxed_slice(),
                 loop_length_ticks: looper_len_ticks,
-            });
-            log::info!("[reconnect] looper restored: {n} events");
+            }) {
+                Ok(()) => log::info!("[reconnect] looper restored: {n} events"),
+                Err(_) => log::warn!("[reconnect] looper restore LOST: ring full ({n} events)"),
+            }
         }
 
         log::info!("[reconnect] Audio restarted: {actual_sr}Hz");
