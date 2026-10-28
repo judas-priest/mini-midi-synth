@@ -34,6 +34,8 @@ const CHOKE_GROUPS: [u8; NUM_DRUM_SLOTS] = [
     0, // 51 Ride
 ];
 
+const NUM_CHOKE_GROUPS: usize = 2;
+
 pub const DRUM_NAMES: [&str; NUM_DRUM_SLOTS] = [
     "Kick", "Side Stick", "Snare", "Clap",
     "E-Snare", "Lo Floor Tom", "Closed HH", "Hi Floor Tom",
@@ -856,6 +858,8 @@ pub struct DrumEngine {
     pub fixed_velocity: bool,
     /// Incoming pad note -> internal slot. remap[note-36] = slot (0..16).
     pub remap: [u8; NUM_DRUM_SLOTS],
+    /// SF2 choke: last triggered note per choke group (0 = none).
+    group_last_note: [u8; NUM_CHOKE_GROUPS],
     sample_rate: f32,
     /// Shared atom for GUI to read current step position.
     step_atom: Arc<AtomicU8>,
@@ -894,6 +898,7 @@ impl DrumEngine {
             sf2_mode: false,
             fixed_velocity: false,
             remap: core::array::from_fn(|i| i as u8),
+            group_last_note: [0u8; NUM_CHOKE_GROUPS],
             sample_rate,
             step_atom: Arc::new(AtomicU8::new(0)),
             play_atom: Arc::new(AtomicU8::new(0)),
@@ -948,6 +953,27 @@ impl DrumEngine {
             }
             _ => note,
         }
+    }
+
+    /// SF2 choke: returns the previous note held by this note's choke group
+    /// (0 = none) and records `note` as the new holder.  The caller sends a
+    /// MIDI note-off for the returned note to the SF2 channel before the
+    /// note-on.  Notes outside 36..=51 return 0.  DSP choke is handled inside
+    /// trigger_slot and does not use this.
+    pub fn sf2_choke_take(&mut self, note: u8) -> u8 {
+        if note < DRUM_NOTE_BASE { return 0; }
+        let slot = (note - DRUM_NOTE_BASE) as usize;
+        if slot >= NUM_DRUM_SLOTS { return 0; }
+        let g = CHOKE_GROUPS[slot] as usize;
+        if g == 0 { return 0; }
+        let prev = self.group_last_note[g - 1];
+        self.group_last_note[g - 1] = note;
+        prev
+    }
+
+    /// Clear choke state (AllNotesOff / panic paths).
+    pub fn reset_choke_state(&mut self) {
+        self.group_last_note = [0u8; NUM_CHOKE_GROUPS];
     }
 
     /// Load a remap table from config (short vecs are padded with identity, long truncated).
