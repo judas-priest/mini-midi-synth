@@ -2,6 +2,9 @@
 
 mod params;
 mod drums;
+
+/// Parts per split zone (A: 0..N, B: N..2N)
+const PARTS_PER_ZONE: usize = 8;
 mod midi_seq;
 mod settings;
 mod keyboard;

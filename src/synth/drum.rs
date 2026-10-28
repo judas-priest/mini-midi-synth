@@ -974,7 +974,7 @@ impl DrumEngine {
     /// note-on.  Notes outside the kit range 30..=55 return 0.  DSP choke is
     /// handled inside trigger_slot and does not use this.
     pub fn sf2_choke_take(&mut self, note: u8) -> u8 {
-        if note < KIT_NOTE_LO || note > KIT_NOTE_HI { return 0; }
+        if !(KIT_NOTE_LO..=KIT_NOTE_HI).contains(&note) { return 0; }
         let i = (note - KIT_NOTE_LO) as usize;
         if i >= self.choke_groups.len() { return 0; }
         let g = self.choke_groups[i] as usize;

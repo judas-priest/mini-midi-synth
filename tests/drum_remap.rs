@@ -1,5 +1,5 @@
 //! Drum note remap: входная нота -> внутренний слот (см. docs/superpowers/plans/2026-10-28-drum-note-remap.md)
-use mini_midi_synth::synth::drum::{DrumEngine, DRUM_NOTE_BASE, NUM_DRUM_SLOTS};
+use mini_midi_synth::synth::drum::{DrumEngine, DRUM_NOTE_BASE};
 
 #[test]
 fn tc1_identity_by_default() {

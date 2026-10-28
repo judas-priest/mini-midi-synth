@@ -16,8 +16,9 @@ use super::{App, ToastKind};
 use super::note_name;
 use super::theme;
 
-const ZONE_A: std::ops::Range<usize> = 0..4;
-const ZONE_B: std::ops::Range<usize> = 4..8;
+const PARTS_PER_ZONE: usize = 8;
+const ZONE_A: std::ops::Range<usize> = 0..PARTS_PER_ZONE;
+const ZONE_B: std::ops::Range<usize> = PARTS_PER_ZONE..PARTS_PER_ZONE * 2;
 
 impl App {
     pub(super) fn draw_part_tabs(&mut self, ui: &mut egui::Ui) {
@@ -30,7 +31,7 @@ impl App {
 
             // Add to Zone A
             let a_count = ZONE_A.filter(|&i| self.parts[i].enabled).count();
-            if a_count < 4 && ui.small_button("+ A").on_hover_text("Add part to Zone A").clicked() {
+            if a_count < PARTS_PER_ZONE && ui.small_button("+ A").on_hover_text("Add part to Zone A").clicked() {
                 self.add_part_to_zone(false);
             }
 
@@ -65,7 +66,7 @@ impl App {
                         }
                     }
                     // Switch active part to Zone A if needed
-                    if self.active_part >= 4 {
+                    if self.active_part >= PARTS_PER_ZONE {
                         self.set_active_part(0);
                     }
                 }
@@ -77,7 +78,7 @@ impl App {
                     self.draw_part_tab(ui, i);
                 }
                 let b_count = ZONE_B.filter(|&i| self.parts[i].enabled).count();
-                if b_count < 4 && ui.small_button("+ B").on_hover_text("Add part to Zone B").clicked() {
+                if b_count < PARTS_PER_ZONE && ui.small_button("+ B").on_hover_text("Add part to Zone B").clicked() {
                     self.add_part_to_zone(true);
                 }
             }
@@ -106,8 +107,8 @@ impl App {
 
         // ── Middle-click removal confirmation ────────────────────────────
         if let Some(p) = self.pending_remove_part {
-            let zone = if p < 4 { "A" } else { "B" };
-            let num = (p % 4) + 1;
+            let zone = if p < PARTS_PER_ZONE { "A" } else { "B" };
+            let num = (p % PARTS_PER_ZONE) + 1;
             let dialog = egui::Modal::new(egui::Id::new("remove_part_dialog")).show(ui.ctx(), |ui| {
                 ui.set_width(280.0);
                 ui.strong(format!("Remove part {zone}{num}?"));
@@ -201,7 +202,7 @@ impl App {
                 }
 
                 // Remove: not for first part of each zone
-                let is_zone_first = part == 0 || part == 4;
+                let is_zone_first = part.is_multiple_of(PARTS_PER_ZONE);
                 if !is_zone_first && ui.small_button("Remove").on_hover_text("Remove this part").clicked() {
                     self.remove_part(part);
                 }
@@ -304,8 +305,8 @@ impl App {
         let is_active = i == self.active_part
             && !self.show_drums && !self.show_looper
             && !self.show_midi_seq && !self.show_fx_chain;
-        let zone = if i < 4 { "A" } else { "B" };
-        let num = (i % 4) + 1;
+        let zone = if i < PARTS_PER_ZONE { "A" } else { "B" };
+        let num = (i % PARTS_PER_ZONE) + 1;
         let muted = self.parts[i].mute;
         let label = if muted {
             format!("[{zone}{num} M]")
@@ -322,7 +323,7 @@ impl App {
             self.seq_target_atom.store(1, Ordering::Relaxed);
         }
         // Middle-click: remove with confirmation
-        if tab.middle_clicked() && !(i == 0 || i == 4) {
+        if tab.middle_clicked() && !i.is_multiple_of(PARTS_PER_ZONE) {
             self.pending_remove_part = Some(i);
         }
     }
@@ -356,7 +357,7 @@ impl App {
         self.parts[part].enabled = false;
         self.parts[part].mute = false;
         let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled: false });
-        self.set_active_part(if part >= 4 { 4 } else { 0 });
+        self.set_active_part(if part >= PARTS_PER_ZONE { PARTS_PER_ZONE } else { 0 });
         // find first enabled in same zone
         let zone = if part >= 4 { ZONE_B } else { ZONE_A };
         if let Some(i) = zone.into_iter().find(|&i| self.parts[i].enabled) {

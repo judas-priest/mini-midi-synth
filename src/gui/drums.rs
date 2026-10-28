@@ -800,8 +800,8 @@ impl App {
 
             // "Recording to" — shows active part, allows quick switch
             let ap = self.active_part;
-            let zone = if ap < 4 { "A" } else { "B" };
-            let num = (ap % 4) + 1;
+            let zone = if ap < super::PARTS_PER_ZONE { "A" } else { "B" };
+            let num = (ap % super::PARTS_PER_ZONE) + 1;
             let part_name = self.patches.get(self.parts[ap].patch_idx)
                 .map(|p| p.name.as_str()).unwrap_or("---");
             let is_recording = matches!(state, LooperState::Recording | LooperState::Overdubbing);
@@ -814,8 +814,8 @@ impl App {
                 .show_ui(ui, |ui| {
                     for i in 0..self.parts.len() {
                         if !self.parts[i].enabled { continue; }
-                        let z = if i < 4 { "A" } else { "B" };
-                        let n = (i % 4) + 1;
+                        let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
+                        let n = (i % super::PARTS_PER_ZONE) + 1;
                         let pname = self.patches.get(self.parts[i].patch_idx)
                             .map(|p| p.name.as_str()).unwrap_or("---");
                         let label = format!("{z}{n}: {pname}");
@@ -875,8 +875,8 @@ impl App {
 
                 // Part/preset names for this layer
                 let part_names: Vec<String> = part_ids.iter().map(|&pid| {
-                    let z = if (pid as usize) < 4 { "A" } else { "B" };
-                    let n = (pid as usize % 4) + 1;
+                    let z = if (pid as usize) < super::PARTS_PER_ZONE { "A" } else { "B" };
+                    let n = (pid as usize % super::PARTS_PER_ZONE) + 1;
                     let pname = self.patches.get(self.parts[pid as usize].patch_idx)
                         .map(|p| p.name.as_str()).unwrap_or("---");
                     format!("{z}{n}:{pname}")

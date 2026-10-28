@@ -336,7 +336,7 @@ pub struct ModulationState {
     pub amp_mod: f32,
 }
 
-pub const MAX_PARTS: usize = 8;
+pub const MAX_PARTS: usize = 16;
 const VOICES_PER_LAYER: usize = 8;
 pub const BLOCK_SIZE: usize = 32;
 
