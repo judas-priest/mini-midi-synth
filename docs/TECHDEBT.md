@@ -91,3 +91,23 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
   хетов (open HH slot 46, closed HH 42, pedal HH 44): вероятно, closed/pedal
   должны к choke-группе open HH, но с учётом того, что ЗАКРЫТЫЙ глушит
   ОТКРЫТЫЙ (обратное — нет).
+
+## 11. Диалоги ремапа пэдов живут на вкладке Drums
+- Remap-модалка (полная таблица) и диалог клика по нарисованному пэду
+  рисуются внутри `draw_drum_sequencer` — на других вкладках клик по пэду
+  молчит, диалог не открывается. Пользователь ждёт, что клик по пэду работает
+  всегда (пэды видны на любом экране, они в нижней панели).
+- Фикс: вынести обе модалки из `gui/drums.rs` в главный цикл отрисовки
+  (`gui/mod.rs::update`, вызов с `ctx` вместо `ui.ctx()`); кнопка Remap
+  остаётся на панели ударки.
+
+## 12. set_sample_rate аллоцирует в аудио-колбэке (rt-assert abort под JACK)
+- При старте под JACK/PipeWire stream отдаёт 48000 после старта → колбэк
+  вызывает `synth.set_sample_rate()` → `Part/Voice::set_sample_rate`
+  аллоцирует (RawVec). В debug-сборках с `rt-assert` это мгновенный abort
+  ("memory allocation of N bytes failed"), в release — скрытая RT-наррушение.
+  Воспроизводится каждый запуск, если запрошенный SR != SR устройства.
+- Фикс: не применять SR в колбэке — как в ветке disconnect: atomic + полная
+  пересборка потока вне колбэка (set_sample_rate в audio.rs:148 безопасен),
+  либо сделать Voice::set_sample_rate аллокационно-чистым (перевыделять в
+  trash/на control-потоке).
