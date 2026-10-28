@@ -214,6 +214,16 @@ impl AudioBackend {
                                 let mut off = 0;
                                 while off < nbytes {
                                     if let Some((event, consumed)) = crate::midi::parse_midi_message(&amidi_buf[off..nbytes]) {
+                                        // Bank-2 console notes (60..=67, 75..=80 ch9): drop —
+                                        // owned by the GUI console (desktop BLE only here).
+                                        let console_drop = matches!(&event,
+                                            MidiEvent::NoteOn { channel: 9, note, .. }
+                                            | MidiEvent::NoteOff { channel: 9, note }
+                                                if crate::midi::is_console_note(*note));
+                                        if console_drop {
+                                            off += consumed;
+                                            continue;
+                                        }
                                         // Update GUI note display
                                         match &event {
                                             crate::synth::MidiEvent::NoteOn { channel, note, velocity } => {

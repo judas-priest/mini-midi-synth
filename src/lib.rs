@@ -95,6 +95,9 @@ struct CommonInit {
     note_state: midi::NoteState,
     pad_state: midi::PadState,
     midi_tx_shared: midi::SharedMidiTx,
+    /// Consumed by the GUI console (Task 4); until then it is dormant.
+    #[allow(dead_code)]
+    pub console_rx: std::sync::mpsc::Receiver<(u8, bool)>,
     ctrl_tx: metrics::CountingProducer<synth::ControlEvent>,
     feedback_rx: rtrb::Consumer<synth::ParamFeedback>,
     program_change_atom: Arc<AtomicU8>,
@@ -182,6 +185,9 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         let _ = JNI_PAD_STATE.set(pad_state.clone());
         log::info!("[init] JNI MIDI bridge globals set");
     }
+
+    let (console_snd, console_rx) = std::sync::mpsc::channel::<(u8, bool)>();
+    let _ = midi::CONSOLE_TX.set(std::sync::Mutex::new(Some(console_snd)));
 
     let program_change_atom = Arc::new(AtomicU8::new(255));
 
@@ -309,6 +315,7 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         note_state,
         pad_state,
         midi_tx_shared,
+        console_rx,
         ctrl_tx: metrics::CountingProducer::new(ctrl_tx),
         feedback_rx,
         program_change_atom,
