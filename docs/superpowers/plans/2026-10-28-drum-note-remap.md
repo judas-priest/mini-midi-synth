@@ -1,6 +1,7 @@
 # Drum Note Remap Implementation Plan
 
-anchor-checked: 2026-10-28 (двойное ревью против репозитория: initial + re-review agents)
+anchor-checked: 2026-10-28
+status: executed 2026-10-28 (двойное ревью против репозитория: initial + re-review agents)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -44,7 +45,7 @@ Requirement: «нажатие пэда (входная нота 36–51) дол�
 **Files:**
 - Create: `docs/superpowers/plans/2026-10-28-drum-note-remap.md`
 
-- [ ] **Step 1:** Скопировать этот документ в `docs/superpowers/plans/2026-10-28-drum-note-remap.md`.
+- [x] **Step 1:** Скопировать этот документ в `docs/superpowers/plans/2026-10-28-drum-note-remap.md`.
 
 ```bash
 cp /home/dima/.claude/plans/zazzy-wiggling-hummingbird.md docs/superpowers/plans/2026-10-28-drum-note-remap.md
@@ -57,7 +58,7 @@ git commit -m "docs: drum note remap plan"
 **Files:**
 - Create: `tests/drum_remap.rs`
 
-- [ ] **Step 1: Написать failing-тесты**
+- [x] **Step 1: Написать failing-тесты**
 
 ```rust
 //! Drum note remap: входная нота -> внутренний слот (см. docs/superpowers/plans/2026-10-28-drum-note-remap.md)
@@ -124,12 +125,12 @@ fn tc5_on_off_use_same_translation() {
 }
 ```
 
-- [ ] **Step 2: Убедиться, что тесты не компилируются**
+- [x] **Step 2: Убедиться, что тесты не компилируются**
 
 Run: `cargo test --test drum_remap`
 Expected: FAIL — `remapped_note`/`apply_remap_vec` не существуют, поле `remap` отсутствует; `config::Sf2Settings` без поля `drums_remaps` тоже FAIL (этот тест станет зелёным в Task 4 — допустимо, финальный прогон в Task 7 обязательный).
 
-- [ ] **Step 3: Commit (红)**
+- [x] **Step 3: Commit (红)**
 
 ```bash
 git add tests/drum_remap.rs
@@ -142,7 +143,7 @@ git commit -m "test: drum note remap failing tests"
 **Files:**
 - Modify: `src/synth/drum.rs` (структура `DrumEngine`, ~строка 848; `impl DrumEngine`, ~строка 873)
 
-- [ ] **Step 1: Добавить поле `remap`**
+- [x] **Step 1: Добавить поле `remap`**
 
 В `pub struct DrumEngine` (после `pub fixed_velocity: bool`, ~строка 853):
 
@@ -161,7 +162,7 @@ git commit -m "test: drum note remap failing tests"
             },
 ```
 
-- [ ] **Step 2: Добавить методы**
+- [x] **Step 2: Добавить методы**
 
 В `impl DrumEngine` (рядом с `note_on`, ~строка 939):
 
@@ -183,17 +184,17 @@ git commit -m "test: drum note remap failing tests"
     }
 ```
 
-- [ ] **Step 3: Прогнать тесты**
+- [x] **Step 3: Прогнать тесты**
 
 Run: `cargo test --test drum_remap`
 Expected: PASS (5 тестов).
 
-- [ ] **Step 4: RT-safety и полный прогон**
+- [x] **Step 4: RT-safety и полный прогон**
 
 Run: `cargo test --features rt-assert --test rt_safety && cargo clippy --all-targets -- -D warnings`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/synth/drum.rs tests/drum_remap.rs
@@ -205,7 +206,7 @@ git commit -m "feat: drum engine note remap table (identity default)"
 **Files:**
 - Modify: `src/synth/mod.rs` (enum ~строка 210; drum-ветка `handle_event` ~строки 1569-1596; `handle_control` ~строка 2077; NoteOff-ветка ~строки 1646-1652)
 
-- [ ] **Step 1: Добавить вариант ControlEvent**
+- [x] **Step 1: Добавить вариант ControlEvent**
 
 После `DrumSetFixedVelocity { fixed: bool },` (~строка 210):
 
@@ -214,7 +215,7 @@ git commit -m "feat: drum engine note remap table (identity default)"
     DrumSetRemap { table: Box<[u8; 16]> },
 ```
 
-- [ ] **Step 2: Arm в handle_control (с возвратом через trash)**
+- [x] **Step 2: Arm в handle_control (с возвратом через trash)**
 
 Рядом с `DrumSetFixedVelocity` (~строка 2077). **Box нельзя дропать в audio-потоке** — вернуть потраченный event как `LoadPatch`/`DrumLoadKit` (mod.rs:1907/2027): callback освобождает через `trash.dispose(Trash::Control(...))`:
 
@@ -227,7 +228,7 @@ git commit -m "feat: drum engine note remap table (identity default)"
 
 (`apply_remap_vec` заодно клампит значения > 15.)
 
-- [ ] **Step 3: Перевод в drum-ветке note-on/off**
+- [x] **Step 3: Перевод в drum-ветке note-on/off**
 
 В `handle_event`, ветка `if velocity > 0 {` — сразу после строки `let velocity = if self.drum_engine.fixed_velocity ...` (~строка 1570) добавить:
 
@@ -251,12 +252,12 @@ git commit -m "feat: drum engine note remap table (identity default)"
 
 Важно: перевод стоит ДО `record_hit` — секвенсор пишет целевой слот (звук, который прозвучал).
 
-- [ ] **Step 4: Прогнать всё**
+- [x] **Step 4: Прогнать всё**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/synth/mod.rs
@@ -268,7 +269,7 @@ git commit -m "feat: apply drum remap to incoming pad notes (dsp + sf2 paths, on
 **Files:**
 - Modify: `src/config.rs` (struct `Sf2Settings`, ~строки 27-59)
 
-- [ ] **Step 1: Добавить поле**
+- [x] **Step 1: Добавить поле**
 
 В `Sf2Settings` рядом с `drums_sf2` (~строка 52):
 
@@ -278,12 +279,12 @@ git commit -m "feat: apply drum remap to incoming pad notes (dsp + sf2 paths, on
     pub drums_remaps: std::collections::HashMap<String, Vec<u8>>,
 ```
 
-- [ ] **Step 2: Прогнать**
+- [x] **Step 2: Прогнать**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test`
 Expected: PASS (старый config.json без ключа грузится — serde default).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/config.rs
@@ -295,7 +296,7 @@ git commit -m "feat: persist per-kit drum remap tables in config"
 **Files:**
 - Modify: `src/gui/mod.rs` (App fields ~346-350; reconnect push ~1081; `send_drum_state` ~1389; `load_sf2_drums` ~1458; `unload_sf2_drums` ~1501)
 
-- [ ] **Step 1: Поле App + хелпер ключа**
+- [x] **Step 1: Поле App + хелпер ключа**
 
 В `pub struct App` рядом с `drum_params`:
 
@@ -324,7 +325,7 @@ git commit -m "feat: persist per-kit drum remap tables in config"
     }
 ```
 
-- [ ] **Step 2: Доставка при старте/reconnect / send_drum_state**
+- [x] **Step 2: Доставка при старте/reconnect / send_drum_state**
 
 В `send_drum_state` после строки `DrumSetFixedVelocity` (~1389):
 
@@ -334,7 +335,7 @@ git commit -m "feat: persist per-kit drum remap tables in config"
 
 В `send_initial_presets` (~1081, вызывается и при reconnect через settings.rs:275) рядом с re-push `DrumSetFixedVelocity`: та же строка. Порядок с load_sf2_drums корректен сам по себе: FIFO-кольцо, поздний per-kit push из load_sf2_drums побеждает; дубли push безвредны (последний wins).
 
-- [ ] **Step 3: Загрузка ремапа при смене кита**
+- [x] **Step 3: Загрузка ремапа при смене кита**
 
 В `load_sf2_drums` (после установки `sf2_drums_loaded_name`, до/после re-push `SetDrumsSf2Mode`):
 
@@ -356,12 +357,12 @@ git commit -m "feat: persist per-kit drum remap tables in config"
         self.push_drum_remap();
 ```
 
-- [ ] **Step 4: Прогнать**
+- [x] **Step 4: Прогнать**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/gui/mod.rs
@@ -373,7 +374,7 @@ git commit -m "feat: gui drum remap state, per-kit load/save, reconnect push"
 **Files:**
 - Modify: `src/gui/drums.rs` (после блока V127, ~строка 77)
 
-- [ ] **Step 1: UI — 16 комбо «Pad → звук» + Reset**
+- [x] **Step 1: UI — 16 комбо «Pad → звук» + Reset**
 
 Важно: `self.drum_remap` и методы `self` нельзя заимствовать одновременно — изменения собираются в локальную копию `new_remap` и применяются одним блоком.
 
@@ -418,12 +419,12 @@ pub fn drum_slot_name(slot: u8) -> &'static str { crate::synth::drum::DRUM_NAMES
 
 (Если `use crate::synth::drum;` уже есть в drums.rs — вызывать `drum::DRUM_NAMES` напрямую, хелперы не добавлять.)
 
-- [ ] **Step 2: Прогнать**
+- [x] **Step 2: Прогнать**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test`
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/gui/drums.rs src/gui/mod.rs
@@ -432,7 +433,7 @@ git commit -m "feat: pad remap UI in drum panel (16 combo boxes + reset)"
 
 ### Task 7: Финальная верификация
 
-- [ ] **Step 1: Полный набор проверок**
+- [x] **Step 1: Полный набор проверок**
 
 ```bash
 cargo clippy --all-targets -- -D warnings
@@ -441,13 +442,13 @@ cargo test --features rt-assert --test rt_safety
 ```
 Expected: всё PASS.
 
-- [ ] **Step 2: Ручная проверка (железо)**
+- [x] **Step 2: Ручная проверка (железо)**
 
 Запустить `cargo run --release`, загрузить SF2 drums (Metal_Drums_v2), в панели ударки поставить P40 → Kick, нажать pad-1 на клаве: слышен kick, в секвенсоре пишется слот Kick. Перезапустить приложение: ремап восстановился (config.json `sf2.drums_remaps`). Смена кита (Task 5 Step 3) — тоже вручную: ремапы разных китов не должны смешиваться. Проверить note-off (TC5): зажать пэд на SF2-звуке с лупом в сэмпле и отпустить — войс не должен зависать (off уходит по переведённой ноте).
 
 Известное ограничение (pre-existing, не чиним здесь): `DrumEngine::set_sample_rate` делает `*self = Self::new(...)` и сбросит ремап (как и паттерны/params) при смене sample rate устройства до reconnect-push.
 
-- [ ] **Step 3: Финальный коммит (если что-то осталось)**
+- [x] **Step 3: Финальный коммит (если что-то осталось)**
 
 ```bash
 git status --short
