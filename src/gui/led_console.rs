@@ -47,7 +47,9 @@ pub enum Action {
 
 pub struct LedConsole {
     mode: Mode,
-    pending: Option<(usize, Instant)>,
+    /// Currently pressed pads (multi-touch: several simultaneous taps each
+    /// fire their own action on release). Deduplicated by slot.
+    pending: Vec<(usize, Instant)>,
 }
 
 impl Default for LedConsole {
@@ -58,17 +60,16 @@ impl Default for LedConsole {
 
 impl LedConsole {
     pub fn new() -> Self {
-        Self { mode: Mode::Home, pending: None }
+        Self { mode: Mode::Home, pending: Vec::new() }
     }
 
-    /// Poll: fire hold detection. Returns Some(Mode::Menu) on hold trigger.
+    /// Poll: fire hold detection. Returns Some(Mode::Menu) on hold trigger
+    /// (any pad held >= HOLD opens the menu and clears all pending taps).
     pub fn tick(&mut self, now: Instant) -> Option<Mode> {
-        if let Some((_, t0)) = self.pending {
-            if now.duration_since(t0) >= HOLD {
-                self.pending = None;
-                self.mode = Mode::Menu;
-                return Some(Mode::Menu);
-            }
+        if self.pending.iter().any(|(_, t0)| now.duration_since(*t0) >= HOLD) {
+            self.pending.clear();
+            self.mode = Mode::Menu;
+            return Some(Mode::Menu);
         }
         None
     }
@@ -77,17 +78,17 @@ impl LedConsole {
     pub fn on_event(&mut self, ev: PadEvent, now: Instant) -> Option<Action> {
         match ev {
             PadEvent::Down(slot) => {
-                self.pending = Some((slot, now));
+                // refresh if already held (double NoteOn), else register
+                match self.pending.iter_mut().find(|(s, _)| *s == slot) {
+                    Some((_, t0)) => *t0 = now,
+                    None => self.pending.push((slot, now)),
+                }
                 None
             }
             PadEvent::Up(slot) => {
-                let (down_slot, t0) = self.pending?;
-                if down_slot != slot {
-                    return None; // not our press; keep pending
-                }
-                let elapsed = now.duration_since(t0);
-                self.pending = None;
-                if elapsed < HOLD {
+                let pos = self.pending.iter().position(|(s, _)| *s == slot)?;
+                let (_, t0) = self.pending.remove(pos);
+                if now.duration_since(t0) < HOLD {
                     self.tap(slot)
                 } else {
                     None // hold consumed by tick()
@@ -262,14 +263,26 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_down_last_wins() {
+    fn simultaneous_taps_both_fire() {
         let mut c = LedConsole::new();
         let now = Instant::now();
         c.on_event(PadEvent::Down(1), now);
         c.on_event(PadEvent::Down(4), now + Duration::from_millis(10));
-        assert_eq!(c.on_event(PadEvent::Up(1), now + Duration::from_millis(30)), None);
+        assert_eq!(c.on_event(PadEvent::Up(1), now + Duration::from_millis(30)),
+                   Some(Action::LoadPerf(1)));
         assert_eq!(c.on_event(PadEvent::Up(4), now + Duration::from_millis(40)),
                    Some(Action::LoadPerf(4)));
+    }
+
+    #[test]
+    fn duplicate_down_refreshes_single_pending() {
+        let mut c = LedConsole::new();
+        let now = Instant::now();
+        c.on_event(PadEvent::Down(1), now);
+        c.on_event(PadEvent::Down(1), now + Duration::from_millis(10));
+        assert_eq!(c.on_event(PadEvent::Up(1), now + Duration::from_millis(30)),
+                   Some(Action::LoadPerf(1)));
+        assert_eq!(c.on_event(PadEvent::Up(1), now + Duration::from_millis(40)), None);
     }
 
     #[test]
