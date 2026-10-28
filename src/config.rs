@@ -113,6 +113,9 @@ pub struct UiSettings {
     /// Keyboard split note persisted across restarts.
     #[serde(default)]
     pub split_point: Option<u8>,
+    /// Bank-2 LED console companion (unix socket). Off = never connect.
+    #[serde(default)]
+    pub led_companion: bool,
     /// Sync looper BPM with drum sequencer BPM.
     #[serde(default = "default_looper_sync_bpm")]
     pub looper_sync_bpm: bool,
@@ -160,6 +163,7 @@ impl Default for Config {
                 layer_b_volume: 0.5,
                 pad_perf_map: Vec::new(),
                 split_point: None,
+                led_companion: false,
                 looper_sync_bpm: true,
                 keybinds: std::collections::HashMap::new(),
             },

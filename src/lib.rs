@@ -95,6 +95,8 @@ struct CommonInit {
     note_state: midi::NoteState,
     pad_state: midi::PadState,
     midi_tx_shared: midi::SharedMidiTx,
+    /// Bank-2 console pad notes, mirrored by the engine (Task 4).
+    pub console_rx: std::sync::mpsc::Receiver<(u8, bool)>,
     ctrl_tx: metrics::CountingProducer<synth::ControlEvent>,
     feedback_rx: rtrb::Consumer<synth::ParamFeedback>,
     program_change_atom: Arc<AtomicU8>,
@@ -182,6 +184,9 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         let _ = JNI_PAD_STATE.set(pad_state.clone());
         log::info!("[init] JNI MIDI bridge globals set");
     }
+
+    let (console_snd, console_rx) = std::sync::mpsc::channel::<(u8, bool)>();
+    let _ = midi::CONSOLE_TX.set(std::sync::Mutex::new(Some(console_snd)));
 
     let program_change_atom = Arc::new(AtomicU8::new(255));
 
@@ -309,6 +314,7 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         note_state,
         pad_state,
         midi_tx_shared,
+        console_rx,
         ctrl_tx: metrics::CountingProducer::new(ctrl_tx),
         feedback_rx,
         program_change_atom,
@@ -766,6 +772,14 @@ pub fn run_gui(
         drum_step_atom: c.drum_step_atom,
         drum_play_atom: c.drum_play_atom,
         drum_rec_atom: c.drum_rec_atom,
+        console: gui::led_console::LedConsole::default(),
+        console_rx: Some(c.console_rx),
+        led_snapshot: [[0; 3]; 16],
+        led_dirty: true,
+        led_socket: None,
+        led_socket_alive: None,
+        led_socket_failed_at: None,
+        led_last_send: None,
         drum_kit_name: String::new(),
         drum_kit_list: preset::list_drum_kits(),
         drum_midi_import_path: String::new(),

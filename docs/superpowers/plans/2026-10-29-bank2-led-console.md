@@ -1,6 +1,8 @@
 # Bank-2 LED Console Implementation Plan
 
 anchor-checked: 2026-10-29 (якоря сняты с master @ f455503 чтением кода; см. «Якоря» в задачах)
+status: executed 2026-10-29 (worktree-bank2-console; + UX-итерации: MENU-кнопка слот 0,
+палитра из hardware-validated hues, троттлинг 60ms в компаньоне, heartbeat 2s, мультитач)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -67,7 +69,7 @@ cargo test --features rt-assert --test rt_safety
 - Modify: `src/gui/mod.rs` (сразу `pub mod led_console;` — иначе модуль не
   компилируется и красной фазы не будет)
 
-- [ ] **Step 1: написать failing-тесты** — создать `src/gui/led_console.rs`
+- [x] **Step 1: написать failing-тесты** — создать `src/gui/led_console.rs`
   ТОЛЬКО с типами, struct и тестами (БЕЗ `impl LedConsole` — методы не
   существуют, тесты не скомпилируются; это и есть красная фаза), и объявить
   модуль в `src/gui/mod.rs` (`pub mod led_console;` в списке модулей).
@@ -262,13 +264,13 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: прогнать — убедиться в красной фазе**
+- [x] **Step 2: прогнать — убедиться в красной фазе**
 
 Run: `cargo test --lib led_console`
 Expected: COMPILE FAIL — `no method named on_event/tick/top_colors/bottom_colors/mode`
 (E0599, `impl LedConsole` отсутствует).
 
-- [ ] **Step 3: реализация** — добавить `impl LedConsole` после struct (перед
+- [x] **Step 3: реализация** — добавить `impl LedConsole` после struct (перед
 `#[cfg(test)]`):
 
 ```rust
@@ -408,19 +410,19 @@ impl LedConsole {
 }
 ```
 
-- [ ] **Step 4: прогнать**
+- [x] **Step 4: прогнать**
 
 Run: `cargo test --lib led_console`
 Expected: PASS (12 тестов).
 
-- [ ] **Step 5: clippy + rt**
+- [x] **Step 5: clippy + rt**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test --features rt-assert --test rt_safety`
 Expected: PASS. Если clippy ругается на dead_code (модуль ещё не подключён в
 gui/mod.rs) — добавить над impl `#[allow(dead_code)] // wired in Task 4`
 и снять его в Task 4.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/gui/led_console.rs
@@ -434,7 +436,7 @@ git commit -m "feat: bank-2 console state machine (tap/hold, modes, snapshots)"
 - Modify: `src/synth/looper.rs` (метод rewind_to_start рядом с `toggle_play`)
 - Modify: `src/synth/mod.rs` (ControlEvent + arm)
 
-- [ ] **Step 1: тест rewind** — в `src/synth/looper.rs` в конец
+- [x] **Step 1: тест rewind** — в `src/synth/looper.rs` в конец
   `mod restore_tests` добавить (тест red: метода нет):
 
 ```rust
@@ -454,7 +456,7 @@ git commit -m "feat: bank-2 console state machine (tap/hold, modes, snapshots)"
 (Поле `playback_tick` приватное — публичный контракт проверяем через len/state;
 полевая проверка cursor — ревьюером кодом.)
 
-- [ ] **Step 2: метод в `impl MidiLooper`** (рядом с `toggle_play`, код полей
+- [x] **Step 2: метод в `impl MidiLooper`** (рядом с `toggle_play`, код полей
   сверить с существующим `clear`/`restore` — сброс ТОЛЬКО transient playback):
 
 ```rust
@@ -472,7 +474,7 @@ git commit -m "feat: bank-2 console state machine (tap/hold, modes, snapshots)"
 закрыть звучащие ноты на следующем тике; `clear`/`restore` ставят false только
 потому что идут из Idle — аналогия неприменима.)
 
-- [ ] **Step 3: ControlEvent** — в enum после `LooperSetSolo` (grep `LooperSetSolo`):
+- [x] **Step 3: ControlEvent** — в enum после `LooperSetSolo` (grep `LooperSetSolo`):
 
 ```rust
     LooperRewind,
@@ -489,12 +491,12 @@ arm в handle_control рядом с остальными Looper-arm:
 (проверить: не-heap вариант — `return None` не нужен, arm без return; сверить
 с соседями.)
 
-- [ ] **Step 4: прогнать**
+- [x] **Step 4: прогнать**
 
 Run: `cargo test --lib && cargo clippy --all-targets -- -D warnings`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/synth/looper.rs src/synth/mod.rs
@@ -511,7 +513,7 @@ git commit -m "feat: looper rewind_to_start + LooperRewind control event"
 Канал — глобальный `static` (паттерн `JNI_MIDI_TX`, lib.rs:180): desktop midir,
 JNI и будущие пути получают его бесплатно, сигнатура parse_and_push НЕ меняется.
 
-- [ ] **Step 1: тип канала + предикат** — в `src/midi.rs` рядом с
+- [x] **Step 1: тип канала + предикат** — в `src/midi.rs` рядом с
   `pub type NoteState` (~16):
 
 ```rust
@@ -530,7 +532,7 @@ pub fn is_console_note(note: u8) -> bool {
 
 (static требует Sync: Mutex<Option<Sender>> — Sync ✓; Sender внутри Mutex.)
 
-- [ ] **Step 2: swallow в parse_and_push** — сразу после разбора event
+- [x] **Step 2: swallow в parse_and_push** — сразу после разбора event
   (после блока логгирования ~116-124, ДО «Update GUI note display» и ДО
   финального push в ring, который найти в конце функции — `match tx.try_lock()`
   ~145-152):
@@ -554,7 +556,7 @@ pub fn is_console_note(note: u8) -> bool {
     }
 ```
 
-- [ ] **Step 3: создание канала в init_common (lib.rs)** — рядом с
+- [x] **Step 3: создание канала в init_common (lib.rs)** — рядом с
   `JNI_MIDI_TX.set(...)` (~180):
 
 ```rust
@@ -567,7 +569,7 @@ pub fn is_console_note(note: u8) -> bool {
 местом, где передаётся midi_tx_shared). Дочитывать: все места, где CommonInit
 конструируется (desktop + android ветки, grep `CommonInit {`).
 
-- [ ] **Step 3b: AMidi-путь (Android USB) — swallow без mirror** —
+- [x] **Step 3b: AMidi-путь (Android USB) — swallow без mirror** —
   `src/audio.rs:216` парсит через `parse_midi_message` ПРЯМО в аудио-колбэке,
   минуя parse_and_push: там консольные ноты обязаны молча дропаться (нельзя
   Mutex/allocation в RT — зеркала в GUI с AMidi-пути НЕТ, by design: Android
@@ -592,13 +594,13 @@ pub fn is_console_note(note: u8) -> bool {
 перед `synth.handle_event` и до атомиков — консольная нота на AMidi-пути
 вообще не производит эффектов. RT-safe: только matches! на разобранном event.)
 
-- [ ] **Step 4: callers** — сигнатура parse_and_push не менялась: midir
+- [x] **Step 4: callers** — сигнатура parse_and_push не менялась: midir
   (midi.rs:264), JNI (lib.rs:991), три вызова midi::connect/connect_by_name
   (lib.rs:275, 574, 676) — правок не требуют. Тесты midi_parse/end_to_end зовут
   parse_midi_message — не трогаются. Проверить grep `parse_and_push(` —
   сигнатурных правок быть не должно.
 
-- [ ] **Step 5: unit-тест swallow** — добавить в `tests/midi_parse.rs`:
+- [x] **Step 5: unit-тест swallow** — добавить в `tests/midi_parse.rs`:
 
 ```rust
 #[test]
@@ -627,12 +629,12 @@ fn console_notes_swallowed_and_mirrored() {
 (если SharedMidiTx/типы называются иначе — сверить с midi.rs реальным; rtrb
 уже dev-доступен через основной crate.)
 
-- [ ] **Step 6: прогнать**
+- [x] **Step 6: прогнать**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/midi.rs src/lib.rs src/audio.rs tests/midi_parse.rs
@@ -646,7 +648,7 @@ git commit -m "feat: mirror bank-2 console notes to GUI via global CONSOLE_TX"
 - Modify: `src/gui/mod.rs` (mod led_console; App-поля; poll в update; обработчик действий; снимок → socket-writer)
 - Якоря: `DrumSeqPattern` push — gui/mod.rs:1500 (`send_drum_state`); `load_performance_by_name` — gui/mod.rs:1669; `SetPartMute` push — grep; `drum_current_pattern` — gui/mod.rs:315; parts[].mute — grep `pub mute` в gui/mod.rs
 
-- [ ] **Step 1: подключить модуль** — в `src/gui/mod.rs` к списку модулей:
+- [x] **Step 1: подключить модуль** — в `src/gui/mod.rs` к списку модулей:
   `pub mod led_console;`. Если в Task 1 ставился `#[allow(dead_code)]` — снять.
 
 App-поля (рядом с `drum_current_pattern` ~315):
@@ -676,7 +678,7 @@ Receiver консоли берётся из CommonInit (Task 3 Step 3): у `run_
 создать канал в каждом (CONSOLE_TX.set второй раз вернёт Err — допустимо,
 swallow перестанет работать на той ветке, где set не удался; пометить в отчёте).
 
-- [ ] **Step 2: обработка событий** — в главном цикле App (update/draw, где
+- [x] **Step 2: обработка событий** — в главном цикле App (update/draw, где
   поллятся атомы — grep `drum_play_atom` в gui/mod.rs update), добавить poll:
 
 ```rust
@@ -769,7 +771,7 @@ swallow перестанет работать на той ветке, где set
 gui/mod.rs. Заметка на поля: perf_list обновляется в layers.rs — если юзер
 сохранил новый перф, не открывая Layers, список может быть stale; v1 accepts.)
 
-- [ ] **Step 3: LED-снимок** — там же в update, после poll:
+- [x] **Step 3: LED-снимок** — там же в update, после poll:
 
 ```rust
         // LED snapshot (16 slots = pads 17..=32, top row first)
@@ -803,12 +805,12 @@ gui/mod.rs. Заметка на поля: perf_list обновляется в la
 (формат: одна строка `STATE <RRGGBB>×16\n`; writer-тред из Task 5 пишет её в
 сокет как байты.)
 
-- [ ] **Step 4: clippy/test**
+- [x] **Step 4: clippy/test**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/gui/mod.rs src/gui/led_console.rs
@@ -823,7 +825,7 @@ git commit -m "feat: wire bank-2 console into GUI (actions, snapshots, transport
 - Modify: `src/gui/mod.rs` (подключение/retry/отключение + writer-тред)
 - Test: `tests/config_led.rs` (новый)
 
-- [ ] **Step 1: config** — в `UiSettings` рядом с `split_point` (~83):
+- [x] **Step 1: config** — в `UiSettings` рядом с `split_point` (~83):
 
 ```rust
     /// Bank-2 LED console companion (unix socket). Off = never connect.
@@ -846,7 +848,7 @@ fn led_companion_defaults_false() {
 для UiSettings со всеми полями — добавить туда `led_companion: false`, иначе
 не скомпилируется.)
 
-- [ ] **Step 2: подключение/переподключение в update** — в gui/mod.rs update
+- [x] **Step 2: подключение/переподключение в update** — в gui/mod.rs update
   (рядом с poll-блоком Task 4):
 
 ```rust
@@ -901,14 +903,14 @@ fn led_companion_defaults_false() {
         }
 ```
 
-- [ ] **Step 3: checkbox в настройках** — settings.rs, секция аудио/MIDI
+- [x] **Step 3: checkbox в настройках** — settings.rs, секция аудио/MIDI
   настроек (grep `split_point` UI или другой checkbox):
 
 ```rust
                 ui.checkbox(&mut self.config.ui.led_companion, "LED companion (bank-2 pads)");
 ```
 
-- [ ] **Step 4: прогнать + commit**
+- [x] **Step 4: прогнать + commit**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test
@@ -923,7 +925,7 @@ git commit -m "feat: led_companion toggle, resilient socket client (retry/alive/
 - Create: `~/Projects/smk37_config/pad_console.py` (вне репо синта — hardware tooling)
 - Test: unit-самотест `--selftest` (framing + slot→addr, без BLE)
 
-- [ ] **Step 1: написать компаньон** — dbus-вызовы В ТОЙ ЖЕ ФОРМЕ, что smk.py
+- [x] **Step 1: написать компаньон** — dbus-вызовы В ТОЙ ЖЕ ФОРМЕ, что smk.py
   (`Interface(bus.get_object(...), "org.bluez.GattCharacteristic1")`), BLE
   reconnect циклом снаружи socket-accept:
 
@@ -1042,17 +1044,17 @@ BLE, состояние last сбрасывается → следующий STA
 disconnect → accept ждёт нового. Ctrl-C ПОСЛЕ BLE-up убирает сокет-файл; до
 этого — останется, уберётся unlink'ом при следующем старте (уже в коде).
 
-- [ ] **Step 2: selftest**
+- [x] **Step 2: selftest**
 
 Run: `python3 ~/Projects/smk37_config/pad_console.py --selftest`
 Expected: `selftest ok`.
 
-- [ ] **Step 3: ручной smoke (пользователь рядом)** — запустить компаньон,
+- [x] **Step 3: ручной smoke (пользователь рядом)** — запустить компаньон,
   `echo "STATE FF8000 303030 303030 303030 303030 303030 303030 303030 202020 202020 202020 202020 202020 202020 202020 202020" | socat - UNIX-CONNECT:/tmp/mini_midi_synth_led.sock`;
   пользователь видит: пэд 17 оранжевый, 18–24 серые, нижняя строка dim.
   Пометить как Manual в Task 8.
 
-- [ ] **Step 4: Commit (в репо smk37_config)**
+- [x] **Step 4: Commit (в репо smk37_config)**
 
 ```bash
 cd ~/Projects/smk37_config && git add pad_console.py && git commit -m "feat: pad_console companion — LED paint over GATT, RAM-only, auto-reconnect"
@@ -1085,24 +1087,24 @@ cd ~/Projects/smk37_config && git add pad_console.py && git commit -m "feat: pad
 в новой записи. Флаг у 17–24 обязателен FF (иначе LED off), у 25–32 сохранить
 существующий.
 
-- [ ] **Step 1: прочитать все записи 17–32 (note+цвет), вывести текущее**
-- [ ] **Step 2: записать новые ноты полными 74-байтовыми рекордами,
+- [x] **Step 1: прочитать все записи 17–32 (note+цвет), вывести текущее**
+- [x] **Step 2: записать новые ноты полными 74-байтовыми рекордами,
   ОДИН commit в конце** (batч: exec smk.py без main(), как в PADS_NOTES.md)
-- [ ] **Step 3: верифицировать чтением всех 16 нот; пользователь проверяет,
+- [x] **Step 3: верифицировать чтением всех 16 нот; пользователь проверяет,
   что цвета не слетели и ноты ходят** (aseqdump: пэд 17 → note 60 ch10... —
   ch в aseqdump = 1-based)
-- [ ] **Step 4: обновить ~/Projects/smk37_config/PADS_NOTES.md (карта нот
+- [x] **Step 4: обновить ~/Projects/smk37_config/PADS_NOTES.md (карта нот
   банка 2) и закоммитить**
 
 ### Task 8: Финальная верификация
 
-- [ ] **Step 1:** `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety` — всё зелёное.
-- [ ] **Step 2: Ручной чек (пользователь):** компаньон запущен, клава по BT,
+- [x] **Step 1:** `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety` — всё зелёное.
+- [x] **Step 2: Ручной чек (пользователь):** компаньон запущен, клава по BT,
   синт с led_companion=on → HOME: пэды 17–24 показывают перфы, активный —
   оранжевый; тап по заполненному — перф загрузился (и LED перекрасился);
   холд → меню; PATTERN → тап переключает паттерн (слышно); MUTE → тап мьютит
   часть (слышно); Play/Rec горят на 25/27 при запуске. led_companion=off →
   синт работает, LED статичен, сокет не подключается (проверка: компаньон
   не получает connection).
-- [ ] **Step 3:** обновить docs/TECHDEBT.md #15 (статус: v1 реализована,
+- [x] **Step 3:** обновить docs/TECHDEBT.md #15 (статус: v1 реализована,
   ссылки на план/спеку) + закоммитить план/спеку статусы.

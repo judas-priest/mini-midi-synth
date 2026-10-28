@@ -15,6 +15,18 @@ use crate::synth::MidiEvent;
 /// Shared note state: 128 notes, 0 = off, >0 = velocity.
 pub type NoteState = Arc<[AtomicU8; 128]>;
 
+/// Console pads (bank-2 notes 60..=67 and 75..=80 on ch9) are mirrored to the
+/// GUI instead of the audio ring. NOTE: 64 is INSIDE the range — it is console
+/// top-row slot 4; the engine's legacy note-64 undo arm (mod.rs:1592) becomes
+/// unreachable via parse_and_push (kept as dead code, superseded by console
+/// Undo note 75).
+pub type ConsoleTx = std::sync::Mutex<Option<std::sync::mpsc::Sender<(u8, bool)>>>;
+pub static CONSOLE_TX: std::sync::OnceLock<ConsoleTx> = std::sync::OnceLock::new();
+
+pub fn is_console_note(note: u8) -> bool {
+    (60..=67).contains(&note) || (75..=80).contains(&note)
+}
+
 pub fn new_note_state() -> NoteState {
     Arc::new(std::array::from_fn(|_| AtomicU8::new(0)))
 }
@@ -121,6 +133,23 @@ pub fn parse_and_push(
             log::debug!("[midi-in] note ch{} n{} v{}", channel, note, velocity);
         }
         _ => {}
+    }
+
+    // LED-console notes: mirror to GUI, never reach the audio engine.
+    // vel-0 NoteOn == note-off convention: map to is_on=false.
+    let (console_note, is_on) = match &event {
+        MidiEvent::NoteOn { channel: 9, note, velocity, .. } if *velocity > 0 && is_console_note(*note) => (Some(*note), true),
+        MidiEvent::NoteOn { channel: 9, note, .. } if is_console_note(*note) => (Some(*note), false),
+        MidiEvent::NoteOff { channel: 9, note } if is_console_note(*note) => (Some(*note), false),
+        _ => (None, false),
+    };
+    if let Some(note) = console_note {
+        if let Ok(guard) = CONSOLE_TX.get_or_init(Default::default).lock() {
+            if let Some(sender) = guard.as_ref() {
+                let _ = sender.send((note, is_on));
+            }
+        }
+        return consumed;
     }
 
     // Update GUI note display

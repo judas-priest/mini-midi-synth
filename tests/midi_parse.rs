@@ -122,3 +122,25 @@ fn garbage_does_not_panic() {
     assert!(parse_midi_message(&[0xF7]).is_none());
     assert!(parse_midi_message(&[0x90]).is_none());
 }
+
+#[test]
+fn console_notes_swallowed_and_mirrored() {
+    let (prod, mut cons) = rtrb::RingBuffer::<mini_midi_synth::synth::MidiEvent>::new(64);
+    let tx: mini_midi_synth::midi::SharedMidiTx =
+        std::sync::Arc::new(std::sync::Mutex::new(prod));
+    let note_state: mini_midi_synth::midi::NoteState =
+        std::sync::Arc::new(std::array::from_fn(|_| Default::default()));
+    let pad_state: mini_midi_synth::midi::PadState =
+        std::sync::Arc::new(std::array::from_fn(|_| Default::default()));
+    let (snd, rx) = std::sync::mpsc::channel();
+    *mini_midi_synth::midi::CONSOLE_TX.get_or_init(Default::default)
+        .lock().unwrap() = Some(snd);
+    // NoteOn ch9 note 60 vel 127: 99 3C 7F
+    let used = mini_midi_synth::midi::parse_and_push(&[0x99, 0x3C, 0x7F], &tx, &note_state, &pad_state);
+    assert_eq!(used, 3);
+    assert_eq!(rx.recv().unwrap(), (60, true));      // mirrored to GUI
+    assert!(cons.pop().is_err());                    // never reached the engine
+    // NoteOff ch9 note 60: 89 3C 7F
+    let _ = mini_midi_synth::midi::parse_and_push(&[0x89, 0x3C, 0x7F], &tx, &note_state, &pad_state);
+    assert_eq!(rx.recv().unwrap(), (60, false));
+}

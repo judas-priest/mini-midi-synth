@@ -209,6 +209,7 @@ pub enum ControlEvent {
     },
     LooperSetLayerMute { layer: u8, mute: bool },
     LooperSetSolo { layer: Option<u8> },
+    LooperRewind,
     SetSustain { on: bool },
     AllNotesOff,
     /// GUI sustain toggle (F1): same path as CC64
@@ -2133,6 +2134,9 @@ impl SynthEngine {
                         }
                     }
                 }
+            }
+            ControlEvent::LooperRewind => {
+                self.looper.rewind_to_start();
             }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
                 self.drum_engine.fixed_velocity = fixed;
