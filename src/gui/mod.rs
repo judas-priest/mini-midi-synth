@@ -1087,6 +1087,15 @@ impl App {
         // Send drum and part volumes to engine
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+        // Restore the internal-kit remap before the initial push (if an SF2 kit is
+        // configured, load_sf2_drums below overwrites this with the per-kit table).
+        if self.sf2_drums_loaded_name.is_empty() {
+            if let Some(v) = self.config.sf2.drums_remaps.get("internal") {
+                let mut t = [0u8; 16];
+                for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(i as u8).min(15); }
+                self.drum_remap = t;
+            }
+        }
         self.push_drum_remap();
         for i in 0..self.parts.len() {
             self.send_part_volume(i);
