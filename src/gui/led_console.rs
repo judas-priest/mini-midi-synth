@@ -317,7 +317,7 @@ mod tests {
         let c = LedConsole::new();
         let b = c.bottom_colors(true, false);
         assert_eq!(b[0], [0x00, 0xFF, 0x00]); // play lit
-        assert_eq!(b[4], [0x40, 0x40, 0x40]); // system buttons dim white
+        assert_eq!(b[4], [0x40, 0x35, 0x00]); // system buttons dim amber
         let b = c.bottom_colors(false, true);
         assert_eq!(b[2], [0xFF, 0x00, 0x00]); // rec lit
     }
