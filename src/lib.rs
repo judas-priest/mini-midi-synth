@@ -822,7 +822,7 @@ pub fn run_gui(
         pitch_seq_swing: [0.0; 2],
         preset_search: String::new(),
         scope_buf: c.scope_buf,
-        split_point: 60,
+        split_point: c.config.ui.split_point.unwrap_or(60),
         show_fx_chain: false,
         show_midi_seq: false,
         midi_seq_path: String::new(),

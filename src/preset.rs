@@ -742,6 +742,10 @@ pub struct Performance {
     #[serde(default)]
     pub category: String,
     pub parts: Vec<PartConfig>,
+    /// Keyboard split note (zone B starts here). None = legacy perf without
+    /// a stored split point — GUI derives it from the enabled zone-B parts.
+    #[serde(default)]
+    pub split_point: Option<u8>,
 }
 
 fn performance_dir() -> Option<PathBuf> {
@@ -783,6 +787,7 @@ pub fn init_performance() -> Performance {
     Performance {
         name: "(Init)".to_string(),
         category: String::new(),
+        split_point: None,
         parts: vec![PartConfig {
             patch_name: "Init".to_string(),
             enabled: true,

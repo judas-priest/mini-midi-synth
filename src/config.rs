@@ -106,6 +106,9 @@ pub struct UiSettings {
     /// Pad performance map: 16 slots (notes 36-51) → performance name.
     #[serde(default)]
     pub pad_perf_map: Vec<Option<String>>,
+    /// Keyboard split note persisted across restarts.
+    #[serde(default)]
+    pub split_point: Option<u8>,
     /// Sync looper BPM with drum sequencer BPM.
     #[serde(default = "default_looper_sync_bpm")]
     pub looper_sync_bpm: bool,
@@ -152,6 +155,7 @@ impl Default for Config {
                 layer_a_volume: 0.8,
                 layer_b_volume: 0.5,
                 pad_perf_map: Vec::new(),
+                split_point: None,
                 looper_sync_bpm: true,
                 keybinds: std::collections::HashMap::new(),
             },

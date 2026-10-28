@@ -232,7 +232,9 @@ impl App {
                 }).collect();
                 match preset::save_performance(&Performance {
                     name: self.perf_name.trim().to_string(),
-                    category: String::new(), parts,
+                    category: String::new(),
+                    split_point: Some(self.split_point),
+                    parts,
                 }) {
                     Ok(_path) => { self.show_toast("Performance saved", ToastKind::Success);
                                    self.perf_list = preset::list_performances();

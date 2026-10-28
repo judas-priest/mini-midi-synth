@@ -1161,6 +1161,7 @@ impl App {
         if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
+        self.config.ui.split_point = Some(self.split_point);
         self.config.ui.looper_sync_bpm = self.looper_sync_bpm;
         self.config.ui.keybinds = self.keybinds.to_config();
         let _ = self.config.save();
@@ -1643,19 +1644,18 @@ impl App {
         };
         // AllNotesOff for smooth transition
         let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-        // Legacy 8-part performances: zone B lived at indices 4..8.  In the
-        // 16-part layout zone B is 8..16 — relocate so A/B semantics survive.
-        let mut parts = perf.parts;
-        if parts.len() == 8 {
-            let legacy_b: Vec<_> = parts.drain(4..8).collect();
-            let empty_a = parts[0].clone();
-            parts.resize_with(8, || {
-                let mut c = empty_a.clone();
-                c.enabled = false;
-                c
-            });
-            parts.extend(legacy_b); // now: 0..4 = zone A, 4..8 empty, 8..12 = zone B
-        }
+        // Legacy 8-part migration is centralized in preset::load_performance.
+        let parts = perf.parts;
+        // Restore the stored split point; legacy perfs derive it from the
+        // first enabled zone-B part's key_low (fallback: C4=60).
+        self.split_point = perf.split_point.unwrap_or_else(|| {
+            parts.iter()
+                .skip(crate::gui::PARTS_PER_ZONE)
+                .find(|p| p.enabled)
+                .map(|p| p.key_low)
+                .filter(|&v| v > 0)
+                .unwrap_or(60)
+        });
         self.perf_name = perf.name.clone();
         for (i, part) in parts.iter().enumerate() {
             if i >= self.parts.len() { break; }
