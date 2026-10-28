@@ -1,32 +1,32 @@
+// Проверка exclusiveClass: semi-open (46) звонит -> closed (51) должен убить голос
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 use std::fs::File;
 use std::sync::Arc;
 
-fn rms(buf: &[f32]) -> f32 {
-    let n = buf.len() as f32;
-    (buf.iter().map(|s| s * s).sum::<f32>() / n).sqrt()
-}
+fn rms(b: &[f32]) -> f32 { (b.iter().map(|s| s*s).sum::<f32>() / b.len() as f32).sqrt() }
 
 fn main() {
     let path = std::env::var("HOME").unwrap() + "/.local/share/mini_midi_synth/sf2/Metal_Drums_v2.sf2";
     let mut file = File::open(&path).unwrap();
     let sf = Arc::new(SoundFont::new(&mut file).unwrap());
-    let settings = SynthesizerSettings::new(44_100);
-    let names = ["", "inferno kick", "rim", "snare", "rim2", "sidestick", "snare2", "snare3",
-        "tom10", "tom12", "tom16", "Semi-Open Hat", "Mid hat", "Hi Hat", "Dark Crash", "Cymbals"];
+    let st = SynthesizerSettings::new(44_100);
+    let mut syn = Synthesizer::new(&sf, &st).unwrap();
     let (mut l, mut r) = (vec![0f32; 441], vec![0f32; 441]);
-    for (i, &note) in [46u8, 47, 48, 49, 50, 51].iter().enumerate() {
-        let mut syn = Synthesizer::new(&sf, &settings).unwrap();
-        syn.process_midi_message(9, 0x90, note as i32, 100);
-        let mut ring = Vec::new();
-        for _ in 0..100 { syn.render(&mut l, &mut r); for j in 0..441 { ring.push((l[j]+r[j])*0.5); } }
-        let tail_natural = rms(&ring[ring.len()-441..]); // 0.99-1.0s без off
-        syn.process_midi_message(9, 0x80, note as i32, 0);
-        let mut tail = Vec::new();
-        for _ in 0..50 { syn.render(&mut l, &mut r); for j in 0..441 { tail.push((l[j]+r[j])*0.5); } }
-        let after_off = rms(&tail[..441]); // 0-10ms после off
-        println!("{} note={} nat_tail(1s)={:.5} after_noteoff={:.5} ratio={}",
-            names[[11u8,12,13,14,15,16][i] as usize], note, tail_natural, after_off,
-            if after_off > 0.0 { tail_natural / after_off } else { 0.0 });
-    }
+    syn.process_midi_message(9, 0x90, 46, 100); // semi-open
+    for _ in 0..30 { syn.render(&mut l, &mut r); }
+    let mut before = Vec::new();
+    for _ in 0..5 { syn.render(&mut l, &mut r); for j in 0..441 { before.push((l[j]+r[j])*0.5); } }
+    syn.process_midi_message(9, 0x90, 48, 1); // Hi Hat vel=1: kill by class, тихий
+    let mut after = Vec::new();
+    for _ in 0..5 { syn.render(&mut l, &mut r); for j in 0..441 { after.push((l[j]+r[j])*0.5); } }
+    // контроль: то же без закрытого (просто звенит дальше)
+    let mut syn2 = Synthesizer::new(&sf, &st).unwrap();
+    syn2.process_midi_message(9, 0x90, 46, 100);
+    for _ in 0..30 { syn2.render(&mut l, &mut r); }
+    let mut ctl = Vec::new();
+    for _ in 0..5 { syn2.render(&mut l, &mut r); for j in 0..441 { ctl.push((l[j]+r[j])*0.5); } }
+    println!("semi-open ringing:  {:.5}", rms(&before));
+    println!("ctl (46 звенит сам): {:.5}", rms(&ctl));
+    println!("после тихого 48:      {:.5}", rms(&after));
+    println!("choke works: {}", rms(&after) < rms(&ctl) * 0.7);
 }
