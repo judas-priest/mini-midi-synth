@@ -323,10 +323,7 @@ pub struct App {
     pub led_snapshot: [[u8; 3]; 16],
     pub led_dirty: bool,
     pub led_socket: Option<std::sync::mpsc::Sender<String>>,
-    /// Task 5 (socket lifecycle) reads/writes these.
-    #[allow(dead_code)]
     pub led_socket_alive: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    #[allow(dead_code)]
     pub led_socket_failed_at: Option<std::time::Instant>,
     // Drum kit save/load
     pub drum_kit_name: String,
@@ -558,6 +555,55 @@ impl eframe::App for App {
         let _ = self.console.tick(std::time::Instant::now()); // hold -> Menu (snapshot below)
         for a in acts {
             self.execute_console_action(a);
+        }
+
+        // LED companion socket lifecycle
+        if !self.config.ui.led_companion {
+            if self.led_socket.take().is_some() {
+                log::info!("[console] companion disabled");
+            }
+        } else if self.led_socket.is_none()
+            && self.led_socket_failed_at
+                .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
+                .unwrap_or(true)
+        {
+            match std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock") {
+                Ok(stream) => {
+                    let (tx, rx) = std::sync::mpsc::channel::<String>();
+                    // fresh AtomicBool на каждый коннект: старый writer не может
+                    // перезаписать флаг нового (spurious reconnect)
+                    let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                    self.led_socket_alive = Some(alive.clone());
+                    std::thread::spawn(move || {
+                        use std::io::Write;
+                        let mut stream = stream;
+                        for msg in rx {
+                            if stream.write_all(msg.as_bytes()).is_err() {
+                                alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                                break;
+                            }
+                        }
+                        alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                    });
+                    self.led_socket = Some(tx);
+                    self.led_socket_failed_at = None;
+                    self.led_dirty = true; // отправить полный STATE сразу после коннекта
+                    log::info!("[console] companion connected");
+                }
+                Err(_) => {
+                    self.led_socket_failed_at = Some(std::time::Instant::now());
+                }
+            }
+        }
+        // writer умер (компаньон перезапускается) — забыть сокет, retry через 2с
+        let socket_dead = match &self.led_socket_alive {
+            Some(a) => !a.load(std::sync::atomic::Ordering::Relaxed),
+            None => false,
+        };
+        if self.led_socket.is_some() && socket_dead {
+            self.led_socket = None;
+            self.led_socket_alive = None;
+            self.led_socket_failed_at = Some(std::time::Instant::now());
         }
 
         // LED snapshot (16 slots = pads 17..=32, top row first)
