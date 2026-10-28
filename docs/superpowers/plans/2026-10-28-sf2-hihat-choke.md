@@ -1,6 +1,7 @@
 # SF2 Hi-hat Choke Implementation Plan
 
 anchor-checked: 2026-10-28 (двойное ревью против репозитория)
+status: executed 2026-10-28 (ручная проверка хвоста — за пользователем)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -42,7 +43,7 @@ Requirement: «после открытого/полуоткрытого хэта
 **Files:**
 - Create: `docs/superpowers/plans/2026-10-28-sf2-hihat-choke.md`
 
-- [ ] **Step 1:** Этот документ уже создаётся в `docs/superpowers/plans/2026-10-28-sf2-hihat-choke.md` (worktree). Закоммитить:
+- [x] **Step 1:** Этот документ уже создаётся в `docs/superpowers/plans/2026-10-28-sf2-hihat-choke.md` (worktree). Закоммитить:
 
 ```bash
 git add docs/superpowers/plans/2026-10-28-sf2-hihat-choke.md
@@ -54,7 +55,7 @@ git commit -m "docs: sf2 hihat choke plan"
 **Files:**
 - Create: `tests/drum_choke.rs`
 
-- [ ] **Step 1: Написать failing-тесты**
+- [x] **Step 1: Написать failing-тесты**
 
 ```rust
 //! SF2 hihat choke: закрытый/педальный хэт обрывает хвост открытого
@@ -117,12 +118,12 @@ fn tc7_choke_uses_remapped_note() {
 }
 ```
 
-- [ ] **Step 2: Убедиться, что не компилируется**
+- [x] **Step 2: Убедиться, что не компилируется**
 
 Run: `cargo test --test drum_choke`
 Expected: FAIL — `sf2_choke_take`/`reset_choke_state` не существуют.
 
-- [ ] **Step 3: Commit (красные тесты)**
+- [x] **Step 3: Commit (красные тесты)**
 
 ```bash
 git add tests/drum_choke.rs
@@ -134,13 +135,13 @@ git commit -m "test: sf2 hihat choke failing tests"
 **Files:**
 - Modify: `src/synth/drum.rs` (const CHOKE_GROUPS ~строка 18; struct DrumEngine ~853; impl ~939)
 
-- [ ] **Step 1: Const числа групп** (после `CHOKE_GROUPS`, ~строка 34; максимум id в CHOKE_GROUPS = 2):
+- [x] **Step 1: Const числа групп** (после `CHOKE_GROUPS`, ~строка 34; максимум id в CHOKE_GROUPS = 2):
 
 ```rust
 const NUM_CHOKE_GROUPS: usize = 2;
 ```
 
-- [ ] **Step 2: Поле** — в `pub struct DrumEngine` (после `pub remap: [u8; NUM_DRUM_SLOTS],`):
+- [x] **Step 2: Поле** — в `pub struct DrumEngine` (после `pub remap: [u8; NUM_DRUM_SLOTS],`):
 
 ```rust
     /// SF2 choke: last triggered note per choke group (0 = none).
@@ -153,7 +154,7 @@ const NUM_CHOKE_GROUPS: usize = 2;
             group_last_note: [0u8; NUM_CHOKE_GROUPS],
 ```
 
-- [ ] **Step 3: Методы** — в `impl DrumEngine` (рядом с `remapped_note`):
+- [x] **Step 3: Методы** — в `impl DrumEngine` (рядом с `remapped_note`):
 
 ```rust
     /// SF2 choke: returns the previous note held by this note's choke group
@@ -178,17 +179,17 @@ const NUM_CHOKE_GROUPS: usize = 2;
     }
 ```
 
-- [ ] **Step 4: Прогнать**
+- [x] **Step 4: Прогнать**
 
 Run: `cargo test --test drum_choke`
 Expected: PASS (7 тестов).
 
-- [ ] **Step 5: RT-safety + clippy**
+- [x] **Step 5: RT-safety + clippy**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test --features rt-assert --test rt_safety`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/synth/drum.rs tests/drum_choke.rs
@@ -200,7 +201,7 @@ git commit -m "feat: drum engine SF2 choke state (group_last_note)"
 **Files:**
 - Modify: `src/synth/mod.rs` (live pads ~1585; MIDI-seq ~2563; step-seq триггеры ~2680; AllNotesOff/panic arms)
 
-- [ ] **Step 1: Живые пэды** — в `handle_event`, ветка:
+- [x] **Step 1: Живые пэды** — в `handle_event`, ветка:
 
 ```rust
                         if sampler_drums {
@@ -222,7 +223,7 @@ git commit -m "feat: drum engine SF2 choke state (group_last_note)"
                         }
 ```
 
-- [ ] **Step 2: MIDI-файл секвенсор** — ветка `midi_player::TrackInstrument::Drums` (~2563):
+- [x] **Step 2: MIDI-файл секвенсор** — ветка `midi_player::TrackInstrument::Drums` (~2563):
 
 ```rust
                             let sf2 = self.drum_engine.sf2_mode;
@@ -240,7 +241,7 @@ git commit -m "feat: drum engine SF2 choke state (group_last_note)"
                                 self.sampler.drum_note_on(note, velocity);
 ```
 
-- [ ] **Step 3: Step-секвенсор** — dispatch `drum_triggers` (~2680):
+- [x] **Step 3: Step-секвенсор** — dispatch `drum_triggers` (~2680):
 
 ```rust
             for i in 0..drum_triggers.count {
@@ -263,7 +264,7 @@ git commit -m "feat: drum engine SF2 choke state (group_last_note)"
             }
 ```
 
-- [ ] **Step 4: Сброс состояния на AllNotesOff и panic**
+- [x] **Step 4: Сброс состояния на AllNotesOff и panic**
 
 Найти arm `ControlEvent::AllNotesOff` в `handle_control` и ветку CC120/CC123 в panic-drain (grep `AllNotesOff` и `123` рядом с `note_off_all` / `all_notes_off`). В обеих точках после вызова `self.sampler.all_notes_off()` (или эквивалента) добавить:
 
@@ -273,12 +274,12 @@ git commit -m "feat: drum engine SF2 choke state (group_last_note)"
 
 (Если arm'ов два — добавить в оба; `sf2_choke_take`-состояние без сброса могло бы заглушить новую ноту чужим висящим prev.)
 
-- [ ] **Step 5: Прогнать всё**
+- [x] **Step 5: Прогнать всё**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/synth/mod.rs
@@ -287,13 +288,13 @@ git commit -m "feat: sf2 hihat choke — note-off previous group member before n
 
 ### Task 4: Финальная верификация
 
-- [ ] **Step 1:** `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety` — всё зелёное.
+- [x] **Step 1:** `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety` — всё зелёное.
 
-- [ ] **Step 2: Ручная проверка (железо):** запустить приложение, включить SF2 Drums (Metal_Drums_v2), назначить Pad → Open Hat (semi-open), сыграть open hat → закрытый хэт (Pad с Closed Hat) — хвост открытого должен оборваться. Если НЕ обрывается (длинный release кита) — записать в TECHDEBT план Б: проставить exclusiveClass=1 в igen-зонах нот 46/47/48/51 Metal_Drums_v2.sf2 (rustysynth voice_collection.rs:32 уже умеет).
+- [x] **Step 2: Ручная проверка (железо):** запустить приложение, включить SF2 Drums (Metal_Drums_v2), назначить Pad → Open Hat (semi-open), сыграть open hat → закрытый хэт (Pad с Closed Hat) — хвост открытого должен оборваться. Если НЕ обрывается (длинный release кита) — записать в TECHDEBT план Б: проставить exclusiveClass=1 в igen-зонах нот 46/47/48/51 Metal_Drums_v2.sf2 (rustysynth voice_collection.rs:32 уже умеет).
 
-- [ ] **Step 3: Закрыть TECHDEBT #10** (частично: SF2-путь сделан; DSP уже работал) — обновить пункт 10 в `docs/TECHDEBT.md` пометкой «SF2-путь сделан (коммит …); DSP был ранее».
+- [x] **Step 3: Закрыть TECHDEBT #10** (частично: SF2-путь сделан; DSP уже работал) — обновить пункт 10 в `docs/TECHDEBT.md` пометкой «SF2-путь сделан (коммит …); DSP был ранее».
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/TECHDEBT.md
