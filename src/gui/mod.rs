@@ -622,9 +622,16 @@ impl eframe::App for App {
             let mut snap = [[0u8; 3]; 16];
             snap[..8].copy_from_slice(&top);
             snap[8..].copy_from_slice(&bottom);
-            if snap != self.led_snapshot || self.led_dirty {
+            // Send on change, plus a 2s heartbeat: heals dropped writes and
+            // reconnects after a companion restart (otherwise nothing is sent
+            // while the state is idle and the console shows stale colors).
+            let heartbeat_due = self.led_last_send
+                .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
+                .unwrap_or(true);
+            if snap != self.led_snapshot || self.led_dirty || heartbeat_due {
                 self.led_snapshot = snap;
                 self.led_dirty = false;
+                self.led_last_send = Some(std::time::Instant::now());
                 if let Some(sock) = &self.led_socket {
                     let mut msg = String::from("STATE");
                     for c in &snap {
