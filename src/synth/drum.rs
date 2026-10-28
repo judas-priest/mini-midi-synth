@@ -861,6 +861,9 @@ pub struct DrumEngine {
     pub fixed_velocity: bool,
     /// Incoming pad note -> internal slot. remap[note-36] = slot (0..16).
     pub remap: [u8; NUM_DRUM_SLOTS],
+    /// Per-pad velocity override, indexed by incoming note - 36.  0 = Off
+    /// (use incoming/master velocity).
+    pub pad_vel: [u8; NUM_DRUM_SLOTS],
     /// Per-note choke group ids for the SF2 path, indexed by (note - 30).
     /// Defaults to the GM layout (CHOKE_GROUPS shifted); replaced per-kit by
     /// the GUI from the kit's sample names.
@@ -905,6 +908,7 @@ impl DrumEngine {
             sf2_mode: false,
             fixed_velocity: false,
             remap: core::array::from_fn(|i| DRUM_NOTE_BASE + i as u8),
+            pad_vel: [0u8; NUM_DRUM_SLOTS],
             choke_groups: {
                 // GM table covers notes 36..=51 -> indices 6..=21 of the 30..=55 range
                 let mut t = [0u8; 26];
@@ -965,6 +969,25 @@ impl DrumEngine {
         match note.wrapping_sub(DRUM_NOTE_BASE) {
             i if (i as usize) < NUM_DRUM_SLOTS => self.remap[i as usize],
             _ => note,
+        }
+    }
+
+    /// Per-pad velocity override for an incoming pad note.  Values outside
+    /// 36..=51 pass through; 0 override = passthrough.
+    pub fn pad_velocity(&self, note: u8, vel: u8) -> u8 {
+        match note.wrapping_sub(DRUM_NOTE_BASE) {
+            i if (i as usize) < NUM_DRUM_SLOTS && self.pad_vel[i as usize] > 0 => {
+                self.pad_vel[i as usize]
+            }
+            _ => vel,
+        }
+    }
+
+    /// Load pad-velocity overrides from config (short vecs padded with 0 = Off,
+    /// long truncated, values clamped to 127).
+    pub fn apply_pad_vel_vec(&mut self, v: &[u8]) {
+        for (i, vel) in self.pad_vel.iter_mut().enumerate() {
+            *vel = v.get(i).copied().unwrap_or(0).min(127);
         }
     }
 
