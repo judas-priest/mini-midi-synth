@@ -77,7 +77,7 @@ impl App {
         });
 
         // Pad remap: incoming pad note -> internal slot
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Remap:");
             let mut new_remap = self.drum_remap;
             for (i, slot) in new_remap.iter_mut().enumerate() {
