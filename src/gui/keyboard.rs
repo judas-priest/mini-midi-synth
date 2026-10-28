@@ -17,6 +17,10 @@ fn is_black_key(note: u8) -> bool {
     matches!(note % 12, 1 | 3 | 6 | 8 | 10)
 }
 
+/// Pad notes in physical order: pads 1-8 (top row), 9-16 (bottom row).
+pub const PAD_TOP_NOTES: [u8; 8] = [40, 41, 42, 43, 48, 49, 50, 51];
+pub const PAD_BOT_NOTES: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
+
 impl App {
     pub fn draw_keyboard(&mut self, ui: &mut egui::Ui) {
         // Active notes label above keyboard; detected chord in brackets, bold
@@ -113,8 +117,6 @@ impl App {
             // --- Pads (C1–D#2 = MIDI 36–51, MPC layout as 2×8) ---
             // Top row: E1,F1,F#1,G1, C2,C#2,D2,D#2 — cyan
             // Bottom row: C1,C#1,D1,D#1, G#1,A1,A#1,B1 — pink
-            const PAD_TOP: [u8; 8] = [40, 41, 42, 43, 48, 49, 50, 51];
-            const PAD_BOT: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
 
             let pad_h = (key_h - pad_gap) / 2.0;
             let pad_w = pad_size;
@@ -127,12 +129,12 @@ impl App {
             );
             let pad_origin = pad_resp.rect.min;
 
-            // Click a drawn pad -> remap dialog for that sound
-            let mut clicked_slot: Option<usize> = None;
+            // Click a drawn pad -> remap dialog for that hardware pad (position = pad number)
+            let mut clicked_pad: Option<usize> = None;
 
             // Top row (cyan)
             for col in 0..8u8 {
-                let note = PAD_TOP[col as usize];
+                let note = PAD_TOP_NOTES[col as usize];
                 let vel = self.pad_state[note as usize].load(Ordering::Relaxed);
                 let pr = egui::Rect::from_min_size(
                     pad_origin + egui::vec2(col as f32 * (pad_w + pad_gap), 0.0),
@@ -146,13 +148,13 @@ impl App {
                 pad_painter.rect_filled(pr, 3.0, color);
                 pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, theme::STROKE_PAD_BORDER), egui::StrokeKind::Outside);
                 if ui.interact(pr, egui::Id::new("pad_top").with(col), egui::Sense::click()).clicked() {
-                    clicked_slot = Some((note - 36) as usize);
+                    clicked_pad = Some(col as usize);
                 }
             }
 
             // Bottom row (pink)
             for col in 0..8u8 {
-                let note = PAD_BOT[col as usize];
+                let note = PAD_BOT_NOTES[col as usize];
                 let vel = self.pad_state[note as usize].load(Ordering::Relaxed);
                 let pr = egui::Rect::from_min_size(
                     pad_origin + egui::vec2(col as f32 * (pad_w + pad_gap), pad_h + pad_gap),
@@ -166,12 +168,12 @@ impl App {
                 pad_painter.rect_filled(pr, 3.0, color);
                 pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, theme::STROKE_PAD_BORDER), egui::StrokeKind::Outside);
                 if ui.interact(pr, egui::Id::new("pad_bot").with(col), egui::Sense::click()).clicked() {
-                    clicked_slot = Some((note - 36) as usize);
+                    clicked_pad = Some(8 + col as usize);
                 }
             }
 
-            if let Some(s) = clicked_slot {
-                self.remap_pad = Some(s);
+            if let Some(p) = clicked_pad {
+                self.remap_pad = Some(p);
                 self.show_drum_remap = false;
             }
         });

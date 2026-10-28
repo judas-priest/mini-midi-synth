@@ -303,7 +303,7 @@ pub struct App {
     /// Drum note remap table: slot i plays mapped note drum_remap[i].
     pub drum_remap: [u8; 16],
     pub show_drum_remap: bool,
-    /// Remap dialog for a single drawn pad (slot index), from pad click
+    /// Remap dialog for a single hardware pad (0..16), from drawn-pad click
     pub remap_pad: Option<usize>,
     pub drum_volume: f32,
     pub drum_fixed_velocity: bool,

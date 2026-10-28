@@ -7,6 +7,7 @@ use crate::preset::{self, DrumKit};
 use crate::synth::{ControlEvent, DrumParam};
 use crate::synth::drum::{NUM_DRUM_SLOTS, DRUM_NAMES, DrumSlotParams, DrumPattern};
 use super::{App, ToastKind, drum_slot_name, drum_slot_names};
+use super::keyboard::{PAD_BOT_NOTES, PAD_TOP_NOTES};
 use super::theme;
 
 impl App {
@@ -84,11 +85,6 @@ impl App {
         }
 
         if self.show_drum_remap {
-            // Hardware pad k (1..16) sends this stock note (SMK-37 factory map).
-            const NOTE_OF_PAD: [u8; 16] = [
-                40, 41, 42, 43, 48, 49, 50, 51, // top row, pads 1-8
-                36, 37, 38, 39, 44, 45, 47, 46, // bottom row, pads 9-16
-            ];
             let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ui.ctx(), |ui| {
                 ui.set_width(860.0);
                 ui.strong("Pad Remap");
@@ -98,7 +94,7 @@ impl App {
                 let mut pad_row = |ui: &mut egui::Ui, pads: std::ops::Range<usize>, id: &str| {
                     egui::Grid::new(id).num_columns(8).spacing([8.0, 6.0]).show(ui, |ui| {
                         for p in pads {
-                            let note = NOTE_OF_PAD[p];
+                            let note = if p < 8 { PAD_TOP_NOTES[p] } else { PAD_BOT_NOTES[p - 8] };
                             let slot = &mut new_remap[(note - 36) as usize];
                             let sel = drum_slot_name(*slot);
                             ui.vertical_centered(|ui| {
@@ -140,20 +136,22 @@ impl App {
         }
 
         // Single-pad remap: click a drawn pad on the main screen
-        if let Some(s) = self.remap_pad {
-            let name = drum_slot_name(s as u8);
-            let cur = self.drum_remap.iter().position(|&v| v as usize == s).unwrap_or(s);
-            let mut sel = cur;
+        if let Some(p) = self.remap_pad {
+            // hardware pad p sends this factory note
+            let note = if p < 8 { PAD_TOP_NOTES[p] } else { PAD_BOT_NOTES[p - 8] };
+            let idx = (note - 36) as usize;
+            let mut sel = self.drum_remap[idx];
             let dialog = egui::Modal::new(egui::Id::new("remap_pad_dialog")).show(ui.ctx(), |ui| {
                 ui.set_width(300.0);
-                ui.strong(format!("\"{}\" plays from:", name));
+                ui.strong(format!("Pad {}", p + 1));
+                ui.label("Instrument:");
                 ui.add_space(theme::SP_MD);
-                egui::ComboBox::from_label("Pad")
-                    .width(120.0)
-                    .selected_text(format!("Pad {}", sel + 1))
+                egui::ComboBox::from_id_salt("remap_instrument")
+                    .width(140.0)
+                    .selected_text(drum_slot_name(sel))
                     .show_ui(ui, |ui| {
-                        for p in 0..16usize {
-                            ui.selectable_value(&mut sel, p, format!("Pad {}", p + 1));
+                        for (s, name) in drum_slot_names().iter().enumerate() {
+                            ui.selectable_value(&mut sel, s as u8, *name);
                         }
                     });
                 ui.add_space(theme::SP_MD);
@@ -161,12 +159,12 @@ impl App {
                     self.remap_pad = None;
                 }
             });
-            if sel != cur {
-                // detach the pad that triggered this slot before, attach the new one
+            if sel != self.drum_remap[idx] {
+                // detach any other pad mapped to this instrument, then attach this pad
                 for (i, v) in self.drum_remap.iter_mut().enumerate() {
-                    if *v as usize == s && i != sel { *v = i as u8; }
+                    if *v == sel && i != idx { *v = i as u8; }
                 }
-                self.drum_remap[sel] = s as u8;
+                self.drum_remap[idx] = sel;
                 self.push_drum_remap();
                 self.save_drum_remap();
             }
