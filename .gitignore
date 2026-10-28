@@ -1,1 +1,11 @@
 /target
+android/local.properties
+android/app/src/main/jniLibs/
+android/app/build/
+android/build/
+android/.gradle/
+android/.claude_session
+android/symbols/
+fuzz/target/
+fuzz/artifacts/
+fuzz/coverage/

@@ -1,4 +1,4 @@
-/// Patch loading/saving with serde + JSON.
+//! Patch loading/saving with serde + JSON.
 
 use anyhow::{Context, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -11,13 +11,39 @@ use std::sync::Arc;
 // Generic JSON save/load/list helpers
 // ---------------------------------------------------------------------------
 
+/// Turns a user-supplied preset name into a safe filename stem.
+///
+/// Names come from a text field, so `../../etc/foo` would otherwise write
+/// outside the preset directory. Everything that is not alphanumeric collapses
+/// into a single underscore, and an empty result falls back to a fixed name
+/// rather than producing a file called just `.json`.
+pub fn sanitize_preset_filename(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut last_was_sep = true; // leading separators are trimmed
+
+    for ch in name.to_lowercase().chars() {
+        if ch.is_alphanumeric() {
+            out.push(ch);
+            last_was_sep = false;
+        } else if !last_was_sep {
+            out.push('_');
+            last_was_sep = true;
+        }
+    }
+
+    while out.ends_with('_') {
+        out.pop();
+    }
+
+    if out.is_empty() { "preset".to_string() } else { out }
+}
+
 fn save_json<T: Serialize>(obj: &T, dir: Option<PathBuf>, name: &str) -> Result<PathBuf> {
     let dir = dir.context("Could not determine config directory")?;
     fs::create_dir_all(&dir)?;
-    let filename = name.to_lowercase().replace(' ', "_") + ".json";
-    let path = dir.join(filename);
+    let path = dir.join(sanitize_preset_filename(name) + ".json");
     let json = serde_json::to_string_pretty(obj)?;
-    fs::write(&path, json)?;
+    crate::config::write_atomic(&path, &json)?;
     Ok(path)
 }
 
@@ -446,7 +472,7 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
 
 /// Return user patch directory (~/.config/mini_midi_synth/presets/).
 fn user_preset_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("mini_midi_synth").join("presets"))
+    crate::config::app_config_dir().map(|d| d.join("presets"))
 }
 
 /// Load all presets from a directory recursively (subdirs = categories).
@@ -490,31 +516,32 @@ fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Patch>) {
 /// External patch directory: ~/.local/share/mini_midi_synth/presets/
 /// Place converted Surge presets here.
 pub fn external_preset_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("mini_midi_synth")
-        .join("presets")
+    crate::config::app_data_dir().join("presets")
 }
 
 /// Wavetable directory: ~/.local/share/mini_midi_synth/wavetables/
 pub fn wavetable_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("mini_midi_synth")
-        .join("wavetables")
+    crate::config::app_data_dir().join("wavetables")
 }
 
-/// Load all available presets: factory + external + user.
-pub fn load_all_patches() -> Vec<Patch> {
-    let mut presets = Vec::new();
-
-    // Factory presets (compiled in)
+/// Load only the presets compiled into the binary.
+///
+/// Unlike [`load_all_patches`] this never touches the filesystem, so its result
+/// is identical on every machine — which is what tests need.
+pub fn load_factory_patches() -> Vec<Patch> {
+    let mut presets = Vec::with_capacity(FACTORY_PRESETS.len());
     for (category, _, json) in FACTORY_PRESETS {
         if let Ok(mut p) = serde_json::from_str::<Patch>(json) {
             p.category = category.to_string();
             presets.push(p);
         }
     }
+    presets
+}
+
+/// Load all available presets: factory + external + user.
+pub fn load_all_patches() -> Vec<Patch> {
+    let mut presets = load_factory_patches();
 
     // External presets (~/.local/share/mini_midi_synth/presets/)
     // Converted Surge presets and other third-party presets go here.
@@ -533,10 +560,9 @@ pub fn load_all_patches() -> Vec<Patch> {
 pub fn save_patch(preset: &Patch) -> Result<PathBuf> {
     let dir = user_preset_dir().context("Could not determine config directory")?;
     fs::create_dir_all(&dir)?;
-    let filename = preset.name.to_lowercase().replace(' ', "_") + ".json";
-    let path = dir.join(filename);
+    let path = dir.join(sanitize_preset_filename(&preset.name) + ".json");
     let json = serde_json::to_string_pretty(preset)?;
-    fs::write(&path, json)?;
+    crate::config::write_atomic(&path, &json)?;
     Ok(path)
 }
 
@@ -555,7 +581,7 @@ pub struct DrumKit {
 }
 
 fn drum_kit_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("mini_midi_synth").join("drum_kits"))
+    crate::config::app_config_dir().map(|d| d.join("drum_kits"))
 }
 
 pub fn save_drum_kit(kit: &DrumKit) -> Result<PathBuf> {
@@ -581,6 +607,9 @@ pub fn import_midi_drums(path: &std::path::Path) -> Result<(Vec<DrumPattern>, f3
     use crate::synth::drum::{DRUM_NOTE_BASE, NUM_DRUM_SLOTS};
 
     let data = fs::read(path).context("Failed to read MIDI file")?;
+    // midly panics on some malformed headers, and the release profile aborts
+    // on panic — check before handing the bytes over. See check_smf_header.
+    crate::midi::check_smf_header(&data).map_err(|e| anyhow::anyhow!("{e}"))?;
     let smf = midly::Smf::parse(&data).map_err(|e| anyhow::anyhow!("MIDI parse error: {e}"))?;
 
     let ppq = match smf.header.timing {
@@ -690,7 +719,21 @@ pub struct PartConfig {
     /// SF2 program number (0-127).
     #[serde(default)]
     pub sf2_program: u8,
+    /// Per-part routing, persisted (older files default to neutral values).
+    #[serde(default)]
+    pub pan: f32,
+    #[serde(default)]
+    pub transpose: i8,
+    #[serde(default)]
+    pub mute: bool,
+    #[serde(default = "default_vel_min")]
+    pub vel_min: u8,
+    #[serde(default = "default_vel_max")]
+    pub vel_max: u8,
 }
+
+fn default_vel_min() -> u8 { 1 }
+fn default_vel_max() -> u8 { 127 }
 
 /// A saved split/part configuration.
 #[derive(Clone, Serialize, Deserialize)]
@@ -699,10 +742,14 @@ pub struct Performance {
     #[serde(default)]
     pub category: String,
     pub parts: Vec<PartConfig>,
+    /// Keyboard split note (zone B starts here). None = legacy perf without
+    /// a stored split point — GUI derives it from the enabled zone-B parts.
+    #[serde(default)]
+    pub split_point: Option<u8>,
 }
 
 fn performance_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("mini_midi_synth").join("performances"))
+    crate::config::app_config_dir().map(|d| d.join("performances"))
 }
 
 pub fn save_performance(perf: &Performance) -> Result<PathBuf> {
@@ -710,10 +757,52 @@ pub fn save_performance(perf: &Performance) -> Result<PathBuf> {
 }
 
 pub fn load_performance(path: &std::path::Path) -> Result<Performance> {
-    load_json(path, "performance")
+    let mut perf: Performance = load_json(path, "performance")?;
+    migrate_performance_parts(&mut perf.parts);
+    Ok(perf)
+}
+
+/// 16-part layout migration: legacy 8-part performances kept zone B at
+/// indices 4..8 — relocate it to 8..12 so A/B semantics survive.
+pub fn migrate_performance_parts(parts: &mut Vec<PartConfig>) {
+    if parts.len() == 8 {
+        let legacy_b: Vec<_> = parts.drain(4..8).collect();
+        let empty = parts[0].clone();
+        parts.resize_with(8, || {
+            let mut c = empty.clone();
+            c.enabled = false;
+            c
+        });
+        parts.extend(legacy_b); // 0..4 = zone A, 4..8 empty, 8..12 = zone B
+    }
 }
 
 pub fn list_performances() -> Vec<(String, PathBuf)> {
     list_json(performance_dir(), |p: &Performance| p.name.clone())
+}
+
+/// Built-in empty performance: single part A1 = Init preset, full range,
+/// no SF2. Served as the virtual "(Init)" entry of the perf list.
+pub fn init_performance() -> Performance {
+    Performance {
+        name: "(Init)".to_string(),
+        category: String::new(),
+        split_point: None,
+        parts: vec![PartConfig {
+            patch_name: "Init".to_string(),
+            enabled: true,
+            volume: 0.8,
+            key_low: 0,
+            key_high: 127,
+            param_overrides: Default::default(),
+            sf2_mode: false,
+            sf2_program: 0,
+            pan: 0.0,
+            transpose: 0,
+            mute: false,
+            vel_min: 1,
+            vel_max: 127,
+        }],
+    }
 }
 

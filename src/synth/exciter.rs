@@ -1,15 +1,15 @@
-/// Exciter — harmonic exciter for adding brightness and "air".
-///
-/// Algorithm:
-///   1. Split the input with a 1-pole HP filter above a tunable frequency
-///      (1 kHz..8 kHz) to isolate high-frequency content.
-///   2. Drive the high-frequency signal through a soft nonlinearity (tanh)
-///      to generate new harmonics.
-///   3. HP-filter the harmonics again to strip any sub content they produced.
-///   4. Optionally boost a gentle presence shelf around the exciter frequency.
-///   5. Mix the generated harmonics back with the dry signal.
-///
-/// Inspired by Surge XT's Exciter effect.
+//! Exciter — harmonic exciter for adding brightness and "air".
+//!
+//! Algorithm:
+//!   1. Split the input with a 1-pole HP filter above a tunable frequency
+//!      (1 kHz..8 kHz) to isolate high-frequency content.
+//!   2. Drive the high-frequency signal through a soft nonlinearity (tanh)
+//!      to generate new harmonics.
+//!   3. HP-filter the harmonics again to strip any sub content they produced.
+//!   4. Optionally boost a gentle presence shelf around the exciter frequency.
+//!   5. Mix the generated harmonics back with the dry signal.
+//!
+//! Inspired by Surge XT's Exciter effect.
 use std::f32::consts::PI;
 
 pub struct Exciter {

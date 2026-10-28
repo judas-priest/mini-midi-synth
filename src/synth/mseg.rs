@@ -1,5 +1,5 @@
-/// Multi-Segment Envelope Generator (MSEG).
-/// Algorithm inspired by Surge XT MSEGModulationHelper.
+//! Multi-Segment Envelope Generator (MSEG).
+//! Algorithm inspired by Surge XT MSEGModulationHelper.
 
 /// Curve type for each segment.
 #[derive(Clone, Copy, PartialEq)]
@@ -196,6 +196,10 @@ impl MsegState {
             return self.output;
         }
 
+        if self.current_seg >= mseg.segments.len() {
+            self.playing = false;
+            return self.output;
+        }
         let seg = &mseg.segments[self.current_seg];
         let dur = seg.duration.max(0.001) as f64;
         let frac = (self.phase / dur) as f32;

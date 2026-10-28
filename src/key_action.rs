@@ -1,5 +1,5 @@
-/// Shared key action definitions used by both GUI keybinds and headless evdev input.
-/// No GUI dependencies — safe to use in headless mode.
+//! Shared key action definitions used by both GUI keybinds and headless evdev input.
+//! No GUI dependencies — safe to use in headless mode.
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
@@ -11,6 +11,9 @@ pub enum KeyAction {
     LooperClear,
     DrumTogglePlay,
     ToggleDrumsSynth,
+    PrevPreset,
+    NextPreset,
+    TogglePadPerf,
 }
 
 #[allow(dead_code)]
@@ -32,10 +35,13 @@ impl KeyAction {
             Self::LooperClear => "Looper Clear",
             Self::DrumTogglePlay => "Drum Seq Play/Stop",
             Self::ToggleDrumsSynth => "Toggle Drums/Synth",
+            Self::PrevPreset => "Previous Preset",
+            Self::NextPreset => "Next Preset",
+            Self::TogglePadPerf => "Toggle Pad Performances",
         }
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn to_config_string(&self) -> String {
         match self {
             Self::SwitchPart(p) => format!("SwitchPart({p})"),
             Self::LooperRecord => "LooperRecord".into(),
@@ -44,6 +50,9 @@ impl KeyAction {
             Self::LooperClear => "LooperClear".into(),
             Self::DrumTogglePlay => "DrumTogglePlay".into(),
             Self::ToggleDrumsSynth => "ToggleDrumsSynth".into(),
+            Self::PrevPreset => "PrevPreset".into(),
+            Self::NextPreset => "NextPreset".into(),
+            Self::TogglePadPerf => "TogglePadPerf".into(),
         }
     }
 
@@ -59,6 +68,9 @@ impl KeyAction {
             "LooperClear" => Some(Self::LooperClear),
             "DrumTogglePlay" => Some(Self::DrumTogglePlay),
             "ToggleDrumsSynth" => Some(Self::ToggleDrumsSynth),
+            "PrevPreset" => Some(Self::PrevPreset),
+            "NextPreset" => Some(Self::NextPreset),
+            "TogglePadPerf" => Some(Self::TogglePadPerf),
             _ => None,
         }
     }
@@ -73,6 +85,8 @@ impl KeyAction {
             Self::LooperRecord, Self::LooperTogglePlay,
             Self::LooperUndo, Self::LooperClear,
             Self::DrumTogglePlay, Self::ToggleDrumsSynth,
+            Self::PrevPreset, Self::NextPreset,
+            Self::TogglePadPerf,
         ]
     }
 }

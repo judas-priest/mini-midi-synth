@@ -1,6 +1,6 @@
-/// 16-slot configurable FX chain (Surge XT style).
-/// Each slot selects an effect type, has a mix and up to 4 parameters.
-/// Serialized as `fx{i}_type`, `fx{i}_en`, `fx{i}_mix`, `fx{i}_p0..p3` in patch BTreeMap.
+//! 16-slot configurable FX chain (Surge XT style).
+//! Each slot selects an effect type, has a mix and up to 4 parameters.
+//! Serialized as `fx{i}_type`, `fx{i}_en`, `fx{i}_mix`, `fx{i}_p0..p3` in patch BTreeMap.
 
 pub const FX_SLOTS: usize = 16;
 
@@ -273,7 +273,7 @@ impl Default for FxChain {
 
 impl FxChain {
     /// Serialize into a preset BTreeMap.
-    pub fn to_map(&self, out: &mut std::collections::BTreeMap<String, f32>) {
+    pub fn write_to_map(&self, out: &mut std::collections::BTreeMap<String, f32>) {
         for (i, s) in self.slots.iter().enumerate() {
             out.insert(format!("fx{i}_type"), s.slot_type as u8 as f32);
             out.insert(format!("fx{i}_en"),   if s.enabled { 1.0 } else { 0.0 });
@@ -287,8 +287,7 @@ impl FxChain {
     /// Deserialize from a preset BTreeMap that contains `fx0_type` etc.
     pub fn from_map(map: &std::collections::BTreeMap<String, f32>) -> Self {
         let p = |key: &str, def: f32| map.get(key).copied().unwrap_or(def);
-        let mut chain = Self::default();
-        chain.active = true;
+        let mut chain = Self { active: true, ..Self::default() };
         for i in 0..FX_SLOTS {
             let ty = FxSlotType::from_u8(p(&format!("fx{i}_type"), 0.0) as u8);
             let defaults = ty.default_params();
@@ -311,8 +310,7 @@ impl FxChain {
     /// Call this when converting a legacy patch to the new format.
     pub fn from_legacy_preset_active(map: &std::collections::BTreeMap<String, f32>) -> Self {
         let get = |k: &str, d: f32| map.get(k).copied().unwrap_or(d);
-        let mut chain = Self::default();
-        chain.active = true;
+        let mut chain = Self { active: true, ..Self::default() };
 
         let mut idx = 0usize;
         let _ = idx; // incremented by macro

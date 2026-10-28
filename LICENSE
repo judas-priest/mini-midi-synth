@@ -1,0 +1,20 @@
+Copyright (c) 2026 Dmitry. All rights reserved.
+
+This software is proprietary. It is not licensed for redistribution,
+modification or use by third parties. No permission is granted to copy,
+publish, sublicense or distribute this software or derivative works.
+
+--------------------------------------------------------------------------------
+Third-party code vendored in this repository
+--------------------------------------------------------------------------------
+
+The directories below contain third-party code under their own licenses. Those
+licenses continue to apply to that code, including their attribution
+requirements, and are unaffected by the terms above.
+
+vendor/cpal              Apache-2.0    see vendor/cpal/LICENSE
+vendor/rustysynth        MIT           see vendor/rustysynth/Cargo.toml
+vendor/mi-plaits-dsp-rs  MIT           see vendor/mi-plaits-dsp-rs/LICENSE.txt
+
+Dependencies fetched from crates.io are covered by their own licenses; the
+allowed set is enforced by deny.toml.

@@ -1,6 +1,6 @@
-/// MIDI looper: records note events with sample-accurate timing,
-/// plays them back in a loop. Overdub support with per-part undo.
-/// Zero heap allocation in the audio path.
+//! MIDI looper: records note events with sample-accurate timing,
+//! plays them back in a loop. Overdub support with per-part undo.
+//! Zero heap allocation in the audio path.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU16, Ordering};
@@ -47,7 +47,9 @@ pub struct LooperDisplay {
 impl LooperDisplay {
     pub fn new() -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self {
-            events: Vec::new(),
+            // Sized for the worst case up front: update_display runs on the
+            // audio thread, where growing this Vec means calling malloc.
+            events: Vec::with_capacity(MAX_LOOP_EVENTS),
             current_layer: 0,
         }))
     }
@@ -73,19 +75,13 @@ impl LooperState {
 }
 
 /// Compact recorded event: 8 bytes.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct LoopEvent {
     tick: u32,      // sample offset from loop start
     note: u8,       // MIDI note 0-127
     velocity: u8,   // 0 = note-off, 1-127 = note-on
     layer_id: u8,   // overdub layer (for undo)
     part_id: u8,    // which synth part this was recorded on
-}
-
-impl Default for LoopEvent {
-    fn default() -> Self {
-        Self { tick: 0, note: 0, velocity: 0, layer_id: 0, part_id: 0 }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -262,12 +258,10 @@ impl MidiLooper {
             LooperState::Playing | LooperState::Overdubbing => {
                 self.stop();
             }
-            LooperState::Idle => {
-                if self.len > 0 {
-                    self.state = LooperState::Playing;
-                    self.playback_tick = 0;
-                    self.playback_cursor = 0;
-                }
+            LooperState::Idle if self.len > 0 => {
+                self.state = LooperState::Playing;
+                self.playback_tick = 0;
+                self.playback_cursor = 0;
             }
             _ => {}
         }
@@ -487,8 +481,18 @@ impl MidiLooper {
         out
     }
 
+    /// Publishes a snapshot of recorded events for the GUI timeline.
+    ///
+    /// Runs on the audio thread. `try_lock` never blocks and the vector is
+    /// pre-sized to MAX_LOOP_EVENTS so `push` cannot allocate. The `unlock`
+    /// when the guard drops is still a futex syscall; replacing this Mutex
+    /// with a triple buffer is recorded in docs/ARCHITECTURE.md.
     fn update_display(&self) {
         if let Ok(mut d) = self.display.try_lock() {
+            debug_assert!(
+                d.events.capacity() >= MAX_LOOP_EVENTS,
+                "display vector must never grow on the audio thread"
+            );
             d.events.clear();
             if self.loop_length_ticks > 0 {
                 let inv = 1.0 / self.loop_length_ticks as f32;

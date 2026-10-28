@@ -1,6 +1,6 @@
-/// SF2 sampler engine wrapping rustysynth.
-/// Separate synthesizers for keys (ch0/ch1) and drums (ch9),
-/// allowing different SF2 files. Arc<SoundFont> deduplicates when same file.
+//! SF2 sampler engine wrapping rustysynth.
+//! Separate synthesizers for keys (ch0/ch1) and drums (ch9),
+//! allowing different SF2 files. Arc<SoundFont> deduplicates when same file.
 
 use std::sync::Arc;
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
@@ -60,6 +60,21 @@ pub const GM_PROGRAM_NAMES: [&str; 128] = [
     "Telephone Ring", "Helicopter", "Applause", "Gunshot",
 ];
 
+/// What a soundfont swap displaced. Must be dropped off the audio thread.
+#[derive(Default)]
+pub struct Displaced {
+    pub soundfont: Option<Arc<SoundFont>>,
+    pub synth: Option<Synthesizer>,
+}
+
+impl Displaced {
+    /// True when there is actually something to free — lets callers skip the
+    /// trash queue for no-op unloads.
+    pub fn is_empty(&self) -> bool {
+        self.soundfont.is_none() && self.synth.is_none()
+    }
+}
+
 /// Internal sub-synth: one rustysynth Synthesizer + its render buffers.
 struct SubSynth {
     soundfont: Option<Arc<SoundFont>>,
@@ -80,10 +95,22 @@ impl SubSynth {
         }
     }
 
-    fn rebuild(&mut self, sf: Option<Arc<SoundFont>>, sample_rate: i32, block_size: usize) {
+    /// Swaps in a new soundfont and returns whatever it displaced.
+    ///
+    /// The caller must move the returned `Displaced` off the audio thread —
+    /// the last `Arc` to a soundfont can be tens of megabytes, and dropping a
+    /// `Synthesizer` frees its voice pool. See `crate::trash`.
+    ///
+    /// Note: `Synthesizer::new` still *allocates* here, on the audio thread.
+    /// Moving construction to the GUI thread is tracked separately; this
+    /// change removes the frees, which are the larger and more frequent cost.
+    #[must_use = "the displaced soundfont and synth must be freed off the audio thread"]
+    fn rebuild(&mut self, sf: Option<Arc<SoundFont>>, sample_rate: i32, block_size: usize) -> Displaced {
+        let displaced = Displaced { soundfont: self.soundfont.take(), synth: self.synth.take() };
+
         let sf = match sf {
             Some(s) => s,
-            None => { self.synth = None; self.soundfont = None; return; }
+            None => return displaced,
         };
         let mut settings = SynthesizerSettings::new(sample_rate);
         settings.block_size = block_size;
@@ -99,6 +126,7 @@ impl SubSynth {
                 self.soundfont = None;
             }
         }
+        displaced
     }
 
     #[allow(dead_code)]
@@ -161,9 +189,13 @@ pub struct SamplerEngine {
     keys: SubSynth,
     drums: SubSynth,
     pub block_size: usize,
-    part_sf2: [bool; 8],
-    part_program: [u8; 8],
-    part_bank: [u8; 8],
+    part_sf2: [bool; 16],
+    part_program: [u8; 16],
+    part_bank: [u8; 16],
+    /// Melodic SF2 channel per part (skips percussion ch9). None = DSP part
+    /// or no free channel. 16 parts, 15 melodic channels — the 16th SF2 part
+    /// stays DSP until a channel frees up.
+    part_channel: [Option<usize>; 16],
     drums_sf2: bool,
     sample_rate: i32,
     pub drum_volume: f32,
@@ -172,6 +204,12 @@ pub struct SamplerEngine {
     /// Sample start offset in samples — skip this many samples after note-on
     /// to compensate for slow SF2 attack envelopes.
     sample_offset: usize,
+    /// Last sustain state, re-applied after SF2 rebuilds (fresh rustysynth
+    /// channels start with hold_pedal=false).
+    sustain: bool,
+    /// Global SF2 release multiplier, re-applied after SF2 rebuilds (fresh
+    /// rustysynth instances start at scale 1.0).
+    release_scale: f32,
 }
 
 impl SamplerEngine {
@@ -180,43 +218,57 @@ impl SamplerEngine {
             keys: SubSynth::new(),
             drums: SubSynth::new(),
             block_size: DEFAULT_BLOCK_SIZE,
-            part_sf2: [false; 8],
-            part_program: [0; 8],
-            part_bank: [0; 8],
+            part_sf2: [false; 16],
+            part_program: [0; 16],
+            part_bank: [0; 16],
+            part_channel: [None; 16],
             drums_sf2: false,
             sample_rate: sample_rate as i32,
             drum_volume: 1.0,
             seq_channel_program: [255; 16], // 255 = not yet initialised
             sample_offset: 0,
+            sustain: false,
+            release_scale: 1.0,
         }
     }
 
-    /// Load SF2 for keys (parts A/B).
-    pub fn load_keys_soundfont(&mut self, sf: Arc<SoundFont>) {
+    /// Load SF2 for keys (parts A/B). The returned `Displaced` holds the
+    /// previous soundfont and synth and must be freed off the audio thread.
+    #[must_use = "the displaced soundfont must be freed off the audio thread"]
+    pub fn load_keys_soundfont(&mut self, sf: Arc<SoundFont>) -> Displaced {
         self.seq_channel_program = [255; 16]; // new synth instance — reset program cache
-        self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
+        let displaced = self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
         // Restore programs on new synth
         if let Some(synth) = &mut self.keys.synth {
-            for i in 0..8 {
+            for (i, ch) in self.part_channel.iter().enumerate() {
+                let Some(ch) = ch else { continue };
                 if self.part_sf2[i] {
-                    synth.process_midi_message(i as i32, 0xB0, 0, self.part_bank[i] as i32);
-                    synth.process_midi_message(i as i32, 0xC0, self.part_program[i] as i32, 0);
+                    synth.process_midi_message(*ch as i32, 0xB0, 0, self.part_bank[i] as i32);
+                    synth.process_midi_message(*ch as i32, 0xC0, self.part_program[i] as i32, 0);
                 }
             }
         }
+        self.apply_sustain();
+        if let Some(synth) = &mut self.keys.synth {
+            synth.set_release_time_scale(self.release_scale);
+        }
+        displaced
     }
 
     /// Load SF2 for drums (ch9).
-    pub fn load_drums_soundfont(&mut self, sf: Arc<SoundFont>) {
-        self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
+    #[must_use = "the displaced soundfont must be freed off the audio thread"]
+    pub fn load_drums_soundfont(&mut self, sf: Arc<SoundFont>) -> Displaced {
+        self.drums.rebuild(Some(sf), self.sample_rate, self.block_size)
     }
 
-    pub fn unload_keys(&mut self) {
-        self.keys.rebuild(None, self.sample_rate, self.block_size);
+    #[must_use = "the displaced soundfont must be freed off the audio thread"]
+    pub fn unload_keys(&mut self) -> Displaced {
+        self.keys.rebuild(None, self.sample_rate, self.block_size)
     }
 
-    pub fn unload_drums(&mut self) {
-        self.drums.rebuild(None, self.sample_rate, self.block_size);
+    #[must_use = "the displaced soundfont must be freed off the audio thread"]
+    pub fn unload_drums(&mut self) -> Displaced {
+        self.drums.rebuild(None, self.sample_rate, self.block_size)
     }
 
     #[allow(dead_code)]
@@ -224,46 +276,87 @@ impl SamplerEngine {
     #[allow(dead_code)]
     pub fn drums_loaded(&self) -> bool { self.drums.is_loaded() }
 
-    pub fn set_block_size(&mut self, size: usize) {
+    /// Returns both displaced sub-synths (keys, drums) for deferred freeing.
+    #[must_use = "the displaced soundfonts must be freed off the audio thread"]
+    pub fn set_block_size(&mut self, size: usize) -> (Displaced, Displaced) {
         let size = size.clamp(8, MAX_BLOCK_SIZE);
         self.block_size = size;
+        let mut keys_displaced = Displaced::default();
         if let Some(sf) = self.keys.soundfont.clone() {
-            self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
+            keys_displaced = self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
             // Restore programs
             if let Some(synth) = &mut self.keys.synth {
-                for i in 0..8 {
+                for (i, ch) in self.part_channel.iter().enumerate() {
+                    let Some(ch) = ch else { continue };
                     if self.part_sf2[i] {
-                        synth.process_midi_message(i as i32, 0xB0, 0, self.part_bank[i] as i32);
-                        synth.process_midi_message(i as i32, 0xC0, self.part_program[i] as i32, 0);
+                        synth.process_midi_message(*ch as i32, 0xB0, 0, self.part_bank[i] as i32);
+                        synth.process_midi_message(*ch as i32, 0xC0, self.part_program[i] as i32, 0);
                     }
                 }
+                // Rebuild made a fresh Synthesizer — re-apply the release scale
+                synth.set_release_time_scale(self.release_scale);
             }
         }
+        let mut drums_displaced = Displaced::default();
         if let Some(sf) = self.drums.soundfont.clone() {
-            self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
+            drums_displaced = self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
         }
+        self.apply_sustain();
+        (keys_displaced, drums_displaced)
     }
 
-    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+    #[must_use = "the displaced soundfonts must be freed off the audio thread"]
+    pub fn set_sample_rate(&mut self, sample_rate: f32) -> (Displaced, Displaced) {
         self.sample_rate = sample_rate as i32;
+        let mut keys_displaced = Displaced::default();
         if let Some(sf) = self.keys.soundfont.clone() {
-            self.load_keys_soundfont(sf);
+            keys_displaced = self.load_keys_soundfont(sf);
         }
+        let mut drums_displaced = Displaced::default();
         if let Some(sf) = self.drums.soundfont.clone() {
-            self.load_drums_soundfont(sf);
+            drums_displaced = self.load_drums_soundfont(sf);
         }
+        self.apply_sustain();
+        (keys_displaced, drums_displaced)
+    }
+
+    /// Melodic channels 0..=8, 10..=15 — percussion channel 9 reserved.
+    const MELODIC_CHANNELS: [usize; 15] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15];
+
+    fn alloc_channel(&self) -> Option<usize> {
+        Self::MELODIC_CHANNELS
+            .iter()
+            .find(|c| !self.part_channel.contains(&Some(**c)))
+            .copied()
     }
 
     pub fn set_part_mode(&mut self, part: usize, enabled: bool) {
-        if part < 8 { self.part_sf2[part] = enabled; }
+        if part >= 16 { return; }
+        if enabled && self.part_channel[part].is_none() {
+            self.part_channel[part] = self.alloc_channel();
+        } else if !enabled {
+            if let Some(ch) = self.part_channel[part].take() {
+                if let Some(synth) = &mut self.keys.synth {
+                    synth.note_off_all_channel(ch as i32, false);
+                }
+            }
+        }
+        self.part_sf2[part] = enabled;
+    }
+
+    /// Channel of an SF2-enabled part (None for DSP parts / unallocated).
+    fn part_channel_of(&self, part: usize) -> Option<usize> {
+        self.part_channel.get(part).copied().flatten()
     }
 
     pub fn set_part_program(&mut self, part: usize, program: u8, bank: u8) {
-        if part >= 8 { return; }
+        if part >= 16 { return; }
         self.part_program[part] = program;
         self.part_bank[part] = bank;
-        self.keys.midi(part as i32, 0xB0, 0, bank as i32);
-        self.keys.midi(part as i32, 0xC0, program as i32, 0);
+        if let Some(ch) = self.part_channel_of(part) {
+            self.keys.midi(ch as i32, 0xB0, 0, bank as i32);
+            self.keys.midi(ch as i32, 0xC0, program as i32, 0);
+        }
     }
 
     pub fn set_drums_enabled(&mut self, enabled: bool) {
@@ -274,11 +367,18 @@ impl SamplerEngine {
         self.drums_sf2
     }
 
+    /// Per-channel pan (CC10) for SF2 parts — rustysynth applies it per voice.
+    pub fn set_channel_pan(&mut self, part: usize, cc_value: i32) {
+        if let Some(ch) = self.part_channel_of(part) {
+            self.keys.midi(ch as i32, 0xB0, 10, cc_value.clamp(0, 127));
+        }
+    }
+
     pub fn set_layer_volume(&mut self, part: usize, volume: f32) {
-        if part >= 8 { return; }
-        let ch = (part as i32) % 16;
+        if part >= 16 { return; }
+        let Some(ch) = self.part_channel_of(part) else { return; };
         let cc_val = (volume * 127.0).round().clamp(0.0, 127.0) as i32;
-        self.keys.midi(ch, 0xB0, 7, cc_val);
+        self.keys.midi(ch as i32, 0xB0, 7, cc_val);
     }
 
     /// Set sample start offset in milliseconds (0-50).
@@ -289,9 +389,8 @@ impl SamplerEngine {
     }
 
     pub fn note_on(&mut self, part: usize, note: u8, velocity: u8) {
-        // rustysynth uses MIDI channels 0-15; map part to channel
-        let ch = (part as i32) % 16;
-        self.keys.midi(ch, 0x90, note as i32, velocity as i32);
+        let Some(ch) = self.part_channel_of(part) else { return; };
+        self.keys.midi(ch as i32, 0x90, note as i32, velocity as i32);
         // Skip initial samples to reduce perceived latency from slow SF2 attacks
         if self.sample_offset > 0 {
             self.keys.skip_samples(self.sample_offset, self.block_size);
@@ -299,8 +398,48 @@ impl SamplerEngine {
     }
 
     pub fn note_off(&mut self, part: usize, note: u8) {
-        let ch = (part as i32) % 16;
-        self.keys.midi(ch, 0x80, note as i32, 0);
+        let Some(ch) = self.part_channel_of(part) else { return; };
+        self.keys.midi(ch as i32, 0x80, note as i32, 0);
+    }
+
+    /// Sustain pedal (CC64) for all part channels of the keys synth.
+    /// rustysynth implements hold-pedal per channel: note-offs received while
+    /// the pedal is down keep sounding until it is released. Drum channel 9
+    /// is intentionally not sustained.
+    pub fn sustain_pedal(&mut self, on: bool) {
+        self.sustain = on;
+        let val = if on { 127 } else { 0 };
+        for ch in self.part_channel.iter().flatten() {
+            self.keys.midi(*ch as i32, 0xB0, 64, val);
+        }
+    }
+
+    /// Global SF2 release multiplier (GM2 CC72 semantics). 1.0 = file defaults.
+    pub fn set_release_time_scale(&mut self, scale: f32) {
+        self.release_scale = scale;
+        if let Some(synth) = &mut self.keys.synth {
+            synth.set_release_time_scale(scale);
+        }
+    }
+
+    /// Re-send CC64 to the part channels after a rustysynth rebuild.
+    fn apply_sustain(&mut self) {
+        let on = self.sustain;
+        let val = if on { 127 } else { 0 };
+        for ch in self.part_channel.iter().flatten() {
+            self.keys.midi(*ch as i32, 0xB0, 64, val);
+        }
+    }
+
+    /// Kill every sounding SF2 voice of one part. Clears the channel's hold
+    /// pedal first — `note_off_all_channel` respects it and would leave the
+    /// notes hanging otherwise. Used when a part switches patch or is disabled.
+    pub fn part_all_notes_off(&mut self, part: usize) {
+        let Some(ch) = self.part_channel_of(part) else { return; };
+        self.keys.midi(ch as i32, 0xB0, 64, 0);
+        if let Some(synth) = &mut self.keys.synth {
+            synth.note_off_all_channel(ch as i32, false);
+        }
     }
 
     pub fn drum_note_on(&mut self, note: u8, velocity: u8) {
@@ -357,7 +496,11 @@ impl SamplerEngine {
     }
 
     pub fn all_notes_off(&mut self) {
+        // rustysynth defers note-offs while a channel hold pedal is down
+        // (voice.rs RELEASE_REQUESTED); lift CC64 everywhere before CC123.
+        self.sustain = false;
         for ch in 0..16 {
+            self.keys.midi(ch, 0xB0, 64, 0);
             self.keys.midi(ch, 0xB0, 123, 0);
             self.drums.midi(ch, 0xB0, 123, 0);
         }

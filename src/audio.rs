@@ -1,10 +1,10 @@
-/// Audio backend using cpal.
+//! Audio backend using cpal.
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{HostId, Stream};
 use rtrb::Consumer;
-use std::sync::{Arc, atomic::{AtomicU32, Ordering}};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicU32, Ordering}};
 
 use crate::synth::{ControlEvent, MidiEvent, SynthEngine};
 
@@ -24,6 +24,20 @@ fn soft_limit(x: f32) -> f32 {
     }
 }
 
+/// Runs `f` under the no-allocation assertion when the `rt-assert` feature is
+/// on, and unchanged otherwise. Keeps the callback body free of cfg noise.
+#[inline(always)]
+fn rt_guard<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(feature = "rt-assert")]
+    {
+        assert_no_alloc::assert_no_alloc(f)
+    }
+    #[cfg(not(feature = "rt-assert"))]
+    {
+        f()
+    }
+}
+
 pub struct AudioConfig {
     pub host_id: HostId,
     pub sample_rate: u32,
@@ -34,12 +48,7 @@ pub fn available_hosts() -> Vec<(HostId, &'static str)> {
     cpal::available_hosts()
         .into_iter()
         .map(|id| {
-            let name = match id.name() {
-                "ALSA" => "ALSA",
-                "JACK" => "JACK",
-                n => n,
-            };
-            (id, name)
+            (id, id.name())
         })
         .collect()
 }
@@ -78,6 +87,25 @@ pub fn supported_sample_rates(host_id: HostId) -> Vec<u32> {
 pub struct AudioBackend {
     #[allow(dead_code)]
     stream: Stream,
+    /// Set to true when the audio device disconnects (e.g. headphones unplugged).
+    /// GUI polls this to show a "restart app" message.
+    pub disconnected: Arc<AtomicBool>,
+    /// Set to true when the app is backgrounded (Android onPause).
+    /// Audio callback outputs silence when paused to save battery.
+    #[allow(dead_code)]
+    pub paused: Arc<AtomicBool>,
+}
+
+/// Everything the audio callback needs to share with the rest of the app.
+/// Grouped into a struct because passing eight positional arguments is both a
+/// clippy lint and an easy place to swap two `Arc<AtomicBool>` by mistake.
+pub struct AudioShared {
+    pub amidi_port: std::sync::Arc<crate::amidi::AmidiPort>,
+    pub note_state: crate::midi::NoteState,
+    pub pad_state: crate::midi::PadState,
+    pub paused: Arc<AtomicBool>,
+    /// Where spent control events go instead of being freed in the callback.
+    pub trash: crate::trash::TrashTx,
 }
 
 impl AudioBackend {
@@ -86,7 +114,9 @@ impl AudioBackend {
         mut synth: SynthEngine,
         mut midi_rx: Consumer<MidiEvent>,
         mut ctrl_rx: Consumer<ControlEvent>,
+        shared: AudioShared,
     ) -> Result<(Self, u32)> {
+        let AudioShared { amidi_port, note_state, pad_state, paused, mut trash } = shared;
         let host = cpal::host_from_id(config.host_id)
             .map_err(|e| anyhow::anyhow!("Failed to init audio host: {e}"))?;
         let device = host
@@ -124,80 +154,135 @@ impl AudioBackend {
         let jack_sr_err = jack_sr.clone();
         let jack_sr_cb  = jack_sr.clone();
         let mut synth_sr = actual_sr;
+        let disconnected = Arc::new(AtomicBool::new(false));
+        let disconnected_err = disconnected.clone();
+        let paused_cb = paused.clone();
+        let amidi_port = amidi_port.clone();
+        let note_state = note_state.clone();
+        let pad_state = pad_state.clone();
 
         let stream = device.build_output_stream(
             &stream_config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                // If JACK changed the sample rate, update the synth immediately.
-                let new_sr = jack_sr_cb.load(Ordering::Relaxed);
-                if new_sr != synth_sr {
-                    synth_sr = new_sr;
-                    synth.set_sample_rate(new_sr as f32);
-                }
+                // Instant::now is a vDSO read on Linux and Android, not a
+                // syscall, so it is safe to call from the callback.
+                let started = std::time::Instant::now();
 
-                // Flush denormals to zero (DAZ+FTZ) — prevents CPU spikes
-                // when filter/reverb tails decay to subnormal floats.
-                #[cfg(target_arch = "x86_64")]
-                let _old_mxcsr: u32 = unsafe {
-                    let mut old: u32 = 0;
-                    std::arch::asm!("stmxcsr [{}]", in(reg) &mut old, options(nostack));
-                    let new = old | 0x8040; // FTZ (bit 15) | DAZ (bit 6)
-                    std::arch::asm!("ldmxcsr [{}]", in(reg) &new, options(nostack));
-                    old
-                };
-
-                while let Ok(event) = ctrl_rx.pop() {
-                    synth.handle_control(event);
-                }
-
-                let total_frames = data.len() / channels;
-                let mut frame_offset = 0;
-
-                while frame_offset < total_frames {
-                    let block_len = (total_frames - frame_offset).min(crate::synth::BLOCK_SIZE);
-
-                    // Collect MIDI events for this block
+                // Backgrounded: output silence to save battery, but still apply
+                // every queued event. Skipping the drain lets the 256-slot
+                // rings fill up, and the GUI's pushes are then dropped on the
+                // floor — the engine would come back from onResume disagreeing
+                // with the UI about volumes, presets and which notes are held.
+                if paused_cb.load(Ordering::Relaxed) {
+                    while let Ok(event) = ctrl_rx.pop() {
+                        if let Some(spent) = synth.handle_control(event) {
+                            trash.dispose(crate::trash::Trash::Control(spent));
+                        }
+                    }
                     while let Ok(event) = midi_rx.pop() {
                         synth.handle_event(event);
                     }
+                    for sample in data.iter_mut() { *sample = 0.0; }
+                    return;
+                }
+                rt_guard(|| no_denormals::no_denormals(|| {
+                    // If JACK changed the sample rate, update the synth immediately.
+                    let new_sr = jack_sr_cb.load(Ordering::Relaxed);
+                    if new_sr != synth_sr {
+                        synth_sr = new_sr;
+                        synth.set_sample_rate(new_sr as f32);
+                    }
 
-                    // Process block
-                    let mut bl = [0.0f32; crate::synth::BLOCK_SIZE];
-                    let mut br = [0.0f32; crate::synth::BLOCK_SIZE];
-                    synth.tick_block(&mut bl[..block_len], &mut br[..block_len]);
-
-                    // Write to output with soft limiting
-                    for i in 0..block_len {
-                        let left = soft_limit(bl[i]);
-                        let right = soft_limit(br[i]);
-                        let base = (frame_offset + i) * channels;
-                        if channels >= 2 {
-                            data[base] = left;
-                            data[base + 1] = right;
-                            for s in data[base + 2..base + channels].iter_mut() {
-                                *s = 0.0;
-                            }
-                        } else {
-                            data[base] = (left + right) * 0.5;
+                    while let Ok(event) = ctrl_rx.pop() {
+                        // Heap-owning events come back out; free() belongs to
+                        // the GUI thread, not here.
+                        if let Some(spent) = synth.handle_control(event) {
+                            trash.dispose(crate::trash::Trash::Control(spent));
                         }
                     }
 
-                    frame_offset += block_len;
-                }
+                    let total_frames = data.len() / channels;
+                    let mut frame_offset = 0;
 
-                // Restore MXCSR
-                #[cfg(target_arch = "x86_64")]
-                unsafe {
-                    std::arch::asm!("ldmxcsr [{}]", in(reg) &_old_mxcsr, options(nostack));
-                }
+                    while frame_offset < total_frames {
+                        let block_len = (total_frames - frame_offset).min(crate::synth::BLOCK_SIZE);
+
+                        // USB MIDI via AMidi (non-blocking, RT-safe, zero-latency)
+                        {
+                            let mut amidi_buf = [0u8; 256];
+                            while let Some(nbytes) = amidi_port.receive(&mut amidi_buf) {
+                                let mut off = 0;
+                                while off < nbytes {
+                                    if let Some((event, consumed)) = crate::midi::parse_midi_message(&amidi_buf[off..nbytes]) {
+                                        // Update GUI note display
+                                        match &event {
+                                            crate::synth::MidiEvent::NoteOn { channel, note, velocity } => {
+                                                let st = if *channel == 9 { &pad_state } else { &note_state };
+                                                if *velocity == 0 { st[*note as usize].store(0, Ordering::Relaxed); }
+                                                else { st[*note as usize].store(*velocity, Ordering::Relaxed); }
+                                            }
+                                            crate::synth::MidiEvent::NoteOff { channel, note } => {
+                                                let st = if *channel == 9 { &pad_state } else { &note_state };
+                                                st[*note as usize].store(0, Ordering::Relaxed);
+                                            }
+                                            _ => {}
+                                        }
+                                        synth.handle_event(event);
+                                        off += consumed;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        while let Ok(event) = midi_rx.pop() {
+                            synth.handle_event(event);
+                        }
+
+                        let mut bl = [0.0f32; crate::synth::BLOCK_SIZE];
+                        let mut br = [0.0f32; crate::synth::BLOCK_SIZE];
+                        synth.tick_block(&mut bl[..block_len], &mut br[..block_len]);
+
+                        for i in 0..block_len {
+                            let left = soft_limit(bl[i]);
+                            let right = soft_limit(br[i]);
+                            let base = (frame_offset + i) * channels;
+                            if channels >= 2 {
+                                data[base] = left;
+                                data[base + 1] = right;
+                                for s in data[base + 2..base + channels].iter_mut() {
+                                    *s = 0.0;
+                                }
+                            } else {
+                                data[base] = (left + right) * 0.5;
+                            }
+                        }
+
+                        frame_offset += block_len;
+                    }
+                }));
+
+                crate::metrics::METRICS
+                    .note_callback_time(started.elapsed().as_micros() as u32);
             },
             move |err| {
+                crate::metrics::METRICS.note_stream_error();
                 let msg = err.to_string();
                 if let Some(sr_str) = msg.strip_prefix("A backend-specific error has occurred: sample rate changed to: ") {
                     if let Ok(sr) = sr_str.trim().parse::<u32>() {
                         jack_sr_err.store(sr, Ordering::Relaxed);
                     }
+                } else if msg.contains("xrun") {
+                    // Buffer over/under-run: a few dropped samples, the stream
+                    // itself keeps running. Tearing down and rebuilding the
+                    // whole engine here caused audible dropouts under load.
+                    // Real disconnects surface as different errors.
+                } else {
+                    // Device disconnected (headphones unplugged etc.)
+                    disconnected_err.store(true, Ordering::Relaxed);
                 }
+                log::info!("Audio stream error: {err}");
                 eprintln!("Audio stream error: {err}");
             },
             None,
@@ -210,7 +295,7 @@ impl AudioBackend {
         std::thread::sleep(std::time::Duration::from_millis(150));
         let final_sr = jack_sr.load(Ordering::Relaxed);
 
-        Ok((Self { stream }, final_sr))
+        Ok((Self { stream, disconnected, paused }, final_sr))
     }
 
     /// Try requested SR + buffer, fall back step by step to device defaults.

@@ -1,11 +1,11 @@
-/// Conditioner — mastering-style signal conditioner.
-///
-/// Combines:
-///   1. Two-pole high-pass filter for bass cut (20 Hz..400 Hz).
-///   2. Mid/Side stereo width control.
-///   3. Soft limiter based on tanh.
-///
-/// Inspired by Surge XT's Conditioner effect.
+//! Conditioner — mastering-style signal conditioner.
+//!
+//! Combines:
+//!   1. Two-pole high-pass filter for bass cut (20 Hz..400 Hz).
+//!   2. Mid/Side stereo width control.
+//!   3. Soft limiter based on tanh.
+//!
+//! Inspired by Surge XT's Conditioner effect.
 use std::f32::consts::PI;
 
 pub struct Conditioner {

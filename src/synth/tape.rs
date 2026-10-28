@@ -1,5 +1,5 @@
-/// Tape Saturation effect — magnetic hysteresis model with loss filter.
-/// Algorithm inspired by Surge XT chowdsp TapeEffect.
+//! Tape Saturation effect — magnetic hysteresis model with loss filter.
+//! Algorithm inspired by Surge XT chowdsp TapeEffect.
 
 use std::f32::consts::PI;
 use super::dsp_utils::DcBlocker;
@@ -48,6 +48,7 @@ impl Tape {
     /// Simplified magnetic hysteresis: Langevin-like saturation with history.
     /// Uses RK2 (midpoint method) for the ODE integration.
     #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
     fn hysteresis_step(
         h: f32, m: f32, _m_prev: f32, h_prev: f32,
         m_sat: f32, alpha: f32, k: f32, c: f32, dt_inv: f32,
@@ -78,6 +79,7 @@ impl Tape {
         (m + dm / dt_inv).clamp(-m_sat * 1.5, m_sat * 1.5)
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn tick(
         &mut self, in_l: f32, in_r: f32,

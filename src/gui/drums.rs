@@ -1,4 +1,4 @@
-/// Drum sequencer, pitch sequencer, and looper UI.
+//! Drum sequencer, pitch sequencer, and looper UI.
 
 use std::sync::atomic::Ordering;
 use eframe::egui;
@@ -6,7 +6,9 @@ use eframe::egui;
 use crate::preset::{self, DrumKit};
 use crate::synth::{ControlEvent, DrumParam};
 use crate::synth::drum::{NUM_DRUM_SLOTS, DRUM_NAMES, DrumSlotParams, DrumPattern};
-use super::App;
+use super::{App, ToastKind};
+use super::keyboard::{PAD_BOT_NOTES, PAD_TOP_NOTES};
+use super::theme;
 
 impl App {
     pub(super) fn draw_drum_sequencer(&mut self, ui: &mut egui::Ui) {
@@ -33,10 +35,10 @@ impl App {
             }
 
             // Undo / Clear
-            if ui.button("Undo").clicked() {
+            if ui.button("Undo").on_hover_text("Undo last edit").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqUndo);
             }
-            if ui.button("Clear").clicked() {
+            if ui.button("Clear").on_hover_text("Clear all steps").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
             }
 
@@ -56,16 +58,176 @@ impl App {
 
             // Swing + Vol
             ui.label("Swing:");
-            if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).show_value(false)).changed() {
+            if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).fixed_decimals(2)).on_hover_text("Swing amount").changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqSwing { swing: self.drum_swing });
             }
 
             ui.separator();
             ui.label("Vol:");
-            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=2.0).show_value(false)).changed() {
+            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=2.0).fixed_decimals(2)).on_hover_text("Master drum volume").changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
             }
+
+            ui.separator();
+            if ui.checkbox(&mut self.drum_fixed_velocity, "V127")
+                .on_hover_text("Fixed velocity: every hit triggers at max (127). For controllers without velocity.").changed()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+                self.save_global_to_config();
+            }
         });
+
+        // Pad remap: incoming pad note -> internal slot (modal, off the main screen)
+        if ui.selectable_label(self.show_drum_remap, "Remap")
+            .on_hover_text("Pad note -> drum sound mapping").clicked()
+        {
+            self.show_drum_remap = !self.show_drum_remap;
+        }
+
+        if self.show_drum_remap {
+            let kit_names = self.drum_kit_names.clone();
+            // selectable kit notes 30..=55 that have a sample
+            let kit_notes: Vec<(u8, &str)> = (0..26)
+                .filter(|&i| !kit_names[i].is_empty())
+                .map(|i| (30 + i as u8, kit_names[i].as_str()))
+                .collect();
+            let name_of = |v: u8| -> String {
+                if (30..=55).contains(&v) && !kit_names[(v - 30) as usize].is_empty() {
+                    kit_names[(v - 30) as usize].clone()
+                } else { format!("note {}", v) }
+            };
+            let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ui.ctx(), |ui| {
+                ui.set_width(900.0);
+                ui.strong("Pad Remap");
+                ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
+                ui.add_space(theme::SP_MD);
+                let mut new_remap = self.drum_remap;
+                let mut new_vels = self.drum_pad_vel;
+                let mut pad_row = |ui: &mut egui::Ui, pads: std::ops::Range<usize>, id: &str| {
+                    egui::Grid::new(id).num_columns(8).spacing([8.0, 6.0]).show(ui, |ui| {
+                        for p in pads {
+                            let note = if p < 8 { PAD_TOP_NOTES[p] } else { PAD_BOT_NOTES[p - 8] };
+                            let slot = &mut new_remap[(note - 36) as usize];
+                            let sel = name_of(*slot);
+                            ui.vertical_centered(|ui| {
+                                ui.label(format!("{}", p + 1));
+                                egui::ComboBox::from_id_salt(p)
+                                    .width(120.0)
+                                    .selected_text(sel)
+                                    .show_ui(ui, |ui| {
+                                        for (n, name) in kit_notes.iter() {
+                                            ui.selectable_value(slot, *n, *name);
+                                        }
+                                    });
+                                let mut vel = new_vels[(note - 36) as usize];
+                                ui.add_sized([60.0, 0.0], egui::DragValue::new(&mut vel)
+                                    .range(0..=127)
+                                    .custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{}", v as i32) }));
+                                new_vels[(note - 36) as usize] = vel;
+                            });
+                        }
+                    });
+                };
+                pad_row(ui, 0..8, "remap_top");
+                pad_row(ui, 8..16, "remap_bot");
+                ui.add_space(theme::SP_MD);
+                let mut reset_clicked = false;
+                ui.horizontal(|ui| {
+                    if ui.button("Copy top to bottom").on_hover_text("Copy pads 1-8 mapping to pads 9-16").clicked() {
+                        for i in 0..8 { new_remap[(PAD_BOT_NOTES[i] - 36) as usize] = new_remap[(PAD_TOP_NOTES[i] - 36) as usize]; }
+                    }
+                    if ui.button("Copy bottom to top").on_hover_text("Copy pads 9-16 mapping to pads 1-8").clicked() {
+                        for i in 0..8 { new_remap[(PAD_TOP_NOTES[i] - 36) as usize] = new_remap[(PAD_BOT_NOTES[i] - 36) as usize]; }
+                    }
+                    if ui.button("Reset").clicked() {
+                        reset_clicked = true;
+                    }
+                    if ui.button("Close").clicked() {
+                        self.show_drum_remap = false;
+                    }
+                });
+                if reset_clicked {
+                    for (i, v) in new_remap.iter_mut().enumerate() { *v = 36 + i as u8; }
+                    new_vels = [0u8; 16];
+                    self.drum_remap = new_remap;
+                    self.drum_pad_vel = new_vels;
+                    self.push_drum_remap();
+                    self.push_drum_pad_vel();
+                    self.save_drum_remap();
+                    self.save_drum_pad_vel();
+                }
+                if new_remap != self.drum_remap {
+                    self.drum_remap = new_remap;
+                    self.push_drum_remap();
+                    self.save_drum_remap();
+                }
+                if new_vels != self.drum_pad_vel {
+                    self.drum_pad_vel = new_vels;
+                    self.push_drum_pad_vel();
+                    self.save_drum_pad_vel();
+                }
+            });
+            if dialog.should_close() {
+                self.show_drum_remap = false;
+            }
+        }
+
+        // Single-pad remap: click a drawn pad on the main screen
+        if let Some(p) = self.remap_pad {
+            // hardware pad p sends this factory note
+            let note = if p < 8 { PAD_TOP_NOTES[p] } else { PAD_BOT_NOTES[p - 8] };
+            let idx = (note - 36) as usize;
+            let mut sel = self.drum_remap[idx];
+            let kit_names = self.drum_kit_names.clone();
+            let kit_notes: Vec<(u8, &str)> = (0..26)
+                .filter(|&i| !kit_names[i].is_empty())
+                .map(|i| (30 + i as u8, kit_names[i].as_str()))
+                .collect();
+            let sel_name = if (30..=55).contains(&sel) && !kit_names[(sel - 30) as usize].is_empty() {
+                kit_names[(sel - 30) as usize].clone()
+            } else { format!("note {}", sel) };
+            let dialog = egui::Modal::new(egui::Id::new("remap_pad_dialog")).show(ui.ctx(), |ui| {
+                ui.set_width(300.0);
+                ui.strong(format!("Pad {}", p + 1));
+                ui.label("Instrument:");
+                ui.add_space(theme::SP_MD);
+                egui::ComboBox::from_id_salt("remap_instrument")
+                    .width(200.0)
+                    .selected_text(sel_name)
+                    .show_ui(ui, |ui| {
+                        for (n, name) in kit_notes.iter() {
+                            ui.selectable_value(&mut sel, *n, *name);
+                        }
+                    });
+                ui.add_space(theme::SP_MD);
+                ui.label("Velocity (Off = dynamic):");
+                let mut vel = self.drum_pad_vel[idx];
+                ui.add_sized([80.0, 0.0], egui::DragValue::new(&mut vel)
+                    .range(0..=127)
+                    .custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{}", v as i32) }));
+                if vel != self.drum_pad_vel[idx] {
+                    self.drum_pad_vel[idx] = vel;
+                    self.push_drum_pad_vel();
+                    self.save_drum_pad_vel();
+                }
+                ui.add_space(theme::SP_MD);
+                if ui.button("Close").clicked() {
+                    self.remap_pad = None;
+                }
+            });
+            if sel != self.drum_remap[idx] {
+                // detach any other pad mapped to this instrument, then attach this pad
+                for (i, v) in self.drum_remap.iter_mut().enumerate() {
+                    if *v == sel && i != idx { *v = i as u8; }
+                }
+                self.drum_remap[idx] = sel;
+                self.push_drum_remap();
+                self.save_drum_remap();
+            }
+            if dialog.should_close() {
+                self.remap_pad = None;
+            }
+        }
 
         // Pattern selector + length
         ui.horizontal(|ui| {
@@ -91,7 +253,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label("Kit:");
             ui.add(egui::TextEdit::singleline(&mut self.drum_kit_name).desired_width(120.0).hint_text("name"));
-            if ui.button("Save").clicked() && !self.drum_kit_name.trim().is_empty() {
+            if ui.button("Save").on_hover_text("Save drum kit").clicked() && !self.drum_kit_name.trim().is_empty() {
                 let kit = DrumKit {
                     name: self.drum_kit_name.trim().to_string(),
                     patterns: self.drum_patterns.to_vec(),
@@ -101,11 +263,11 @@ impl App {
                     volume: self.drum_volume,
                 };
                 match preset::save_drum_kit(&kit) {
-                    Ok(path) => {
-                        self.drum_kit_status = format!("Saved: {}", path.display());
+                    Ok(_path) => {
+                        self.show_toast("Kit saved", ToastKind::Success);
                         self.drum_kit_list = preset::list_drum_kits();
                     }
-                    Err(e) => { self.drum_kit_status = format!("Error: {e}"); }
+                    Err(e) => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
             }
             ui.separator();
@@ -125,19 +287,17 @@ impl App {
                     Ok(kit) => {
                         self.drum_kit_name = kit.name.clone();
                         let mut patterns = [DrumPattern::default(); 8];
-                        for i in 0..kit.patterns.len().min(8) {
-                            patterns[i] = kit.patterns[i];
-                        }
+                        let pat_len = kit.patterns.len().min(8);
+                        patterns[..pat_len].copy_from_slice(&kit.patterns[..pat_len]);
                         let mut params = [DrumSlotParams::default(); NUM_DRUM_SLOTS];
-                        for i in 0..kit.params.len().min(NUM_DRUM_SLOTS) {
-                            params[i] = kit.params[i];
-                        }
+                        let par_len = kit.params.len().min(NUM_DRUM_SLOTS);
+                        params[..par_len].copy_from_slice(&kit.params[..par_len]);
                         self.drum_patterns = patterns;
                         self.drum_params = params;
                         self.drum_bpm = kit.bpm;
                         self.drum_swing = kit.swing;
                         self.drum_volume = kit.volume;
-                        self.drum_kit_status = format!("Loaded: {}", kit.name);
+                        self.show_toast(format!("Kit loaded: {}", kit.name), ToastKind::Success);
                         let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
                             patterns: Box::new(patterns),
                             params: Box::new(params),
@@ -150,12 +310,8 @@ impl App {
                             let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: kit.bpm });
                         }
                     }
-                    Err(e) => { self.drum_kit_status = format!("Error: {e}"); }
+                    Err(e) => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
-            }
-            if !self.drum_kit_status.is_empty() {
-                ui.separator();
-                ui.label(egui::RichText::new(&self.drum_kit_status).small().weak());
             }
         });
 
@@ -164,21 +320,19 @@ impl App {
             ui.label("MIDI:");
             ui.add(egui::TextEdit::singleline(&mut self.drum_midi_import_path)
                 .desired_width(240.0).hint_text("path to .mid file"));
-            if ui.button("Import").clicked() && !self.drum_midi_import_path.trim().is_empty() {
+            if ui.button("Import").on_hover_text("Import from MIDI file").clicked() && !self.drum_midi_import_path.trim().is_empty() {
                 let path = std::path::PathBuf::from(self.drum_midi_import_path.trim());
                 match preset::import_midi_drums(&path) {
                     Ok((patterns_vec, bpm)) => {
                         let mut patterns = [DrumPattern::default(); 8];
-                        for i in 0..patterns_vec.len().min(8) {
-                            patterns[i] = patterns_vec[i];
-                        }
+                        let pvec_len = patterns_vec.len().min(8);
+                        patterns[..pvec_len].copy_from_slice(&patterns_vec[..pvec_len]);
                         self.drum_patterns = patterns;
                         self.drum_bpm = bpm;
-                        self.drum_kit_status = format!(
-                            "Imported {} bar(s) @ {:.0} BPM from {}",
+                        self.show_toast(format!(
+                            "Imported {} bar(s) @ {:.0} BPM",
                             patterns_vec.len().min(8), bpm,
-                            path.file_name().unwrap_or_default().to_string_lossy()
-                        );
+                        ), ToastKind::Success);
                         let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
                             patterns: Box::new(patterns),
                             params: Box::new(self.drum_params),
@@ -191,12 +345,12 @@ impl App {
                             let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm });
                         }
                     }
-                    Err(e) => { self.drum_kit_status = format!("Import error: {e}"); }
+                    Err(e) => { self.show_toast(format!("Import error: {e}"), ToastKind::Error); }
                 }
             }
         });
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Step grid
         let cell_w = 28.0;
@@ -205,24 +359,7 @@ impl App {
         let pattern_length = self.drum_patterns[pat_idx].length as usize;
 
         // Colors per instrument type
-        let colors: [egui::Color32; NUM_DRUM_SLOTS] = [
-            egui::Color32::from_rgb(220, 60, 60),   // Kick
-            egui::Color32::from_rgb(180, 140, 80),   // Side Stick
-            egui::Color32::from_rgb(220, 140, 40),   // Snare
-            egui::Color32::from_rgb(200, 100, 200),  // Clap
-            egui::Color32::from_rgb(220, 160, 40),   // E-Snare
-            egui::Color32::from_rgb(120, 200, 80),   // Lo Floor Tom
-            egui::Color32::from_rgb(60, 180, 220),   // Closed HH
-            egui::Color32::from_rgb(100, 180, 60),   // Hi Floor Tom
-            egui::Color32::from_rgb(80, 160, 200),   // Pedal HH
-            egui::Color32::from_rgb(80, 160, 60),    // Low Tom
-            egui::Color32::from_rgb(60, 200, 240),   // Open HH
-            egui::Color32::from_rgb(60, 140, 60),    // Lo-Mid Tom
-            egui::Color32::from_rgb(60, 120, 60),    // Hi-Mid Tom
-            egui::Color32::from_rgb(200, 200, 60),   // Crash
-            egui::Color32::from_rgb(60, 100, 60),    // High Tom
-            egui::Color32::from_rgb(180, 180, 60),   // Ride
-        ];
+        let colors = theme::DRUM_COLORS;
 
         for slot in 0..NUM_DRUM_SLOTS {
             ui.horizontal(|ui| {
@@ -250,11 +387,11 @@ impl App {
 
                     // Beat grouping: highlight beat 1 of each group of 4
                     let bg = if step % 4 == 0 {
-                        egui::Color32::from_gray(50)
+                        theme::BG_BEAT_PRIMARY
                     } else if step % 2 == 0 {
-                        egui::Color32::from_gray(40)
+                        theme::BG_BEAT_SECONDARY
                     } else {
-                        egui::Color32::from_gray(32)
+                        theme::BG_BEAT_OFF
                     };
 
                     let painter = ui.painter();
@@ -287,7 +424,7 @@ impl App {
 
                     // Border (subtle)
                     if !is_current {
-                        painter.rect_stroke(rect, 2.0, egui::Stroke::new(0.5, egui::Color32::from_gray(55)), egui::StrokeKind::Outside);
+                        painter.rect_stroke(rect, 2.0, egui::Stroke::new(0.5, theme::STROKE_CELL_BORDER), egui::StrokeKind::Outside);
                     }
 
                     // Click: toggle step on/off. Place with default vel 100.
@@ -328,7 +465,7 @@ impl App {
                 }
 
                 ui.spacing_mut().item_spacing = spacing;
-                ui.add_space(8.0);
+                ui.add_space(theme::SP_MD);
 
                 // Per-instrument controls
                 ui.horizontal(|ui| {
@@ -336,21 +473,21 @@ impl App {
                     let mut tune = self.drum_params[slot].tune;
                     let mut decay = self.drum_params[slot].decay;
 
-                    ui.style_mut().spacing.slider_width = 40.0;
-                    if ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).changed() {
+                    ui.style_mut().spacing.slider_width = theme::SLIDER_DRUM;
+                    if ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text("Level").changed() {
                         self.drum_params[slot].level = level;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
                     }
-                    if ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).changed() {
+                    if ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).on_hover_text("Tune (semitones)").changed() {
                         self.drum_params[slot].tune = tune;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
                     }
-                    if ui.add(egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).changed() {
+                    if ui.add(egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).on_hover_text("Decay time").changed() {
                         self.drum_params[slot].decay = decay;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
                     }
                     let mut pan = self.drum_params[slot].pan;
-                    if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).changed() {
+                    if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).on_hover_text("Pan L/R").changed() {
                         self.drum_params[slot].pan = pan;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
                     }
@@ -439,7 +576,7 @@ impl App {
 
                 // Step grid: pitch bars + gate toggles
                 let avail_w = ui.available_width();
-                let step_w = (avail_w / length as f32).min(40.0).max(20.0);
+                let step_w = (avail_w / length as f32).clamp(20.0, 40.0);
                 let bar_h = 80.0;
 
                 // Pitch bars
@@ -451,13 +588,13 @@ impl App {
                 let painter = ui.painter_at(rect);
 
                 // Background
-                painter.rect_filled(rect, 2.0, egui::Color32::from_gray(30));
+                painter.rect_filled(rect, 2.0, theme::BG_PANEL);
 
                 // Center line (pitch = 0)
                 let center_y = rect.top() + bar_h * 0.5;
                 painter.line_segment(
                     [egui::pos2(rect.left(), center_y), egui::pos2(rect.left() + step_w * length as f32, center_y)],
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+                    egui::Stroke::new(1.0, theme::STROKE_GUIDE),
                 );
 
                 for i in 0..length {
@@ -469,7 +606,7 @@ impl App {
                     if i > 0 {
                         painter.line_segment(
                             [egui::pos2(x, rect.top()), egui::pos2(x, rect.top() + bar_h)],
-                            egui::Stroke::new(0.5, egui::Color32::from_gray(50)),
+                            egui::Stroke::new(0.5, theme::STROKE_GRID),
                         );
                     }
 
@@ -488,11 +625,11 @@ impl App {
                     }
 
                     let bar_color = if !step.gate {
-                        egui::Color32::from_gray(60)
+                        theme::SEQ_BAR_MUTED
                     } else if is_current {
-                        egui::Color32::from_rgb(0, 220, 180)
+                        theme::SEQ_BAR_CURRENT
                     } else {
-                        egui::Color32::from_rgb(0, 160, 220)
+                        theme::SEQ_BAR_IDLE
                     };
 
                     let bar_rect = egui::Rect::from_min_max(
@@ -509,7 +646,7 @@ impl App {
                             egui::Align2::CENTER_CENTER,
                             &label,
                             egui::FontId::proportional(9.0),
-                            egui::Color32::from_gray(180),
+                            theme::TEXT_OVERLAY,
                         );
                     }
 
@@ -518,7 +655,7 @@ impl App {
                         painter.rect_stroke(
                             egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(step_w, bar_h)),
                             0.0,
-                            egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 200)),
+                            egui::Stroke::new(2.0, theme::SEQ_STEP_HIGHLIGHT),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -530,9 +667,9 @@ impl App {
                         egui::vec2(step_w - 8.0, 12.0),
                     );
                     let gate_color = if step.gate {
-                        egui::Color32::from_rgb(0, 200, 120)
+                        theme::SEQ_GATE_ON
                     } else {
-                        egui::Color32::from_gray(50)
+                        theme::SEQ_GATE_OFF
                     };
                     painter.rect_filled(gate_rect, 2.0, gate_color);
                 }
@@ -585,16 +722,7 @@ impl App {
         let layer_count = self.looper_atoms.layer_count.load(Ordering::Relaxed);
         let state = LooperState::from_u8(state_u8);
 
-        let part_colors = [
-            egui::Color32::from_rgb(70, 130, 200),
-            egui::Color32::from_rgb(70, 190, 100),
-            egui::Color32::from_rgb(220, 150, 50),
-            egui::Color32::from_rgb(200, 70, 70),
-            egui::Color32::from_rgb(160, 80, 200),
-            egui::Color32::from_rgb(50, 190, 190),
-            egui::Color32::from_rgb(220, 200, 50),
-            egui::Color32::from_rgb(190, 100, 150),
-        ];
+        let part_colors = theme::PART_COLORS;
 
         // --- Row 1: Transport + Status ---
         ui.horizontal(|ui| {
@@ -648,7 +776,7 @@ impl App {
 
             let status_color = match state {
                 LooperState::Recording => egui::Color32::RED,
-                LooperState::Overdubbing => egui::Color32::from_rgb(255, 140, 0),
+                LooperState::Overdubbing => theme::LOOPER_OVERDUB,
                 LooperState::Playing => egui::Color32::GREEN,
                 LooperState::Idle => egui::Color32::GRAY,
             };
@@ -695,18 +823,18 @@ impl App {
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.drum_bpm });
                 }
             }
-            if !self.looper_sync_bpm {
-                if ui.add(egui::DragValue::new(&mut self.looper_bpm).range(40.0..=300.0).speed(0.5).prefix("BPM ")).changed() {
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
-                }
+            if !self.looper_sync_bpm
+                && ui.add(egui::DragValue::new(&mut self.looper_bpm).range(40.0..=300.0).speed(0.5).prefix("BPM ")).changed()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
             }
 
             ui.separator();
 
             // "Recording to" — shows active part, allows quick switch
             let ap = self.active_part;
-            let zone = if ap < 4 { "A" } else { "B" };
-            let num = (ap % 4) + 1;
+            let zone = if ap < super::PARTS_PER_ZONE { "A" } else { "B" };
+            let num = (ap % super::PARTS_PER_ZONE) + 1;
             let part_name = self.patches.get(self.parts[ap].patch_idx)
                 .map(|p| p.name.as_str()).unwrap_or("---");
             let is_recording = matches!(state, LooperState::Recording | LooperState::Overdubbing);
@@ -719,8 +847,8 @@ impl App {
                 .show_ui(ui, |ui| {
                     for i in 0..self.parts.len() {
                         if !self.parts[i].enabled { continue; }
-                        let z = if i < 4 { "A" } else { "B" };
-                        let n = (i % 4) + 1;
+                        let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
+                        let n = (i % super::PARTS_PER_ZONE) + 1;
                         let pname = self.patches.get(self.parts[i].patch_idx)
                             .map(|p| p.name.as_str()).unwrap_or("---");
                         let label = format!("{z}{n}: {pname}");
@@ -773,15 +901,15 @@ impl App {
                 // Layer label with part color
                 let primary_part = part_ids[0] as usize % 8;
                 let color = if muted {
-                    egui::Color32::from_gray(80)
+                    theme::LOOPER_LAYER_MUTED
                 } else {
                     part_colors[primary_part]
                 };
 
                 // Part/preset names for this layer
                 let part_names: Vec<String> = part_ids.iter().map(|&pid| {
-                    let z = if (pid as usize) < 4 { "A" } else { "B" };
-                    let n = (pid as usize % 4) + 1;
+                    let z = if (pid as usize) < super::PARTS_PER_ZONE { "A" } else { "B" };
+                    let n = (pid as usize % super::PARTS_PER_ZONE) + 1;
                     let pname = self.patches.get(self.parts[pid as usize].patch_idx)
                         .map(|p| p.name.as_str()).unwrap_or("---");
                     format!("{z}{n}:{pname}")
@@ -792,7 +920,7 @@ impl App {
 
                 // Solo button
                 let solo_color = if soloed { egui::Color32::YELLOW } else { egui::Color32::GRAY };
-                if ui.button(egui::RichText::new("S").color(solo_color)).clicked() {
+                if ui.button(egui::RichText::new("S").color(solo_color)).on_hover_text("Solo layer").clicked() {
                     if soloed {
                         self.looper_solo_layer = None;
                         let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: None });
@@ -804,7 +932,7 @@ impl App {
 
                 // Mute button
                 let mute_color = if muted { egui::Color32::RED } else { egui::Color32::GRAY };
-                if ui.button(egui::RichText::new("M").color(mute_color)).clicked() {
+                if ui.button(egui::RichText::new("M").color(mute_color)).on_hover_text("Mute layer").clicked() {
                     let new_mute = !muted;
                     self.looper_layer_mute[*layer_id as usize] = new_mute;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: *layer_id, mute: new_mute });
@@ -843,16 +971,16 @@ impl App {
         let painter = ui.painter_at(rect);
 
         // Background
-        painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
+        painter.rect_filled(rect, 2.0, theme::BG_TIMELINE);
 
         // Beat grid lines
         let beats = self.looper_bars as u32 * 4;
         for beat in 1..beats {
             let x = rect.left() + (beat as f32 / beats as f32) * total_w;
             let color = if beat % 4 == 0 {
-                egui::Color32::from_gray(70)
+                theme::STROKE_BAR_LINE
             } else {
-                egui::Color32::from_gray(40)
+                theme::STROKE_GRID_DARK
             };
             painter.line_segment(
                 [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
@@ -877,8 +1005,8 @@ impl App {
         let note_span = (note_hi - note_lo).max(1.0);
 
         // Draw note-on events as small rectangles
-        let dot_w = (total_w / (self.looper_bars as f32 * 16.0)).max(2.0).min(6.0);
-        let dot_h = (height / (note_span / 2.0)).max(2.0).min(5.0);
+        let dot_w = (total_w / (self.looper_bars as f32 * 16.0)).clamp(2.0, 6.0);
+        let dot_h = (height / (note_span / 2.0)).clamp(2.0, 5.0);
         for ev in &events {
             if ev.velocity == 0 { continue; } // skip note-offs
             let x = rect.left() + ev.position * total_w;

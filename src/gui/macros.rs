@@ -1,7 +1,8 @@
-/// Macro knobs panel — 8 named user-controllable modulation sources.
+//! Macro knobs panel — 8 named user-controllable modulation sources.
 use eframe::egui;
 use crate::synth::ControlEvent;
 use super::App;
+use super::theme;
 
 impl App {
     /// Draw the macro panel (called from params.rs, near top of synth params).
@@ -12,7 +13,7 @@ impl App {
             ui.strong("Macros");
             ui.label(egui::RichText::new("— assign in Mod Matrix as sources Macro 1-8").small().weak());
         });
-        ui.add_space(2.0);
+        ui.add_space(theme::SP_XS);
 
         // 8 macros in a 4×2 grid
         egui::Grid::new(format!("macros_{part}"))
@@ -49,7 +50,7 @@ impl App {
                             egui::Slider::new(&mut v, 0.0..=1.0)
                                 .show_value(true)
                                 .text("")
-                        ).changed() {
+                        ).on_hover_text("Macro modulation value").changed() {
                             self.parts[part].macro_vals[i] = v;
                             // Update edited_params so it's saved in patch
                             self.parts[part].edited_params.insert(
@@ -68,7 +69,7 @@ impl App {
                 }
             });
 
-        ui.add_space(8.0);
+        ui.add_space(theme::SP_MD);
         self.draw_xy_pad(ui);
     }
 
@@ -86,39 +87,39 @@ impl App {
         // Axis assignment combo boxes
         ui.horizontal(|ui| {
             ui.strong("XY Pad");
-            ui.add_space(12.0);
+            ui.add_space(theme::SP_LG);
 
             ui.label("X:");
             egui::ComboBox::from_id_salt(format!("xy_x_{part}"))
                 .selected_text(macro_labels[self.parts[part].xy_macro_x].as_str())
                 .width(90.0)
                 .show_ui(ui, |ui| {
-                    for i in 0..8 {
+                    for (i, label) in macro_labels.iter().enumerate() {
                         ui.selectable_value(
                             &mut self.parts[part].xy_macro_x,
                             i,
-                            &macro_labels[i],
+                            label,
                         );
                     }
                 });
 
-            ui.add_space(8.0);
+            ui.add_space(theme::SP_MD);
             ui.label("Y:");
             egui::ComboBox::from_id_salt(format!("xy_y_{part}"))
                 .selected_text(macro_labels[self.parts[part].xy_macro_y].as_str())
                 .width(90.0)
                 .show_ui(ui, |ui| {
-                    for i in 0..8 {
+                    for (i, label) in macro_labels.iter().enumerate() {
                         ui.selectable_value(
                             &mut self.parts[part].xy_macro_y,
                             i,
-                            &macro_labels[i],
+                            label,
                         );
                     }
                 });
         });
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         let xi = self.parts[part].xy_macro_x;
         let yi = self.parts[part].xy_macro_y;
@@ -131,11 +132,12 @@ impl App {
         // Pad area
         let size = egui::vec2(200.0, 200.0);
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        response.clone().on_hover_text("Drag to control two macros");
         let painter = ui.painter_at(rect);
 
         // Background
-        painter.rect_filled(rect, 4.0, egui::Color32::from_gray(30));
-        painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_gray(80)), egui::StrokeKind::Outside);
+        painter.rect_filled(rect, 4.0, theme::BG_PANEL);
+        painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0, theme::STROKE_PANEL_BORDER), egui::StrokeKind::Outside);
 
         // Grid lines (4×4 subdivisions)
         for i in 1..4 {
@@ -144,11 +146,11 @@ impl App {
             let y = rect.top() + frac * rect.height();
             painter.line_segment(
                 [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-                egui::Stroke::new(0.5, egui::Color32::from_gray(50)),
+                egui::Stroke::new(0.5, theme::STROKE_GRID),
             );
             painter.line_segment(
                 [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-                egui::Stroke::new(0.5, egui::Color32::from_gray(50)),
+                egui::Stroke::new(0.5, theme::STROKE_GRID),
             );
         }
 
@@ -165,32 +167,32 @@ impl App {
         // Crosshair lines through dot
         painter.line_segment(
             [egui::pos2(dot_pos.x, rect.top()), egui::pos2(dot_pos.x, rect.bottom())],
-            egui::Stroke::new(0.5, egui::Color32::from_rgba_premultiplied(100, 200, 255, 60)),
+            egui::Stroke::new(0.5, theme::XY_CROSSHAIR),
         );
         painter.line_segment(
             [egui::pos2(rect.left(), dot_pos.y), egui::pos2(rect.right(), dot_pos.y)],
-            egui::Stroke::new(0.5, egui::Color32::from_rgba_premultiplied(100, 200, 255, 60)),
+            egui::Stroke::new(0.5, theme::XY_CROSSHAIR),
         );
 
         // Dot
-        painter.circle_filled(dot_pos, 7.0, egui::Color32::from_rgb(100, 200, 255));
+        painter.circle_filled(dot_pos, 7.0, theme::CURVE_FILTER);
         painter.circle_stroke(dot_pos, 7.0, egui::Stroke::new(1.0, egui::Color32::WHITE));
 
         // Axis labels
         painter.text(
             egui::pos2(rect.center().x, rect.bottom() + 10.0),
             egui::Align2::CENTER_TOP,
-            &x_name,
+            x_name,
             egui::FontId::proportional(11.0),
-            egui::Color32::from_gray(180),
+            theme::TEXT_OVERLAY,
         );
         // Y label (rotated text not trivial in egui, place to the left)
         painter.text(
             egui::pos2(rect.left() - 4.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,
-            &y_name,
+            y_name,
             egui::FontId::proportional(11.0),
-            egui::Color32::from_gray(180),
+            theme::TEXT_OVERLAY,
         );
 
         // Handle drag / click

@@ -1,4 +1,4 @@
-/// Shared DSP utility functions: fast math approximations, DC blocker, etc.
+//! Shared DSP utility functions: fast math approximations, DC blocker, etc.
 
 use std::f32::consts::PI;
 
@@ -24,6 +24,10 @@ pub struct DcBlocker {
     y1_l: f32,
     x1_r: f32,
     y1_r: f32,
+}
+
+impl Default for DcBlocker {
+    fn default() -> Self { Self::new() }
 }
 
 impl DcBlocker {

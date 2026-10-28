@@ -39,6 +39,8 @@ pub struct Synthesizer {
 
     master_volume: f32,
 
+    release_time_scale: f32,
+
     effects: Option<Effects>,
 }
 
@@ -98,6 +100,8 @@ impl Synthesizer {
 
         let master_volume = 0.5_f32;
 
+        let release_time_scale = 1_f32;
+
         let effects = if settings.enable_reverb_and_chorus {
             Some(Effects::new(settings))
         } else {
@@ -118,6 +122,7 @@ impl Synthesizer {
             inverse_block_size,
             block_read,
             master_volume,
+            release_time_scale,
             effects,
         })
     }
@@ -237,7 +242,8 @@ impl Synthesizer {
                         let region_pair = RegionPair::new(preset_region, instrument_region);
 
                         if let Some(value) = self.voices.request_new(instrument_region, channel) {
-                            value.start(&region_pair, channel, key, velocity)
+                            let release_scale = self.release_time_scale;
+                            value.start(&region_pair, channel, key, velocity, release_scale)
                         }
                     }
                 }
@@ -534,6 +540,14 @@ impl Synthesizer {
     /// * `value` - The new value of the master volume.
     pub fn set_master_volume(&mut self, value: f32) {
         self.master_volume = value;
+    }
+
+    /// Global multiplier applied to every volume-envelope release time
+    /// (GM2 CC72 semantics, global form). 1.0 = SoundFont defaults.
+    /// Applies to voices started after the call — already-sounding voices
+    /// keep their release.
+    pub fn set_release_time_scale(&mut self, scale: f32) {
+        self.release_time_scale = scale.clamp(0.02, 20.0);
     }
 }
 

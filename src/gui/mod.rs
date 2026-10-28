@@ -1,22 +1,24 @@
-/// GUI interface using egui/eframe.
+//! GUI interface using egui/eframe.
 
 mod params;
 mod drums;
+
+/// Parts per split zone (A: 0..N, B: N..2N)
+const PARTS_PER_ZONE: usize = 8;
 mod midi_seq;
 mod settings;
 mod keyboard;
 mod layers;
 mod fx_chain;
 mod macros;
+mod theme;
 pub mod keybinds;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use cpal::HostId;
 use eframe::egui;
-use rtrb::Producer;
 
 use crate::cc_map::CcMap;
 use crate::config::Config;
@@ -110,11 +112,25 @@ const FILTER_NAMES: &[&str] = &[
     "ResWarp AP",    // 34
     "Vintage Ladder",// 35
     "SVF Morph",     // 36
+    "Polivoks LP",   // 37
+    "Polivoks BP",   // 38
 ];
 const FILTER_ROUTING_NAMES: &[&str] = &["Single", "Serial", "Parallel"];
 const FORMANT_VOICE_NAMES: &[&str] = &["Bass", "Tenor", "Alto", "Soprano"];
 const FORMANT_VOWEL_NAMES: &[&str] = &["A (ah)", "E (eh)", "I (ee)", "O (oh)", "U (oo)"];
 const LAYER_NAMES: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8"];
+
+/// Toast message severity
+#[derive(Clone)]
+pub enum ToastKind { Success, Error, Info }
+
+/// Active toast notification
+#[derive(Clone)]
+pub struct Toast {
+    pub message: String,
+    pub kind: ToastKind,
+    pub created: Instant,
+}
 
 fn buffer_label(size: u32) -> String {
     if size == 0 { "Default".to_string() } else { format!("{size}") }
@@ -161,31 +177,57 @@ impl PartState {
     }
 }
 
+/// Result of scanning for .sf2 files, including directories that could not be
+/// read — so the UI can explain an empty list instead of just showing one.
+pub struct Sf2Scan {
+    pub files: Vec<(String, std::path::PathBuf)>,
+    pub unreadable: Vec<(std::path::PathBuf, String)>,
+}
+
 /// Scan for .sf2 files in the standard data directory.
-pub fn scan_sf2_files() -> Vec<(String, std::path::PathBuf)> {
-    let dir = sf2_dir();
-    let mut result = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("sf2") {
-                let name = path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("?")
-                    .to_string();
-                result.push((name, path));
+pub fn scan_sf2_files() -> Sf2Scan {
+    let mut files: Vec<(String, std::path::PathBuf)> = Vec::new();
+    let mut unreadable = Vec::new();
+
+    // On Android /sdcard/Download needs storage permissions this app does not
+    // hold, so the scan usually fails there. That has to be reported rather
+    // than silently producing an empty list.
+    #[cfg(target_os = "android")]
+    let dirs_to_scan = vec![sf2_dir(), std::path::PathBuf::from("/sdcard/Download")];
+    #[cfg(not(target_os = "android"))]
+    let dirs_to_scan = vec![sf2_dir()];
+
+    for dir in &dirs_to_scan {
+        match std::fs::read_dir(dir) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("sf2") {
+                        let name = path.file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("?")
+                            .to_string();
+                        if !files.iter().any(|(n, _)| n == &name) {
+                            files.push((name, path));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                // A missing private sf2 dir is normal on first run. Anything
+                // else — permission denied in particular — is worth surfacing.
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    unreadable.push((dir.clone(), e.to_string()));
+                }
             }
         }
     }
-    result.sort_by(|a, b| a.0.cmp(&b.0));
-    result
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    Sf2Scan { files, unreadable }
 }
 
 fn sf2_dir() -> std::path::PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("mini_midi_synth")
-        .join("sf2")
+    crate::config::app_data_dir().join("sf2")
 }
 
 fn note_name(note: u8) -> String {
@@ -194,28 +236,32 @@ fn note_name(note: u8) -> String {
     format!("{name}{oct}")
 }
 
+type MidiReconnectFn = Box<dyn FnMut(&str) -> Result<(), String>>;
+
 pub struct App {
     pub _frame_count: u64,
     pub patches: Vec<Patch>,
     pub note_state: NoteState,
     pub pad_state: midi::PadState,
-    pub ctrl_tx: Producer<ControlEvent>,
+    pub ctrl_tx: crate::metrics::CountingProducer<ControlEvent>,
     pub sample_rate: u32,
 
     pub config: Config,
     pub current_host: String,
-    pub available_hosts: Vec<(HostId, &'static str)>,
+    #[cfg(not(target_os = "android"))]
+    pub available_hosts: Vec<(cpal::HostId, &'static str)>,
+    #[cfg(not(target_os = "android"))]
     pub supported_sample_rates: Vec<u32>,
 
     pub midi_port_names: Vec<String>,
     pub midi_connected_port: Option<String>,
 
     pub show_settings: bool,
+    #[cfg(not(target_os = "android"))]
     pub selected_host_idx: usize,
     pub selected_sample_rate: u32,
     pub selected_buffer_size: u32,
     pub selected_midi_port: Option<String>,
-    pub settings_status: String,
     pub is_jack: bool,
 
     /// Layer states
@@ -223,7 +269,7 @@ pub struct App {
     /// Currently edited part (0 = A, 1 = B)
     pub active_part: usize,
 
-    pub on_midi_reconnect: Option<Box<dyn FnMut(usize) -> Result<(), String>>>,
+    pub on_midi_reconnect: Option<MidiReconnectFn>,
 
     /// Collapsed patch categories
     pub collapsed_categories: HashSet<String>,
@@ -234,8 +280,12 @@ pub struct App {
     pub cc_map: CcMap,
     /// MIDI Learn target parameter key
     pub midi_learn_target: Option<&'static str>,
+    /// Part pending removal (middle-click on tab, confirmation dialog)
+    pub pending_remove_part: Option<usize>,
     /// Program change atom for patch feedback
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
+    pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Show help dialog
     pub show_help: bool,
     /// Global params display values (effects, volume, lfo rate)
@@ -247,7 +297,17 @@ pub struct App {
     pub show_drums: bool,
     pub drum_patterns: [DrumPattern; 8],
     pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
+    /// Drum note remap table: slot i plays mapped note drum_remap[i].
+    pub drum_remap: [u8; 16],
+    pub drum_pad_vel: [u8; 16],
+    /// Sound names per kit note (index = note - 30, range 30..=55); from the
+    /// loaded SF2 kit (fallback: GM names for 36..=51, empty elsewhere)
+    pub drum_kit_names: [String; 26],
+    pub show_drum_remap: bool,
+    /// Remap dialog for a single hardware pad (0..16), from drawn-pad click
+    pub remap_pad: Option<usize>,
     pub drum_volume: f32,
+    pub drum_fixed_velocity: bool,
     pub drum_bpm: f32,
     pub drum_swing: f32,
     pub drum_playing: bool,
@@ -259,7 +319,6 @@ pub struct App {
     // Drum kit save/load
     pub drum_kit_name: String,
     pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
-    pub drum_kit_status: String,
     pub drum_midi_import_path: String,
     // Looper
     pub show_looper: bool,
@@ -282,15 +341,15 @@ pub struct App {
     // Performance save/load
     pub perf_name: String,
     pub perf_list: Vec<(String, std::path::PathBuf)>,
-    pub perf_status: String,
     // Navigate button timing
     pub nav_press_time: Option<std::time::Instant>,
     // Pad performance map: 16 pads (notes 36-51) → performance names
     pub show_pad_perf: bool,
     pub pad_perf_map: [Option<String>; 16],
-    pub pad_perf_status: String,
     pub pad_prev_state: [u8; 16],
     pub last_config_save: std::time::Instant,
+    /// Smoothed DSP load percentage shown in the header.
+    pub dsp_load: f32,
     pub global_dirty: bool,
     // SF2 sampler
     pub sf2_file_list: Vec<(String, std::path::PathBuf)>,
@@ -298,7 +357,6 @@ pub struct App {
     pub sf2_keys_loaded_name: String,
     pub sf2_drums_selected: Option<usize>,
     pub sf2_drums_loaded_name: String,
-    pub sf2_status: String,
     pub sf2_drums_enabled: bool,
     pub sf2_keys_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
     pub sf2_drums_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
@@ -312,6 +370,8 @@ pub struct App {
     pub pitch_seq_rate: [u8; 2],
     pub pitch_seq_scale: [u8; 2],
     pub pitch_seq_swing: [f32; 2],
+    // Toast notifications
+    pub toasts: Vec<Toast>,
     // Patch search
     pub preset_search: String,
     // Oscilloscope
@@ -323,7 +383,6 @@ pub struct App {
     // MIDI file sequencer
     pub show_midi_seq: bool,
     pub midi_seq_path: String,
-    pub midi_seq_status: String,
     pub midi_seq_tracks: Vec<midi_seq::MidiSeqTrackGui>,
     pub midi_seq_playing: bool,
     pub midi_seq_looping: bool,
@@ -332,6 +391,17 @@ pub struct App {
     pub midi_seq_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// Result of an async file picker (zenity/kdialog subprocess). None = no pending pick.
     pub midi_seq_file_pick: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+    // Undo/redo for patch parameter editing
+    pub undo_stack: std::collections::VecDeque<std::collections::BTreeMap<String, f32>>,
+    pub redo_stack: Vec<std::collections::BTreeMap<String, f32>>,
+    // Audio device disconnect detection + reconnect
+    pub audio_disconnected: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub _audio_handle: Option<crate::audio::AudioBackend>,
+    pub midi_tx_shared: crate::midi::SharedMidiTx,
+    /// Heap objects the engine and the audio callback handed back. Dropping
+    /// them here is what keeps free() off the audio thread.
+    pub engine_trash_rx: crate::trash::TrashRx,
+    pub cb_trash_rx: crate::trash::TrashRx,
 }
 
 impl eframe::App for App {
@@ -340,13 +410,30 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // On Android high-DPI screens, set proper pixel ratio for crisp font rendering
+        #[cfg(target_os = "android")]
+        ctx.set_pixels_per_point(2.5);
+
+        #[cfg(target_os = "android")]
+        ctx.style_mut(|style| {
+            style.spacing.interact_size = egui::vec2(48.0, 36.0); // Material Design min touch target
+            style.spacing.button_padding = egui::vec2(12.0, 8.0);
+            style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+        });
+
         // Increase base font size and spacing
         ctx.style_mut(|style| {
-            style.text_styles.get_mut(&egui::TextStyle::Body).unwrap().size = 15.0;
-            style.text_styles.get_mut(&egui::TextStyle::Button).unwrap().size = 15.0;
-            style.text_styles.get_mut(&egui::TextStyle::Monospace).unwrap().size = 14.0;
-            style.text_styles.get_mut(&egui::TextStyle::Small).unwrap().size = 13.0;
-            style.text_styles.get_mut(&egui::TextStyle::Heading).unwrap().size = 20.0;
+            for (text_style, size) in [
+                (egui::TextStyle::Body, 15.0),
+                (egui::TextStyle::Button, 13.0),
+                (egui::TextStyle::Monospace, 14.0),
+                (egui::TextStyle::Small, 13.0),
+                (egui::TextStyle::Heading, 20.0),
+            ] {
+                if let Some(font_id) = style.text_styles.get_mut(&text_style) {
+                    font_id.size = size;
+                }
+            }
             style.spacing.slider_width = 250.0;
             style.spacing.item_spacing = egui::vec2(8.0, 5.0);
         });
@@ -361,8 +448,20 @@ impl eframe::App for App {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
 
+        // Check for audio device disconnect (headphones unplugged etc.)
+        if self.audio_disconnected.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            match self.reconnect_audio() {
+                Ok(()) => self.show_toast("Audio reconnected".to_string(), ToastKind::Success),
+                Err(e) => self.show_toast(format!("Audio reconnect failed: {e}"), ToastKind::Error),
+            }
+        }
+
         // Drain feedback from audio thread
         self.drain_feedback();
+
+        // Free whatever the audio thread handed over this frame.
+        self.engine_trash_rx.drain();
+        self.cb_trash_rx.drain();
 
         // Pad performance switching (only when pad perf panel is open)
         if self.show_pad_perf {
@@ -376,9 +475,9 @@ impl eframe::App for App {
                         let name = name.clone();
                         let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                         if self.load_performance_by_name(&name) {
-                            self.pad_perf_status = format!("Loaded: {name}");
+                            self.show_toast(format!("Loaded: {name}"), ToastKind::Success);
                         } else {
-                            self.pad_perf_status = format!("Not found: {name}");
+                            self.show_toast(format!("Not found: {name}"), ToastKind::Error);
                         }
                     }
                 }
@@ -398,14 +497,22 @@ impl eframe::App for App {
             if let Some(key) = keybinds::detect_key_press(ctx) {
                 if key == egui::Key::Escape {
                     self.keybind_capturing = None;
-                } else {
-                    let action = self.keybind_capturing.take().unwrap();
+                } else if let Some(action) = self.keybind_capturing.take() {
                     self.keybinds.set_key_for_action(&action, key);
                     self.config.ui.keybinds = self.keybinds.to_config();
                 }
             }
         } else if !text_editing {
             self.process_keybinds(ctx);
+        }
+
+        // Undo/Redo keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z)
+        if !text_editing {
+            if ctx.input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z)) {
+                self.redo();
+            } else if ctx.input(|i| i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z)) {
+                self.undo();
+            }
         }
 
         // Sync drum play/rec state from engine (for MIDI-triggered changes)
@@ -429,7 +536,7 @@ impl eframe::App for App {
 
         // Top bar
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
-            ui.add_space(2.0);
+            ui.add_space(theme::SP_XS);
             ui.horizontal(|ui| {
                 if ui.button("\u{2699}").on_hover_text("Settings").clicked() {
                     self.show_settings = !self.show_settings;
@@ -454,34 +561,71 @@ impl eframe::App for App {
                 ui.label(format!("MIDI: {midi_status}"));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // DSP load against the callback budget: one buffer at the
+                    // current rate. Anything approaching 100% will glitch.
+                    let budget_us =
+                        self.config.audio.buffer_size as f32 / self.sample_rate as f32 * 1e6;
+                    let worst_us = crate::metrics::METRICS.take_worst_callback_us() as f32;
+                    if budget_us > 0.0 {
+                        let load = worst_us / budget_us * 100.0;
+                        // Smoothed so the number does not flicker every frame.
+                        self.dsp_load = self.dsp_load * 0.8 + load * 0.2;
+                    }
+
                     ui.label(format!(
-                        "{} | {}Hz | buf {}",
-                        self.current_host, self.sample_rate, self.config.audio.buffer_size
-                    ));
+                        "{} | {}Hz | buf {} | dsp {:.0}%",
+                        self.current_host,
+                        self.sample_rate,
+                        self.config.audio.buffer_size,
+                        self.dsp_load,
+                    ))
+                    .on_hover_text(
+                        "Worst audio callback time as a share of the buffer budget. \
+                         Approaching 100% means crackle — raise the buffer size.",
+                    );
+
+                    let dropped = crate::metrics::METRICS.total_dropped();
+                    let errors = crate::metrics::METRICS.stream_error_count();
+                    if dropped > 0 || errors > 0 {
+                        ui.separator();
+                        ui.colored_label(
+                            theme::TEXT_WARN,
+                            format!("drops {dropped} | errs {errors}"),
+                        )
+                        .on_hover_text(
+                            "MIDI and control events that never reached the engine, and audio \
+                             stream errors. A lost NoteOff is a stuck note; non-zero here means \
+                             something is wrong.",
+                        );
+                    }
                 });
             });
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
         });
 
         // Global controls bar
         egui::TopBottomPanel::top("global_controls").show(ctx, |ui| {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.horizontal(|ui| {
-                // Master Volume (global)
-                let mut vol = self.global_params.get("master_volume").copied().unwrap_or(0.8);
-                ui.label("Vol:");
-                if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false)).changed() {
-                    self.global_params.insert("master_volume".into(), vol);
-                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_volume", value: vol });
-                    self.global_dirty = true;
+                // F1 Sustain (CC64) — reflects pedal/fader state, click to toggle
+                let sus = self.sustain_atom.load(std::sync::atomic::Ordering::Relaxed);
+                ui.label("F1 Sustain:");
+                let sus_btn = egui::Button::new(egui::RichText::new(if sus { "ON" } else { "OFF" })
+                    .color(if sus { egui::Color32::BLACK } else { theme::TEXT_MUTED }))
+                    .fill(if sus { theme::KEY_WHITE_ACTIVE } else { theme::BG_PAD_EMPTY });
+                if ui.add(sus_btn).on_hover_text("Sustain pedal (CC64): holds notes. Click to toggle.").clicked() {
+                    let _ = self.ctrl_tx.push(ControlEvent::SetSustain { on: !sus });
                 }
 
                 ui.separator();
 
-                // Master Tone (global)
+                // F2 Master Tone (global)
                 let mut tone = self.global_params.get("master_tone").copied().unwrap_or(20000.0);
-                ui.label("Tone:");
-                if ui.add(egui::Slider::new(&mut tone, 200.0..=20000.0).logarithmic(true).show_value(false)).changed() {
+                ui.label("F2 Tone:");
+                let tone_r = ui.add(egui::Slider::new(&mut tone, 200.0..=20000.0).logarithmic(true).suffix(" Hz").fixed_decimals(0))
+                    .on_hover_text("Double-click to reset");
+                if tone_r.double_clicked() { tone = 20000.0; }
+                if tone_r.changed() || tone_r.double_clicked() {
                     self.global_params.insert("master_tone".into(), tone);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_tone", value: tone });
                     self.global_dirty = true;
@@ -489,10 +633,13 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                // Reverb (global)
+                // F3 Reverb (global)
                 let mut reverb = self.global_params.get("reverb_mix").copied().unwrap_or(0.0);
-                ui.label("Reverb:");
-                if ui.add(egui::Slider::new(&mut reverb, 0.0..=1.0).show_value(false)).changed() {
+                ui.label("F3 Reverb:");
+                let rev_r = ui.add(egui::Slider::new(&mut reverb, 0.0..=1.0).fixed_decimals(2))
+                    .on_hover_text("Double-click to reset");
+                if rev_r.double_clicked() { reverb = 0.0; }
+                if rev_r.changed() || rev_r.double_clicked() {
                     self.global_params.insert("reverb_mix".into(), reverb);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "reverb_mix", value: reverb });
                     self.global_dirty = true;
@@ -500,12 +647,15 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                // Delay (global)
-                let mut delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
-                ui.label("Delay:");
-                if ui.add(egui::Slider::new(&mut delay, 0.0..=1.0).show_value(false)).changed() {
-                    self.global_params.insert("delay_mix".into(), delay);
-                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "delay_mix", value: delay });
+                // F4 Master Volume (global)
+                let mut vol = self.global_params.get("master_volume").copied().unwrap_or(0.8);
+                ui.label("F4 Vol:");
+                let vol_r = ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
+                    .on_hover_text("Double-click to reset");
+                if vol_r.double_clicked() { vol = 0.8; }
+                if vol_r.changed() || vol_r.double_clicked() {
+                    self.global_params.insert("master_volume".into(), vol);
+                    let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_volume", value: vol });
                     self.global_dirty = true;
                 }
 
@@ -514,7 +664,10 @@ impl eframe::App for App {
                 // Pitch Bend Range
                 let mut pbr = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as i32;
                 ui.label("PB:");
-                if ui.add(egui::Slider::new(&mut pbr, 1..=24).suffix("st").show_value(true)).changed() {
+                let pb_r = ui.add(egui::Slider::new(&mut pbr, 1..=24).suffix(" st"))
+                    .on_hover_text("Double-click to reset");
+                if pb_r.double_clicked() { pbr = 2; }
+                if pb_r.changed() || pb_r.double_clicked() {
                     let val = pbr as f32;
                     self.global_params.insert("pitch_bend_range".into(), val);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "pitch_bend_range", value: val });
@@ -525,14 +678,14 @@ impl eframe::App for App {
 
                 // Oscilloscope
                 let scope_data = self.scope_buf.read();
-                let scope_w = 100.0_f32;
-                let scope_h = 24.0_f32;
+                let scope_w = 150.0_f32;
+                let scope_h = 40.0_f32;
                 let (resp, painter) = ui.allocate_painter(
                     egui::vec2(scope_w, scope_h),
                     egui::Sense::hover(),
                 );
                 let r = resp.rect;
-                painter.rect_filled(r, 2.0, egui::Color32::from_rgb(20, 20, 30));
+                painter.rect_filled(r, 2.0, theme::BG_WIDGET);
                 let mid_y = r.center().y;
                 // Draw waveform
                 let n = scope_data.len();
@@ -543,35 +696,29 @@ impl eframe::App for App {
                     egui::pos2(r.left() + px as f32, mid_y - s * scope_h * 0.45)
                 }).collect();
                 if points.len() >= 2 {
-                    painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 200, 100))));
+                    painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, theme::SCOPE_WAVE)));
                 }
                 // Center line
                 painter.line_segment(
                     [egui::pos2(r.left(), mid_y), egui::pos2(r.right(), mid_y)],
-                    egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 80)),
+                    egui::Stroke::new(0.5, theme::STROKE_SUBTLE),
                 );
             });
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
         });
 
         // Bottom: keyboard
         egui::TopBottomPanel::bottom("keyboard_panel").show(ctx, |ui| {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             self.draw_keyboard(ui);
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
         });
 
-        // Pad perf status (above keyboard)
-        if !self.pad_perf_status.is_empty() || self.show_pad_perf {
+        // Pad perf indicator (above keyboard)
+        if self.show_pad_perf {
             egui::TopBottomPanel::bottom("pad_perf_bar").show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    if self.show_pad_perf {
-                        ui.colored_label(egui::Color32::YELLOW, "PAD PERF: tap a pad to switch performance");
-                    }
-                    if !self.pad_perf_status.is_empty() {
-                        ui.separator();
-                        ui.label(egui::RichText::new(&self.pad_perf_status).small().weak());
-                    }
+                    ui.colored_label(egui::Color32::YELLOW, "PAD PERF: tap a pad to switch performance");
                 });
             });
         }
@@ -587,12 +734,12 @@ impl eframe::App for App {
                 let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
                 let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
 
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
                 if is_sf2 {
                     ui.strong(format!("GM Instruments (Layer {layer_label})"));
                 } else {
                     ui.horizontal(|ui| {
-                        if ui.small_button("\u{25C0}").clicked() {
+                        if ui.small_button("\u{25C0}").on_hover_text("Previous preset").clicked() {
                             // Prev patch
                             let idx = self.parts[part].patch_idx;
                             if idx > 0 {
@@ -603,8 +750,10 @@ impl eframe::App for App {
                                 self.save_config();
                             }
                         }
-                        ui.strong(format!("Presets ({layer_label})"));
-                        if ui.small_button("\u{25B6}").clicked() {
+                        let idx = self.parts[part].patch_idx;
+                        let total = self.patches.len();
+                        ui.strong(format!("Presets ({layer_label}) {}/{}", idx + 1, total));
+                        if ui.small_button("\u{25B6}").on_hover_text("Next preset").clicked() {
                             // Next patch
                             let idx = self.parts[part].patch_idx;
                             if idx + 1 < self.patches.len() {
@@ -617,19 +766,28 @@ impl eframe::App for App {
                         }
                     });
                     ui.horizontal(|ui| {
-                        if ui.small_button("Init").clicked() {
+                        if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
+                            self.push_undo_snapshot();
                             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                             self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
                             self.send_edited_params(part);
                         }
-                        if ui.small_button("Rnd").clicked() {
+                        if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
+                            self.push_undo_snapshot();
                             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                             self.parts[part].edited_params = crate::synth::PatchParams::random_map();
                             self.send_edited_params(part);
                         }
+                        ui.separator();
+                        if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
+                            self.undo();
+                        }
+                        if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+                            self.redo();
+                        }
                     });
                 }
-                ui.add_space(2.0);
+                ui.add_space(theme::SP_XS);
 
                 // Search bar
                 let search_width = ui.available_width();
@@ -645,11 +803,9 @@ impl eframe::App for App {
                             .hint_text("\u{1F50D} Search...")
                             .desired_width(text_w.max(60.0)),
                     );
-                    if !self.preset_search.is_empty() {
-                        if ui.small_button("\u{2715}").clicked() {
-                            self.preset_search.clear();
-                            r.request_focus();
-                        }
+                    if !self.preset_search.is_empty() && ui.small_button("\u{2715}").on_hover_text("Clear search").clicked() {
+                        self.preset_search.clear();
+                        r.request_focus();
                     }
                 });
                 ui.separator();
@@ -832,13 +988,38 @@ impl eframe::App for App {
             self.draw_keybinds_window(ctx);
         }
 
+        // Draw toast notifications
+        self.toasts.retain(|t| t.created.elapsed().as_secs_f32() < 3.0);
+        for (i, toast) in self.toasts.iter().enumerate() {
+            let color = match toast.kind {
+                ToastKind::Success => egui::Color32::from_rgb(40, 160, 80),
+                ToastKind::Error => egui::Color32::from_rgb(200, 60, 60),
+                ToastKind::Info => egui::Color32::from_rgb(60, 140, 200),
+            };
+            egui::Area::new(egui::Id::new("toast").with(i))
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -40.0 - i as f32 * 36.0))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::default()
+                        .fill(color)
+                        .corner_radius(4.0)
+                        .inner_margin(egui::Margin::symmetric(12, 6))
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new(&toast.message).color(egui::Color32::WHITE).strong());
+                        });
+                });
+        }
+        if !self.toasts.is_empty() {
+            ctx.request_repaint();
+        }
+
         // Central: part tabs + parameters / drum sequencer
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             self.draw_part_tabs(ui);
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.separator();
-            ui.add_space(6.0);
+            ui.add_space(theme::SP_MD);
             if self.show_fx_chain {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     self.draw_fx_chain(ui);
@@ -853,10 +1034,10 @@ impl eframe::App for App {
                 });
             } else {
                 self.draw_looper(ui);
-                ui.add_space(2.0);
+                ui.add_space(theme::SP_XS);
                 self.draw_pitch_sequencer(ui);
                 ui.separator();
-                ui.add_space(6.0);
+                ui.add_space(theme::SP_MD);
                 let part = self.active_part;
                 let is_sf2 = self.parts[part].sf2_mode;
                 // Synth / SF2 toggle
@@ -864,8 +1045,8 @@ impl eframe::App for App {
                     ui.horizontal(|ui| {
                         ui.label("Mode:");
                         let mut sf2 = is_sf2;
-                        if ui.selectable_label(!sf2, "Synth").clicked() { sf2 = false; }
-                        if ui.selectable_label(sf2, "SF2").clicked() { sf2 = true; }
+                        if ui.selectable_label(!sf2, "Synth").on_hover_text("Use synth engine").clicked() { sf2 = false; }
+                        if ui.selectable_label(sf2, "SF2").on_hover_text("Use SoundFont samples").clicked() { sf2 = true; }
                         if sf2 != is_sf2 {
                             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                             self.parts[part].sf2_mode = sf2;
@@ -882,7 +1063,7 @@ impl eframe::App for App {
                     let prog = self.parts[part].sf2_program;
                     let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
                     ui.colored_label(
-                        egui::Color32::from_rgb(160, 160, 160),
+                        theme::TEXT_SF2_STATUS,
                         format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_keys_loaded_name, prog, name),
                     );
                 } else {
@@ -909,6 +1090,23 @@ impl App {
         }
         // Send drum and part volumes to engine
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+        // Restore the internal-kit remap before the initial push (if an SF2 kit is
+        // configured, load_sf2_drums below overwrites this with the per-kit table).
+        if self.sf2_drums_loaded_name.is_empty() {
+            if let Some(v) = self.config.sf2.drums_remaps.get("internal") {
+                let mut t = [0u8; 16];
+                for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(i as u8).min(15); }
+                self.drum_remap = t;
+            }
+            if let Some(v) = self.config.sf2.drums_vels.get("internal") {
+                let mut t = [0u8; 16];
+                for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
+                self.drum_pad_vel = t;
+            }
+        }
+        self.push_drum_remap();
+        self.push_drum_pad_vel();
         for i in 0..self.parts.len() {
             self.send_part_volume(i);
         }
@@ -966,9 +1164,11 @@ impl App {
         self.config.ui.fader_delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
         self.config.ui.pitch_bend_range = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as u8;
         self.config.ui.drum_volume = self.drum_volume;
-        if let Some(l) = self.parts.get(0) { self.config.ui.layer_a_volume = l.volume; }
+        self.config.ui.drum_fixed_velocity = self.drum_fixed_velocity;
+        if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
+        self.config.ui.split_point = Some(self.split_point);
         self.config.ui.looper_sync_bpm = self.looper_sync_bpm;
         self.config.ui.keybinds = self.keybinds.to_config();
         let _ = self.config.save();
@@ -1031,6 +1231,31 @@ impl App {
                         self.seq_target_atom.store(0, Ordering::Relaxed);
                     }
                 }
+                KeyAction::PrevPreset => {
+                    let part = self.active_part;
+                    let idx = self.parts[part].patch_idx;
+                    if idx > 0 {
+                        let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                        self.parts[part].patch_idx = idx - 1;
+                        self.load_edited_params(part);
+                        self.send_edited_params(part);
+                        self.save_config();
+                    }
+                }
+                KeyAction::NextPreset => {
+                    let part = self.active_part;
+                    let idx = self.parts[part].patch_idx;
+                    if idx + 1 < self.patches.len() {
+                        let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                        self.parts[part].patch_idx = idx + 1;
+                        self.load_edited_params(part);
+                        self.send_edited_params(part);
+                        self.save_config();
+                    }
+                }
+                KeyAction::TogglePadPerf => {
+                    self.show_pad_perf = !self.show_pad_perf;
+                }
             }
         }
     }
@@ -1051,7 +1276,7 @@ impl App {
                     for action in KeyAction::all() {
                         ui.label(action.label());
                         let key_label = self.keybinds.key_for_action(&action)
-                            .map(|k| key_to_str(k))
+                            .map(key_to_str)
                             .unwrap_or("---");
                         let is_capturing = self.keybind_capturing.as_ref() == Some(&action);
                         let btn_text = if is_capturing { "Press key..." } else { key_label };
@@ -1068,7 +1293,7 @@ impl App {
                         ui.end_row();
                     }
                 });
-                ui.add_space(5.0);
+                ui.add_space(theme::SP_SM);
                 if ui.button("Reset Defaults").clicked() {
                     self.keybinds = keybinds::Keybinds::defaults();
                     self.config.ui.keybinds = self.keybinds.to_config();
@@ -1076,6 +1301,52 @@ impl App {
                 }
             });
         self.show_keybinds_window = open;
+    }
+
+    /// Push a toast notification.
+    pub fn show_toast(&mut self, message: impl Into<String>, kind: ToastKind) {
+        self.toasts.push(Toast {
+            message: message.into(),
+            kind,
+            created: Instant::now(),
+        });
+    }
+
+    /// Maximum undo depth for patch parameter editing.
+    const MAX_UNDO: usize = 50;
+
+    /// Push a snapshot of the active part's edited_params onto the undo stack.
+    /// Safe to call multiple times — only pushes if state differs from top of stack.
+    pub(super) fn push_undo_snapshot(&mut self) {
+        let current = &self.parts[self.active_part].edited_params;
+        if self.undo_stack.back() == Some(current) {
+            return; // no change since last snapshot
+        }
+        self.undo_stack.push_back(current.clone());
+        self.redo_stack.clear();
+        if self.undo_stack.len() > Self::MAX_UNDO {
+            self.undo_stack.pop_front();
+        }
+    }
+
+    fn undo(&mut self) {
+        let part = self.active_part;
+        if let Some(snapshot) = self.undo_stack.pop_back() {
+            self.redo_stack.push(self.parts[part].edited_params.clone());
+            self.parts[part].edited_params = snapshot;
+            self.send_edited_params(part);
+            self.show_toast("Undo", ToastKind::Info);
+        }
+    }
+
+    fn redo(&mut self) {
+        let part = self.active_part;
+        if let Some(snapshot) = self.redo_stack.pop() {
+            self.undo_stack.push_back(self.parts[part].edited_params.clone());
+            self.parts[part].edited_params = snapshot;
+            self.send_edited_params(part);
+            self.show_toast("Redo", ToastKind::Info);
+        }
     }
 
     fn send_edited_params(&mut self, part: usize) {
@@ -1093,6 +1364,144 @@ impl App {
     fn send_part_volume(&mut self, part: usize) {
         let volume = self.parts[part].volume;
         let _ = self.ctrl_tx.push(ControlEvent::SetPartVolume { part, volume });
+    }
+
+    /// Pushes every per-part setting that is not carried by the patch itself.
+    ///
+    /// Needed after an audio reconnect, where the engine is brand new and
+    /// knows nothing about the GUI's state: without this the fresh engine has
+    /// default ranges, no panning, no transposition and no SF2 assignments.
+    pub(super) fn send_full_part_state(&mut self) {
+        for i in 0..self.parts.len() {
+            let p = &self.parts[i];
+            let (enabled, mute, volume) = (p.enabled, p.mute, p.volume);
+            let (min_note, max_note) = (p.min_note, p.max_note);
+            let (vel_min, vel_max) = (p.vel_min, p.vel_max);
+            let (pan, transpose) = (p.pan, p.transpose);
+            let (sf2_mode, sf2_program) = (p.sf2_mode, p.sf2_program);
+            let macro_vals = p.macro_vals;
+
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartVolume { part: i, volume });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartRange { part: i, min_note, max_note });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange { part: i, vel_min, vel_max });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: transpose });
+            for (index, value) in macro_vals.iter().enumerate() {
+                let _ = self.ctrl_tx.push(ControlEvent::SetMacro { part: i, index, value: *value });
+            }
+            if sf2_mode {
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                    part: i, program: sf2_program, bank: 0,
+                });
+            }
+        }
+    }
+
+    /// Re-sends the MIDI CC mapping to a freshly created engine.
+    pub(super) fn send_cc_map(&mut self) {
+        let _ = self.ctrl_tx.push(ControlEvent::SetCcMap { map: Box::new(self.cc_map) });
+    }
+
+    /// Config key for the drum remap table: kit name, or "internal" kit.
+    /// Derive SF2 choke groups from the kit's sample names: hat-ish sounds ->
+    /// group 1 (mutual), crash/cymbal -> group 2, everything else 0.
+    fn derive_choke_groups(&self) -> [u8; 26] {
+        let mut t = [0u8; 26];
+        for (i, name) in self.drum_kit_names.iter().enumerate() {
+            let n = name.to_lowercase();
+            if n.contains("hat") || n.contains("hh") {
+                t[i] = 1;
+            } else if n.contains("crash") || n.contains("cymbal") {
+                t[i] = 2;
+            }
+        }
+        t
+    }
+
+    fn push_drum_choke_groups(&mut self) {
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetChokeGroups {
+            table: Box::new(self.derive_choke_groups()),
+        });
+    }
+
+    fn drum_remap_key(&self) -> String {
+        if self.sf2_drums_loaded_name.is_empty() { "internal".to_string() }
+        else { self.sf2_drums_loaded_name.clone() }
+    }
+
+    /// Extract the kit's own drum map (note -> SAMPLE name) for the remap UI.
+    /// All instruments/presets are scanned; per-key sample names are collected.
+    fn extract_kit_names(&mut self, sf: &rustysynth::SoundFont) {
+        self.reset_kit_names();
+        let headers = sf.get_sample_headers();
+        let mut seen = [false; 26];
+        for inst in sf.get_instruments() {
+            for r in inst.get_regions() {
+                let (lo, hi) = (r.get_key_range_start(), r.get_key_range_end());
+                if hi < 30 || lo > 55 { continue; }
+                let sid = r.get_sample_id();
+                if sid >= headers.len() { continue; }
+                let name = headers[sid].get_name().to_string();
+                for k in lo.max(30)..=hi.min(55) {
+                    let i = (k - 30) as usize;
+                    if !seen[i] { self.drum_kit_names[i] = name.clone(); seen[i] = true; }
+                }
+            }
+        }
+    }
+
+    fn reset_kit_names(&mut self) {
+        for (i, n) in self.drum_kit_names.iter_mut().enumerate() {
+            let note = 30 + i as u8;
+            *n = if (36..=51).contains(&note) {
+                crate::synth::drum::DRUM_NAMES[(note - 36) as usize].to_string()
+            } else { String::new() };
+        }
+    }
+
+    /// Push the current remap table to the engine.
+    fn push_drum_remap(&mut self) {
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetRemap { table: Box::new(self.drum_remap) });
+    }
+
+    /// Persist the current remap table under the active kit key.
+    /// Called from the remap panel in drums.rs.
+    fn save_drum_remap(&mut self) {
+        let key = self.drum_remap_key();
+        self.config.sf2.drums_remaps.insert(key, self.drum_remap.to_vec());
+        let _ = self.config.save();
+    }
+
+    fn push_drum_pad_vel(&mut self) {
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetPadVel { table: Box::new(self.drum_pad_vel) });
+    }
+
+    /// Wired up by the pad-vel panel in drums.rs.
+    fn save_drum_pad_vel(&mut self) {
+        let key = self.drum_remap_key();
+        self.config.sf2.drums_vels.insert(key, self.drum_pad_vel.to_vec());
+        let _ = self.config.save();
+    }
+
+    /// Re-sends the drum kit, tempo and pattern selection to a fresh engine.
+    pub(super) fn send_drum_state(&mut self) {
+        let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
+            patterns: Box::new(self.drum_patterns),
+            params: Box::new(self.drum_params),
+            bpm: self.drum_bpm,
+            swing: self.drum_swing,
+            volume: self.drum_volume,
+        });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPattern { pattern: self.drum_current_pattern });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+        self.push_drum_remap();
+        self.push_drum_pad_vel();
+        let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
+        let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: self.looper_bars });
+        let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: self.looper_quantize });
     }
 
     fn set_active_part(&mut self, part: usize) {
@@ -1114,16 +1523,16 @@ impl App {
                 let mut reader = BufReader::new(&mut file);
                 match rustysynth::SoundFont::new(&mut reader) {
                     Ok(sf) => Some(std::sync::Arc::new(sf)),
-                    Err(e) => { self.sf2_status = format!("Parse error: {e}"); None }
+                    Err(e) => { self.show_toast(format!("SF2 parse error: {e}"), ToastKind::Error); None }
                 }
             }
-            Err(e) => { self.sf2_status = format!("Open error: {e}"); None }
+            Err(e) => { self.show_toast(format!("SF2 open error: {e}"), ToastKind::Error); None }
         }
     }
 
     fn load_sf2_keys(&mut self, idx: usize) {
         let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
-            self.sf2_status = "File not found".to_string();
+            self.show_toast("SF2 file not found", ToastKind::Error);
             return;
         };
         // Reuse existing drums soundfont if same file
@@ -1143,7 +1552,7 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
         let _ = self.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
         self.sf2_keys_loaded_name = name;
-        self.sf2_status = "Keys SF2 loaded".to_string();
+        self.show_toast("Keys SF2 loaded", ToastKind::Success);
         // Apply per-part SF2 modes
         for i in 0..2 {
             if self.parts[i].sf2_mode {
@@ -1160,7 +1569,7 @@ impl App {
 
     fn load_sf2_drums(&mut self, idx: usize) {
         let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
-            self.sf2_status = "File not found".to_string();
+            self.show_toast("SF2 file not found", ToastKind::Error);
             return;
         };
         // Reuse existing keys soundfont if same file
@@ -1178,12 +1587,33 @@ impl App {
         };
         self.sf2_drums_soundfont = Some(sf.clone());
         let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
-        let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf });
+        let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
         self.sf2_drums_loaded_name = name;
-        self.sf2_status = "Drums SF2 loaded".to_string();
+        self.extract_kit_names(&sf);
+        self.push_drum_choke_groups();
+        self.show_toast("Drums SF2 loaded", ToastKind::Success);
         if self.sf2_drums_enabled {
             let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
         }
+        // Load the per-kit remap table (identity if none saved for this kit).
+        if let Some(v) = self.config.sf2.drums_remaps.get(&self.drum_remap_key()) {
+            // migrate legacy slot-encoded values (0..16) to kit notes (+36)
+            let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
+            let mut t = [0u8; 16];
+            for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(36 + i as u8).clamp(30, 55); }
+            self.drum_remap = t;
+        } else {
+            for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
+        }
+        self.push_drum_remap();
+        if let Some(v) = self.config.sf2.drums_vels.get(&self.drum_remap_key()) {
+            let mut t = [0u8; 16];
+            for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
+            self.drum_pad_vel = t;
+        } else {
+            self.drum_pad_vel = [0u8; 16];
+        }
+        self.push_drum_pad_vel();
         self.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
         let _ = self.config.save();
     }
@@ -1205,6 +1635,13 @@ impl App {
         self.sf2_drums_soundfont = None;
         self.sf2_drums_loaded_name.clear();
         self.sf2_drums_enabled = false;
+        self.reset_kit_names();
+        self.push_drum_choke_groups(); // back to GM choke layout
+        // Internal kit: reset to identity remap.
+        for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
+        self.push_drum_remap();
+        self.drum_pad_vel = [0u8; 16];
+        self.push_drum_pad_vel();
         let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
         let _ = self.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);
         self.config.sf2.drums_file_path = None;
@@ -1222,15 +1659,34 @@ impl App {
     /// Load a performance by name (for pad perf switching).
     /// Returns true if found and loaded.
     fn load_performance_by_name(&mut self, name: &str) -> bool {
-        let path = self.perf_list.iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, p)| p.clone());
-        let Some(path) = path else { return false; };
-        let Ok(perf) = preset::load_performance(&path) else { return false; };
+        let perf = if name == "(Init)" {
+            preset::init_performance()
+        } else {
+            let path = self.perf_list.iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, p)| p.clone());
+            let Some(path) = path else { return false; };
+            match preset::load_performance(&path) {
+                Ok(p) => p,
+                Err(_) => return false,
+            }
+        };
         // AllNotesOff for smooth transition
         let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+        // Legacy 8-part migration is centralized in preset::load_performance.
+        let parts = perf.parts;
+        // Restore the stored split point; legacy perfs derive it from the
+        // first enabled zone-B part's key_low (fallback: C4=60).
+        self.split_point = perf.split_point.unwrap_or_else(|| {
+            parts.iter()
+                .skip(crate::gui::PARTS_PER_ZONE)
+                .find(|p| p.enabled)
+                .map(|p| p.key_low)
+                .filter(|&v| v > 0)
+                .unwrap_or(60)
+        });
         self.perf_name = perf.name.clone();
-        for (i, part) in perf.parts.iter().enumerate() {
+        for (i, part) in parts.iter().enumerate() {
             if i >= self.parts.len() { break; }
             let patch_idx = self.patches.iter()
                 .position(|p| p.name == part.patch_name)
@@ -1243,16 +1699,34 @@ impl App {
             self.parts[i].edited_params = part.param_overrides.clone();
             self.parts[i].sf2_mode = part.sf2_mode;
             self.parts[i].sf2_program = part.sf2_program;
+            self.parts[i].pan = part.pan;
+            self.parts[i].transpose = part.transpose;
+            self.parts[i].mute = part.mute;
+            self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
+            self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
             self.send_edited_params(i);
             self.send_part_enabled(i);
             self.send_part_volume(i);
             self.send_part_range(i);
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan: part.pan });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: part.transpose });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: part.mute });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange {
+                part: i, vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max });
             // Restore SF2 mode for this part
             let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: part.sf2_mode });
             if part.sf2_mode {
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
                     part: i, program: part.sf2_program, bank: 0,
                 });
+            }
+        }
+        // Parts absent from the performance must not keep playing
+        // the previous patch with their old voices.
+        for i in parts.len()..self.parts.len() {
+            if self.parts[i].enabled {
+                self.parts[i].enabled = false;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
             }
         }
         true
@@ -1330,6 +1804,7 @@ impl App {
         self.midi_port_names = midi::list_ports().unwrap_or_default();
     }
 
+    #[cfg(not(target_os = "android"))]
     fn refresh_sample_rates(&mut self) {
         if let Some((host_id, _)) = self.available_hosts.get(self.selected_host_idx) {
             self.supported_sample_rates = crate::audio::supported_sample_rates(*host_id);

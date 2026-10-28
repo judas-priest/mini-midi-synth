@@ -177,6 +177,46 @@ rustup target add aarch64-unknown-linux-gnu
 cross build --release --target aarch64-unknown-linux-gnu --no-default-features
 ```
 
+### Android
+
+```bash
+./android/build_rust.sh
+(cd android && ./gradlew assembleDebug)
+```
+
+Логи: `adb logcat -s MiniMidiSynth`.
+Разбор нативного краша: `adb logcat | $ANDROID_NDK_HOME/prebuilt/linux-x86_64/bin/ndk-stack -sym android/symbols/arm64-v8a`
+
+#### Релизная подпись
+
+Ключ создаётся один раз и никогда не попадает в репозиторий:
+
+```bash
+keytool -genkey -v -keystore ~/keys/mini-midi-synth.jks \
+  -keyalg RSA -keysize 4096 -validity 10000 -alias mini-midi-synth
+```
+
+Затем в `~/.gradle/gradle.properties`:
+
+```properties
+mmsStoreFile=/home/you/keys/mini-midi-synth.jks
+mmsStorePassword=...
+mmsKeyAlias=mini-midi-synth
+mmsKeyPassword=...
+mmsVersionCode=2
+```
+
+Без этих свойств `assembleRelease` соберётся с debug-ключом и предупредит об этом — такой APK нельзя распространять. Потеря keystore означает невозможность обновить уже установленное приложение: сделай резервную копию.
+
+### Проверки перед коммитом
+
+```bash
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo test --features rt-assert --test rt_safety   # аудиопоток не аллоцирует
+cargo deny check                                    # уязвимости и лицензии
+```
+
 ---
 
 ## Конфигурация
@@ -218,10 +258,14 @@ Drum kits: `~/.config/mini_midi_synth/drum_kits/`
 
 - **Zero-alloc audio path**: фиксированные массивы, никаких Vec/String/Box в `tick_block`
 - **Lock-free**: rtrb ring buffers для ControlEvent/MidiEvent, atomics для состояния
+- **Trash queue**: heap-объекты (пресеты, саундфонты) не освобождаются в аудиопотоке — уезжают в GUI-поток через `src/trash.rs`
 - **LooperDisplay**: `Arc<Mutex<>>` с `try_lock` — аудио поток никогда не блокируется
+
+Подробнее: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — потоки, инварианты аудиопотока, формат пресета.
+История изменений: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
 ## Лицензия
 
-Проприетарный код. Не для распространения.
+Проприетарный код. Не для распространения. См. [LICENSE](LICENSE) — там же перечислены лицензии вендоренных зависимостей в `vendor/`.

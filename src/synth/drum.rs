@@ -1,6 +1,6 @@
-/// Dedicated drum engine for MIDI channel 10 (GM drum map notes 36-51).
-/// Lightweight per-instrument voices, choke groups, velocity-to-timbre,
-/// and a built-in step sequencer. Zero heap allocation in the audio path.
+//! Dedicated drum engine for MIDI channel 10 (GM drum map notes 36-51).
+//! Lightweight per-instrument voices, choke groups, velocity-to-timbre,
+//! and a built-in step sequencer. Zero heap allocation in the audio path.
 
 use std::f32::consts::TAU;
 use std::sync::Arc;
@@ -33,6 +33,11 @@ const CHOKE_GROUPS: [u8; NUM_DRUM_SLOTS] = [
     0, // 50 High Tom
     0, // 51 Ride
 ];
+
+const NUM_CHOKE_GROUPS: usize = 2;
+/// Kit sample note range reachable by remap (SF2 kits place samples here).
+pub const KIT_NOTE_LO: u8 = 30;
+pub const KIT_NOTE_HI: u8 = 55;
 
 pub const DRUM_NAMES: [&str; NUM_DRUM_SLOTS] = [
     "Kick", "Side Stick", "Snare", "Clap",
@@ -261,12 +266,12 @@ impl SnareVoice {
         let sr = self.sample_rate;
         let mut body = 0.0_f32;
         let body_levels = [1.0_f32, 0.65, 0.35]; // decreasing amplitude for higher modes
-        for i in 0..3 {
+        for (i, &level) in body_levels.iter().enumerate() {
             let f = self.body_freqs[i] * pitch_offset;
             let p = self.phases[i];
             // Triangle wave from phase
             let tri = if p < 0.5 { 4.0 * p - 1.0 } else { 3.0 - 4.0 * p };
-            body += tri * body_levels[i];
+            body += tri * level;
             self.phases[i] += f / sr;
             self.phases[i] -= self.phases[i].floor();
         }
@@ -355,8 +360,8 @@ impl MetalVoice {
         self.amp = vel;
         self.amp_coeff = decay_coeff(decay_time * params.decay, self.sample_rate);
         let tune_mult = (params.tune / 12.0).exp2();
-        for i in 0..6 {
-            self.freqs[i] = METAL_FREQS[i] * tune_mult;
+        for (freq, &metal_freq) in self.freqs.iter_mut().zip(METAL_FREQS.iter()) {
+            *freq = metal_freq * tune_mult;
         }
     }
 
@@ -689,13 +694,9 @@ impl Default for DrumSlotParams {
 const MAX_STEPS: usize = 16;
 const MAX_PATTERNS: usize = 8;
 
-#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 pub struct StepData {
     pub velocity: u8, // 0 = off, 1-127 = on
-}
-
-impl Default for StepData {
-    fn default() -> Self { Self { velocity: 0 } }
 }
 
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -742,7 +743,7 @@ impl StepSequencer {
 
     /// Clear all steps in the current pattern.
     pub fn clear_pattern(&mut self) {
-        self.undo_snapshot = Some(Box::new(self.patterns.clone()));
+        self.undo_snapshot = Some(Box::new(self.patterns));
         let pat = &mut self.patterns[self.current_pattern as usize];
         pat.steps = [[StepData::default(); MAX_STEPS]; NUM_DRUM_SLOTS];
     }
@@ -756,7 +757,7 @@ impl StepSequencer {
 
     /// Save snapshot before destructive operation (e.g. recording start).
     pub fn save_snapshot(&mut self) {
-        self.undo_snapshot = Some(Box::new(self.patterns.clone()));
+        self.undo_snapshot = Some(Box::new(self.patterns));
     }
 
     /// Advance sequencer by one sample. Returns list of (slot_index, velocity) to trigger.
@@ -782,14 +783,14 @@ impl StepSequencer {
             let pattern = &self.patterns[self.current_pattern as usize];
             let step = self.current_step as usize;
             if step < pattern.length as usize {
-                for slot in 0..NUM_DRUM_SLOTS {
+                for (slot, trigger) in triggers.iter_mut().enumerate() {
                     let vel = pattern.steps[slot][step].velocity;
                     if vel > 0 {
-                        triggers[slot] = (1, vel);
+                        *trigger = (1, vel);
                     }
                 }
             }
-            self.current_step = (self.current_step + 1) % pattern.length;
+            self.current_step = (self.current_step + 1) % pattern.length.max(1);
         }
         triggers
     }
@@ -856,6 +857,19 @@ pub struct DrumEngine {
     pub volume: f32,
     pub enabled: bool,
     pub sf2_mode: bool,
+    /// Velocity off: every hit triggers at 127 (velocity-less controllers)
+    pub fixed_velocity: bool,
+    /// Incoming pad note -> internal slot. remap[note-36] = slot (0..16).
+    pub remap: [u8; NUM_DRUM_SLOTS],
+    /// Per-pad velocity override, indexed by incoming note - 36.  0 = Off
+    /// (use incoming/master velocity).
+    pub pad_vel: [u8; NUM_DRUM_SLOTS],
+    /// Per-note choke group ids for the SF2 path, indexed by (note - 30).
+    /// Defaults to the GM layout (CHOKE_GROUPS shifted); replaced per-kit by
+    /// the GUI from the kit's sample names.
+    pub choke_groups: [u8; 26],
+    /// SF2 choke: last triggered note per choke group (0 = none).
+    group_last_note: [u8; NUM_CHOKE_GROUPS],
     sample_rate: f32,
     /// Shared atom for GUI to read current step position.
     step_atom: Arc<AtomicU8>,
@@ -892,6 +906,16 @@ impl DrumEngine {
             volume: 0.8,
             enabled: true,
             sf2_mode: false,
+            fixed_velocity: false,
+            remap: core::array::from_fn(|i| DRUM_NOTE_BASE + i as u8),
+            pad_vel: [0u8; NUM_DRUM_SLOTS],
+            choke_groups: {
+                // GM table covers notes 36..=51 -> indices 6..=21 of the 30..=55 range
+                let mut t = [0u8; 26];
+                for (i, g) in CHOKE_GROUPS.iter().enumerate() { t[i + 6] = *g; }
+                t
+            },
+            group_last_note: [0u8; NUM_CHOKE_GROUPS],
             sample_rate,
             step_atom: Arc::new(AtomicU8::new(0)),
             play_atom: Arc::new(AtomicU8::new(0)),
@@ -911,6 +935,21 @@ impl DrumEngine {
         self.rec_atom.clone()
     }
 
+    /// Pad-transport record toggle: snapshots before enabling so undo
+    /// reverts exactly what this recording added (same as DrumSeqRecord).
+    pub fn set_recording(&mut self, on: bool) {
+        if on && !self.sequencer.recording {
+            self.sequencer.save_snapshot();
+        }
+        self.sequencer.recording = on;
+        self.rec_atom.store(on as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn set_playing(&mut self, on: bool) {
+        self.sequencer.playing = on;
+        self.play_atom.store(on as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         let step = self.step_atom.clone();
         let play = self.play_atom.clone();
@@ -922,11 +961,78 @@ impl DrumEngine {
         self.rec_atom = rec;
     }
 
+    /// Translate an incoming pad note to its target kit note.
+    /// The remap table holds full target notes (default: identity 36..=51), so
+    /// SF2 kits can be played over their full sample range (30..=55).  Incoming
+    /// notes outside 36..=51 pass through unchanged.
+    pub fn remapped_note(&self, note: u8) -> u8 {
+        match note.wrapping_sub(DRUM_NOTE_BASE) {
+            i if (i as usize) < NUM_DRUM_SLOTS => self.remap[i as usize],
+            _ => note,
+        }
+    }
+
+    /// Per-pad velocity override for an incoming pad note.  Values outside
+    /// 36..=51 pass through; 0 override = passthrough.
+    pub fn pad_velocity(&self, note: u8, vel: u8) -> u8 {
+        match note.wrapping_sub(DRUM_NOTE_BASE) {
+            i if (i as usize) < NUM_DRUM_SLOTS && self.pad_vel[i as usize] > 0 => {
+                self.pad_vel[i as usize]
+            }
+            _ => vel,
+        }
+    }
+
+    /// Load pad-velocity overrides from config (short vecs padded with 0 = Off,
+    /// long truncated, values clamped to 127).
+    pub fn apply_pad_vel_vec(&mut self, v: &[u8]) {
+        for (i, vel) in self.pad_vel.iter_mut().enumerate() {
+            *vel = v.get(i).copied().unwrap_or(0).min(127);
+        }
+    }
+
+    /// SF2 choke: returns the previous note held by this note's choke group
+    /// (0 = none) and records `note` as the new holder.  The caller sends a
+    /// MIDI note-off for the returned note to the SF2 channel before the
+    /// note-on.  Notes outside the kit range 30..=55 return 0.  DSP choke is
+    /// handled inside trigger_slot and does not use this.
+    pub fn sf2_choke_take(&mut self, note: u8) -> u8 {
+        if !(KIT_NOTE_LO..=KIT_NOTE_HI).contains(&note) { return 0; }
+        let i = (note - KIT_NOTE_LO) as usize;
+        if i >= self.choke_groups.len() { return 0; }
+        let g = self.choke_groups[i] as usize;
+        if g == 0 { return 0; }
+        let prev = self.group_last_note[g - 1];
+        self.group_last_note[g - 1] = note;
+        prev
+    }
+
+    /// Clear choke state (AllNotesOff / panic paths).
+    pub fn reset_choke_state(&mut self) {
+        self.group_last_note = [0u8; NUM_CHOKE_GROUPS];
+    }
+
+    /// Install a per-kit choke table (SF2 path), indexed note-30. Also clears group state.
+    pub fn set_choke_groups(&mut self, t: &[u8; 26]) {
+        self.choke_groups = *t;
+        self.group_last_note = [0u8; NUM_CHOKE_GROUPS];
+    }
+
+    /// Load a remap table from config (short vecs padded with identity notes,
+    /// long truncated, values clamped to the kit range 30..=55).
+    pub fn apply_remap_vec(&mut self, v: &[u8]) {
+        for (i, slot) in self.remap.iter_mut().enumerate() {
+            let ident = DRUM_NOTE_BASE + i as u8;
+            *slot = v.get(i).copied().unwrap_or(ident).clamp(30, 55);
+        }
+    }
+
     pub fn note_on(&mut self, note: u8, velocity: u8) {
         if note < DRUM_NOTE_BASE || note > DRUM_NOTE_BASE + NUM_DRUM_SLOTS as u8 - 1 {
             return;
         }
         let slot = (note - DRUM_NOTE_BASE) as usize;
+        let velocity = if self.fixed_velocity { 127 } else { velocity };
         let vel = velocity as f32 / 127.0;
         self.trigger_slot(slot, vel);
     }
@@ -942,9 +1048,9 @@ impl DrumEngine {
         let group = CHOKE_GROUPS[slot];
         if group > 0 {
             let fade = self.sample_rate * 0.003; // 3ms fade
-            for i in 0..NUM_DRUM_SLOTS {
-                if i != slot && CHOKE_GROUPS[i] == group && self.voices[i].is_active() {
-                    self.voices[i].kill_fade(fade);
+            for (i, (voice, &choke)) in self.voices.iter_mut().zip(CHOKE_GROUPS.iter()).enumerate() {
+                if i != slot && choke == group && voice.is_active() {
+                    voice.kill_fade(fade);
                 }
             }
         }
@@ -992,8 +1098,7 @@ impl DrumEngine {
 
         let mut sf2_triggers = DrumTriggers { triggers: [(0, 0); NUM_DRUM_SLOTS], count: 0 };
 
-        for slot in 0..NUM_DRUM_SLOTS {
-            let (fire, vel) = triggers[slot];
+        for (slot, &(fire, vel)) in triggers.iter().enumerate() {
             if fire > 0 {
                 if self.sf2_mode {
                     sf2_triggers.triggers[sf2_triggers.count] = (slot as u8, vel);

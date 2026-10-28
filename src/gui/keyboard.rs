@@ -1,10 +1,11 @@
-/// On-screen piano keyboard display.
+//! On-screen piano keyboard display.
 
 use std::sync::atomic::Ordering;
 use eframe::egui;
 
 use super::App;
 use super::NOTE_NAMES;
+use super::theme;
 
 fn note_name(note: u8) -> String {
     let name = NOTE_NAMES[(note % 12) as usize];
@@ -16,24 +17,34 @@ fn is_black_key(note: u8) -> bool {
     matches!(note % 12, 1 | 3 | 6 | 8 | 10)
 }
 
+/// Pad notes in physical order: pads 1-8 (top row), 9-16 (bottom row).
+pub const PAD_TOP_NOTES: [u8; 8] = [40, 41, 42, 43, 48, 49, 50, 51];
+pub const PAD_BOT_NOTES: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
+
 impl App {
-    pub fn draw_keyboard(&self, ui: &mut egui::Ui) {
-        // Active notes label above keyboard
-        let active: Vec<String> = (0..128u8)
-            .filter_map(|i| {
-                let vel = self.note_state[i as usize].load(Ordering::Relaxed);
-                if vel > 0 {
-                    Some(note_name(i))
-                } else {
-                    None
-                }
-            })
+    pub fn draw_keyboard(&mut self, ui: &mut egui::Ui) {
+        // Active notes label above keyboard; detected chord in brackets, bold
+        let held: Vec<u8> = (0..128u8)
+            .filter(|i| self.note_state[*i as usize].load(Ordering::Relaxed) > 0)
             .collect();
+        let active: Vec<String> = held.iter().map(|n| note_name(*n)).collect();
 
         if active.is_empty() {
-            ui.colored_label(egui::Color32::from_rgb(100, 100, 100), " ");
+            ui.colored_label(theme::TEXT_DIM, " ");
         } else {
-            ui.label(active.join("  "));
+            let chord = crate::chord::detect(&held);
+            match chord {
+                Some(c) => {
+                    // Chord-only bold: two widgets side by side
+                    ui.horizontal(|ui| {
+                        ui.label(active.join("  "));
+                        ui.label(egui::RichText::new(format!("({})", c)).strong());
+                    });
+                }
+                None => {
+                    ui.label(active.join("  "));
+                }
+            }
         }
 
         ui.horizontal(|ui| {
@@ -46,12 +57,12 @@ impl App {
                 .count() as f32;
 
             // Reserve space for pads on the right: 8 pads * pad_size + gap
-            let pad_size = 32.0_f32;
-            let pad_gap = 2.0_f32;
+            let pad_gap = 3.0_f32;
+            let pad_size = ((ui.available_width() * 0.25) / 8.0 - pad_gap).clamp(32.0, 48.0);
             let pad_block_w = 8.0 * (pad_size + pad_gap) + 12.0; // 12px margin
 
             let available_w = ui.available_width() - pad_block_w;
-            let key_w = (available_w / total_white).min(18.0).max(6.0);
+            let key_w = (available_w / total_white).clamp(6.0, 18.0);
             let key_h = (key_w * 3.5).min(70.0);
             let black_h = key_h * 0.62;
 
@@ -71,12 +82,12 @@ impl App {
                     egui::vec2(key_w - 1.0, key_h),
                 );
                 let color = if vel > 0 {
-                    egui::Color32::from_rgb(80, 180, 255)
+                    theme::KEY_WHITE_ACTIVE
                 } else {
-                    egui::Color32::from_rgb(220, 220, 220)
+                    theme::KEY_WHITE_IDLE
                 };
                 painter.rect_filled(key_rect, 1.0, color);
-                painter.rect_stroke(key_rect, 1.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(120, 120, 120)), egui::StrokeKind::Outside);
+                painter.rect_stroke(key_rect, 1.0, egui::Stroke::new(0.5, theme::STROKE_KEY_BORDER), egui::StrokeKind::Outside);
                 wx += key_w;
             }
 
@@ -91,9 +102,9 @@ impl App {
                         egui::vec2(bw, black_h),
                     );
                     let color = if vel > 0 {
-                        egui::Color32::from_rgb(60, 140, 220)
+                        theme::KEY_BLACK_ACTIVE
                     } else {
-                        egui::Color32::from_rgb(30, 30, 30)
+                        theme::BG_BLACK_KEY
                     };
                     painter.rect_filled(key_rect, 1.0, color);
                 } else {
@@ -101,13 +112,11 @@ impl App {
                 }
             }
 
-            ui.add_space(12.0);
+            ui.add_space(theme::SP_LG);
 
             // --- Pads (C1–D#2 = MIDI 36–51, MPC layout as 2×8) ---
             // Top row: E1,F1,F#1,G1, C2,C#2,D2,D#2 — cyan
             // Bottom row: C1,C#1,D1,D#1, G#1,A1,A#1,B1 — pink
-            const PAD_TOP: [u8; 8] = [40, 41, 42, 43, 48, 49, 50, 51];
-            const PAD_BOT: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
 
             let pad_h = (key_h - pad_gap) / 2.0;
             let pad_w = pad_size;
@@ -120,9 +129,37 @@ impl App {
             );
             let pad_origin = pad_resp.rect.min;
 
-            // Top row (cyan)
+            // Click a drawn pad -> remap dialog for that hardware pad (position = pad number)
+            let mut clicked_pad: Option<usize> = None;
+
+            // Pad color by the category of the sound it triggers (remap-aware)
+            let pad_color = |note: u8| -> egui::Color32 {
+                let i = (note - 36) as usize;
+                let target = self.drum_remap[i] as usize;
+                let kit_idx = target.wrapping_sub(30);
+                let name = if kit_idx < self.drum_kit_names.len() {
+                    self.drum_kit_names[kit_idx].to_lowercase()
+                } else {
+                    String::new()
+                };
+                if name.contains("hat") || name.contains("hh") {
+                    egui::Color32::from_rgb(212, 200, 70)   // hats: yellow
+                } else if name.contains("crash") || name.contains("cymbal") || name.contains("ride") || name.contains("china") {
+                    egui::Color32::from_rgb(235, 140, 50)   // cymbals: orange
+                } else if name.contains("tom") {
+                    egui::Color32::from_rgb(90, 135, 225)   // toms: blue
+                } else if name.contains("kick") {
+                    egui::Color32::from_rgb(190, 65, 65)    // kick: red
+                } else if name.contains("snare") {
+                    egui::Color32::from_rgb(85, 185, 95)    // snare: green
+                } else {
+                    egui::Color32::from_rgb(200, 95, 185)   // perc/clap/rim: magenta
+                }
+            };
+
+            // Top row
             for col in 0..8u8 {
-                let note = PAD_TOP[col as usize];
+                let note = PAD_TOP_NOTES[col as usize];
                 let vel = self.pad_state[note as usize].load(Ordering::Relaxed);
                 let pr = egui::Rect::from_min_size(
                     pad_origin + egui::vec2(col as f32 * (pad_w + pad_gap), 0.0),
@@ -131,15 +168,18 @@ impl App {
                 let color = if vel > 0 {
                     egui::Color32::WHITE
                 } else {
-                    egui::Color32::from_rgb(0, 200, 210)
+                    pad_color(note)
                 };
                 pad_painter.rect_filled(pr, 3.0, color);
-                pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)), egui::StrokeKind::Outside);
+                pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, theme::STROKE_PAD_BORDER), egui::StrokeKind::Outside);
+                if ui.interact(pr, egui::Id::new("pad_top").with(col), egui::Sense::click()).clicked() {
+                    clicked_pad = Some(col as usize);
+                }
             }
 
-            // Bottom row (pink)
+            // Bottom row
             for col in 0..8u8 {
-                let note = PAD_BOT[col as usize];
+                let note = PAD_BOT_NOTES[col as usize];
                 let vel = self.pad_state[note as usize].load(Ordering::Relaxed);
                 let pr = egui::Rect::from_min_size(
                     pad_origin + egui::vec2(col as f32 * (pad_w + pad_gap), pad_h + pad_gap),
@@ -148,10 +188,18 @@ impl App {
                 let color = if vel > 0 {
                     egui::Color32::WHITE
                 } else {
-                    egui::Color32::from_rgb(220, 60, 150)
+                    pad_color(note)
                 };
                 pad_painter.rect_filled(pr, 3.0, color);
-                pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)), egui::StrokeKind::Outside);
+                pad_painter.rect_stroke(pr, 3.0, egui::Stroke::new(0.5, theme::STROKE_PAD_BORDER), egui::StrokeKind::Outside);
+                if ui.interact(pr, egui::Id::new("pad_bot").with(col), egui::Sense::click()).clicked() {
+                    clicked_pad = Some(8 + col as usize);
+                }
+            }
+
+            if let Some(p) = clicked_pad {
+                self.remap_pad = Some(p);
+                self.show_drum_remap = false;
             }
         });
     }

@@ -1,4 +1,4 @@
-/// Juno-style stereo chorus effect.
+//! Juno-style stereo chorus effect.
 
 use super::dsp_utils::{buf_read_cubic, advance_phase};
 
@@ -56,9 +56,8 @@ impl Chorus {
         let mut wet_l = buf_read_cubic(&self.buffer, self.write_pos, delay_l);
         let mut wet_r = buf_read_cubic(&self.buffer, self.write_pos, delay_r);
 
-        // BBD lowpass emulation (~10kHz at 48kHz) — one-pole per channel
-        // Coefficient ~0.65 gives roughly 10kHz cutoff at 48kHz sample rate
-        let bbd_coeff = 0.65;
+        // BBD lowpass emulation (~10kHz) — one-pole per channel, SR-aware
+        let bbd_coeff = (2.0 * std::f32::consts::PI * 10000.0 / self.sample_rate).min(0.95);
         wet_l = self.bbd_lp_l + bbd_coeff * (wet_l - self.bbd_lp_l);
         self.bbd_lp_l = wet_l;
         wet_r = self.bbd_lp_r + bbd_coeff * (wet_r - self.bbd_lp_r);

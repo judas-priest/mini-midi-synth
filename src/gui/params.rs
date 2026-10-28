@@ -1,8 +1,9 @@
-/// Synth parameter editor UI.
+//! Synth parameter editor UI.
 
 use eframe::egui;
 
 use super::App;
+use super::theme;
 use super::{
     OSC_NAMES, SIMPLE_OSC_NAMES, FILTER_NAMES, FILTER_ROUTING_NAMES,
     PD_SHAPE_NAMES, FOLD_SOURCE_NAMES, MODAL_MATERIAL_NAMES, SYNC_SHAPE_NAMES,
@@ -42,7 +43,7 @@ fn compute_filter_response(cutoff: f32, resonance: f32, filter_type: u32) -> [(f
     // 18dB (3-pole) types get 1.5x the slope.
     let is_3pole = matches!(filter_type, 6 | 23);
 
-    for i in 0..FILTER_RESP_POINTS {
+    for (i, point) in points.iter_mut().enumerate() {
         let t = i as f32 / (FILTER_RESP_POINTS - 1) as f32;
         let freq = 20.0 * (20000.0f32 / 20.0).powf(t);
         let ratio = freq / cutoff.max(1.0);
@@ -60,7 +61,7 @@ fn compute_filter_response(cutoff: f32, resonance: f32, filter_type: u32) -> [(f
         let mut db = 10.0 * mag_sq.max(1e-10).log10();
         if is_4pole { db *= 2.0; }
         if is_3pole { db *= 1.5; }
-        points[i] = (freq, db.clamp(-24.0, 12.0));
+        *point = (freq, db.clamp(-24.0, 12.0));
     }
     points
 }
@@ -91,14 +92,14 @@ fn draw_filter_response(
     let painter = ui.painter_at(rect);
 
     // Background
-    painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
+    painter.rect_filled(rect, 2.0, theme::BG_TIMELINE);
 
     // Grid lines at 100 Hz, 1 kHz, 10 kHz
     for &freq in &[100.0f32, 1000.0, 10000.0] {
         let x = freq_to_x(freq, rect);
         painter.line_segment(
             [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-            egui::Stroke::new(1.0, egui::Color32::from_gray(40)),
+            egui::Stroke::new(1.0, theme::STROKE_GRID_DARK),
         );
     }
 
@@ -106,14 +107,14 @@ fn draw_filter_response(
     let y_0db = db_to_y(0.0, rect);
     painter.line_segment(
         [egui::pos2(rect.left(), y_0db), egui::pos2(rect.right(), y_0db)],
-        egui::Stroke::new(1.0, egui::Color32::from_gray(50)),
+        egui::Stroke::new(1.0, theme::STROKE_GUIDE),
     );
 
     // Compute response curve
     let points = compute_filter_response(cutoff, resonance, filter_type);
 
     // Draw curve
-    let color = egui::Color32::from_rgb(100, 200, 255);
+    let color = theme::CURVE_FILTER;
     for i in 1..FILTER_RESP_POINTS {
         let x0 = freq_to_x(points[i - 1].0, rect);
         let y0 = db_to_y(points[i - 1].1, rect);
@@ -129,7 +130,7 @@ fn draw_filter_response(
     let cx = freq_to_x(cutoff.clamp(20.0, 20000.0), rect);
     painter.line_segment(
         [egui::pos2(cx, rect.top()), egui::pos2(cx, rect.bottom())],
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 200, 50)),
+        egui::Stroke::new(1.0, theme::CURVE_CUTOFF_MARKER),
     );
 }
 
@@ -201,7 +202,7 @@ impl App {
         let h = 32.0_f32;
         let (resp, painter) = ui.allocate_painter(egui::vec2(w, h), egui::Sense::hover());
         let rect = resp.rect;
-        painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(25, 25, 35));
+        painter.rect_filled(rect, 2.0, theme::BG_WIDGET_ALT);
 
         // Normalize time segments to fit width (sustain gets fixed portion)
         let total_time = a + d + r + 0.001;
@@ -227,9 +228,9 @@ impl App {
         let p4 = egui::pos2(p3.x + r_w, bot);                      // release end
 
         let color = if prefix == "amp" {
-            egui::Color32::from_rgb(100, 180, 255)
+            theme::CURVE_AMP_ENV
         } else {
-            egui::Color32::from_rgb(255, 160, 80)
+            theme::CURVE_MOD_ENV
         };
         painter.add(egui::Shape::line(
             vec![p0, p1, p2, p3, p4],
@@ -239,7 +240,7 @@ impl App {
         let sy = bot - s * range;
         painter.line_segment(
             [egui::pos2(rect.left(), sy), egui::pos2(rect.right(), sy)],
-            egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 80)),
+            egui::Stroke::new(0.5, theme::STROKE_SUBTLE),
         );
     }
 
@@ -254,15 +255,22 @@ impl App {
 
         let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
         ui.strong(format!("{preset_name} (Layer {layer_label})"));
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_MD);
 
         let mut changed = false;
 
         // Macro knobs (always visible at top — key performance controls)
         self.draw_macros(ui);
-        ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
+
+        // Oscillator section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        // Set secondary width for oscillator params
+        ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
         // Oscillator 1
         ui.strong("Oscillator 1");
@@ -274,6 +282,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in OSC_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut osc, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("osc_type".into(), osc as f32);
                             changed = true;
                         }
@@ -282,7 +291,9 @@ impl App {
 
             let mut detune = self.parts[part].edited_params.get("osc_detune").copied().unwrap_or(0.0);
             ui.label("Detune:");
-            if ui.add(egui::Slider::new(&mut detune, 0.0..=0.05).step_by(0.001)).changed() {
+            let detune_resp = ui.add(egui::Slider::new(&mut detune, 0.0..=0.05).step_by(0.001)).on_hover_text("Oscillator pitch detune");
+            if detune_resp.drag_started() { self.push_undo_snapshot(); }
+            if detune_resp.changed() {
                 self.parts[part].edited_params.insert("osc_detune".into(), detune);
                 changed = true;
             }
@@ -313,13 +324,15 @@ impl App {
 
         // Organ drawbar params
         if osc_type == 7 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Drawbars");
             let drawbar_names = ["16'", "5⅓'", "8'", "4'", "2⅔'", "2'", "1⅗'", "1⅓'", "1'"];
             for (i, name) in drawbar_names.iter().enumerate() {
                 let key = format!("drawbar_{}", i + 1);
                 let mut val = self.parts[part].edited_params.get(&key).copied().unwrap_or(0.0);
-                if ui.add(egui::Slider::new(&mut val, 0.0..=8.0).step_by(1.0).text(*name)).changed() {
+                let db_resp = ui.add(egui::Slider::new(&mut val, 0.0..=8.0).step_by(1.0).text(*name)).on_hover_text("Organ drawbar level");
+                if db_resp.drag_started() { self.push_undo_snapshot(); }
+                if db_resp.changed() {
                     self.parts[part].edited_params.insert(key, val);
                     changed = true;
                 }
@@ -328,18 +341,18 @@ impl App {
 
         // Drum synth params
         if osc_type == 12 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Drum Synth");
-            changed |= self.param_slider(ui, "drum_pitch_amount", "Pitch Sweep (st)", 0.0, 72.0, false);
-            changed |= self.param_slider(ui, "drum_pitch_decay", "Pitch Decay", 5.0, 200.0, false);
+            changed |= self.param_slider_ex(ui, "drum_pitch_amount", "Pitch Sweep", 0.0, 72.0, false, " st");
+            changed |= self.param_slider_ex(ui, "drum_pitch_decay", "Pitch Decay", 5.0, 200.0, false, " ms");
             changed |= self.param_slider(ui, "drum_noise_level", "Noise Level", 0.0, 1.0, false);
-            changed |= self.param_slider(ui, "drum_noise_decay", "Noise Decay", 5.0, 200.0, false);
+            changed |= self.param_slider_ex(ui, "drum_noise_decay", "Noise Decay", 5.0, 200.0, false, " ms");
             changed |= self.param_slider(ui, "drum_noise_color", "Noise Color", 0.0, 1.0, false);
         }
 
         // Bass guitar params
         if osc_type == 13 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Bass Guitar");
             ui.horizontal(|ui| {
                 let mut style = self.parts[part].edited_params.get("bass_style").copied().unwrap_or(0.0) as usize;
@@ -349,6 +362,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in BASS_STYLE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut style, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("bass_style".into(), style as f32);
                                 changed = true;
                             }
@@ -363,6 +377,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in BASS_PICKUP_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut pu, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("bass_pickup".into(), pu as f32);
                                 changed = true;
                             }
@@ -375,7 +390,7 @@ impl App {
 
         // Bowed string params
         if osc_type == 14 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Bowed String");
             ui.horizontal(|ui| {
                 let mut bt = self.parts[part].edited_params.get("body_type").copied().unwrap_or(0.0) as usize;
@@ -385,6 +400,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in BOWED_BODY_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut bt, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("body_type".into(), bt as f32);
                                 changed = true;
                             }
@@ -397,7 +413,7 @@ impl App {
 
         // Brass params
         if osc_type == 15 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Brass");
             ui.horizontal(|ui| {
                 let mut bt = self.parts[part].edited_params.get("bell_type").copied().unwrap_or(0.0) as usize;
@@ -407,6 +423,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in BRASS_BELL_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut bt, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("bell_type".into(), bt as f32);
                                 changed = true;
                             }
@@ -419,7 +436,7 @@ impl App {
 
         // Accordion params
         if osc_type == 22 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Accordion");
             ui.horizontal(|ui| {
                 let mut reg = self.parts[part].edited_params.get("accordion_register").copied().unwrap_or(0.0) as usize;
@@ -429,6 +446,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in ACCORDION_REGISTER_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut reg, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("accordion_register".into(), reg as f32);
                                 changed = true;
                             }
@@ -440,7 +458,7 @@ impl App {
 
         // Saxophone params
         if osc_type == 23 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Saxophone");
             ui.horizontal(|ui| {
                 let mut st = self.parts[part].edited_params.get("sax_type").copied().unwrap_or(1.0) as usize;
@@ -450,6 +468,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in SAX_TYPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut st, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("sax_type".into(), st as f32);
                                 changed = true;
                             }
@@ -463,7 +482,7 @@ impl App {
 
         // Electric Piano params
         if osc_type == 24 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Electric Piano");
             ui.horizontal(|ui| {
                 let mut ep_t = self.parts[part].edited_params.get("epiano_type").copied().unwrap_or(0.0) as usize;
@@ -473,6 +492,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in ["Rhodes MkII", "Wurlitzer 200A", "Stage 73"].iter().enumerate() {
                             if ui.selectable_value(&mut ep_t, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("epiano_type".into(), ep_t as f32);
                                 changed = true;
                             }
@@ -485,7 +505,7 @@ impl App {
 
         // Alias oscillator params
         if osc_type == 25 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Alias (8-bit)");
             ui.horizontal(|ui| {
                 let mut wt = self.parts[part].edited_params.get("alias_wave_type").copied().unwrap_or(0.0) as usize;
@@ -495,6 +515,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in ALIAS_WAVE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut wt, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("alias_wave_type".into(), wt as f32);
                                 changed = true;
                             }
@@ -506,7 +527,7 @@ impl App {
 
         // Window oscillator params
         if osc_type == 26 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Window Oscillator");
             ui.horizontal(|ui| {
                 let mut wt = self.parts[part].edited_params.get("window_type").copied().unwrap_or(0.0) as usize;
@@ -516,6 +537,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in WINDOW_TYPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut wt, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("window_type".into(), wt as f32);
                                 changed = true;
                             }
@@ -523,12 +545,12 @@ impl App {
                     });
             });
             changed |= self.param_slider(ui, "window_morph", "Morph", 0.0, 1.0, false);
-            changed |= self.param_slider(ui, "window_formant", "Formant", -24.0, 24.0, false);
+            changed |= self.param_slider_ex(ui, "window_formant", "Formant", -24.0, 24.0, false, " st");
         }
 
         // Twist / Plaits (engine 29)
         if osc_type == 29 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Twist (Plaits)");
             // Engine selector
             const TWIST_ENGINES: &[&str] = &[
@@ -550,6 +572,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in TWIST_ENGINES.iter().enumerate() {
                             if ui.selectable_value(&mut eng, i, *name).clicked() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("twist_engine".into(), eng as f32);
                                 changed = true;
                             }
@@ -570,7 +593,9 @@ impl App {
             let mut pw_val = pw;
             ui.horizontal(|ui| {
                 ui.label("Pulse Width");
-                if ui.add(egui::Slider::new(&mut pw_val, 0.05..=0.95)).changed() {
+                let pw_resp = ui.add(egui::Slider::new(&mut pw_val, 0.05..=0.95)).on_hover_text("Square wave duty cycle");
+                if pw_resp.drag_started() { self.push_undo_snapshot(); }
+                if pw_resp.changed() {
                     self.parts[part].edited_params.insert("pulse_width".into(), pw_val);
                     self.parts[part].params_dirty = true;
                 }
@@ -579,7 +604,7 @@ impl App {
 
         // Phase Distortion params
         if osc_type == 16 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Phase Distortion");
             ui.horizontal(|ui| {
                 let mut shape = self.parts[part].edited_params.get("pd_shape").copied().unwrap_or(0.0) as usize;
@@ -589,6 +614,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in PD_SHAPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut shape, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("pd_shape".into(), shape as f32);
                                 changed = true;
                             }
@@ -601,7 +627,7 @@ impl App {
 
         // Wavefolder params
         if osc_type == 17 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Wavefolder");
             ui.horizontal(|ui| {
                 let mut src = self.parts[part].edited_params.get("fold_source").copied().unwrap_or(0.0) as usize;
@@ -611,6 +637,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in FOLD_SOURCE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut src, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("fold_source".into(), src as f32);
                                 changed = true;
                             }
@@ -623,7 +650,7 @@ impl App {
 
         // Modal Resonator params
         if osc_type == 18 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.strong("Modal Resonator");
             ui.horizontal(|ui| {
                 let mut mat = self.parts[part].edited_params.get("modal_material").copied().unwrap_or(0.0) as usize;
@@ -633,6 +660,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in MODAL_MATERIAL_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut mat, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("modal_material".into(), mat as f32);
                                 changed = true;
                             }
@@ -646,7 +674,7 @@ impl App {
 
         // Hard Sync params
         if osc_type == 19 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.label("Hard Sync");
             ui.horizontal(|ui| {
                 let mut shape = self.parts[part].edited_params.get("sync_shape").copied().unwrap_or(0.0) as usize;
@@ -656,6 +684,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in SYNC_SHAPE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut shape, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("sync_shape".into(), shape as f32);
                                 changed = true;
                             }
@@ -667,7 +696,7 @@ impl App {
 
         // Supersaw params
         if osc_type == 20 {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             ui.label("Supersaw");
             changed |= self.param_slider(ui, "supersaw_detune", "Detune", 0.0, 1.0, false);
             changed |= self.param_slider(ui, "supersaw_mix", "Mix", 0.0, 1.0, false);
@@ -675,11 +704,13 @@ impl App {
 
         // Multi-osc controls (only for simple osc types)
         if osc_is_simple {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             let mut osc_count = self.parts[part].edited_params.get("osc_count").copied().unwrap_or(1.0) as u32;
             ui.horizontal(|ui| {
                 ui.label("Osc Count:");
-                if ui.add(egui::Slider::new(&mut osc_count, 1..=3)).changed() {
+                let oc_resp = ui.add(egui::Slider::new(&mut osc_count, 1..=3)).on_hover_text("Number of oscillators");
+                if oc_resp.drag_started() { self.push_undo_snapshot(); }
+                if oc_resp.changed() {
                     self.parts[part].edited_params.insert("osc_count".into(), osc_count as f32);
                     changed = true;
                 }
@@ -690,7 +721,7 @@ impl App {
             }
 
             if osc_count >= 2 {
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
                 ui.strong("Oscillator 2");
                 ui.horizontal(|ui| {
                     let mut osc2 = self.parts[part].edited_params.get("osc2_type").copied().unwrap_or(1.0) as usize;
@@ -700,6 +731,7 @@ impl App {
                         .show_ui(ui, |ui| {
                             for (i, name) in SIMPLE_OSC_NAMES.iter().enumerate() {
                                 if ui.selectable_value(&mut osc2, i, *name).changed() {
+                                    self.push_undo_snapshot();
                                     self.parts[part].edited_params.insert("osc2_type".into(), osc2 as f32);
                                     changed = true;
                                 }
@@ -708,7 +740,9 @@ impl App {
 
                     let mut detune2 = self.parts[part].edited_params.get("osc2_detune").copied().unwrap_or(0.0);
                     ui.label("Detune:");
-                    if ui.add(egui::Slider::new(&mut detune2, -0.05..=0.05).step_by(0.001)).changed() {
+                    let d2_resp = ui.add(egui::Slider::new(&mut detune2, -0.05..=0.05).step_by(0.001)).on_hover_text("Osc 2 pitch detune");
+                    if d2_resp.drag_started() { self.push_undo_snapshot(); }
+                    if d2_resp.changed() {
                         self.parts[part].edited_params.insert("osc2_detune".into(), detune2);
                         changed = true;
                     }
@@ -717,7 +751,7 @@ impl App {
             }
 
             if osc_count >= 3 {
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
                 ui.strong("Oscillator 3");
                 ui.horizontal(|ui| {
                     let mut osc3 = self.parts[part].edited_params.get("osc3_type").copied().unwrap_or(1.0) as usize;
@@ -727,6 +761,7 @@ impl App {
                         .show_ui(ui, |ui| {
                             for (i, name) in SIMPLE_OSC_NAMES.iter().enumerate() {
                                 if ui.selectable_value(&mut osc3, i, *name).changed() {
+                                    self.push_undo_snapshot();
                                     self.parts[part].edited_params.insert("osc3_type".into(), osc3 as f32);
                                     changed = true;
                                 }
@@ -735,7 +770,9 @@ impl App {
 
                     let mut detune3 = self.parts[part].edited_params.get("osc3_detune").copied().unwrap_or(0.0);
                     ui.label("Detune:");
-                    if ui.add(egui::Slider::new(&mut detune3, -0.05..=0.05).step_by(0.001)).changed() {
+                    let d3_resp = ui.add(egui::Slider::new(&mut detune3, -0.05..=0.05).step_by(0.001)).on_hover_text("Osc 3 pitch detune");
+                    if d3_resp.drag_started() { self.push_undo_snapshot(); }
+                    if d3_resp.changed() {
                         self.parts[part].edited_params.insert("osc3_detune".into(), detune3);
                         changed = true;
                     }
@@ -750,7 +787,7 @@ impl App {
         }
 
         // Osc Waveshaper (pre-filter, per-voice)
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Osc Shaper");
         ui.horizontal(|ui| {
             let mut wsm = self.parts[part].edited_params.get("osc_ws_mode").copied().unwrap_or(0.0) as usize;
@@ -760,6 +797,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wsm, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("osc_ws_mode".into(), wsm as f32);
                             changed = true;
                         }
@@ -768,8 +806,17 @@ impl App {
         });
         changed |= self.param_slider(ui, "osc_ws_drive", "Drive", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "osc_ws_mix", "Mix", 0.0, 1.0, false);
+        }); // end Oscillator frame
+        ui.add_space(theme::SP_SM);
 
-        ui.add_space(6.0);
+        // Filter section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        // Primary width for filter — main sound-shaping params
+        ui.style_mut().spacing.slider_width = theme::SLIDER_PRIMARY;
 
         // Filter 1
         ui.strong("Filter 1");
@@ -781,6 +828,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in FILTER_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut ft, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("filter_type".into(), ft as f32);
                             changed = true;
                         }
@@ -801,6 +849,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in FORMANT_VOICE_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut fv, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("formant_voice".into(), fv as f32);
                                 changed = true;
                             }
@@ -814,6 +863,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in FORMANT_VOWEL_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut vw, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("formant_vowel".into(), vw as f32);
                                 changed = true;
                             }
@@ -821,9 +871,9 @@ impl App {
                     });
             });
         } else {
-            changed |= self.param_slider(ui, "filter_cutoff", "Cutoff", 20.0, 20000.0, true);
+            changed |= self.param_slider_ex(ui, "filter_cutoff", "Cutoff", 20.0, 20000.0, true, " Hz");
             changed |= self.param_slider(ui, "filter_resonance", "Resonance", 0.0, 1.0, false);
-            changed |= self.param_slider(ui, "filter_env_amount", "Env Amount", 0.0, 15000.0, false);
+            changed |= self.param_slider_ex(ui, "filter_env_amount", "Env Amount", 0.0, 15000.0, false, " Hz");
             changed |= self.param_slider(ui, "filter_key_track", "Key Track", 0.0, 1.0, false);
             // SVF Morph slider: only shown when filter type is SVFMorph (type 36)
             if filter_type == 36 {
@@ -843,7 +893,7 @@ impl App {
 
         // Filter routing (not available with formant filter)
         if !is_formant {
-            ui.add_space(4.0);
+            ui.add_space(theme::SP_SM);
             let mut routing = self.parts[part].edited_params.get("filter_routing").copied().unwrap_or(0.0) as usize;
             ui.horizontal(|ui| {
                 ui.label("Routing:");
@@ -852,6 +902,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in FILTER_ROUTING_NAMES.iter().enumerate() {
                             if ui.selectable_value(&mut routing, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("filter_routing".into(), routing as f32);
                                 changed = true;
                             }
@@ -861,7 +912,7 @@ impl App {
 
             // Filter 2 controls (only when routing != Single)
             if routing >= 1 {
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
                 ui.strong("Filter 2");
                 ui.horizontal(|ui| {
                     let ft2 = self.parts[part].edited_params.get("filter2_type").copied().unwrap_or(0.0) as usize;
@@ -877,18 +928,19 @@ impl App {
                             for (i, name) in f2_names.iter().enumerate() {
                                 if ui.selectable_value(&mut f2_sel, i, *name).changed() {
                                     let param_val = f2_values[f2_sel];
+                                    self.push_undo_snapshot();
                                     self.parts[part].edited_params.insert("filter2_type".into(), param_val as f32);
                                     changed = true;
                                 }
                             }
                         });
                 });
-                changed |= self.param_slider(ui, "filter2_cutoff", "Cutoff 2", 20.0, 20000.0, true);
+                changed |= self.param_slider_ex(ui, "filter2_cutoff", "Cutoff 2", 20.0, 20000.0, true, " Hz");
                 changed |= self.param_slider(ui, "filter2_resonance", "Resonance 2", 0.0, 1.0, false);
 
                 // Inter-filter waveshaper (Serial routing only)
                 if routing == 1 {
-                    ui.add_space(4.0);
+                    ui.add_space(theme::SP_SM);
                     ui.strong("Inter-Filter Shaper");
                     ui.horizontal(|ui| {
                         let mut wsm = self.parts[part].edited_params.get("inter_ws_mode").copied().unwrap_or(0.0) as usize;
@@ -898,6 +950,7 @@ impl App {
                             .show_ui(ui, |ui| {
                                 for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
                                     if ui.selectable_value(&mut wsm, i, *name).changed() {
+                                        self.push_undo_snapshot();
                                         self.parts[part].edited_params.insert("inter_ws_mode".into(), wsm as f32);
                                         changed = true;
                                     }
@@ -909,27 +962,36 @@ impl App {
                 }
             }
         }
+        }); // end Filter frame
+        ui.add_space(theme::SP_SM);
 
-        ui.add_space(6.0);
+        // Envelopes section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        // Primary width for envelopes — main sound-shaping params
+        ui.style_mut().spacing.slider_width = theme::SLIDER_PRIMARY;
 
         // Amp Envelope (AHDSR)
         ui.strong("Amp Envelope");
-        changed |= self.param_slider(ui, "amp_attack",  "Attack",  0.001, 5.0, true);
-        changed |= self.param_slider(ui, "amp_hold",    "Hold",    0.0,   5.0, false);
-        changed |= self.param_slider(ui, "amp_decay",   "Decay",   0.0,   5.0, false);
+        changed |= self.param_slider_ex(ui, "amp_attack",  "Attack",  0.001, 5.0, true, " s");
+        changed |= self.param_slider_ex(ui, "amp_hold",    "Hold",    0.0,   5.0, false, " s");
+        changed |= self.param_slider_ex(ui, "amp_decay",   "Decay",   0.0,   5.0, false, " s");
         changed |= self.param_slider(ui, "amp_sustain", "Sustain", 0.0,   1.0, false);
-        changed |= self.param_slider(ui, "amp_release", "Release", 0.001, 5.0, true);
+        changed |= self.param_slider_ex(ui, "amp_release", "Release", 0.001, 5.0, true, " s");
         Self::draw_adsr_curve(ui, part, &self.parts[part].edited_params, "amp");
 
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_MD);
 
         // Filter Envelope (AHDSR)
         ui.strong("Filter Envelope");
-        changed |= self.param_slider(ui, "filter_attack",  "Attack",  0.001, 5.0, true);
-        changed |= self.param_slider(ui, "filter_hold",    "Hold",    0.0,   5.0, false);
-        changed |= self.param_slider(ui, "filter_decay",   "Decay",   0.0,   5.0, false);
+        changed |= self.param_slider_ex(ui, "filter_attack",  "Attack",  0.001, 5.0, true, " s");
+        changed |= self.param_slider_ex(ui, "filter_hold",    "Hold",    0.0,   5.0, false, " s");
+        changed |= self.param_slider_ex(ui, "filter_decay",   "Decay",   0.0,   5.0, false, " s");
         changed |= self.param_slider(ui, "filter_sustain", "Sustain", 0.0,   1.0, false);
-        changed |= self.param_slider(ui, "filter_release", "Release", 0.001, 5.0, true);
+        changed |= self.param_slider_ex(ui, "filter_release", "Release", 0.001, 5.0, true, " s");
         Self::draw_adsr_curve(ui, part, &self.parts[part].edited_params, "filter");
 
         // Envelope shapes
@@ -944,8 +1006,17 @@ impl App {
             changed |= env_shape_combo(ui, part, "Dec:", "filter_env_decay_shape", "fenv_dec_shape", &mut self.parts[part].edited_params);
             changed |= env_shape_combo(ui, part, "Rel:", "filter_env_release_shape", "fenv_rel_shape", &mut self.parts[part].edited_params);
         });
+        }); // end Envelopes frame
+        ui.add_space(theme::SP_SM);
 
-        ui.add_space(6.0);
+        // Dynamics section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        // Secondary width for dynamics, LFOs, modulators
+        ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
         // Dynamics
         ui.strong("Dynamics");
@@ -957,6 +1028,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in VELOCITY_CURVE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut vc, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("velocity_curve".into(), vc as f32);
                             changed = true;
                         }
@@ -964,8 +1036,16 @@ impl App {
                 });
         });
         changed |= self.param_slider(ui, "vel_to_filter", "Vel->Filter", 0.0, 1.0, false);
+        }); // end Dynamics frame
+        ui.add_space(theme::SP_SM);
 
-        ui.add_space(6.0);
+        // LFO section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
         // LFO
         ui.strong("LFO");
@@ -977,20 +1057,21 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("lfo_waveform".into(), lw as f32);
                             changed = true;
                         }
                     }
                 });
         });
-        changed |= self.param_slider(ui, "lfo_rate", "Rate", 0.1, 20.0, true);
+        changed |= self.param_slider_ex(ui, "lfo_rate", "Rate", 0.1, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "lfo_pitch_depth", "Pitch Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_filter_depth", "Filter Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_amp_depth", "Amp Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo_deform", "Deform", -1.0, 1.0, false);
         changed |= draw_lfo_trigger_mode(ui, part, 1, &mut self.parts[part].edited_params);
 
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_MD);
 
         // LFO 2
         ui.strong("LFO 2");
@@ -1002,20 +1083,21 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw2, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("lfo2_waveform".into(), lw2 as f32);
                             changed = true;
                         }
                     }
                 });
         });
-        changed |= self.param_slider(ui, "lfo2_rate", "Rate", 0.1, 20.0, true);
+        changed |= self.param_slider_ex(ui, "lfo2_rate", "Rate", 0.1, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "lfo2_pitch_depth", "Pitch Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_filter_depth", "Filter Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_amp_depth", "Amp Depth", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "lfo2_deform", "Deform", -1.0, 1.0, false);
         changed |= draw_lfo_trigger_mode(ui, part, 2, &mut self.parts[part].edited_params);
 
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_MD);
 
         // LFO 3 & 4 (mod matrix sources)
         ui.strong("LFO 3 (Mod Matrix)");
@@ -1027,13 +1109,14 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw3, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("lfo3_waveform".into(), lw3 as f32);
                             changed = true;
                         }
                     }
                 });
         });
-        changed |= self.param_slider(ui, "lfo3_rate", "Rate", 0.1, 20.0, true);
+        changed |= self.param_slider_ex(ui, "lfo3_rate", "Rate", 0.1, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "lfo3_deform", "Deform", -1.0, 1.0, false);
         changed |= draw_lfo_trigger_mode(ui, part, 3, &mut self.parts[part].edited_params);
 
@@ -1046,19 +1129,20 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut lw4, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("lfo4_waveform".into(), lw4 as f32);
                             changed = true;
                         }
                     }
                 });
         });
-        changed |= self.param_slider(ui, "lfo4_rate", "Rate", 0.1, 20.0, true);
+        changed |= self.param_slider_ex(ui, "lfo4_rate", "Rate", 0.1, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "lfo4_deform", "Deform", -1.0, 1.0, false);
         changed |= draw_lfo_trigger_mode(ui, part, 4, &mut self.parts[part].edited_params);
         {
         }
 
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_MD);
 
         // Scene LFOs (free-running — never reset on note-on)
         ui.strong("Scene LFO 1");
@@ -1071,30 +1155,33 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wf, i, *name).clicked() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("slfo1_waveform".into(), wf as f32);
                             changed = true;
                         }
                     }
                 });
         });
-        changed |= self.param_slider(ui, "slfo1_rate", "Rate", 0.01, 20.0, true);
+        changed |= self.param_slider_ex(ui, "slfo1_rate", "Rate", 0.01, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "slfo1_deform", "Deform", -1.0, 1.0, false);
         {
             let mut uni = self.parts[part].edited_params.get("slfo1_unipolar").copied().unwrap_or(0.0) > 0.5;
             let mut tsync = self.parts[part].edited_params.get("slfo1_tempo_sync").copied().unwrap_or(0.0) > 0.5;
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut uni, "Unipolar").changed() {
+                    self.push_undo_snapshot();
                     self.parts[part].edited_params.insert("slfo1_unipolar".into(), if uni { 1.0 } else { 0.0 });
                     changed = true;
                 }
                 if ui.checkbox(&mut tsync, "Tempo Sync").changed() {
+                    self.push_undo_snapshot();
                     self.parts[part].edited_params.insert("slfo1_tempo_sync".into(), if tsync { 1.0 } else { 0.0 });
                     changed = true;
                 }
             });
         }
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Scene LFO 2");
         ui.horizontal(|ui| {
             let mut wf = self.parts[part].edited_params.get("slfo2_waveform").copied().unwrap_or(0.0) as usize;
@@ -1104,30 +1191,41 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in LFO_WAVEFORM_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wf, i, *name).clicked() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("slfo2_waveform".into(), wf as f32);
                             changed = true;
                         }
                     }
                 });
         });
-        changed |= self.param_slider(ui, "slfo2_rate", "Rate", 0.01, 20.0, true);
+        changed |= self.param_slider_ex(ui, "slfo2_rate", "Rate", 0.01, 20.0, true, " Hz");
         changed |= self.param_slider(ui, "slfo2_deform", "Deform", -1.0, 1.0, false);
         {
             let mut uni = self.parts[part].edited_params.get("slfo2_unipolar").copied().unwrap_or(0.0) > 0.5;
             let mut tsync = self.parts[part].edited_params.get("slfo2_tempo_sync").copied().unwrap_or(0.0) > 0.5;
             ui.horizontal(|ui| {
                 if ui.checkbox(&mut uni, "Unipolar").changed() {
+                    self.push_undo_snapshot();
                     self.parts[part].edited_params.insert("slfo2_unipolar".into(), if uni { 1.0 } else { 0.0 });
                     changed = true;
                 }
                 if ui.checkbox(&mut tsync, "Tempo Sync").changed() {
+                    self.push_undo_snapshot();
                     self.parts[part].edited_params.insert("slfo2_tempo_sync".into(), if tsync { 1.0 } else { 0.0 });
                     changed = true;
                 }
             });
         }
+        }); // end LFO frame
+        ui.add_space(theme::SP_SM);
 
-        ui.add_space(6.0);
+        // Mod Matrix section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
         // Modulation Matrix
         ui.strong("Mod Matrix");
@@ -1185,15 +1283,24 @@ impl App {
 
                     // Depth slider
                     let mut depth = depth_val;
-                    if ui.add(egui::Slider::new(&mut depth, -1.0..=1.0).text("Depth").step_by(0.01)).changed() {
+                    if ui.add(egui::Slider::new(&mut depth, -1.0..=1.0).text("Depth").step_by(0.01)).on_hover_text("Modulation depth").changed() {
                         ep.insert(format!("{prefix}depth"), depth);
                         changed = true;
                     }
                 });
             }
         }
+        }); // end Mod Matrix frame
+        ui.add_space(theme::SP_SM);
 
-        ui.add_space(6.0);
+        // Voice section (Play Mode + Portamento + Unison)
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        // Compact width for utility params
+        ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
 
         // Play Mode
         ui.strong("Play Mode");
@@ -1204,6 +1311,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in PLAY_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut pmode, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("play_mode".into(), pmode as f32);
                             changed = true;
                         }
@@ -1221,6 +1329,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in sustain_names.iter().enumerate() {
                         if ui.selectable_value(&mut smode, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("sustain_mode".into(), smode as f32);
                             changed = true;
                         }
@@ -1228,7 +1337,7 @@ impl App {
                 });
         });
 
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_SM);
 
         // Portamento
         ui.strong("Portamento");
@@ -1240,29 +1349,40 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in PORTAMENTO_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut pm, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("portamento_mode".into(), pm as f32);
                             changed = true;
                         }
                     }
                 });
         });
-        changed |= self.param_slider(ui, "portamento_time", "Time", 0.0, 2.0, false);
+        changed |= self.param_slider_ex(ui, "portamento_time", "Time", 0.0, 2.0, false, " s");
 
-        ui.add_space(6.0);
+        ui.add_space(theme::SP_SM);
 
         // Unison
         ui.strong("Unison");
         {
             let mut uv = self.parts[part].edited_params.get("unison_voices").copied().unwrap_or(1.0) as u32;
-            if ui.add(egui::Slider::new(&mut uv, 1..=8).text("Voices")).changed() {
+            let uv_resp = ui.add(egui::Slider::new(&mut uv, 1..=8).text("Voices")).on_hover_text("Unison voice count");
+            if uv_resp.drag_started() { self.push_undo_snapshot(); }
+            if uv_resp.changed() {
                 self.parts[part].edited_params.insert("unison_voices".into(), uv as f32);
                 changed = true;
             }
         }
-        changed |= self.param_slider(ui, "unison_detune", "Detune (cents)", 0.0, 50.0, false);
+        changed |= self.param_slider_ex(ui, "unison_detune", "Detune", 0.0, 50.0, false, " ct");
         changed |= self.param_slider(ui, "unison_spread", "Spread", 0.0, 1.0, false);
+        }); // end Voice frame
+        ui.add_space(theme::SP_SM);
 
-        ui.add_space(6.0);
+        // Arpeggiator section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
 
         // Arpeggiator
         ui.strong("Arpeggiator");
@@ -1273,6 +1393,7 @@ impl App {
             ui.horizontal(|ui| {
                 let mut enabled = self.parts[part].edited_params.get("arp_enabled").copied().unwrap_or(0.0) > 0.5;
                 if ui.checkbox(&mut enabled, "Enabled").changed() {
+                    self.push_undo_snapshot();
                     self.parts[part].edited_params.insert("arp_enabled".into(), if enabled { 1.0 } else { 0.0 });
                     changed = true;
                     // Send immediate arp param update
@@ -1293,6 +1414,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in arp_mode_names.iter().enumerate() {
                             if ui.selectable_value(&mut amode, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("arp_mode".into(), amode as f32);
                                 changed = true;
                             }
@@ -1307,6 +1429,7 @@ impl App {
                     .show_ui(ui, |ui| {
                         for (i, name) in arp_rate_names.iter().enumerate() {
                             if ui.selectable_value(&mut arate, i, *name).changed() {
+                                self.push_undo_snapshot();
                                 self.parts[part].edited_params.insert("arp_rate".into(), arate as f32);
                                 changed = true;
                             }
@@ -1316,24 +1439,35 @@ impl App {
 
             ui.horizontal(|ui| {
                 let mut oct = self.parts[part].edited_params.get("arp_octaves").copied().unwrap_or(1.0) as u32;
-                if ui.add(egui::Slider::new(&mut oct, 1..=4).text("Octaves")).changed() {
+                let oct_resp = ui.add(egui::Slider::new(&mut oct, 1..=4).text("Octaves")).on_hover_text("Arpeggiator octave range");
+                if oct_resp.drag_started() { self.push_undo_snapshot(); }
+                if oct_resp.changed() {
                     self.parts[part].edited_params.insert("arp_octaves".into(), oct as f32);
                     changed = true;
                 }
             });
             changed |= self.param_slider(ui, "arp_gate", "Gate", 0.1, 1.0, false);
         }
+        }); // end Arpeggiator frame
+        ui.add_space(theme::SP_SM);
 
-        ui.add_space(6.0);
+        // Effects section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        // Secondary width for effects
+        ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
         // Effects
         ui.strong("Effects");
         changed |= self.param_slider(ui, "chorus_mix", "Chorus", 0.0, 1.0, false);
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Ring Modulator");
         changed |= self.param_slider(ui, "ring_mod_mix", "Mix", 0.0, 1.0, false);
-        changed |= self.param_slider(ui, "ring_mod_freq", "Carrier Freq", 20.0, 8000.0, true);
+        changed |= self.param_slider_ex(ui, "ring_mod_freq", "Carrier Freq", 20.0, 8000.0, true, " Hz");
         ui.horizontal(|ui| {
             let mut rs = self.parts[part].edited_params.get("ring_mod_shape").copied().unwrap_or(0.0) as usize;
             ui.label("Shape:");
@@ -1342,6 +1476,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in RING_MOD_SHAPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut rs, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("ring_mod_shape".into(), rs as f32);
                             changed = true;
                         }
@@ -1351,14 +1486,14 @@ impl App {
         changed |= self.param_slider(ui, "ring_mod_bias", "Diode Bias", 0.0, 2.0, false);
         changed |= self.param_slider(ui, "ring_mod_linear", "Diode Linear", 0.01, 2.0, false);
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Freq Shifter");
         changed |= self.param_slider(ui, "freq_shift_mix", "Mix", 0.0, 1.0, false);
-        changed |= self.param_slider(ui, "freq_shift_hz", "Shift (Hz)", -1000.0, 1000.0, false);
+        changed |= self.param_slider_ex(ui, "freq_shift_hz", "Shift", -1000.0, 1000.0, false, " Hz");
         changed |= self.param_slider(ui, "freq_shift_feedback", "Feedback", 0.0, 0.9, false);
-        changed |= self.param_slider(ui, "freq_shift_delay", "Delay", 0.0, 1.0, false);
+        changed |= self.param_slider_ex(ui, "freq_shift_delay", "Delay", 0.0, 1.0, false, " s");
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Tape Saturation");
         changed |= self.param_slider(ui, "tape_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "tape_drive", "Drive", 0.0, 1.0, false);
@@ -1367,7 +1502,7 @@ impl App {
         changed |= self.param_slider(ui, "tape_tone", "Tone", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "tape_speed", "Speed", 0.0, 1.0, false);
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Neuron Distortion");
         changed |= self.param_slider(ui, "neuron_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "neuron_drive", "Drive", 0.0, 1.0, false);
@@ -1375,25 +1510,26 @@ impl App {
         changed |= self.param_slider(ui, "neuron_stab", "Stab", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "neuron_asym", "Asymmetry", -1.0, 1.0, false);
         changed |= self.param_slider(ui, "neuron_bias", "Bias", 0.0, 1.0, false);
-        changed |= self.param_slider(ui, "neuron_comb_freq", "Comb Freq", 20.0, 4000.0, true);
+        changed |= self.param_slider_ex(ui, "neuron_comb_freq", "Comb Freq", 20.0, 4000.0, true, " Hz");
         changed |= self.param_slider(ui, "neuron_comb_sep", "Comb Sep", 0.0, 1.0, false);
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Delay");
         changed |= self.param_slider(ui, "delay_mix", "Mix", 0.0, 1.0, false);
-        changed |= self.param_slider(ui, "delay_time_l", "Time L", 0.01, 2.0, false);
-        changed |= self.param_slider(ui, "delay_time_r", "Time R", 0.01, 2.0, false);
+        changed |= self.param_slider_ex(ui, "delay_time_l", "Time L", 0.01, 2.0, false, " s");
+        changed |= self.param_slider_ex(ui, "delay_time_r", "Time R", 0.01, 2.0, false, " s");
         changed |= self.param_slider(ui, "delay_feedback", "Feedback", 0.0, 0.95, false);
         changed |= self.param_slider(ui, "delay_filter", "Filter", 0.0, 0.95, false);
         {
             let mut pp = self.parts[part].edited_params.get("delay_ping_pong").copied().unwrap_or(0.0) > 0.5;
             if ui.checkbox(&mut pp, "Ping-Pong").changed() {
+                self.push_undo_snapshot();
                 self.parts[part].edited_params.insert("delay_ping_pong".into(), if pp { 1.0 } else { 0.0 });
                 changed = true;
             }
         }
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Reverb");
         ui.horizontal(|ui| {
             let mut rt = self.parts[part].edited_params.get("reverb_type").copied().unwrap_or(0.0) as usize;
@@ -1403,6 +1539,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in REVERB_TYPE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut rt, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("reverb_type".into(), rt as f32);
                             changed = true;
                         }
@@ -1416,7 +1553,7 @@ impl App {
             changed |= self.param_slider(ui, "reverb_room_size", "Room Size", 0.0, 1.0, false);
             changed |= self.param_slider(ui, "reverb_damping", "Damping", 0.0, 1.0, false);
             changed |= self.param_slider(ui, "reverb_width", "Width", 0.0, 1.0, false);
-            changed |= self.param_slider(ui, "reverb_pre_delay", "Pre-Delay", 0.0, 0.1, false);
+            changed |= self.param_slider_ex(ui, "reverb_pre_delay", "Pre-Delay", 0.0, 0.1, false, " s");
         } else {
             // Spring reverb params
             changed |= self.param_slider(ui, "spring_mix", "Mix", 0.0, 1.0, false);
@@ -1427,7 +1564,7 @@ impl App {
             changed |= self.param_slider(ui, "spring_spin", "Spin", 0.0, 1.0, false);
         }
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Wave Shaper");
         changed |= self.param_slider(ui, "wave_shaper_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "wave_shaper_drive", "Drive", 0.0, 1.0, false);
@@ -1440,6 +1577,7 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in WAVE_SHAPER_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut wsm, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("wave_shaper_mode".into(), wsm as f32);
                             changed = true;
                         }
@@ -1447,7 +1585,7 @@ impl App {
                 });
         });
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.strong("Airwindows");
         changed |= self.param_slider(ui, "airwindows_mix", "Mix", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "airwindows_drive", "Drive", 0.0, 1.0, false);
@@ -1476,25 +1614,37 @@ impl App {
                 .show_ui(ui, |ui| {
                     for (i, name) in airwindows_mode_names.iter().enumerate() {
                         if ui.selectable_value(&mut awm, i, *name).changed() {
+                            self.push_undo_snapshot();
                             self.parts[part].edited_params.insert("airwindows_mode".into(), i as f32);
                             changed = true;
                         }
                     }
                 });
         });
+        }); // end Effects frame
+        ui.add_space(theme::SP_SM);
+
+        // Pitch Bend section
+        egui::Frame::default()
+            .fill(theme::BG_SECTION)
+            .corner_radius(4.0)
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+        // Compact width for pitch bend utility
+        ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
 
         // Asymmetric pitch bend
-        ui.add_space(4.0);
         ui.strong("Pitch Bend");
-        changed |= self.param_slider(ui, "pitch_bend_up",   "Range Up (st)",   0.0, 48.0, false);
-        changed |= self.param_slider(ui, "pitch_bend_down", "Range Down (st)", 0.0, 48.0, false);
+        changed |= self.param_slider_ex(ui, "pitch_bend_up",   "Range Up",   0.0, 48.0, false, " st");
+        changed |= self.param_slider_ex(ui, "pitch_bend_down", "Range Down", 0.0, 48.0, false, " st");
+        }); // end Pitch Bend frame
 
         if changed {
             self.parts[part].params_dirty = true;
             self.send_edited_params(part);
         }
 
-        ui.add_space(8.0);
+        ui.add_space(theme::SP_MD);
         ui.horizontal(|ui| {
             if self.parts[part].params_dirty {
                 ui.colored_label(egui::Color32::YELLOW, "Modified");
@@ -1503,12 +1653,10 @@ impl App {
             if ui.button("Save as new preset...").clicked() {
                 self.save_as_user_preset();
             }
-            if self.parts[part].params_dirty {
-                if ui.button("Reset").clicked() {
-                    let l = self.active_part;
-                    self.load_edited_params(l);
-                    self.send_edited_params(l);
-                }
+            if self.parts[part].params_dirty && ui.button("Reset").clicked() {
+                let l = self.active_part;
+                self.load_edited_params(l);
+                self.send_edited_params(l);
             }
         });
     }

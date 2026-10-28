@@ -1,8 +1,8 @@
-/// State-variable filter (SVF) — lowpass, highpass, bandpass.
-/// Plus Moog ladder filter (Huovilainen 2004 improved model with 2x oversampling).
-/// Plus K35 (Korg MS-20 Sallen-Key), Notch, LP24, HP24.
-/// Plus OB-Xd 2-pole/4-pole (saturating SVF), Tripole 18dB/oct, Sample&Hold,
-/// Cutoff Warp and Resonance Warp variants.
+//! State-variable filter (SVF) — lowpass, highpass, bandpass.
+//! Plus Moog ladder filter (Huovilainen 2004 improved model with 2x oversampling).
+//! Plus K35 (Korg MS-20 Sallen-Key), Notch, LP24, HP24.
+//! Plus OB-Xd 2-pole/4-pole (saturating SVF), Tripole 18dB/oct, Sample&Hold,
+//! Cutoff Warp and Resonance Warp variants.
 
 use std::f32::consts::PI;
 use super::dsp_utils::{fast_tan, fast_tanh};
@@ -163,6 +163,8 @@ pub struct Filter {
     comb_write: usize,          // write position
     comb_delay: usize,          // delay in samples (from cutoff)
     comb_feedback: f32,         // feedback amount (from resonance)
+    comb_dc_x1: f32,            // DC blocker state (previous input)
+    comb_dc_y1: f32,            // DC blocker state (previous output)
     // Allpass filter state
     allpass_x1: f32,            // x[n-1]
     allpass_y1: f32,            // y[n-1]
@@ -233,6 +235,8 @@ impl Filter {
             comb_write: 0,
             comb_delay: 100,
             comb_feedback: 0.0,
+            comb_dc_x1: 0.0,
+            comb_dc_y1: 0.0,
             // Allpass filter state
             allpass_x1: 0.0,
             allpass_y1: 0.0,
@@ -313,6 +317,8 @@ impl Filter {
         self.diode_feedback = 0.0;
         self.comb_buf.fill(0.0);
         self.comb_write = 0;
+        self.comb_dc_x1 = 0.0;
+        self.comb_dc_y1 = 0.0;
         self.allpass_x1 = 0.0;
         self.allpass_y1 = 0.0;
         self.pv_s1 = 0.0;
@@ -517,7 +523,13 @@ impl Filter {
         let mask = buf_len - 1; // buf_len == 512 == 2^9
         let read_pos = (self.comb_write + buf_len - delay) & mask;
         let delayed = self.comb_buf[read_pos];
-        let output = input + self.comb_feedback * delayed;
+        // DC blocker on feedback path (one-pole HPF ~10 Hz at any SR)
+        // y[n] = R * y[n-1] + x[n] - x[n-1], R ≈ 0.9995
+        let dc_in = self.comb_feedback * delayed;
+        let dc_out = dc_in - self.comb_dc_x1 + 0.9995 * self.comb_dc_y1;
+        self.comb_dc_x1 = dc_in;
+        self.comb_dc_y1 = dc_out;
+        let output = input + dc_out;
         self.comb_buf[self.comb_write] = output;
         self.comb_write = (self.comb_write + 1) & mask;
         output
@@ -785,7 +797,7 @@ impl Filter {
         for _ in 0..2 {
             let feedback = (self.moog_stage[3] + self.moog_delay4) * 0.5;
             self.moog_delay4 = self.moog_stage[3];
-            let x = fast_tanh((input - self.moog_res_quad * feedback) * (1.0 / 1.22070313_f32));
+            let x = fast_tanh((input - self.moog_res_quad * feedback) * (1.0 / 1.220_703_1_f32));
             // Linear integrators (warmer character, no per-stage saturation)
             self.moog_stage[0] += self.moog_tune * (x - self.moog_stage[0]);
             self.moog_stage[1] += self.moog_tune * (self.moog_stage[0] - self.moog_stage[1]);

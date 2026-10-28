@@ -1,9 +1,17 @@
-/// Persistent settings: audio backend, buffer size, sample rate, MIDI port.
+//! Persistent settings: audio backend, buffer size, sample rate, MIDI port.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+
+#[cfg(target_os = "android")]
+static ANDROID_DATA_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "android")]
+pub fn set_android_data_dir(path: std::path::PathBuf) {
+    let _ = ANDROID_DATA_DIR.set(path);
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -42,6 +50,13 @@ pub struct Sf2Settings {
     /// Drums use SF2 mode.
     #[serde(default)]
     pub drums_sf2: bool,
+    /// Pad-note remap tables per drums kit (key = kit file name or "internal"), len 16.
+    #[serde(default)]
+    pub drums_remaps: std::collections::HashMap<String, Vec<u8>>,
+    /// Per-pad velocity overrides per drums kit (key = kit file name or
+    /// "internal"), len 16, 0 = off.
+    #[serde(default)]
+    pub drums_vels: std::collections::HashMap<String, Vec<u8>>,
     /// SF2 internal block size (samples). Higher = less CPU, more latency.
     #[serde(default = "default_sf2_block_size")]
     pub block_size: usize,
@@ -85,6 +100,9 @@ pub struct UiSettings {
     pub pitch_bend_range: u8,
     #[serde(default = "default_drum_volume")]
     pub drum_volume: f32,
+    /// Drum velocity off: all hits at 127 (for velocity-less controllers)
+    #[serde(default)]
+    pub drum_fixed_velocity: bool,
     #[serde(default = "default_layer_a_volume")]
     pub layer_a_volume: f32,
     #[serde(default = "default_layer_b_volume")]
@@ -92,6 +110,9 @@ pub struct UiSettings {
     /// Pad performance map: 16 slots (notes 36-51) → performance name.
     #[serde(default)]
     pub pad_perf_map: Vec<Option<String>>,
+    /// Keyboard split note persisted across restarts.
+    #[serde(default)]
+    pub split_point: Option<u8>,
     /// Sync looper BPM with drum sequencer BPM.
     #[serde(default = "default_looper_sync_bpm")]
     pub looper_sync_bpm: bool,
@@ -134,9 +155,11 @@ impl Default for Config {
                 fader_delay: 0.0,
                 pitch_bend_range: 2,
                 drum_volume: 0.8,
+                drum_fixed_velocity: false,
                 layer_a_volume: 0.8,
                 layer_b_volume: 0.5,
                 pad_perf_map: Vec::new(),
+                split_point: None,
                 looper_sync_bpm: true,
                 keybinds: std::collections::HashMap::new(),
             },
@@ -144,8 +167,45 @@ impl Default for Config {
     }
 }
 
+/// Base config directory (~/.config/mini_midi_synth or Android internal).
+pub fn app_config_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        ANDROID_DATA_DIR.get().cloned()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        dirs::config_dir().map(|d| d.join("mini_midi_synth"))
+    }
+}
+
+/// Base data directory (~/.local/share/mini_midi_synth or Android internal).
+pub fn app_data_dir() -> PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        ANDROID_DATA_DIR.get().cloned()
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("mini_midi_synth")
+    }
+}
+
 fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("mini_midi_synth").join("config.json"))
+    app_config_dir().map(|d| d.join("config.json"))
+}
+
+/// Writes `contents` to `path` atomically: a crash mid-write leaves either the
+/// old file or the new one, never a truncated one. Android kills backgrounded
+/// processes without warning, which makes this more than theoretical.
+pub fn write_atomic(path: &std::path::Path, contents: &str) -> Result<()> {
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, contents)?;
+    fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 impl Config {
@@ -153,9 +213,29 @@ impl Config {
         let Some(path) = config_path() else {
             return Self::default();
         };
-        match fs::read_to_string(&path) {
-            Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
-            Err(_) => Self::default(),
+        let Ok(contents) = fs::read_to_string(&path) else {
+            return Self::default();
+        };
+
+        match serde_json::from_str(&contents) {
+            Ok(config) => config,
+            Err(e) => {
+                // Keep the unparseable file. Autosave would overwrite it two
+                // seconds later and the user's settings would be gone for good.
+                let backup = path.with_extension("json.bad");
+                let _ = fs::write(&backup, &contents);
+                log::warn!(
+                    "[config] {} is not valid JSON ({e}); starting from defaults, original kept at {}",
+                    path.display(),
+                    backup.display()
+                );
+                eprintln!(
+                    "[config] Could not parse {}: {e}\n[config] Original saved as {}",
+                    path.display(),
+                    backup.display()
+                );
+                Self::default()
+            }
         }
     }
 
@@ -168,7 +248,7 @@ impl Config {
             fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(self)?;
-        fs::write(&path, json)?;
+        write_atomic(&path, &json)?;
         Ok(())
     }
 }

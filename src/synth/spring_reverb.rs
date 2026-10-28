@@ -1,5 +1,5 @@
-/// Spring Reverb — Schroeder allpass network with dispersive delay lines.
-/// Algorithm inspired by Surge XT chowdsp SpringReverbEffect.
+//! Spring Reverb — Schroeder allpass network with dispersive delay lines.
+//! Algorithm inspired by Surge XT chowdsp SpringReverbEffect.
 
 use std::f32::consts::PI;
 
@@ -117,6 +117,7 @@ impl SpringReverb {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self, in_l: f32, in_r: f32,
         size: f32, decay: f32, reflections: f32,

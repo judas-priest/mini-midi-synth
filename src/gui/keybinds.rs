@@ -1,6 +1,6 @@
-/// Keyboard shortcut system for live performance.
-/// Binds computer keyboard keys to actions (switch part, looper controls, etc.).
-/// Persisted in config.json as `keybinds: { "F1": "SwitchPart(0)", ... }`.
+//! Keyboard shortcut system for live performance.
+//! Binds computer keyboard keys to actions (switch part, looper controls, etc.).
+//! Persisted in config.json as `keybinds: { "F1": "SwitchPart(0)", ... }`.
 
 use eframe::egui;
 use std::collections::HashMap;
@@ -43,13 +43,15 @@ impl Keybinds {
                 (egui::Key::Z, KeyAction::LooperUndo),
                 (egui::Key::X, KeyAction::LooperClear),
                 (egui::Key::Tab, KeyAction::ToggleDrumsSynth),
+                (egui::Key::OpenBracket, KeyAction::PrevPreset),
+                (egui::Key::CloseBracket, KeyAction::NextPreset),
             ],
         }
     }
 
     pub fn to_config(&self) -> HashMap<String, String> {
         self.binds.iter()
-            .map(|(key, action)| (key_to_str(*key).to_string(), action.to_string()))
+            .map(|(key, action)| (key_to_str(*key).to_string(), action.to_config_string()))
             .collect()
     }
 
@@ -106,6 +108,7 @@ const KEY_TABLE: &[(egui::Key, &str)] = &[
     (egui::Key::PageUp, "PageUp"), (egui::Key::PageDown, "PageDown"),
     (egui::Key::Delete, "Delete"), (egui::Key::Insert, "Insert"),
     (egui::Key::Minus, "Minus"), (egui::Key::Plus, "Plus"),
+    (egui::Key::OpenBracket, "["), (egui::Key::CloseBracket, "]"),
 ];
 
 pub fn key_to_str(key: egui::Key) -> &'static str {
@@ -119,11 +122,6 @@ pub fn key_from_str(s: &str) -> Option<egui::Key> {
 /// Detect any key press this frame (for rebind capture).
 pub fn detect_key_press(ctx: &egui::Context) -> Option<egui::Key> {
     ctx.input(|i| {
-        for &(key, _) in KEY_TABLE {
-            if i.key_pressed(key) {
-                return Some(key);
-            }
-        }
-        None
+        KEY_TABLE.iter().map(|&(key, _)| key).find(|&key| i.key_pressed(key))
     })
 }

@@ -1,4 +1,4 @@
-/// Stereo delay with ping-pong option and feedback filtering.
+//! Stereo delay with ping-pong option and feedback filtering.
 
 const MAX_DELAY_SAMPLES: usize = 131072; // ~2.7s at 48kHz, must be power of 2
 const DELAY_MASK: usize = MAX_DELAY_SAMPLES - 1;
@@ -47,6 +47,7 @@ impl StereoDelay {
     /// Process one stereo sample.
     /// `time_l`/`time_r` in seconds, `feedback` 0..0.95, `filter` 0..1 (LP amount),
     /// `ping_pong`: cross-feed L↔R, `mix` 0..1.
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
         in_l: f32,

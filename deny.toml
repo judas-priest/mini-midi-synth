@@ -1,0 +1,50 @@
+[advisories]
+version = 2
+yanked = "warn"
+ignore = [
+    # quick-xml reaches us only through wayland-scanner, a proc-macro that
+    # parses the Wayland protocol XML shipped with the system at build time.
+    # No runtime code path and no untrusted input, so the DoS advisories do
+    # not apply. Revisit when winit bumps smithay-client-toolkit.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml is build-time only via wayland-scanner" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml is build-time only via wayland-scanner" },
+    # ttf-parser is unmaintained but not vulnerable; it comes from epaint's
+    # font rasterizer and there is no upgrade path short of egui replacing
+    # ab_glyph. Tracked, not ignored forever.
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained, no vulnerability, pinned by egui 0.31" },
+]
+
+[licenses]
+version = 2
+# This crate itself is proprietary (see LICENSE) and has no SPDX id, so
+# cargo-deny reports it as unlicensed. The check exists to police
+# dependencies, not us.
+private = { ignore = true }
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    # Public-domain equivalent, used by memchr/aho-corasick.
+    "Unlicense",
+    # egui's bundled default fonts (Ubuntu Light, Noto Emoji). Both permit
+    # redistribution as part of a larger work.
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+
+[bans]
+# Several versions of the same crate are common in a GUI + audio dependency
+# tree and are not worth failing a build over.
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

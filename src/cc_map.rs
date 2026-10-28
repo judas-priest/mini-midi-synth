@@ -1,5 +1,5 @@
-/// CC mapping: maps MIDI CC numbers to synth parameters.
-/// RT-safe: CcBinding is Copy, CcMap uses fixed [Option<CcBinding>; 128] — zero heap.
+//! CC mapping: maps MIDI CC numbers to synth parameters.
+//! RT-safe: CcBinding is Copy, CcMap uses fixed [Option<CcBinding>; 128] — zero heap.
 
 use serde::{Deserialize, Serialize};
 
@@ -115,7 +115,7 @@ impl Default for CcMap {
 impl CcMap {
     pub fn default_map() -> Self {
         let mut bindings = [None; 128];
-        // SMK-37 Pro: Knobs K1-K8 = CC 48-55 (all patch-scoped)
+        // SMK-37 Pro: Knobs K1-K8 = CC 48-55 (K7 is global: it holds delay mix)
         bindings[48] = Some(CcBinding {
             param_key: "filter_cutoff", min_val: 20.0, max_val: 20000.0, logarithmic: true, scope: ParamScope::Patch,
         });
@@ -134,16 +134,12 @@ impl CcMap {
         bindings[53] = Some(CcBinding {
             param_key: "portamento_time", min_val: 0.0, max_val: 2.0, logarithmic: false, scope: ParamScope::Patch,
         });
-        bindings[54] = Some(CcBinding {
-            param_key: "lfo_filter_depth", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Patch,
-        });
         bindings[55] = Some(CcBinding {
             param_key: "chorus_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Patch,
         });
-        // SMK-37 Pro: Faders F1-F4 = CC 64-67 (all global — persist across presets)
-        bindings[64] = Some(CcBinding {
-            param_key: "master_volume", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Global,
-        });
+        // CC64 is intentionally unbound: it is the sustain pedal. Binding it
+        // to master volume made a physical sustain pedal act as a volume fader.
+        // SMK-37 Pro: Faders F2-F4 = CC 65-67 (all global — persist across presets)
         bindings[65] = Some(CcBinding {
             param_key: "master_tone", min_val: 200.0, max_val: 20000.0, logarithmic: true, scope: ParamScope::Global,
         });
@@ -151,6 +147,10 @@ impl CcMap {
             param_key: "reverb_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Global,
         });
         bindings[67] = Some(CcBinding {
+            param_key: "master_volume", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Global,
+        });
+        // K7 = delay mix (was LFO filter depth — least-used knob)
+        bindings[54] = Some(CcBinding {
             param_key: "delay_mix", min_val: 0.0, max_val: 1.0, logarithmic: false, scope: ParamScope::Global,
         });
         Self { bindings }
@@ -164,6 +164,10 @@ impl CcMap {
         // Overwrite from saved config
         for (cc_str, raw_binding) in &raw.bindings {
             let cc = *cc_str;
+            if cc == 64 {
+                // CC64 is the sustain pedal, never a parameter binding
+                continue;
+            }
             if (cc as usize) < 128 {
                 if let Some(static_key) = resolve_key(&raw_binding.param_key) {
                     let scope = find_param_meta(static_key).map(|m| m.scope).unwrap_or(ParamScope::Patch);

@@ -1,10 +1,16 @@
-/// Settings, help, feedback, and utility UI methods.
+//! Settings, help, feedback, and utility UI methods.
+
+use std::sync::LazyLock;
+use std::collections::BTreeMap;
 
 use eframe::egui;
 
 use crate::preset::{self, Patch};
-use crate::synth::{ControlEvent, ParamFeedback};
-use super::{App, BUFFER_SIZES, buffer_label, scan_sf2_files, sf2_dir};
+use crate::synth::{ControlEvent, ParamFeedback, PatchParams};
+use super::{App, ToastKind, BUFFER_SIZES, buffer_label, scan_sf2_files, sf2_dir, theme};
+
+/// Default parameter values for double-click reset.
+static DEFAULT_PARAMS: LazyLock<BTreeMap<String, f32>> = LazyLock::new(|| PatchParams::default().to_map());
 
 impl App {
     pub(super) fn draw_pad_perf_window(&mut self, ctx: &egui::Context) {
@@ -14,9 +20,9 @@ impl App {
         // Bot (pink):  C1(36) C#1(37) D1(38) D#1(39) G#1(44) A1(45) A#1(46) B1(47)
         const PAD_TOP: [u8; 8] = [40, 41, 42, 43, 48, 49, 50, 51];
         const PAD_BOT: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
-        const TOP_COLOR: egui::Color32 = egui::Color32::from_rgb(0, 160, 180);
-        const BOT_COLOR: egui::Color32 = egui::Color32::from_rgb(180, 50, 120);
-        const EMPTY_COLOR: egui::Color32 = egui::Color32::from_rgb(50, 50, 58);
+        const TOP_COLOR: egui::Color32 = theme::PAD_PERF_TOP;
+        const BOT_COLOR: egui::Color32 = theme::PAD_PERF_BOT;
+        const EMPTY_COLOR: egui::Color32 = theme::BG_PAD_EMPTY;
 
         egui::Window::new("Pad Performances")
             .open(&mut open)
@@ -25,7 +31,7 @@ impl App {
             .show(ctx, |ui| {
                 ui.label(egui::RichText::new("Tap pad to switch perf. Click cell to assign. Right-click to clear.")
                     .small().weak());
-                ui.add_space(4.0);
+                ui.add_space(theme::SP_SM);
 
                 let pad_w = 80.0_f32;
                 let pad_h = 52.0_f32;
@@ -56,7 +62,7 @@ impl App {
                                     row_color
                                 }
                             } else if pressed {
-                                egui::Color32::from_rgb(90, 90, 100)
+                                theme::BG_PAD_PRESSED_EMPTY
                             } else {
                                 EMPTY_COLOR
                             };
@@ -68,7 +74,7 @@ impl App {
 
                             // Performance name inside
                             if let Some(ref name) = self.pad_perf_map[idx] {
-                                let display = if name.len() > 10 { &name[..10] } else { name };
+                                let display: String = name.chars().take(10).collect();
                                 painter.text(
                                     rect.center(),
                                     egui::Align2::CENTER_CENTER,
@@ -105,10 +111,7 @@ impl App {
                     ui.add_space(gap);
                 }
 
-                ui.add_space(2.0);
-                if !self.pad_perf_status.is_empty() {
-                    ui.label(egui::RichText::new(&self.pad_perf_status).small().weak());
-                }
+                ui.add_space(theme::SP_XS);
             });
         if self.show_pad_perf && !open {
             // Window closing — save pad map
@@ -126,7 +129,7 @@ impl App {
             .default_width(420.0)
             .show(ctx, |ui| {
                 ui.heading("SMK-37 Pro Controller Map");
-                ui.add_space(8.0);
+                ui.add_space(theme::SP_MD);
 
                 // Preset-scoped bindings
                 ui.strong("Preset (reset on patch change, pickup mode)");
@@ -146,7 +149,7 @@ impl App {
                         }
                     });
 
-                ui.add_space(8.0);
+                ui.add_space(theme::SP_MD);
 
                 // Global bindings
                 ui.strong("Global (persist across patch changes)");
@@ -156,6 +159,9 @@ impl App {
                     .striped(true)
                     .show(ui, |ui| {
                         ui.strong("Control"); ui.strong("CC"); ui.strong("Parameter"); ui.end_row();
+                        // F1 is the sustain pedal: CC64 is never bound as a
+                        // parameter, so list it explicitly.
+                        ui.label("F1 (CC64)"); ui.label(""); ui.label("Sustain (hold notes)"); ui.end_row();
                         for (cc, binding) in self.cc_map.bindings.iter().enumerate().filter_map(|(i, b)| b.map(|b| (i as u8, b))) {
                             if binding.scope == crate::cc_map::ParamScope::Global {
                                 let ctrl = crate::cc_map::cc_to_control_name(cc);
@@ -166,12 +172,113 @@ impl App {
                         }
                     });
 
-                ui.add_space(8.0);
+                ui.add_space(theme::SP_MD);
                 ui.separator();
                 ui.label("Preset knobs use pickup mode: after switching presets,");
                 ui.label("move the knob past the current value to start controlling.");
             });
         self.show_help = open;
+    }
+
+    /// Recreate audio engine + stream after device disconnect.
+    /// Creates a new SynthEngine, ring buffers, and AudioBackend.
+    /// Updates all shared atoms and producers in the GUI.
+    pub(super) fn reconnect_audio(&mut self) -> anyhow::Result<()> {
+        use crate::synth;
+
+        // Drop old audio backend (dead stream + old synth engine)
+        self._audio_handle = None;
+
+        let host_id = cpal::default_host().id();
+        let sr = self.sample_rate;
+
+        // New ring buffers
+        let (midi_tx, midi_rx) = rtrb::RingBuffer::<synth::MidiEvent>::new(256);
+        // Must match the capacity in init_common — see the note there.
+        let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(512);
+        let (feedback_tx, feedback_rx) = rtrb::RingBuffer::<synth::ParamFeedback>::new(64);
+
+        // Swap MIDI producer inside SharedMidiTx (for JNI bridge on Android)
+        if let Ok(mut guard) = self.midi_tx_shared.lock() {
+            *guard = midi_tx;
+        }
+
+        // New trash queues for the new engine and callback. The old ones are
+        // replaced below; anything still in them belonged to the dead stream
+        // and is freed when the old receivers drop.
+        let (engine_trash_tx, engine_trash_rx) = crate::trash::channel();
+        let (cb_trash_tx, cb_trash_rx) = crate::trash::channel();
+
+        // New synth engine
+        let mut engine = synth::SynthEngine::new(sr as f32);
+        engine.set_patches(self.patches.clone());
+        engine.set_feedback_tx(feedback_tx);
+        engine.set_trash_tx(engine_trash_tx);
+        engine.set_program_change_atom(self._program_change_atom.clone());
+
+        // Update shared atoms
+        self.drum_step_atom = engine.drum_engine.step_atom();
+        self.drum_play_atom = engine.drum_engine.play_atom();
+        self.drum_rec_atom = engine.drum_engine.rec_atom();
+        self.looper_atoms = engine.looper.atoms();
+        self.looper_display = engine.looper.display();
+        self.seq_target_atom = engine.seq_target_atom();
+        self.active_part_atom = engine.active_part_atom();
+        self.sustain_atom = engine.sustain_atom();
+        self.pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
+        self.scope_buf = engine.scope_buffer();
+        self.midi_seq_play_atom = engine.midi_player_play_atom();
+        self.midi_seq_pos_atom = engine.midi_player_pos_atom();
+
+        // New audio stream
+        let audio_config = crate::audio::AudioConfig {
+            host_id,
+            sample_rate: sr,
+            buffer_size: self.config.audio.buffer_size,
+        };
+        let amidi_port = crate::AMIDI_PORT.get().cloned()
+            .unwrap_or_else(|| std::sync::Arc::new(crate::amidi::AmidiPort::new()));
+
+        #[cfg(target_os = "android")]
+        let audio_paused = crate::AUDIO_PAUSED.get().cloned()
+            .unwrap_or_else(|| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        #[cfg(not(target_os = "android"))]
+        let audio_paused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let (audio_backend, actual_sr) = crate::audio::AudioBackend::new(
+            audio_config,
+            engine,
+            midi_rx,
+            ctrl_rx,
+            crate::audio::AudioShared {
+                amidi_port,
+                note_state: self.note_state.clone(),
+                pad_state: self.pad_state.clone(),
+                paused: audio_paused,
+                trash: cb_trash_tx,
+            },
+        )?;
+        self.engine_trash_rx = engine_trash_rx;
+        self.cb_trash_rx = cb_trash_rx;
+
+        // Update GUI state
+        self.audio_disconnected = audio_backend.disconnected.clone();
+        self._audio_handle = Some(audio_backend);
+        self.ctrl_tx = crate::metrics::CountingProducer::new(ctrl_tx);
+        self.feedback_rx = Some(feedback_rx);
+        self.sample_rate = actual_sr;
+
+        // Re-send the entire GUI state, not just the patches. Sending only
+        // patches left the fresh engine without global params, soundfonts,
+        // drum kit, part ranges, panning and the CC map — unplugging
+        // headphones silently reset half the session.
+        self.send_initial_presets();
+        self.send_full_part_state();
+        self.send_cc_map();
+        self.send_drum_state();
+
+        log::info!("[reconnect] Audio restarted: {actual_sr}Hz");
+        Ok(())
     }
 
     pub(super) fn drain_feedback(&mut self) {
@@ -223,9 +330,6 @@ impl App {
                             } else {
                                 // Long press: toggle pad performance panel
                                 self.show_pad_perf = !self.show_pad_perf;
-                                if !self.show_pad_perf {
-                                    self.pad_perf_status.clear();
-                                }
                             }
                         }
                     }
@@ -247,6 +351,10 @@ impl App {
             }
         }
 
+        if let Some((64, _)) = learned_cc {
+            self.show_toast("CC64 is the sustain pedal — not assignable".to_string(), ToastKind::Error);
+        }
+        let learned_cc = learned_cc.filter(|&(cc, _)| cc != 64);
         if let Some((cc, target)) = learned_cc {
             if let Some(meta) = crate::cc_map::find_param_meta(target) {
                 self.cc_map.bindings[cc as usize] = Some(crate::cc_map::CcBinding {
@@ -277,6 +385,11 @@ impl App {
     }
 
     pub(super) fn param_slider(&mut self, ui: &mut egui::Ui, key: &str, label: &str, min: f32, max: f32, logarithmic: bool) -> bool {
+        self.param_slider_ex(ui, key, label, min, max, logarithmic, "")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn param_slider_ex(&mut self, ui: &mut egui::Ui, key: &str, label: &str, min: f32, max: f32, logarithmic: bool, suffix: &str) -> bool {
         let part = self.active_part;
         let mut val = self.parts[part].edited_params.get(key).copied().unwrap_or(min);
 
@@ -293,10 +406,16 @@ impl App {
             _ => label.to_string(),
         };
 
-        let slider = egui::Slider::new(&mut val, min..=max)
+        let mut slider = egui::Slider::new(&mut val, min..=max)
             .text(&display_label)
             .logarithmic(logarithmic);
-        let resp = ui.add(slider);
+        if !suffix.is_empty() {
+            slider = slider.suffix(suffix);
+        }
+        let resp = ui.add(slider).on_hover_text("Double-click to reset to default");
+        if resp.drag_started() {
+            self.push_undo_snapshot();
+        }
         resp.context_menu(|ui| {
             // Show current CC assignment
             if let Some(cc) = cc_info {
@@ -309,16 +428,21 @@ impl App {
                 }
                 ui.close_menu();
             }
-            if cc_info.is_some() {
+            if let Some(cc) = cc_info {
                 if ui.button("Clear MIDI").clicked() {
-                    if let Some(cc) = cc_info {
-                        self.cc_map.bindings[cc] = None;
-                        self.save_cc_map();
-                    }
+                    self.cc_map.bindings[cc] = None;
+                    self.save_cc_map();
                     ui.close_menu();
                 }
             }
         });
+        if resp.double_clicked() {
+            if let Some(&default_val) = DEFAULT_PARAMS.get(key) {
+                self.push_undo_snapshot();
+                self.parts[part].edited_params.insert(key.into(), default_val);
+                return true;
+            }
+        }
         if resp.changed() {
             self.parts[part].edited_params.insert(key.into(), val);
             return true;
@@ -343,10 +467,16 @@ impl App {
             wavetable_frame_size: 0,
         };
 
-        if let Ok(path) = preset::save_patch(&new_patch) {
-            self.settings_status = format!("Saved: {}", path.display());
-            self.patches.push(new_patch);
-            self.parts[part].patch_idx = self.patches.len() - 1;
+        if let Ok(_path) = preset::save_patch(&new_patch) {
+            self.show_toast("Preset saved", ToastKind::Success);
+            // Replace existing preset with same name, or append
+            if let Some(idx) = self.patches.iter().position(|p| p.name == new_patch.name) {
+                self.patches[idx] = new_patch;
+                self.parts[part].patch_idx = idx;
+            } else {
+                self.patches.push(new_patch);
+                self.parts[part].patch_idx = self.patches.len() - 1;
+            }
             self.parts[part].params_dirty = false;
             self.save_config();
         }
@@ -363,16 +493,18 @@ impl App {
 
                 if self.is_jack {
                     ui.colored_label(
-                        egui::Color32::from_rgb(180, 180, 180),
+                        theme::TEXT_MUTED,
                         format!("JACK server: {}Hz", self.sample_rate),
                     );
-                    ui.add_space(4.0);
+                    ui.add_space(theme::SP_SM);
                 }
 
                 egui::Grid::new("audio_settings")
                     .num_columns(2)
                     .spacing([12.0, 6.0])
                     .show(ui, |ui| {
+                        #[cfg(not(target_os = "android"))]
+                        {
                         ui.label("Backend:");
                         let host_name = self.available_hosts.get(self.selected_host_idx)
                             .map(|(_, n)| *n).unwrap_or("?");
@@ -398,6 +530,7 @@ impl App {
                                 }
                             });
                         ui.end_row();
+                        }
 
                         ui.label("Buffer Size:");
                         egui::ComboBox::from_id_salt("buffer")
@@ -416,19 +549,27 @@ impl App {
                         ui.end_row();
                     });
 
-                ui.add_space(4.0);
-                ui.colored_label(egui::Color32::from_rgb(140, 140, 140), "Restart to apply audio changes.");
+                ui.add_space(theme::SP_SM);
+                ui.colored_label(theme::TEXT_SECONDARY, "Restart to apply audio changes.");
                 if ui.button("Save Audio Settings").clicked() {
+                    #[cfg(not(target_os = "android"))]
                     if let Some((_, host_name)) = self.available_hosts.get(self.selected_host_idx) {
                         self.config.audio.backend = host_name.to_string();
                         self.config.audio.sample_rate = self.selected_sample_rate;
                         self.config.audio.buffer_size = self.selected_buffer_size;
                         self.save_config();
-                        self.settings_status = "Audio saved. Restart to apply.".to_string();
+                        self.show_toast("Audio saved. Restart to apply.", ToastKind::Info);
+                    }
+                    #[cfg(target_os = "android")]
+                    {
+                        self.config.audio.sample_rate = self.selected_sample_rate;
+                        self.config.audio.buffer_size = self.selected_buffer_size;
+                        self.save_config();
+                        self.show_toast("Audio saved. Restart to apply.", ToastKind::Info);
                     }
                 }
 
-                ui.add_space(12.0);
+                ui.add_space(theme::SP_LG);
                 ui.heading("MIDI");
 
                 egui::Grid::new("midi_settings")
@@ -461,7 +602,7 @@ impl App {
                 });
 
                 // SF2 SoundFont section
-                ui.add_space(12.0);
+                ui.add_space(theme::SP_LG);
                 ui.heading("SoundFont (SF2)");
 
                 // Keys SF2
@@ -526,12 +667,35 @@ impl App {
 
                 ui.horizontal(|ui| {
                     if ui.button("\u{21BB} Scan").clicked() {
-                        self.sf2_file_list = scan_sf2_files();
+                        let scan = scan_sf2_files();
+                        // An empty list because a directory is unreadable is a
+                        // different problem from an empty list because there
+                        // are no files, and the user needs to be told which.
+                        for (dir, err) in &scan.unreadable {
+                            self.show_toast(
+                                format!("Cannot read {}: {err}", dir.display()),
+                                ToastKind::Error,
+                            );
+                        }
+                        self.sf2_file_list = scan.files;
                     }
+                    // Show where files are actually picked up from. On Android
+                    // this is the app's own storage: /sdcard/Download is
+                    // scanned too but is normally unreadable without storage
+                    // permissions this app does not request.
+                    #[cfg(target_os = "android")]
+                    ui.label(
+                        egui::RichText::new(format!("Put .sf2 in {}", sf2_dir().display()))
+                            .small()
+                            .color(theme::TEXT_SECONDARY),
+                    );
                     if ui.button("Open folder").clicked() {
                         let dir = sf2_dir();
                         let _ = std::fs::create_dir_all(&dir);
-                        let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+                        #[cfg(not(target_os = "android"))]
+                        {
+                            let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+                        }
                     }
                 });
 
@@ -582,44 +746,32 @@ impl App {
                 }
 
                 ui.colored_label(
-                    egui::Color32::from_rgb(140, 140, 140),
+                    theme::TEXT_SECONDARY,
                     format!("Place .sf2 files in: {}", sf2_dir().display()),
                 );
 
-                if !self.sf2_status.is_empty() {
-                    ui.colored_label(egui::Color32::YELLOW, &self.sf2_status);
-                }
-
-                if !self.settings_status.is_empty() {
-                    ui.add_space(6.0);
-                    ui.colored_label(egui::Color32::YELLOW, &self.settings_status);
-                }
             });
         self.show_settings = open;
     }
 
     pub(super) fn apply_midi(&mut self) {
         if let Some(port_name) = &self.selected_midi_port {
-            let port_idx = self.midi_port_names.iter().position(|n| n == port_name);
-            if let Some(idx) = port_idx {
-                if let Some(reconnect) = &mut self.on_midi_reconnect {
-                    match reconnect(idx) {
-                        Ok(()) => {
-                            self.midi_connected_port = Some(port_name.clone());
-                            self.config.midi.port_name = Some(port_name.clone());
-                            self.settings_status = format!("MIDI: {port_name}");
-                            self.save_config();
-                        }
-                        Err(e) => { self.settings_status = format!("MIDI error: {e}"); }
+            let port_name = port_name.clone();
+            if let Some(reconnect) = &mut self.on_midi_reconnect {
+                match reconnect(&port_name) {
+                    Ok(()) => {
+                        self.midi_connected_port = Some(port_name.clone());
+                        self.config.midi.port_name = Some(port_name.clone());
+                        self.show_toast(format!("MIDI: {port_name}"), ToastKind::Success);
+                        self.save_config();
                     }
+                    Err(e) => { self.show_toast(format!("MIDI error: {e}"), ToastKind::Error); }
                 }
-            } else {
-                self.settings_status = format!("Port not found: {port_name}");
             }
         } else {
             self.midi_connected_port = None;
             self.config.midi.port_name = None;
-            self.settings_status = "MIDI disconnected".to_string();
+            self.show_toast("MIDI disconnected", ToastKind::Info);
             self.save_config();
         }
     }

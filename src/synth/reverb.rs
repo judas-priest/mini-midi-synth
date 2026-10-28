@@ -1,6 +1,6 @@
-/// Dattorro plate reverb (from "Effect Design Part 1" by Jon Dattorro).
-/// Figure-8 recirculating allpass network with modulated tank for smooth,
-/// dense reverb with excellent stereo image.
+//! Dattorro plate reverb (from "Effect Design Part 1" by Jon Dattorro).
+//! Figure-8 recirculating allpass network with modulated tank for smooth,
+//! dense reverb with excellent stereo image.
 
 use super::dsp_utils::advance_phase;
 
@@ -301,6 +301,7 @@ impl Reverb {
 
     /// Process one stereo sample.
     /// `room_size` 0..1, `damping` 0..1, `width` 0..1, `pre_delay` in seconds, `mix` 0..1.
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
         in_l: f32,

@@ -1,8 +1,8 @@
-/// BBD Ensemble chorus — 3-tap bucket brigade device chorus.
-///
-/// Models the Roland Juno-106 / Korg Poly-800 style ensemble effect.
-/// Three chorus voices with slightly different delay times and LFO rates.
-/// Anti-aliasing LP filters at each tap (BBD clock noise emulation).
+//! BBD Ensemble chorus — 3-tap bucket brigade device chorus.
+//!
+//! Models the Roland Juno-106 / Korg Poly-800 style ensemble effect.
+//! Three chorus voices with slightly different delay times and LFO rates.
+//! Anti-aliasing LP filters at each tap (BBD clock noise emulation).
 
 use super::dsp_utils::buf_read_linear;
 
@@ -71,8 +71,7 @@ impl BbdEnsemble {
         let mut out_l = 0.0_f32;
         let mut out_r = 0.0_f32;
 
-        for i in 0..3 {
-            let (center_ms, depth_ms, lfo_hz) = TAPS[i];
+        for (i, &(center_ms, depth_ms, lfo_hz)) in TAPS.iter().enumerate() {
             self.phases[i] += lfo_hz * rate_scale / sr;
             if self.phases[i] >= 1.0 { self.phases[i] -= 1.0; }
 

@@ -1,4 +1,4 @@
-/// Flanger: short modulated delay line with feedback.
+//! Flanger: short modulated delay line with feedback.
 
 use std::f32::consts::PI;
 use super::dsp_utils::advance_phase;
@@ -17,6 +17,9 @@ pub struct Flanger {
     pub feedback: f32,  // -0.95..0.95
     pub delay_ms: f32,  // base delay in ms (1..10)
     pub mix: f32,
+    // DC blocker state for feedback path
+    dc_x1_l: f32, dc_y1_l: f32,
+    dc_x1_r: f32, dc_y1_r: f32,
 }
 
 impl Flanger {
@@ -28,6 +31,7 @@ impl Flanger {
             lfo_phase: 0.0,
             sample_rate,
             rate: 0.3, depth: 0.5, feedback: 0.5, delay_ms: 3.0, mix: 0.0,
+            dc_x1_l: 0.0, dc_y1_l: 0.0, dc_x1_r: 0.0, dc_y1_r: 0.0,
         }
     }
 
@@ -35,6 +39,8 @@ impl Flanger {
         self.sample_rate = sr;
         self.buf_l = [0.0; FLANGER_SIZE];
         self.buf_r = [0.0; FLANGER_SIZE];
+        self.dc_x1_l = 0.0; self.dc_y1_l = 0.0;
+        self.dc_x1_r = 0.0; self.dc_y1_r = 0.0;
     }
 
     /// Hermite cubic interpolation for smoother delay line reading.
@@ -73,8 +79,15 @@ impl Flanger {
         let dl = Self::hermite(&self.buf_l, read_pos);
         let dr = Self::hermite(&self.buf_r, read_pos);
 
-        self.buf_l[self.write_pos] = in_l + dl * self.feedback;
-        self.buf_r[self.write_pos] = in_r + dr * self.feedback;
+        // DC blocker on feedback to prevent DC accumulation (one-pole HPF, R≈0.9995)
+        let fb_l = dl * self.feedback;
+        let fb_r = dr * self.feedback;
+        let dc_l = fb_l - self.dc_x1_l + 0.9995 * self.dc_y1_l;
+        let dc_r = fb_r - self.dc_x1_r + 0.9995 * self.dc_y1_r;
+        self.dc_x1_l = fb_l; self.dc_y1_l = dc_l;
+        self.dc_x1_r = fb_r; self.dc_y1_r = dc_r;
+        self.buf_l[self.write_pos] = in_l + dc_l;
+        self.buf_r[self.write_pos] = in_r + dc_r;
         self.write_pos = (self.write_pos + 1) & FLANGER_MASK;
 
         let m = self.mix;

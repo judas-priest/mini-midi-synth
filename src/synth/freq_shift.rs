@@ -1,5 +1,5 @@
-/// Frequency Shifter effect — SSB frequency shifting via quadrature oscillators.
-/// Algorithm inspired by Surge XT FrequencyShifterEffect.
+//! Frequency Shifter effect — SSB frequency shifting via quadrature oscillators.
+//! Algorithm inspired by Surge XT FrequencyShifterEffect.
 
 use std::f32::consts::TAU;
 use super::dsp_utils::DcBlocker;
@@ -131,7 +131,7 @@ impl FreqShift {
 
         // Hilbert transform approximation (allpass-based)
         // Coefficients for wideband 90-degree phase split
-        let coeffs = [0.4021921162, 0.8561710882_f32];
+        let coeffs = [0.402_192_12_f32, 0.856_171_1_f32];
         let (i_l, q_l) = self.allpass_l.process(sig_l, &coeffs);
         let (i_r, q_r) = self.allpass_r.process(sig_r, &coeffs);
 

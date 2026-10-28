@@ -1,7 +1,7 @@
-/// Bonsai saturation — asymmetric multi-mode soft clipper with tone shaping.
-///
-/// Inspired by Surge XT's Bonsai effect. Provides several saturation modes,
-/// adjustable asymmetry, and a pre/post tone filter.
+//! Bonsai saturation — asymmetric multi-mode soft clipper with tone shaping.
+//!
+//! Inspired by Surge XT's Bonsai effect. Provides several saturation modes,
+//! adjustable asymmetry, and a pre/post tone filter.
 
 use std::f32::consts::PI;
 use super::dsp_utils::fast_tanh;
@@ -54,6 +54,7 @@ impl Bonsai {
     /// `asym` (0..1): asymmetry (0=symmetric, 1=asymmetric).
     /// `mode` (0..3): saturation character.
     /// `mix` (0..1): wet/dry.
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
         in_l: f32, in_r: f32,

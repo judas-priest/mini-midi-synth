@@ -1,2 +1,19 @@
-[build]
-rustflags = ["-C", "target-cpu=native"]
+# target-cpu=native is deliberately NOT set here.
+#
+# A [build] rustflags entry applies to every target, including the Android
+# cross-build, where it produced "'raptorlake' is not a recognized processor"
+# on every compile. Worse, on the desktop it bakes the build machine's
+# instruction set into the binary: a release built on a modern x86_64 dies
+# with SIGILL on an older CPU, and this project ships for Orange Pi 5 as well.
+#
+# For a machine-specific build, pass it explicitly for that one build:
+#   RUSTFLAGS="-C target-cpu=native" cargo build --release
+
+[target.aarch64-linux-android]
+linker = "/home/dima/.local/opt/android-sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
+
+# Desktop only: mold linker cuts link times dramatically (no effect on the
+# Android cross-build above, which sets its own NDK clang linker).
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]

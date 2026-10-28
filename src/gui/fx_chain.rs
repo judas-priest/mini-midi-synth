@@ -1,6 +1,6 @@
-/// FX Chain GUI panel — 16 configurable slots.
+//! FX Chain GUI panel — 16 configurable slots.
 use eframe::egui;
-use super::App;
+use super::{App, theme};
 use crate::synth::fx_chain::{FxChain, FxSlot, FxSlotType, FX_SLOTS};
 
 impl App {
@@ -9,15 +9,14 @@ impl App {
 
         ui.horizontal(|ui| {
             ui.strong("FX Chain");
-            ui.label("— 16 слотов, последовательная обработка");
+            ui.label("— 16 slots, serial processing");
             ui.separator();
-            if ui.small_button("Сбросить").clicked() {
-                let mut chain = FxChain::default();
-                chain.active = true;
+            if ui.small_button("Reset").on_hover_text("Reset FX chain to defaults").clicked() {
+                let chain = FxChain { active: true, ..FxChain::default() };
                 flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
                 self.send_edited_params(part);
             }
-            if ui.small_button("Из пресета").clicked() {
+            if ui.small_button("From preset").on_hover_text("Import FX from current preset").clicked() {
                 let chain = FxChain::from_legacy_preset_active(
                     &self.parts[part].edited_params
                 );
@@ -25,15 +24,13 @@ impl App {
                 self.send_edited_params(part);
             }
         });
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // Read current chain
         let mut chain = if self.parts[part].edited_params.contains_key("fx0_type") {
             FxChain::from_map(&self.parts[part].edited_params)
         } else {
-            let mut c = FxChain::default();
-            c.active = true;
-            c
+            FxChain { active: true, ..FxChain::default() }
         };
 
         let mut swap: Option<(usize, usize)> = None;
@@ -49,10 +46,10 @@ impl App {
 
                     // Swap buttons (outside closure so we can act on the chain)
                     ui.horizontal(|ui| {
-                        if i > 0 && ui.small_button("↑").clicked() {
+                        if i > 0 && ui.small_button("↑").on_hover_text("Move up").clicked() {
                             swap = Some((i - 1, i));
                         }
-                        if i + 1 < FX_SLOTS && ui.small_button("↓").clicked() {
+                        if i + 1 < FX_SLOTS && ui.small_button("↓").on_hover_text("Move down").clicked() {
                             swap = Some((i, i + 1));
                         }
                     });
@@ -79,7 +76,7 @@ fn flush_fx_chain(
     _layer: usize,
     params: &mut std::collections::BTreeMap<String, f32>,
 ) {
-    chain.to_map(params);
+    chain.write_to_map(params);
 }
 
 fn draw_slot(ui: &mut egui::Ui, part: usize, idx: usize, slot: &mut FxSlot) -> bool {
@@ -90,7 +87,7 @@ fn draw_slot(ui: &mut egui::Ui, part: usize, idx: usize, slot: &mut FxSlot) -> b
 
         // Enable
         let mut en = slot.enabled;
-        if ui.checkbox(&mut en, "").changed() {
+        if ui.checkbox(&mut en, "").on_hover_text("Enable/bypass effect").changed() {
             slot.enabled = en;
             changed = true;
         }
@@ -119,8 +116,8 @@ fn draw_slot(ui: &mut egui::Ui, part: usize, idx: usize, slot: &mut FxSlot) -> b
         let mut mix = slot.mix;
         if ui.add(
             egui::Slider::new(&mut mix, 0.0..=1.0)
-                .text("Mix").show_value(false)
-        ).changed() {
+                .text("Mix").fixed_decimals(2)
+        ).on_hover_text("Dry/wet mix").changed() {
             slot.mix = mix;
             changed = true;
         }
@@ -133,7 +130,7 @@ fn draw_slot(ui: &mut egui::Ui, part: usize, idx: usize, slot: &mut FxSlot) -> b
                 let mut v = slot.params[j];
                 if ui.add(
                     egui::Slider::new(&mut v, min..=max)
-                        .text(*label).show_value(false)
+                        .text(*label).fixed_decimals(2)
                 ).changed() {
                     slot.params[j] = v;
                     changed = true;

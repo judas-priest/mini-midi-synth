@@ -1,6 +1,6 @@
-/// Headless keyboard input via Linux evdev.
-/// Reads key events from /dev/input/event* devices in a background thread,
-/// maps them to KeyAction and sends corresponding ControlEvent to the audio engine.
+//! Headless keyboard input via Linux evdev.
+//! Reads key events from /dev/input/event* devices in a background thread,
+//! maps them to KeyAction and sends corresponding ControlEvent to the audio engine.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -208,8 +208,8 @@ fn run_keyboard_loop(
 
         if n <= 0 { continue; }
 
-        for i in 0..n as usize {
-            let dev_idx = events[i].u64 as usize;
+        for event in &events[..n as usize] {
+            let dev_idx = event.u64 as usize;
             let fd = fds[dev_idx].0.as_raw_fd();
 
             loop {

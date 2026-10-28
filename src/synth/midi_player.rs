@@ -42,18 +42,15 @@ pub struct MidiSeqData {
 // ---------------------------------------------------------------------------
 
 /// How a track's notes are played.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum TrackInstrument {
     /// Use the DSP synth part 0 voice pool.
+    #[default]
     DspLayer0,
     /// Use the SF2 keys sampler with this GM program.
     Sf2 { program: u8 },
     /// Route to the drum engine (DSP or SF2 drums depending on current mode).
     Drums,
-}
-
-impl Default for TrackInstrument {
-    fn default() -> Self { Self::DspLayer0 }
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +89,10 @@ pub struct MidiPlayer {
     pub position_atom: Arc<AtomicU32>,
 }
 
+impl Default for MidiPlayer {
+    fn default() -> Self { Self::new() }
+}
+
 impl MidiPlayer {
     pub fn new() -> Self {
         Self {
@@ -109,10 +110,15 @@ impl MidiPlayer {
     }
 
     /// Load new MIDI data and reset playback to the beginning.
-    /// Takes `Box<MidiSeqData>` to avoid an extra heap alloc/dealloc on the audio thread.
-    pub fn load(&mut self, data: Box<MidiSeqData>) {
+    ///
+    /// Takes `Box<MidiSeqData>` so the caller's allocation is reused, and
+    /// returns whatever it replaced — the previous file and track list must be
+    /// freed off the audio thread. Building `tracks` still allocates here;
+    /// that is the same debt as `Synthesizer::new` in the sampler.
+    #[must_use = "the replaced MIDI data must be freed off the audio thread"]
+    pub fn load(&mut self, data: Box<MidiSeqData>) -> (Option<Box<MidiSeqData>>, Vec<TrackState>) {
         let n = data.track_names.len();
-        self.tracks = (0..n).map(|i| {
+        let tracks: Vec<TrackState> = (0..n).map(|i| {
             let ch = data.track_channels.get(i).copied().unwrap_or(0);
             TrackState {
                 name: data.track_names[i].clone(),
@@ -121,8 +127,10 @@ impl MidiPlayer {
                 muted: false,
             }
         }).collect();
-        self.data = Some(data); // reuse the Box, no extra alloc
+        let old_tracks = std::mem::replace(&mut self.tracks, tracks);
+        let old_data = self.data.replace(data);
         self.reset_position();
+        (old_data, old_tracks)
     }
 
     /// Seek to the beginning and reset file tempo.
@@ -172,7 +180,7 @@ impl MidiPlayer {
 
         // Effective us-per-beat
         let us = if let Some(bpm) = self.bpm_override {
-            60_000_000.0 / bpm as f64
+            60_000_000.0 / (bpm as f64).max(1.0)
         } else {
             self.us_per_beat as f64
         };
@@ -194,7 +202,10 @@ impl MidiPlayer {
                     }
                 }
                 d => {
-                    if !self.is_muted(ch) {
+                    // Note-offs must never be muted: a muted track's sounding
+                    // voice would otherwise hang forever.
+                    let is_note_off = matches!(d, SeqEventData::NoteOff { .. });
+                    if is_note_off || !self.is_muted(ch) {
                         out.push((ch, d.clone()));
                     }
                 }
@@ -230,6 +241,9 @@ impl MidiPlayer {
 pub fn parse_midi(raw: &[u8]) -> Result<MidiSeqData, String> {
     use midly::{Smf, TrackEventKind, MidiMessage};
 
+    // midly panics on some malformed headers, and the release profile aborts
+    // on panic — check before handing the bytes over. See check_smf_header.
+    crate::midi::check_smf_header(raw).map_err(|e| e.to_string())?;
     let smf = Smf::parse(raw).map_err(|e| format!("MIDI parse error: {e}"))?;
 
     let ticks_per_beat = match smf.header.timing {

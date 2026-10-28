@@ -1,11 +1,11 @@
-/// Wave Shaper — multi-mode waveshaping distortion.
-/// Modes: Tanh, HardClip, Asymmetric, SinFold, TriFold, Digital, Diode, Rectify,
-///        Harm2, Harm3, Harm4, Harm5,
-///        Softfold, Singlefold, Dualfold, WestCoast,
-///        FuzzSoft, FuzzHeavy, FuzzCenter, FuzzEdge, FuzzSoftEdge, FuzzRect,
-///        Sin+x, Sin2x+x, Atan
-///
-/// Inspired by Surge XT's Wave Shaper effect.
+//! Wave Shaper — multi-mode waveshaping distortion.
+//! Modes: Tanh, HardClip, Asymmetric, SinFold, TriFold, Digital, Diode, Rectify,
+//!        Harm2, Harm3, Harm4, Harm5,
+//!        Softfold, Singlefold, Dualfold, WestCoast,
+//!        FuzzSoft, FuzzHeavy, FuzzCenter, FuzzEdge, FuzzSoftEdge, FuzzRect,
+//!        Sin+x, Sin2x+x, Atan
+//!
+//! Inspired by Surge XT's Wave Shaper effect.
 use std::f32::consts::PI;
 use super::dsp_utils::fast_tanh;
 

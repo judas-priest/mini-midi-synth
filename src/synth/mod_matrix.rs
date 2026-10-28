@@ -1,5 +1,5 @@
-/// Modulation Matrix — sparse slot-based routing from any source to any destination.
-/// Max 16 slots per part, evaluated once per sample (control rate).
+//! Modulation Matrix — sparse slot-based routing from any source to any destination.
+//! Max 16 slots per part, evaluated once per sample (control rate).
 
 /// Number of modulation slots per part.
 pub const MOD_SLOTS: usize = 16;

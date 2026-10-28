@@ -369,7 +369,7 @@ impl AirwindowsADClip7 {
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
         let overallscale = sr as f64 / 44100.0;
         let input_gain = 10f64.powf(drive as f64 * 18.0 / 20.0);
-        let softness = 0.618033988749894848f64 * (1.0 - drive as f64);
+        let softness = 0.618_033_988_749_895_f64 * (1.0 - drive as f64);
         let hardness = 1.0 - softness;
         let att = 1.0 - (-1.0 / (0.0001 * overallscale * sr as f64)).exp();
         let rel = 1.0 - (-1.0 / (0.01 * overallscale * sr as f64)).exp();
@@ -384,7 +384,7 @@ impl AirwindowsADClip7 {
         if ov_max > self.env_l {
             self.env_l = self.env_l * (1.0 - att) + ov_max * att;
         } else {
-            self.env_l = self.env_l * (1.0 - rel);
+            self.env_l *= 1.0 - rel;
         }
         self.env_r = self.env_l;
 
@@ -1429,7 +1429,7 @@ impl AirwindowsVerbity {
         let size = 1.87f64;
         let regen = 0.0625f64;
         let lowpass = (1.0 - (0.5f64).powi(2)) / overallscale.sqrt();
-        let interpolate = (0.5f64).powi(2) * 0.618033988749894848f64;
+        let interpolate = (0.5f64).powi(2) * 0.618_033_988_749_895_f64;
         let thunder_amount = (0.3 - 0.0 * 0.22) * 0.5 * 0.1;
 
         let delay_i = (3407.0 * size) as usize;
@@ -1446,8 +1446,8 @@ impl AirwindowsVerbity {
         let delay_h = (1597.0 * size) as usize;
 
         let wet = drive as f64;
-        let dry = (1.0 - wet).max(0.0).min(1.0);
-        let wet = wet.max(0.0).min(1.0);
+        let dry = (1.0 - wet).clamp(0.0, 1.0);
+        let wet = wet.clamp(0.0, 1.0);
 
         let dry_l = in_l;
         let dry_r = in_r;
@@ -1857,8 +1857,8 @@ impl AirwindowsYLowpass {
         sr = outr;
 
         // power soft-clip
-        if sl > 1.0 { sl = 1.0; } if sl < -1.0 { sl = -1.0; }
-        if sr > 1.0 { sr = 1.0; } if sr < -1.0 { sr = -1.0; }
+        sl = sl.clamp(-1.0, 1.0);
+        sr = sr.clamp(-1.0, 1.0);
 
         (sl as f32, sr as f32)
     }

@@ -1,12 +1,12 @@
-/// Reverb 2 — Plate-style feedback delay network (FDN) reverb.
-/// Uses 8 delay lines with a Hadamard mixing matrix.
-/// Character: smooth, metallic plate sound (like a spring plate hybrid).
-///
-/// Algorithm: an 8-line FDN where each delay line output is mixed through an
-/// orthogonal Hadamard matrix before being fed back. Prime-number delay lengths
-/// ensure dense, decorrelated early reflections. Per-line 1-pole LP filters
-/// provide high-frequency damping. Modulation of delay read positions adds a
-/// subtle chorus/shimmer effect.
+//! Reverb 2 — Plate-style feedback delay network (FDN) reverb.
+//! Uses 8 delay lines with a Hadamard mixing matrix.
+//! Character: smooth, metallic plate sound (like a spring plate hybrid).
+//!
+//! Algorithm: an 8-line FDN where each delay line output is mixed through an
+//! orthogonal Hadamard matrix before being fed back. Prime-number delay lengths
+//! ensure dense, decorrelated early reflections. Per-line 1-pole LP filters
+//! provide high-frequency damping. Modulation of delay read positions adds a
+//! subtle chorus/shimmer effect.
 
 use std::f32::consts::PI;
 
@@ -161,8 +161,8 @@ impl Reverb2 {
         Self::hadamard8(&mut outs);
 
         // Write back: mixed feedback + injected input
-        for i in 0..8 {
-            self.delays[i][self.write_pos[i]] = input + outs[i];
+        for (i, &out) in outs.iter().enumerate() {
+            self.delays[i][self.write_pos[i]] = input + out;
             self.write_pos[i] = (self.write_pos[i] + 1) % MAX_DELAY;
         }
 

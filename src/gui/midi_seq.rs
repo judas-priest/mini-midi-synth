@@ -6,7 +6,8 @@ use eframe::egui;
 use crate::synth::ControlEvent;
 use crate::synth::midi_player::TrackInstrument;
 use crate::synth::sampler::GM_PROGRAM_NAMES;
-use super::App;
+use super::{App, ToastKind};
+use super::theme;
 
 /// GUI-side per-track state (mirrors the audio-thread TrackState).
 pub struct MidiSeqTrackGui {
@@ -32,7 +33,7 @@ impl App {
 
             // Loop toggle
             let loop_col = if self.midi_seq_looping {
-                egui::Color32::from_rgb(80, 210, 100)
+                theme::MIDI_SEQ_LOOP_ON
             } else {
                 egui::Color32::DARK_GRAY
             };
@@ -67,7 +68,7 @@ impl App {
             ui.add(egui::ProgressBar::new(frac).desired_width(160.0).show_percentage());
         });
 
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         // ── File load ──────────────────────────────────────────────────────
         // Poll the async file picker result (zenity runs in a background thread)
@@ -112,18 +113,9 @@ impl App {
             }
         });
 
-        if !self.midi_seq_status.is_empty() {
-            let col = if self.midi_seq_status.starts_with("Error") {
-                egui::Color32::from_rgb(220, 70, 70)
-            } else {
-                egui::Color32::from_rgb(100, 200, 100)
-            };
-            ui.colored_label(col, &self.midi_seq_status);
-        }
-
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
         ui.separator();
-        ui.add_space(4.0);
+        ui.add_space(theme::SP_SM);
 
         if self.midi_seq_tracks.is_empty() {
             ui.label(
@@ -167,7 +159,7 @@ impl App {
                         let m_col = if track.muted {
                             egui::Color32::YELLOW
                         } else {
-                            egui::Color32::from_gray(80)
+                            theme::MIDI_SEQ_MUTE_INACTIVE
                         };
                         if ui
                             .button(egui::RichText::new("M").color(m_col).monospace())
@@ -187,8 +179,9 @@ impl App {
                         ui.label(egui::RichText::new(ch_lbl).monospace());
 
                         // Track name (truncated)
-                        let name = if track.name.len() > 24 {
-                            format!("{}…", &track.name[..23])
+                        let name = if track.name.chars().count() > 24 {
+                            let truncated: String = track.name.chars().take(23).collect();
+                            format!("{truncated}…")
                         } else {
                             track.name.clone()
                         };
@@ -284,11 +277,11 @@ impl App {
         }
         match std::fs::read(&path) {
             Err(e) => {
-                self.midi_seq_status = format!("Error reading file: {e}");
+                self.show_toast(format!("Error reading file: {e}"), ToastKind::Error);
             }
             Ok(bytes) => match crate::synth::midi_player::parse_midi(&bytes) {
                 Err(e) => {
-                    self.midi_seq_status = format!("Error parsing MIDI: {e}");
+                    self.show_toast(format!("Error parsing MIDI: {e}"), ToastKind::Error);
                 }
                 Ok(data) => {
                     let n = data.track_names.len();
@@ -309,8 +302,7 @@ impl App {
                             muted: false,
                         })
                         .collect();
-                    self.midi_seq_status =
-                        format!("Loaded: {n} tracks, {ticks} ticks");
+                    self.show_toast(format!("MIDI loaded: {n} tracks, {ticks} ticks"), ToastKind::Success);
                     let _ = self
                         .ctrl_tx
                         .push(ControlEvent::MidiSeqLoad { data: Box::new(data) });
@@ -330,6 +322,7 @@ fn instr_type_name(instr: TrackInstrument) -> &'static str {
 
 /// Open a native file-picker dialog and return the chosen path.
 /// Tries zenity, then kdialog. Returns None if nothing was selected or no tool found.
+#[cfg(not(target_os = "android"))]
 fn open_midi_file_dialog() -> Option<String> {
     // zenity (GTK, works on both X11 and Wayland via xdg-portal)
     if let Ok(out) = std::process::Command::new("zenity")
@@ -370,4 +363,9 @@ fn open_midi_file_dialog() -> Option<String> {
     }
 
     None
+}
+
+#[cfg(target_os = "android")]
+fn open_midi_file_dialog() -> Option<String> {
+    None // No native file picker on Android yet
 }

@@ -1,11 +1,11 @@
-/// Combulator — 3 tuned comb filters creating metallic resonance.
-/// Each comb filter tracks a musical pitch (Hz) with adjustable feedback.
-/// Output mixed together with panning: comb1=center, comb2=left, comb3=right.
-///
-/// Inspired by Surge XT's Combulator effect. The three comb filters each produce
-/// a pitched resonance at their respective frequencies. When driven with broadband
-/// or noisy input, they ring at their tuned pitches, creating metallic timbres.
-/// Adjusting the semitone offsets creates chords or dissonant clusters.
+//! Combulator — 3 tuned comb filters creating metallic resonance.
+//! Each comb filter tracks a musical pitch (Hz) with adjustable feedback.
+//! Output mixed together with panning: comb1=center, comb2=left, comb3=right.
+//!
+//! Inspired by Surge XT's Combulator effect. The three comb filters each produce
+//! a pitched resonance at their respective frequencies. When driven with broadband
+//! or noisy input, they ring at their tuned pitches, creating metallic timbres.
+//! Adjusting the semitone offsets creates chords or dissonant clusters.
 
 use std::f32::consts::PI;
 
@@ -104,6 +104,7 @@ impl Combulator {
     /// - `mix`      (0..1): wet/dry ratio
     ///
     /// Panning: comb1 = center, comb2 = left, comb3 = right.
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
         in_l: f32,

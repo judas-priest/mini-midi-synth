@@ -1,4 +1,4 @@
-/// Synth engine: layered polyphonic voice pools + MIDI event dispatch.
+//! Synth engine: layered polyphonic voice pools + MIDI event dispatch.
 
 pub mod dsp_utils;
 mod airwindows;
@@ -106,6 +106,10 @@ pub struct ScopeBuffer {
     pub write_pos: std::sync::atomic::AtomicUsize,
 }
 
+impl Default for ScopeBuffer {
+    fn default() -> Self { Self::new() }
+}
+
 impl ScopeBuffer {
     pub fn new() -> Self {
         Self {
@@ -124,9 +128,9 @@ impl ScopeBuffer {
     pub fn read(&self) -> [f32; SCOPE_SIZE] {
         let mut out = [0.0f32; SCOPE_SIZE];
         let wp = self.write_pos.load(std::sync::atomic::Ordering::Relaxed);
-        for i in 0..SCOPE_SIZE {
+        for (i, out_sample) in out.iter_mut().enumerate() {
             let idx = (wp + i) & (SCOPE_SIZE - 1);
-            out[i] = f32::from_bits(self.data[idx].load(std::sync::atomic::Ordering::Relaxed));
+            *out_sample = f32::from_bits(self.data[idx].load(std::sync::atomic::Ordering::Relaxed));
         }
         out
     }
@@ -199,7 +203,17 @@ pub enum ControlEvent {
     LooperSetBpm { bpm: f32 },
     LooperSetLayerMute { layer: u8, mute: bool },
     LooperSetSolo { layer: Option<u8> },
+    SetSustain { on: bool },
     AllNotesOff,
+    /// GUI sustain toggle (F1): same path as CC64
+    /// Drums: force every hit to velocity 127
+    DrumSetFixedVelocity { fixed: bool },
+    /// Drums: pad-note -> internal slot table (index = in_note-36, value = slot)
+    DrumSetRemap { table: Box<[u8; 16]> },
+    /// Drums: per-note choke group ids for the SF2 path, indexed (note-30) (0 = none)
+    DrumSetChokeGroups { table: Box<[u8; 26]> },
+    /// Drums: per-pad velocity override (index = in_note-36, 0 = off)
+    DrumSetPadVel { table: Box<[u8; 16]> },
     // SF2 sampler controls
     LoadKeysSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
     LoadDrumsSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
@@ -210,6 +224,8 @@ pub enum ControlEvent {
     SetDrumsSf2Mode { enabled: bool },
     SetSf2BlockSize { size: usize },
     SetSf2SampleOffset { ms: f32 },
+    /// Global SF2 release multiplier (GM2 CC72 semantics, 1.0 = file defaults)
+    SetSf2ReleaseScale { scale: f32 },
     // Pitch step sequencer
     SeqSetEnabled { part: usize, enabled: bool },
     SeqSetStep { part: usize, step: u8, pitch: i8, gate: bool, velocity: u8 },
@@ -322,7 +338,7 @@ pub struct ModulationState {
     pub amp_mod: f32,
 }
 
-pub const MAX_PARTS: usize = 8;
+pub const MAX_PARTS: usize = 16;
 const VOICES_PER_LAYER: usize = 8;
 pub const BLOCK_SIZE: usize = 32;
 
@@ -546,8 +562,12 @@ impl Part {
         ((self.rng_state >> 33) as f32) / (u32::MAX as f32)
     }
 
-    fn note_on(&mut self, note: u8, velocity: u8) {
+    /// Start a voice from a RAW (pre-transpose) MIDI note. Transposition is
+    /// applied internally: `voice.note` keeps the sounding pitch, `voice.src_note`
+    /// keeps the raw key so note-offs match across transpose changes.
+    fn note_on(&mut self, raw_note: u8, velocity: u8) {
         if !self.enabled { return; }
+        let note = (raw_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
         if note < self.min_note || note > self.max_note { return; }
         self.last_velocity = velocity as f32 / 127.0;
         self.last_note = note;
@@ -557,21 +577,22 @@ impl Part {
         self.rand_bipolar = r * 2.0 - 1.0;
         self.rand_unipolar = r;
         self.alt_counter = self.alt_counter.wrapping_add(1);
-        self.alt_bipolar = if self.alt_counter % 2 == 0 { 1.0 } else { -1.0 };
-        self.alt_unipolar = if self.alt_counter % 2 == 0 { 1.0 } else { 0.0 };
+        let is_even = self.alt_counter.is_multiple_of(2);
+        self.alt_bipolar = if is_even { 1.0 } else { -1.0 };
+        self.alt_unipolar = if is_even { 1.0 } else { 0.0 };
 
         let play_mode = self.params.play_mode as u8;
 
         // Latch mode: toggle note on/off
         if play_mode == 3 {
-            if let Some(pos) = self.latch_held.iter().position(|&n| n == note) {
+            if let Some(pos) = self.latch_held.iter().position(|&n| n == raw_note) {
                 self.latch_held.remove(pos);
-                for v in &mut self.voices { if v.active && v.note == note { v.note_off(); } }
+                for v in &mut self.voices { if v.active && v.src_note == raw_note { v.note_off(); } }
             } else {
-                self.latch_held.push(note);
+                self.latch_held.push(raw_note);
                 // fall through to start voice below
             }
-            if self.latch_held.contains(&note) {
+            if self.latch_held.contains(&raw_note) {
                 // Start voice for new latch note
                 self.age_counter += 1;
                 let age = self.age_counter;
@@ -580,7 +601,7 @@ impl Part {
                 });
                 let prev_freq = self.last_note_freq;
                 let voice_params = self.build_voice_params();
-                self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
+                self.voices[idx].note_on(note, raw_note, velocity, age, &voice_params, prev_freq);
                 self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
                 self.lfos[0].trigger_mode(self.params.lfo1_trigger_mode as u8);
                 self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
@@ -594,8 +615,8 @@ impl Part {
 
         // Mono modes (1=mono, 2=mono-st single trigger, 3 handled above)
         if play_mode == 1 || play_mode == 2 {
-            self.note_stack.retain(|&n| n != note);
-            self.note_stack.push(note);
+            self.note_stack.retain(|&n| n != raw_note);
+            self.note_stack.push(raw_note);
             self.age_counter += 1;
             let age = self.age_counter;
             // Retrigger the single mono voice
@@ -606,9 +627,9 @@ impl Part {
             let voice_params = self.build_voice_params();
             let retrigger = play_mode == 2 && self.note_stack.len() > 1; // ST: don't retrigger env
             if retrigger {
-                self.voices[idx].retrigger_note(note, &voice_params);
+                self.voices[idx].retrigger_note(note, raw_note, &voice_params);
             } else {
-                self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
+                self.voices[idx].note_on(note, raw_note, velocity, age, &voice_params, prev_freq);
             }
             self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
             if !retrigger {
@@ -623,10 +644,8 @@ impl Part {
         }
 
         // Piano mode: if same key is already playing, don't retrigger — let it continue
-        if play_mode == 6 {
-            if self.voices.iter().any(|v| v.active && v.note == note) {
-                return;
-            }
+        if play_mode == 6 && self.voices.iter().any(|v| v.active && v.src_note == raw_note) {
+            return;
         }
 
         self.age_counter += 1;
@@ -665,7 +684,7 @@ impl Part {
             _ => None,
         };
         let voice_params = self.build_voice_params();
-        self.voices[idx].note_on(note, velocity, age, &voice_params, prev_freq);
+        self.voices[idx].note_on(note, raw_note, velocity, age, &voice_params, prev_freq);
         self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
         // Retrigger LFOs on note-on if flagged
         self.lfos[0].trigger_mode(self.params.lfo1_trigger_mode as u8);
@@ -756,7 +775,9 @@ impl Part {
         }
     }
 
-    fn note_off(&mut self, note: u8) {
+    /// Release voices matching the RAW (pre-transpose) note — see `note_on`.
+    fn note_off(&mut self, raw_note: u8) {
+        let note = (raw_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
         let play_mode = self.params.play_mode as u8;
 
         // Latch mode: notes released by toggling via note_on, not note_off
@@ -764,17 +785,18 @@ impl Part {
 
         // Mono modes: manage note stack
         if play_mode == 1 || play_mode == 2 {
-            self.note_stack.retain(|&n| n != note);
+            self.note_stack.retain(|&n| n != raw_note);
             if let Some(&prev_note) = self.note_stack.last() {
                 // Retrigger with the previous held note
                 let vp = self.build_voice_params();
+                let prev_transposed = (prev_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
                 if let Some(v) = self.voices.iter_mut().find(|v| v.active) {
-                    v.retrigger_note(prev_note, &vp);
+                    v.retrigger_note(prev_transposed, prev_note, &vp);
                     if play_mode == 1 { v.retrigger_envelope(); }
                 }
             } else {
                 for voice in &mut self.voices {
-                    if voice.active && voice.note == note { voice.note_off(); }
+                    if voice.active && voice.src_note == raw_note { voice.note_off(); }
                 }
                 if !self.has_active_notes() {
                     self.mseg1_state.release();
@@ -791,7 +813,7 @@ impl Part {
             match self.params.sustain_mode as u32 {
                 0 => {
                     // Hold all notes — don't release while pedal is down
-                    self.sustained_notes[note as usize] = true;
+                    self.sustained_notes[raw_note as usize] = true;
                 }
                 1 => {
                     // Release note only if other active non-releasing notes are held
@@ -799,18 +821,21 @@ impl Part {
                         .any(|v| v.note != note && v.active && !v.is_releasing());
                     if other_active {
                         for voice in &mut self.voices {
-                            if voice.active && voice.note == note { voice.note_off(); }
+                            if voice.active && voice.src_note == raw_note { voice.note_off(); }
                         }
+                    } else {
+                        // Held by pedal — must be flagged so pedal-up releases it
+                        self.sustained_notes[raw_note as usize] = true;
                     }
-                    // else hold the note
                 }
                 _ => {
                     // Default: hold all
+                    self.sustained_notes[raw_note as usize] = true;
                 }
             }
         } else {
             for voice in &mut self.voices {
-                if voice.active && voice.note == note { voice.note_off(); }
+                if voice.active && voice.src_note == raw_note { voice.note_off(); }
             }
         }
 
@@ -1049,6 +1074,8 @@ pub struct SynthEngine {
     patches: Vec<Patch>,
     preset_params_cache: Vec<PatchParams>,
     feedback_tx: Option<rtrb::Producer<ParamFeedback>>,
+    /// Where displaced heap objects go so the audio thread never calls free().
+    trash: Option<crate::trash::TrashTx>,
     program_change: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     global_params: GlobalParams,
     pickup_states: [PickupState; 128],
@@ -1056,6 +1083,8 @@ pub struct SynthEngine {
     seq_target: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Active part index (0-7), shared with GUI for looper part recording
     active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Sustain pedal state (CC64 from pedal/fader or GUI toggle), shared with GUI
+    sustain: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Oscilloscope ring buffer: 256 mono samples shared with GUI via atomics
     scope_buf: std::sync::Arc<ScopeBuffer>,
     scope_write: usize,
@@ -1063,6 +1092,10 @@ pub struct SynthEngine {
     pub midi_player: midi_player::MidiPlayer,
     /// Reusable event buffer for midi_player.process_block (avoids per-block allocation)
     midi_seq_buf: Vec<(u8, midi_player::SeqEventData)>,
+    /// Per MIDI-file channel: 0 = DSP layer 0 took the last note-on,
+    /// 1 = SF2 took it, 2 = drums. Note-offs must follow the note-on's
+    /// route, even if the track instrument changed mid-note.
+    seq_route: [u8; 16],
     /// Per-part modulation state, refilled each block in `tick_block`.
     /// Held as a struct field to avoid per-block `Vec` allocation.
     layer_mods: [ModulationState; MAX_PARTS],
@@ -1304,15 +1337,17 @@ impl SynthEngine {
             spring_reverb: SpringReverb::new(sample_rate),
             cc_map: CcMap::default(),
             patches: Vec::new(), preset_params_cache: Vec::new(),
-            feedback_tx: None, program_change: None,
+            feedback_tx: None, trash: None, program_change: None,
             global_params: GlobalParams::default(),
             pickup_states: [PickupState::default(); 128],
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
             scope_write: 0,
             midi_player: midi_player::MidiPlayer::new(),
             midi_seq_buf: Vec::new(),
+            seq_route: [0u8; 16],
             layer_mods: [ModulationState {
                 pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
             }; MAX_PARTS],
@@ -1325,6 +1360,57 @@ impl SynthEngine {
 
     pub fn active_part_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
         self.active_part.clone()
+    }
+
+    pub fn sustain_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.sustain.clone()
+    }
+
+    /// Apply sustain pedal state (CC64 from pedal/fader, or GUI toggle).
+    /// On release, ALL sounding voices get note_off — stale sustained_notes
+    /// flags (patch switched while pedal was down, mono/latch holds) would
+    /// otherwise leave notes ringing forever.
+    fn set_sustain(&mut self, value: u8) {
+        let on = value >= 64;
+        self.sustain.store(on, std::sync::atomic::Ordering::Relaxed);
+        // SF2 voices: rustysynth applies hold-pedal per channel itself
+        self.sampler.sustain_pedal(on);
+        for part in &mut self.parts {
+            part.sustain_pedal = if on { 1.0 } else { 0.0 };
+            if !on {
+                for voice in &mut part.voices {
+                    if voice.active && !voice.is_releasing() {
+                        voice.note_off();
+                    }
+                }
+                part.sustained_notes = [false; 128];
+                // All pedal-held voices are gone; stale mono/latch entries
+                // would resurrect them on the next key press (mono retrigger).
+                part.note_stack.clear();
+                part.latch_held.clear();
+            }
+        }
+    }
+
+
+
+    /// Last held arp key released: the arpeggiator resets pattern_len, so
+    /// tick() will never dispatch the pending gate-off — the sounding voice
+    /// would hang forever. Dispatch the off here (same routing as tick_block).
+    fn flush_arp_note_off(&mut self) {
+        if self.arpeggiator.has_held_notes() {
+            return; // tick() still owns gate-offs
+        }
+        if let Some(off) = self.arpeggiator.flush_current_note() {
+            for (i, part) in self.parts.iter_mut().enumerate() {
+                if !part.enabled { continue; }
+                let transposed = (off as i16 + part.transpose as i16).clamp(0, 127) as u8;
+                if part.sf2_mode { self.sampler.note_off(i, transposed); }
+                else { part.note_off(off); } // raw: part matches by src_note
+            }
+            let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
+            self.looper.record_event(off, 0, ap);
+        }
     }
 
     pub fn pitch_seq_step_atoms(&self) -> Vec<std::sync::Arc<std::sync::atomic::AtomicU8>> {
@@ -1344,6 +1430,20 @@ impl SynthEngine {
         self.patches = patches;
     }
     pub fn set_feedback_tx(&mut self, tx: rtrb::Producer<ParamFeedback>) { self.feedback_tx = Some(tx); }
+    /// Gives the engine somewhere to put heap objects it displaces (soundfonts,
+    /// rustysynth instances) so they are not freed on the audio thread.
+    pub fn set_trash_tx(&mut self, tx: crate::trash::TrashTx) { self.trash = Some(tx); }
+
+    /// Sends a displaced soundfont to the GUI thread for freeing. A no-op when
+    /// nothing was displaced, and a plain drop when no queue has been wired up
+    /// (offline tests and benchmarks, where the audio thread does not exist).
+    fn dispose_sf2(&mut self, displaced: sampler::Displaced) {
+        if displaced.is_empty() { return; }
+        match self.trash.as_mut() {
+            Some(t) => t.dispose(crate::trash::Trash::Sf2(displaced)),
+            None => drop(displaced),
+        }
+    }
     pub fn scope_buffer(&self) -> std::sync::Arc<ScopeBuffer> { self.scope_buf.clone() }
     pub fn set_program_change_atom(&mut self, atom: std::sync::Arc<std::sync::atomic::AtomicU8>) {
         self.program_change = Some(atom);
@@ -1442,11 +1542,40 @@ impl SynthEngine {
                 }
 
                 // Route drum notes (36-51): always on ch10, or any channel when drum mode active
-                let is_drum_note = note >= 36 && note <= 51;
+                let is_drum_note = (36..=51).contains(&note);
                 let drum_mode = self.seq_target.load(std::sync::atomic::Ordering::Relaxed) == 0;
                 let sampler_drums = self.sampler.drums_enabled();
                 if channel == 9 || (is_drum_note && drum_mode) {
+                    // Pad bank 2 transport (notes outside the drum range 36-51):
+                    // 83 (B5) record, 82 (A#5) play/pause, 81 (A5) pause/stop,
+                    // 64 (E4) undo. Never reach the drum trigger path.
+                    if channel == 9 && velocity > 0 {
+                        match note {
+                            83 => {
+                                let rec = !self.drum_engine.sequencer.recording;
+                                self.drum_engine.set_recording(rec);
+                                return;
+                            }
+                            82 => {
+                                let playing = !self.drum_engine.sequencer.playing;
+                                self.drum_engine.set_playing(playing);
+                                return;
+                            }
+                            81 => {
+                                self.drum_engine.set_playing(false);
+                                return;
+                            }
+                            64 => {
+                                self.drum_engine.sequencer.undo();
+                                return;
+                            }
+                            _ => {}
+                        }
+                    }
                     if velocity > 0 {
+                        let velocity = if self.drum_engine.fixed_velocity { 127 } else { velocity };
+                        let velocity = self.drum_engine.pad_velocity(note, velocity);
+                        let note = self.drum_engine.remapped_note(note);
                         // Record into sequencer if recording
                         if is_drum_note {
                             let slot = (note - 36) as usize;
@@ -1462,11 +1591,14 @@ impl SynthEngine {
                             }
                         }
                         if sampler_drums {
+                            let choke = self.drum_engine.sf2_choke_take(note);
+                            if choke != 0 { self.sampler.drum_note_off(choke); }
                             self.sampler.drum_note_on(note, velocity);
                         } else {
                             self.drum_engine.note_on(note, velocity);
                         }
                     } else {
+                        let note = self.drum_engine.remapped_note(note);
                         if sampler_drums {
                             self.sampler.drum_note_off(note);
                         } else {
@@ -1477,22 +1609,24 @@ impl SynthEngine {
                     // Route through arpeggiator — it generates notes in tick_block
                     if velocity == 0 {
                         self.arpeggiator.note_off(note);
+                        self.flush_arp_note_off();
                     } else {
                         self.arpeggiator.note_on(note, velocity);
                     }
                 } else if velocity == 0 {
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         if !part.enabled { continue; }
+                        let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
                         if part.sf2_mode {
-                            self.sampler.note_off(i, note);
+                            self.sampler.note_off(i, transposed);
                         } else {
-                            part.note_off(note);
+                            part.note_off(note); // raw: part matches by src_note
                         }
+                        // Whole-performance recording: tag with the part that
+                        // receives the off (looper replay routes per part id).
+                        self.looper.record_event(note, 0, i as u8);
                     }
-                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
-                    self.looper.record_event(note, 0, ap);
                 } else {
-                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         if !part.enabled || part.mute { continue; }
                         // Key range + velocity range check
@@ -1502,14 +1636,27 @@ impl SynthEngine {
                         if part.sf2_mode {
                             self.sampler.note_on(i, transposed, velocity);
                         } else {
-                            part.note_on(transposed, velocity);
+                            part.note_on(note, velocity); // raw: part transposes internally
                         }
+                        // Whole-performance recording: tag the event with the
+                        // part that actually sounds it (looper replay routes
+                        // per part id).
+                        //
+                        // Accepted effects: (1) the matching off events below
+                        // are also recorded for parts that never sounded the
+                        // note (off loops don't range-check) — replayed offs
+                        // are harmless no-ops but consume looper event slots;
+                        // (2) split overlap (two parts covering the same note)
+                        // overwrites looper's single active_notes[note] slot —
+                        // the forced off at loop wrap releases only the last
+                        // part.
+                        self.looper.record_event(note, velocity, i as u8);
                     }
-                    self.looper.record_event(note, velocity, ap);
                 }
             }
             MidiEvent::NoteOff { channel, note } => {
                 if channel == 9 {
+                    let note = self.drum_engine.remapped_note(note);
                     if self.sampler.drums_enabled() {
                         self.sampler.drum_note_off(note);
                     } else {
@@ -1517,16 +1664,19 @@ impl SynthEngine {
                     }
                 } else if self.arpeggiator.enabled {
                     self.arpeggiator.note_off(note);
+                    self.flush_arp_note_off();
                 } else {
                     for (i, part) in self.parts.iter_mut().enumerate() {
+                        let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
                         if part.sf2_mode {
-                            self.sampler.note_off(i, note);
+                            self.sampler.note_off(i, transposed);
                         } else {
-                            part.note_off(note);
+                            part.note_off(note); // raw: part matches by src_note
                         }
+                        // Whole-performance recording: tag with the part that
+                        // receives the off (looper replay routes per part id).
+                        self.looper.record_event(note, 0, i as u8);
                     }
-                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
-                    self.looper.record_event(note, 0, ap);
                 }
             }
             MidiEvent::PitchBend { value, .. } => {
@@ -1560,12 +1710,27 @@ impl SynthEngine {
                 }
             }
             MidiEvent::ProgramChange { program, .. } => {
+                // Same hang-prevention as LoadPatch: release voices the old
+                // patch held (pedal holds, mono/latch holds) BEFORE anything
+                // else — including when the program is out of range and the
+                // cache lookup below bails.
+                self.sampler.part_all_notes_off(0);
+                if let Some(l) = self.parts.get_mut(0) {
+                    for voice in &mut l.voices {
+                        if voice.active { voice.note_off(); }
+                    }
+                    l.sustained_notes = [false; 128];
+                    l.note_stack.clear();
+                    l.latch_held.clear();
+                }
                 // In SF2 mode, change the SF2 program; in synth mode, change the synth patch
                 if self.parts.first().map(|l| l.sf2_mode).unwrap_or(false) {
                     self.sampler.set_part_program(0, program, 0);
                 } else if let Some(&params) = self.preset_params_cache.get(program as usize) {
                     if let Some(l) = self.parts.get_mut(0) {
                         l.params = params;
+                        l.min_note = params.min_note as u8;
+                        l.max_note = params.max_note as u8;
                         if let Some(patch) = self.patches.get(program as usize) {
                             l.mod_matrix.load_from_params(&patch.params);
                             l.pitch_seq.load_from_params(&patch.params);
@@ -1586,7 +1751,8 @@ impl SynthEngine {
                 if channel != 9 {
                     for part in &mut self.parts {
                         for voice in &mut part.voices {
-                            if voice.note == note && voice.active {
+                            // src_note = raw key; poly AT was always sent raw
+                            if voice.src_note == note && voice.active {
                                 voice.poly_aftertouch = pressure;
                             }
                         }
@@ -1594,6 +1760,34 @@ impl SynthEngine {
                 }
             }
             MidiEvent::ControlChange { cc, value, .. } => {
+                // Channel mode messages. 120 = All Sound Off, 123 = All Notes
+                // Off. Hardware sends these from the panic button and when the
+                // transport stops, so they take priority over any CC mapping.
+                if cc == 120 || cc == 123 {
+                    // Lift the sustain state everywhere first: rustysynth
+                    // gates CC123 on the channel hold pedal, and the GUI
+                    // sustain atom must not stay stuck ON.
+                    self.set_sustain(0);
+                    for part in &mut self.parts {
+                        for v in &mut part.voices {
+                            if v.active { v.note_off(); }
+                        }
+                        part.note_stack.clear();
+                        part.latch_held.clear();
+                        part.sustain_pedal = 0.0;
+                        part.sustained_notes = [false; 128];
+                    }
+                    self.sampler.all_notes_off();
+                    self.drum_engine.reset_choke_state();
+                    if let Some(off_note) = self.arpeggiator.flush_current_note() {
+                        for (i, part) in self.parts.iter_mut().enumerate() {
+                            if !part.enabled { continue; }
+                            if part.sf2_mode { self.sampler.note_off(i, off_note); }
+                            else { part.note_off(off_note); }
+                        }
+                    }
+                    return;
+                }
                 // Check assignable mod sources (CC1..CC4)
                 for i in 0..4 {
                     if cc == self.cc_numbers[i] {
@@ -1601,30 +1795,22 @@ impl SynthEngine {
                     }
                 }
                 // Dedicated mod sources: Breath (CC2), Expression (CC11), Sustain (CC64)
-                for part in &mut self.parts {
-                    match cc {
-                        2  => part.breath = value as f32 / 127.0,
-                        11 => part.expression = value as f32 / 127.0,
-                        64 => {
-                            let was_held = part.sustain_pedal > 0.5;
-                            part.sustain_pedal = if value >= 64 { 1.0 } else { 0.0 };
-                            // When pedal is released, release only voices that were held by sustain
-                            if was_held && part.sustain_pedal < 0.5 {
-                                for voice in &mut part.voices {
-                                    if voice.active && !voice.is_releasing()
-                                        && part.sustained_notes[voice.note as usize]
-                                    {
-                                        voice.note_off();
-                                    }
-                                }
-                                part.sustained_notes = [false; 128];
-                            }
+                if cc == 64 {
+                    self.set_sustain(value);
+                } else {
+                    for part in &mut self.parts {
+                        match cc {
+                            2  => part.breath = value as f32 / 127.0,
+                            11 => part.expression = value as f32 / 127.0,
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
                 // CcBinding is Copy — no heap allocation
-                if let Some(binding) = self.cc_map.bindings[cc as usize] {
+                // Defense in depth: even a hand-edited config binding on CC64
+                // must not steal the sustain pedal.
+                let binding = if cc == 64 { None } else { self.cc_map.bindings[cc as usize] };
+                if let Some(binding) = binding {
                     if self.check_pickup(cc, value, binding) {
                         let param_val = CcMap::cc_to_param(&binding, value);
                         if binding.scope == ParamScope::Global {
@@ -1647,31 +1833,77 @@ impl SynthEngine {
         }
     }
 
-    pub fn handle_control(&mut self, event: ControlEvent) {
+    /// Applies a control event.
+    ///
+    /// Returns the event back when it owns heap memory, so the caller can hand
+    /// it to the trash queue instead of calling free() on the audio thread.
+    /// Returns `None` for the plain-data variants, which cost nothing to drop.
+    #[must_use = "heap-owning events must be sent to the trash queue"]
+    pub fn handle_control(&mut self, event: ControlEvent) -> Option<ControlEvent> {
         match event {
-            ControlEvent::LoadPatch(ev) => {
-                let LoadPatchEvent { part, params, mod_matrix, mseg1, mseg2, pitch_seq, lfo_step_seq, wavetable } = *ev;
+            ControlEvent::LoadPatch(mut ev) => {
+                // Take the contents out of the box rather than unboxing it:
+                // `*ev` would drop the allocation right here, on the audio
+                // thread. The emptied box travels back to the GUI thread.
+                let part = ev.part;
+                let params = ev.params; // PatchParams is Copy
+                let mod_matrix = std::mem::take(&mut ev.mod_matrix);
+                let mseg1 = ev.mseg1.take();
+                let mseg2 = ev.mseg2.take();
+                let pitch_seq = ev.pitch_seq.take();
+                let lfo_step_seq = ev.lfo_step_seq.take();
+                let wavetable = ev.wavetable.take();
                 if let Some(l) = self.parts.get_mut(part) {
+                    // Release anything the old patch left hanging: notes held
+                    // by the sustain pedal would otherwise ring forever under
+                    // the new patch (its envelope keeps the voice active).
+                    // SF2 voices live in rustysynth, not in l.voices.
+                    self.sampler.part_all_notes_off(part);
+                    for voice in &mut l.voices {
+                        if voice.active { voice.note_off(); }
+                    }
+                    l.sustained_notes = [false; 128];
+                    l.note_stack.clear();
+                    l.latch_held.clear();
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
                     // Sync macro values from preset into live part state
-                    // Load wavetable data if provided
-                    if let Some((data, frames, fsize)) = wavetable {
-                        l.wavetable_data = Some(data);
-                        l.wavetable_frames = frames;
-                        l.wavetable_frame_size = fsize;
-                    } else {
-                        l.wavetable_data = None;
-                    }
+                    // Load wavetable data if provided. `replace` hands the
+                    // previous Arc back into the event instead of dropping the
+                    // last reference here — a wavetable is a Vec<f32> of tens
+                    // of thousands of samples.
+                    let previous_wt = match wavetable {
+                        Some((data, frames, fsize)) => {
+                            l.wavetable_frames = frames;
+                            l.wavetable_frame_size = fsize;
+                            l.wavetable_data.replace(data)
+                        }
+                        None => l.wavetable_data.take(),
+                    };
+                    ev.wavetable = previous_wt.map(|d| (d, 0, 0));
                     l.macro_vals = params.macro_vals;
                     l.params = params;
                     l.mod_matrix = mod_matrix;
-                    if let Some(m) = mseg1 { l.mseg1 = m; }
-                    if let Some(m) = mseg2 { l.mseg2 = m; }
-                    if let Some(sq) = pitch_seq { l.pitch_seq = sq; }
+                    // Mseg owns a Vec<MsegSegment>, so plain assignment would
+                    // free the outgoing envelope on the audio thread. Swap it
+                    // into the event and let the GUI thread drop it.
+                    if let Some(mut m) = mseg1 {
+                        std::mem::swap(&mut l.mseg1, &mut m);
+                        ev.mseg1 = Some(m);
+                    }
+                    if let Some(mut m) = mseg2 {
+                        std::mem::swap(&mut l.mseg2, &mut m);
+                        ev.mseg2 = Some(m);
+                    }
+                    // Copy the pattern, keep our own step atom: see
+                    // PitchSequencer::adopt.
+                    if let Some(sq) = pitch_seq {
+                        l.pitch_seq.adopt(&sq);
+                        ev.pitch_seq = Some(sq);
+                    }
                     if let Some(ref sp) = lfo_step_seq {
-                        for i in 0..4 {
-                            l.lfos[i].apply_step_seq(&sp[i]);
+                        for (i, lfo) in l.lfos.iter_mut().enumerate().take(4) {
+                            lfo.apply_step_seq(&sp[i]);
                         }
                     }
                     l.update_routing_cache();
@@ -1685,9 +1917,19 @@ impl SynthEngine {
                     );
                 }
                 self.reset_preset_pickups();
+                return Some(ControlEvent::LoadPatch(ev));
             }
             ControlEvent::SetPartEnabled { part, enabled } => {
                 if let Some(l) = self.parts.get_mut(part) {
+                    if !enabled {
+                        self.sampler.part_all_notes_off(part);
+                        for voice in &mut l.voices {
+                            if voice.active { voice.note_off(); }
+                        }
+                        l.sustained_notes = [false; 128];
+                        l.note_stack.clear();
+                        l.latch_held.clear();
+                    }
                     l.enabled = enabled;
                     if !enabled {
                         // Graceful note-off all voices
@@ -1701,7 +1943,15 @@ impl SynthEngine {
                 if let Some(l) = self.parts.get_mut(part) {
                     l.mute = mute;
                     if mute {
-                        for v in &mut l.voices { if v.active { v.note_off(); } }
+                        // A muted part must not keep sounding; SF2 voices live
+                        // in the sampler, not in l.voices.
+                        self.sampler.part_all_notes_off(part);
+                        for voice in &mut l.voices {
+                            if voice.active { voice.note_off(); }
+                        }
+                        l.sustained_notes = [false; 128];
+                        l.note_stack.clear();
+                        l.latch_held.clear();
                     }
                 }
             }
@@ -1716,9 +1966,22 @@ impl SynthEngine {
                 if let Some(l) = self.parts.get_mut(part) { l.vel_min = vel_min; l.vel_max = vel_max; }
             }
             ControlEvent::SetPartPan { part, pan } => {
-                if let Some(l) = self.parts.get_mut(part) { l.pan = pan.clamp(-1.0, 1.0); }
+                if let Some(l) = self.parts.get_mut(part) {
+                    l.pan = pan.clamp(-1.0, 1.0);
+                    // SF2: pass pan through as CC10 on the part's sampler channel
+                    // (rustysynth applies per-channel pan internally).  DSP parts
+                    // get constant-power pan in tick_block.
+                    if l.sf2_mode {
+                        let cc = (l.pan.clamp(-1.0, 1.0) * 0.5 + 0.5) * 127.0;
+                        self.sampler.set_channel_pan(part, cc as i32);
+                    }
+                }
             }
             ControlEvent::SetPartTranspose { part, semitones } => {
+                // DSP voices match note-offs by src_note (raw), so held voices
+                // stay releasable across the change. SF2 voices transpose
+                // engine-side and are covered by the state-change drains
+                // (SetPartSf2Mode/ProgramChange/panic) — no extra action here.
                 if let Some(l) = self.parts.get_mut(part) { l.transpose = semitones; }
             }
             ControlEvent::SetMacro { part, index, value } => {
@@ -1729,9 +1992,14 @@ impl SynthEngine {
                     }
                 }
             }
-            ControlEvent::SetCcMap { map } => { self.cc_map = *map; }
+            ControlEvent::SetCcMap { map } => {
+                // CcMap is Copy, so this reads through the box without
+                // consuming it; the allocation goes back to the GUI thread.
+                self.cc_map = *map;
+                return Some(ControlEvent::SetCcMap { map });
+            }
             ControlEvent::SetGlobalParam { key, value } => {
-                self.global_params.set(&key, value);
+                self.global_params.set(key, value);
                 if key == "pitch_bend_range" {
                     self.sampler.set_pitch_bend_range(value.clamp(1.0, 24.0) as u8);
                 }
@@ -1779,12 +2047,14 @@ impl SynthEngine {
                 self.drum_engine.sequencer.undo();
             }
             ControlEvent::DrumLoadKit { patterns, params, bpm, swing, volume } => {
+                // Both arrays are Copy; the boxes travel back for freeing.
                 self.drum_engine.sequencer.patterns = *patterns;
                 self.drum_engine.params = *params;
                 self.drum_engine.sequencer.bpm = bpm;
                 self.drum_engine.sequencer.swing = swing;
                 self.drum_engine.volume = volume;
                 self.sampler.drum_volume = volume;
+                return Some(ControlEvent::DrumLoadKit { patterns, params, bpm, swing, volume });
             }
             ControlEvent::LooperRecord => { self.looper.start_record(); }
             ControlEvent::LooperStopRecord => { self.looper.stop_record(); }
@@ -1826,7 +2096,27 @@ impl SynthEngine {
                     }
                 }
             }
+            ControlEvent::DrumSetFixedVelocity { fixed } => {
+                self.drum_engine.fixed_velocity = fixed;
+            }
+            ControlEvent::DrumSetRemap { table } => {
+                // The box travels back for freeing on the GUI thread.
+                self.drum_engine.apply_remap_vec(&*table);
+                return Some(ControlEvent::DrumSetRemap { table });
+            }
+            ControlEvent::DrumSetChokeGroups { table } => {
+                self.drum_engine.set_choke_groups(&table);
+                return Some(ControlEvent::DrumSetChokeGroups { table });
+            }
+            ControlEvent::DrumSetPadVel { table } => {
+                self.drum_engine.apply_pad_vel_vec(&*table);
+                return Some(ControlEvent::DrumSetPadVel { table });
+            }
+            ControlEvent::SetSustain { on } => {
+                self.set_sustain(if on { 127 } else { 0 });
+            }
             ControlEvent::AllNotesOff => {
+                self.set_sustain(0);
                 for part in &mut self.parts {
                     // Kill all active voices immediately
                     for v in &mut part.voices {
@@ -1839,6 +2129,7 @@ impl SynthEngine {
                     part.sustained_notes = [false; 128];
                 }
                 self.sampler.all_notes_off();
+                self.drum_engine.reset_choke_state();
                 // Clear arpeggiator held notes
                 if let Some(off_note) = self.arpeggiator.flush_current_note() {
                     for (i, part) in self.parts.iter_mut().enumerate() {
@@ -1850,25 +2141,50 @@ impl SynthEngine {
                 self.arpeggiator.clear();
             }
             ControlEvent::LoadKeysSoundFont { soundfont } => {
-                self.sampler.load_keys_soundfont(soundfont);
+                // Clone bumps the Arc refcount; the original travels back to
+                // the GUI thread with the event, and whatever the sampler
+                // displaced goes to the trash queue.
+                let displaced = self.sampler.load_keys_soundfont(soundfont.clone());
+                self.dispose_sf2(displaced);
                 self.sampler.set_pitch_bend_range(self.global_params.pitch_bend_range as u8);
+                return Some(ControlEvent::LoadKeysSoundFont { soundfont });
             }
             ControlEvent::LoadDrumsSoundFont { soundfont } => {
-                self.sampler.load_drums_soundfont(soundfont);
+                let displaced = self.sampler.load_drums_soundfont(soundfont.clone());
+                self.dispose_sf2(displaced);
+                return Some(ControlEvent::LoadDrumsSoundFont { soundfont });
             }
             ControlEvent::UnloadKeysSoundFont => {
-                self.sampler.unload_keys();
+                let displaced = self.sampler.unload_keys();
+                self.dispose_sf2(displaced);
             }
             ControlEvent::UnloadDrumsSoundFont => {
-                self.sampler.unload_drums();
+                let displaced = self.sampler.unload_drums();
+                self.dispose_sf2(displaced);
             }
             ControlEvent::SetPartSf2Mode { part, enabled } => {
+                // Engine switch: both voice owners must be drained
+                self.sampler.part_all_notes_off(part);
                 if let Some(l) = self.parts.get_mut(part) {
+                    for voice in &mut l.voices {
+                        if voice.active { voice.note_off(); }
+                    }
+                    l.sustained_notes = [false; 128];
+                    l.note_stack.clear();
+                    l.latch_held.clear();
                     l.sf2_mode = enabled;
+                    // (Re)apply the part's pan on the SF2 channel — CC10 was
+                    // never sent while the part was in DSP mode.
+                    if enabled {
+                        let cc = (l.pan.clamp(-1.0, 1.0) * 0.5 + 0.5) * 127.0;
+                        self.sampler.set_channel_pan(part, cc as i32);
+                    }
                 }
                 self.sampler.set_part_mode(part, enabled);
             }
             ControlEvent::SetPartSf2Program { part, program, bank } => {
+                // 0xC0 kills nothing in rustysynth: drain the channel first
+                self.sampler.part_all_notes_off(part);
                 self.sampler.set_part_program(part, program, bank);
             }
             ControlEvent::SetDrumsSf2Mode { enabled } => {
@@ -1876,7 +2192,12 @@ impl SynthEngine {
                 self.drum_engine.sf2_mode = enabled;
             }
             ControlEvent::SetSf2BlockSize { size } => {
-                self.sampler.set_block_size(size);
+                let (keys, drums) = self.sampler.set_block_size(size);
+                self.dispose_sf2(keys);
+                self.dispose_sf2(drums);
+            }
+            ControlEvent::SetSf2ReleaseScale { scale } => {
+                self.sampler.set_release_time_scale(scale);
             }
             ControlEvent::SetSf2SampleOffset { ms } => {
                 self.sampler.set_sample_offset_ms(ms);
@@ -1915,7 +2236,27 @@ impl SynthEngine {
                 }
             }
             ControlEvent::MidiSeqLoad { data } => {
-                self.midi_player.load(data); // Box<MidiSeqData> passed directly, no re-boxing
+                // The old file's sounding notes will never see their note-offs
+                // from the new event stream.
+                self.sampler.all_notes_off();
+                for part in &mut self.parts {
+                    for voice in &mut part.voices {
+                        if voice.active { voice.note_off(); }
+                    }
+                }
+                self.seq_route = [0u8; 16];
+                // The Box moves into the player; what it displaced comes back
+                // out and goes to the GUI thread for freeing.
+                let (old_data, old_tracks) = self.midi_player.load(data);
+                if old_data.is_some() || !old_tracks.is_empty() {
+                    match self.trash.as_mut() {
+                        Some(t) => t.dispose(crate::trash::Trash::MidiSeq {
+                            data: old_data,
+                            tracks: old_tracks,
+                        }),
+                        None => drop((old_data, old_tracks)),
+                    }
+                }
             }
             ControlEvent::MidiSeqPlay { playing } => {
                 self.midi_player.playing = playing;
@@ -1965,13 +2306,21 @@ impl SynthEngine {
                 self.arpeggiator.set_params(enabled, mode, rate, octaves, gate);
             }
         }
+
+        // Every variant that owns heap memory returns early above; reaching
+        // here means the event was plain data and costs nothing to drop.
+        None
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
         for part in &mut self.parts { part.set_sample_rate(sample_rate); }
         self.drum_engine.set_sample_rate(sample_rate);
-        self.sampler.set_sample_rate(sample_rate);
+        // Called from the audio callback when JACK reports a rate change, so
+        // the rebuilt soundfonts must not be freed here.
+        let (keys, drums) = self.sampler.set_sample_rate(sample_rate);
+        self.dispose_sf2(keys);
+        self.dispose_sf2(drums);
         self.eq.set_sample_rate(sample_rate);
         self.compressor.set_sample_rate(sample_rate);
         self.overdrive.set_sample_rate(sample_rate);
@@ -2242,36 +2591,41 @@ impl SynthEngine {
                 match evt {
                     midi_player::SeqEventData::NoteOn { note, velocity } => match instr {
                         midi_player::TrackInstrument::Drums => {
+                            self.seq_route[ch as usize] = 2;
                             let sf2 = self.drum_engine.sf2_mode;
                             if sf2 {
+                                let choke = self.drum_engine.sf2_choke_take(note);
+                                if choke != 0 { self.sampler.drum_note_off(choke); }
                                 self.sampler.drum_note_on(note, velocity);
                             } else {
                                 self.drum_engine.note_on(note, velocity);
                             }
                         }
                         midi_player::TrackInstrument::DspLayer0 => {
+                            self.seq_route[ch as usize] = 0;
                             if let Some(part) = self.parts.get_mut(0) {
                                 part.note_on(note, velocity);
                             }
                         }
                         midi_player::TrackInstrument::Sf2 { program } => {
+                            self.seq_route[ch as usize] = 1;
                             self.sampler.seq_program_set(ch, program);
                             self.sampler.seq_note_on(ch, note, velocity);
                         }
                     },
-                    midi_player::SeqEventData::NoteOff { note } => match instr {
-                        midi_player::TrackInstrument::Drums => {
-                            let sf2 = self.drum_engine.sf2_mode;
-                            if sf2 { self.sampler.drum_note_off(note); }
-                        }
-                        midi_player::TrackInstrument::DspLayer0 => {
+                    midi_player::SeqEventData::NoteOff { note } => match self.seq_route[ch as usize] {
+                        0 => {
                             if let Some(part) = self.parts.get_mut(0) {
                                 part.note_off(note);
                             }
                         }
-                        midi_player::TrackInstrument::Sf2 { .. } => {
-                            self.sampler.seq_note_off(ch, note);
-                        }
+                        1 => self.sampler.seq_note_off(ch, note),
+                        _ => {
+                            if let midi_player::TrackInstrument::Drums = instr {
+                                let sf2 = self.drum_engine.sf2_mode;
+                                if sf2 { self.sampler.drum_note_off(note); }
+                            }
+                        },
                     },
                     midi_player::SeqEventData::ProgramChange { program } => {
                         // Follow file program changes when in SF2 mode
@@ -2292,8 +2646,9 @@ impl SynthEngine {
                 if let Some(off_note) = arp_off {
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         if !part.enabled { continue; }
-                        if part.sf2_mode { self.sampler.note_off(i, off_note); }
-                        else { part.note_off(off_note); }
+                        let transposed = (off_note as i16 + part.transpose as i16).clamp(0, 127) as u8;
+                        if part.sf2_mode { self.sampler.note_off(i, transposed); }
+                        else { part.note_off(off_note); } // raw: part matches by src_note
                     }
                     let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
                     self.looper.record_event(off_note, 0, ap);
@@ -2306,7 +2661,7 @@ impl SynthEngine {
                         if note < part.min_note || note > part.max_note { continue; }
                         if vel < part.vel_min || vel > part.vel_max { continue; }
                         if part.sf2_mode { self.sampler.note_on(i, transposed, vel); }
-                        else { part.note_on(transposed, vel); }
+                        else { part.note_on(note, vel); } // raw: part transposes internally
                     }
                     self.looper.record_event(note, vel, ap);
                 }
@@ -2324,13 +2679,13 @@ impl SynthEngine {
                         if part.sf2_mode {
                             self.sampler.note_on(pi, transposed, vel);
                         } else {
-                            part.note_on(transposed, vel);
+                            part.note_on(note, vel); // raw: part transposes internally
                         }
                     } else {
                         if part.sf2_mode {
                             self.sampler.note_off(pi, transposed);
                         } else {
-                            part.note_off(transposed);
+                            part.note_off(note); // raw: part matches by src_note
                         }
                     }
                 }
@@ -2357,7 +2712,12 @@ impl SynthEngine {
             out_l += drum_l; out_r += drum_r;
             for i in 0..drum_triggers.count {
                 let (slot, vel) = drum_triggers.triggers[i];
-                self.sampler.drum_note_on(drum::DRUM_NOTE_BASE + slot, vel);
+                let note = drum::DRUM_NOTE_BASE + slot;
+                if self.drum_engine.sf2_mode {
+                    let choke = self.drum_engine.sf2_choke_take(note);
+                    if choke != 0 { self.sampler.drum_note_off(choke); }
+                }
+                self.sampler.drum_note_on(note, vel);
             }
 
             // Effects chain with cached params — skip when mix=0 to save CPU

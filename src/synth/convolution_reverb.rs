@@ -1,17 +1,17 @@
-/// Convolution Reverb — convolves audio with a built-in room impulse response.
-/// Uses direct convolution with a short IR (≤512 samples = ~12ms at 44.1kHz).
-/// For longer reverb, use the reverb or reverb2 effects.
-///
-/// The built-in IR approximates a small-medium room with:
-/// - Early reflections at ~3ms, ~7ms, ~11ms (scaled to current sample rate)
-/// - Exponential decay envelope
-/// - Bandpass character (low-cut ~100Hz, high-cut ~6kHz)
-///
-/// Parameters:
-/// - `room_size` (0..1): scales the IR length used (0=64 samples, 1=512 samples)
-/// - `damping` (0..1): attenuates the late tail, favouring early reflections
-/// - `pre_delay` (0..1): pre-delay 0..40ms
-/// - `mix` (0..1): wet/dry
+//! Convolution Reverb — convolves audio with a built-in room impulse response.
+//! Uses direct convolution with a short IR (≤512 samples = ~12ms at 44.1kHz).
+//! For longer reverb, use the reverb or reverb2 effects.
+//!
+//! The built-in IR approximates a small-medium room with:
+//! - Early reflections at ~3ms, ~7ms, ~11ms (scaled to current sample rate)
+//! - Exponential decay envelope
+//! - Bandpass character (low-cut ~100Hz, high-cut ~6kHz)
+//!
+//! Parameters:
+//! - `room_size` (0..1): scales the IR length used (0=64 samples, 1=512 samples)
+//! - `damping` (0..1): attenuates the late tail, favouring early reflections
+//! - `pre_delay` (0..1): pre-delay 0..40ms
+//! - `mix` (0..1): wet/dry
 
 const IR_LEN: usize = 512;
 /// Maximum pre-delay buffer: 40ms at up to 192kHz
@@ -93,10 +93,10 @@ impl ConvolutionReverb {
 
         // Step 1: generate raw noise with exponential decay
         let mut raw = [0.0_f32; IR_LEN];
-        for i in 0..n {
+        for (i, sample) in raw.iter_mut().enumerate() {
             let noise = self.next_rand() * 2.0 - 1.0; // -1..1
             let decay = (-6.0 * i as f32 / n as f32).exp();
-            raw[i] = noise * decay;
+            *sample = noise * decay;
         }
 
         // Step 2: early reflection spikes (timed in ms, converted to samples)
@@ -119,30 +119,30 @@ impl ConvolutionReverb {
         let alpha_hp = 1.0 / (1.0 + 2.0 * std::f32::consts::PI * 100.0 / sr);
         let mut hp_prev_in = 0.0_f32;
         let mut hp_prev_out = 0.0_f32;
-        for i in 0..n {
-            let x = raw[i];
+        for sample in raw.iter_mut() {
+            let x = *sample;
             let y = alpha_hp * (hp_prev_out + x - hp_prev_in);
             hp_prev_in = x;
             hp_prev_out = y;
-            raw[i] = y;
+            *sample = y;
         }
 
         // Step 4b: low-pass filter at ~6kHz (softens the IR)
         // 1-pole LP: y[n] = (1-alpha)*x[n] + alpha*y[n-1]
         let alpha_lp = (-2.0 * std::f32::consts::PI * 6000.0_f32 / sr).exp();
         let mut lp_prev = 0.0_f32;
-        for i in 0..n {
-            let y = (1.0 - alpha_lp) * raw[i] + alpha_lp * lp_prev;
+        for sample in raw.iter_mut() {
+            let y = (1.0 - alpha_lp) * *sample + alpha_lp * lp_prev;
             lp_prev = y;
-            raw[i] = y;
+            *sample = y;
         }
 
         // Step 5: normalise peak to 0.1
         let peak = raw.iter().cloned().map(f32::abs).fold(0.0_f32, f32::max);
         if peak > 1e-10 {
             let scale = 0.1 / peak;
-            for i in 0..n {
-                self.ir[i] = raw[i] * scale;
+            for (ir_sample, &raw_sample) in self.ir.iter_mut().zip(raw.iter()) {
+                *ir_sample = raw_sample * scale;
             }
         } else {
             self.ir.copy_from_slice(&raw);
@@ -152,13 +152,13 @@ impl ConvolutionReverb {
     /// Rebuild `damped_ir` for the given damping and IR length.
     /// Called lazily in `tick()` only when parameters change.
     fn rebuild_damped_ir(&mut self, damping: f32, ir_len: usize) {
-        for k in 0..IR_LEN {
+        for (k, (damped, &ir_val)) in self.damped_ir.iter_mut().zip(self.ir.iter()).enumerate() {
             let damp_factor = if damping > 1e-6 && k < ir_len {
                 (-damping * 5.0 * k as f32 / ir_len as f32).exp()
             } else {
                 1.0
             };
-            self.damped_ir[k] = self.ir[k] * damp_factor;
+            *damped = ir_val * damp_factor;
         }
         self.cached_damping = damping;
         self.cached_ir_len = ir_len;
@@ -216,18 +216,18 @@ impl ConvolutionReverb {
         let ir = &*self.damped_ir;
         let hl = &self.hist_l;
         let hr = &self.hist_r;
-        for k in 0..seg1_len {
+        for (k, &ir_val) in ir.iter().enumerate().take(seg1_len) {
             let idx = hp - k; // no wrap needed
-            acc_l += ir[k] * hl[idx];
-            acc_r += ir[k] * hr[idx];
+            acc_l += ir_val * hl[idx];
+            acc_r += ir_val * hr[idx];
         }
         // Segment 2: remaining taps wrap around to end of buffer
         if ir_len > seg1_len {
             let base = IR_LEN - 1; // hist[IR_LEN-1], hist[IR_LEN-2], ...
-            for k in seg1_len..ir_len {
+            for (k, &ir_val) in ir.iter().enumerate().take(ir_len).skip(seg1_len) {
                 let idx = base - (k - seg1_len);
-                acc_l += ir[k] * hl[idx];
-                acc_r += ir[k] * hr[idx];
+                acc_l += ir_val * hl[idx];
+                acc_r += ir_val * hr[idx];
             }
         }
 

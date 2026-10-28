@@ -1,8 +1,8 @@
-/// Resonator bank — 4 tuned comb filters with independent frequencies.
-///
-/// Like Surge XT's Resonator effect: 4 voices, each a comb filter (or 2-pole resonant LP)
-/// at a configurable frequency with a decay/resonance parameter.
-/// Great for metallic sounds, pitched reverb tails, and formant shaping.
+//! Resonator bank — 4 tuned comb filters with independent frequencies.
+//!
+//! Like Surge XT's Resonator effect: 4 voices, each a comb filter (or 2-pole resonant LP)
+//! at a configurable frequency with a decay/resonance parameter.
+//! Great for metallic sounds, pitched reverb tails, and formant shaping.
 
 use std::f32::consts::PI;
 use super::dsp_utils::fast_tan;
