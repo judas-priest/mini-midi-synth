@@ -300,3 +300,22 @@ reconnect-backoff, различать «клава off» vs «bluez stale cache�
 (б) синт: пересоздание console_rx/socket при reconnect_audio (сейчас console_rx
 из CommonInit — проверить, что переподключение аудио не рвёт канал); (в) LED
 после восстановления: heartbeat 2s уже перекрашивает всё — сверить.
+
+## 18. Аудио-вывод: автореспавн при hotplug устройств (наушники ↔ колонки)
+Сценарий (2026-10-29, заявка пользователя): отключил наушники → включил обратно —
+звука нет, помогает только рестарт приложения.
+
+Что есть: разрыв СТРИМА ловится (audio.rs:292-293 → disconnected-атом → GUI
+вызывает reconnect_audio, gui/mod.rs:462). дыра: ВСТАВЛЕНИЕ/смена default-device
+не рождает ошибку стрима — cpal стрим продолжает «играть» в мёртвое устройство,
+flag не ставится, reconnect не происходит. Плюс: если reconnect_audio падает
+(устройства ещё нет), ретраев нет — один тост и тишина до рестарта.
+
+ЧТО ДЕЛАТЬ ПОЗЖЕ. Сначала погуглить практики: cpal hotplug/device-changed
+(dcpial нет единого API — проверять issue-трекер cpal), Linux: watch default
+device через PipeWire/WirePlumber (pw-cli/pactl subscribe; DBus), кроссплат
+poll-подход: раз в 1-2с сравнивать имя default_output_device + state стрима,
+при изменении — reconnect_audio с retry-циклом (backoff, пока устройство не
+появится). Затем спека: (a) poller в GUI-треде (не RT); (b) reconnect_audio
+безопасно вызывать повторно (проверить идемпотентность — looper restore уже
+умеет, см. PR #2); (c) выбор устройства: дефолт системы или из config.
