@@ -76,7 +76,8 @@ cargo test --features rt-assert --test rt_safety
 //! Bank-2 pad console state machine (pure logic, GUI thread only).
 //! Slots 0..=7 = top-row pads 17..=24 (notes 60..=67).
 //! Prev/Next/Rewind arrive as actions from notes 78/79/80 (routed by caller).
-//! Transport notes 81/82/83/64 are handled engine-side (mod.rs:1573-1598).
+//! Engine-side transport notes 81/82/83 (mod.rs:1573-1598) never reach this
+//! module; console Undo is note 75 (engine's legacy 64-arm superseded).
 
 use std::time::{Duration, Instant};
 
@@ -400,7 +401,8 @@ impl LedConsole {
         c[0] = if playing { [0x00, 0xFF, 0x00] } else { dim };
         c[1] = if !playing && !recording { [0xFF, 0xDD, 0x00] } else { dim };
         c[2] = if recording { [0xFF, 0x00, 0x00] } else { dim };
-        // slots 3..=7 (Rew, unused, Prev, Next, Undo) stay dim
+        c[3] = [0x66, 0x55, 0x00]; // Rew: dim amber
+        // slots 4..=7 (unused, Prev, Next, Undo) stay dim
         c
     }
 }
@@ -409,7 +411,7 @@ impl LedConsole {
 - [ ] **Step 4: прогнать**
 
 Run: `cargo test --lib led_console`
-Expected: PASS (10 тестов).
+Expected: PASS (12 тестов).
 
 - [ ] **Step 5: clippy + rt**
 
@@ -466,10 +468,9 @@ git commit -m "feat: bank-2 console state machine (tap/hold, modes, snapshots)"
     }
 ```
 
-(`needs_note_offs = true` — чтобы висящие ноты закрылись на следующем тике;
-сверить семантику с тем, как restore сбрасывает эти поля — там `false` на Idle
-без активных нот; если в `clear`/`restore` needs_note_offs ставится в false,
-поставь false и добавь комментарий-обоснование.)
+(`needs_note_offs = true` ОБЯЗАТЕЛЬНО: rewind посреди проигрывания должен
+закрыть звучащие ноты на следующем тике; `clear`/`restore` ставят false только
+потому что идут из Idle — аналогия неприменима.)
 
 - [ ] **Step 3: ControlEvent** — в enum после `LooperSetSolo` (grep `LooperSetSolo`):
 
@@ -515,8 +516,10 @@ JNI и будущие пути получают его бесплатно, си�
 
 ```rust
 /// Console pads (bank-2 notes 60..=67 and 75..=80 on ch9) are mirrored to the
-/// GUI instead of the audio ring: (note, is_on). Note 64 deliberately NOT in
-/// the range: it is the engine-side Undo transport note (mod.rs:1592).
+/// GUI instead of the audio ring. NOTE: 64 is INSIDE the range — it is console
+/// top-row slot 4; the engine's legacy note-64 undo arm (mod.rs:1592) becomes
+/// unreachable via parse_and_push (kept as dead code, superseded by console
+/// Undo note 75).
 pub type ConsoleTx = std::sync::Mutex<Option<std::sync::mpsc::Sender<(u8, bool)>>>;
 pub static CONSOLE_TX: std::sync::OnceLock<ConsoleTx> = std::sync::OnceLock::new();
 
@@ -564,21 +567,71 @@ pub fn is_console_note(note: u8) -> bool {
 местом, где передаётся midi_tx_shared). Дочитывать: все места, где CommonInit
 конструируется (desktop + android ветки, grep `CommonInit {`).
 
+- [ ] **Step 3b: AMidi-путь (Android USB) — swallow без mirror** —
+  `src/audio.rs:216` парсит через `parse_midi_message` ПРЯМО в аудио-колбэке,
+  минуя parse_and_push: там консольные ноты обязаны молча дропаться (нельзя
+  Mutex/allocation в RT — зеркала в GUI с AMidi-пути НЕТ, by design: Android
+  USB не водитель консоли). Найти dispatch события (~216) и обернуть push:
+
+```rust
+                        // Bank-2 console notes (60..=67, 75..=80 ch9): drop —
+                        // owned by the GUI console (desktop BLE only here).
+                        let console_drop = matches!(&event,
+                            synth::MidiEvent::NoteOn { channel: 9, note, .. }
+                            | synth::MidiEvent::NoteOff { channel: 9, note }
+                                if midi::is_console_note(*note));
+                        if !console_drop {
+                            let _ = midi_tx.push(event);
+                        }
+```
+
+(точные имена переменных — по реальному коду audio.rs:216; суть: guard перед
+push. Это RT-safe: только matches! на уже разобранном event.)
+
 - [ ] **Step 4: callers** — сигнатура parse_and_push не менялась: midir
   (midi.rs:264), JNI (lib.rs:991), три вызова midi::connect/connect_by_name
   (lib.rs:275, 574, 676) — правок не требуют. Тесты midi_parse/end_to_end зовут
   parse_midi_message — не трогаются. Проверить grep `parse_and_push(` —
   сигнатурных правок быть не должно.
 
-- [ ] **Step 5: прогнать**
+- [ ] **Step 5: unit-тест swallow** — добавить в `tests/midi_parse.rs`:
+
+```rust
+#[test]
+fn console_notes_swallowed_and_mirrored() {
+    let (prod, mut cons) = rtrb::RingBuffer::<mini_midi_synth::synth::MidiEvent>::new(64);
+    let tx: mini_midi_synth::midi::SharedMidiTx =
+        std::sync::Arc::new(std::sync::Mutex::new(prod));
+    let note_state: mini_midi_synth::midi::NoteState =
+        std::sync::Arc::new(std::array::from_fn(|_| Default::default()));
+    let pad_state: mini_midi_synth::midi::PadState =
+        std::sync::Arc::new(std::array::from_fn(|_| Default::default()));
+    let (snd, rx) = std::sync::mpsc::channel();
+    *mini_midi_synth::midi::CONSOLE_TX.get_or_init(Default::default)
+        .lock().unwrap() = Some(snd);
+    // NoteOn ch9 note 60 vel 127: 99 3C 7F
+    let used = mini_midi_synth::midi::parse_and_push(&[0x99, 0x3C, 0x7F], &tx, &note_state, &pad_state);
+    assert_eq!(used, 3);
+    assert_eq!(rx.recv().unwrap(), (60, true));      // mirrored to GUI
+    assert!(cons.pop().is_none());                   // never reached the engine
+    // NoteOff ch9 note 60: 89 3C 7F
+    let _ = mini_midi_synth::midi::parse_and_push(&[0x89, 0x3C, 0x7F], &tx, &note_state, &pad_state);
+    assert_eq!(rx.recv().unwrap(), (60, false));
+}
+```
+
+(если SharedMidiTx/типы называются иначе — сверить с midi.rs реальным; rtrb
+уже dev-доступен через основной crate.)
+
+- [ ] **Step 6: прогнать**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/midi.rs src/lib.rs
+git add src/midi.rs src/lib.rs src/audio.rs tests/midi_parse.rs
 git commit -m "feat: mirror bank-2 console notes to GUI via global CONSOLE_TX"
 ```
 
@@ -599,14 +652,14 @@ App-поля (рядом с `drum_current_pattern` ~315):
     pub led_snapshot: [[u8; 3]; 16],
     pub led_dirty: bool,
     pub led_socket: Option<std::sync::mpsc::Sender<String>>,
-    pub led_socket_alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub led_socket_alive: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub led_socket_failed_at: Option<std::time::Instant>,
 ```
 
 инициализация в App-литерале (lib.rs ~695+, где `drum_current_pattern: 0,`):
 `console: led_console::LedConsole::default()`, `led_snapshot: [[0;3];16]`,
 `led_dirty: true`, `led_socket: None`,
-`led_socket_alive: Arc::new(AtomicBool::new(true))`, `led_socket_failed_at: None`.
+`led_socket_alive: None`, `led_socket_failed_at: None`.
 Receiver консоли берётся из CommonInit (Task 3 Step 3): у `run_gui`-стороны
 доступ к `c.console_rx` (CommonInit → App): в App-литерал добавить
 `console_rx: Some(c.console_rx),` и поле App:
@@ -785,7 +838,9 @@ fn led_companion_defaults_false() {
 }
 ```
 
-(проверить: UiSettings pub + serde — конфиг-паттерн соседей совпадает.)
+(проверить: UiSettings pub + serde; в config.rs ~162 есть РУЧНОЙ `impl Default`
+для UiSettings со всеми полями — добавить туда `led_companion: false`, иначе
+не скомпилируется.)
 
 - [ ] **Step 2: подключение/переподключение в update** — в gui/mod.rs update
   (рядом с poll-блоком Task 4):
@@ -805,8 +860,10 @@ fn led_companion_defaults_false() {
             match std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock") {
                 Ok(stream) => {
                     let (tx, rx) = std::sync::mpsc::channel::<String>();
-                    let alive = self.led_socket_alive.clone();
-                    alive.store(true, Ordering::Relaxed);
+                    // fresh AtomicBool на каждый коннект: старый writer не может
+                    // перезаписать флаг нового (spurious reconnect)
+                    let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                    self.led_socket_alive = Some(alive.clone());
                     std::thread::spawn(move || {
                         use std::io::Write;
                         let mut stream = stream;
@@ -829,8 +886,13 @@ fn led_companion_defaults_false() {
             }
         }
         // writer умер (компаньон перезапускается) — забыть сокет, retry через 2с
-        if self.led_socket.is_some() && !self.led_socket_alive.load(Ordering::Relaxed) {
+        let dead = match &self.led_socket_alive {
+            Some(a) => !a.load(Ordering::Relaxed),
+            None => false,
+        };
+        if self.led_socket.is_some() && dead {
             self.led_socket = None;
+            self.led_socket_alive = None;
             self.led_socket_failed_at = Some(std::time::Instant::now());
         }
 ```
@@ -908,8 +970,8 @@ def ble_connect(bus):
         try:
             obj = bus.get_object(BUS, CHAR)
             iface = dbus.Interface(obj, "org.bluez.GattCharacteristic1")
-            # probe: commit-frame как в smk.py (cp = 05 00 00 00 00 00 00 00)
-            iface.WriteValue(dbus.Array([dbus.Byte(b) for b in frame(0x22, bytes(8))], signature="y"),
+            # probe: commit-frame как в smk.py (cp = 05 00 ... 00)
+            iface.WriteValue(dbus.Array([dbus.Byte(b) for b in frame(0x22, bytes([0x05, 0, 0, 0, 0, 0, 0, 0]))], signature="y"),
                              {"type": "command"})
             print("BLE ready")
             return iface
@@ -973,7 +1035,8 @@ if __name__ == "__main__":
 
 Дизайн reconnect: paint-failure → break из inner → внешний while переподключает
 BLE, состояние last сбрасывается → следующий STATE перерисует всё. Synth
-disconnect → accept ждёт нового. Ctrl-C убирает сокет-файл.
+disconnect → accept ждёт нового. Ctrl-C ПОСЛЕ BLE-up убирает сокет-файл; до
+этого — останется, уберётся unlink'ом при следующем старте (уже в коде).
 
 - [ ] **Step 2: selftest**
 
