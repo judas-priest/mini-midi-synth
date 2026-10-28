@@ -140,21 +140,24 @@ impl LedConsole {
         current_pattern: usize,
         mutes: &[bool; 8],
     ) -> [[u8; 3]; 8] {
+        // Palette (Novation/Push canon): bright orange = selected, dim white =
+        // available, bright green = running/sounding, dim red = muted/off,
+        // bright white = system button, off = empty.
         let mut c = [[0u8; 3]; 8];
         if self.mode != Mode::Menu {
-            // slot 0 is the always-visible MENU button
-            c[0] = [0xC0, 0xC0, 0xC0];
+            // slot 0 is the always-visible MENU button (bright white)
+            c[0] = [0xC8, 0xC8, 0xC8];
         }
         match self.mode {
             Mode::Home => {
                 // slot i (1..=7) <-> perf_list index i ("(Init)" at 0 has no slot)
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
                     if Some(i) == active_perf {
-                        *col = [0xFF, 0x80, 0x00];
+                        *col = [0xFF, 0x80, 0x00]; // selected: bright orange
                     } else if i < filled_perfs {
-                        *col = [0x30, 0x30, 0x30];
+                        *col = [0x50, 0x50, 0x50]; // available: dim white
                     } else {
-                        *col = [0x00, 0x00, 0x00];
+                        *col = [0x00, 0x00, 0x00]; // empty: off
                     }
                 }
             }
@@ -162,9 +165,9 @@ impl LedConsole {
                 // slot i (1..=7) <-> pattern i-1 (pattern 8 via Prev/Next)
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
                     if i - 1 == current_pattern {
-                        *col = [0xFF, 0x80, 0x00];
+                        *col = [0xFF, 0x80, 0x00]; // selected: bright orange
                     } else {
-                        *col = [0x30, 0x30, 0x30];
+                        *col = [0x50, 0x50, 0x50]; // available: dim white
                     }
                 }
             }
@@ -172,15 +175,15 @@ impl LedConsole {
                 // slot i (1..=7) <-> part i-1 (part 8 via GUI)
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
                     if mutes[i - 1] {
-                        *col = [0x10, 0x10, 0x10];
+                        *col = [0x50, 0x00, 0x00]; // muted: dim red (disabled)
                     } else {
-                        *col = [0x00, 0x66, 0xFF];
+                        *col = [0x00, 0xC0, 0x00]; // sounding: bright green
                     }
                 }
             }
             Mode::Menu => {
                 for (i, col) in c.iter_mut().enumerate() {
-                    *col = if i < 3 { [0x40, 0x40, 0x40] } else { [0x00, 0x00, 0x00] };
+                    *col = if i < 3 { [0x50, 0x50, 0x50] } else { [0x00, 0x00, 0x00] };
                 }
             }
         }
@@ -189,13 +192,13 @@ impl LedConsole {
 
     /// Bottom-row (transport) colors: slots 8..=15 = pads 25..=32.
     pub fn bottom_colors(&self, playing: bool, recording: bool) -> [[u8; 3]; 8] {
-        let dim = [0x20, 0x20, 0x20];
-        let mut c = [dim; 8];
-        c[0] = if playing { [0x00, 0xFF, 0x00] } else { dim };
-        c[1] = if !playing && !recording { [0xFF, 0xDD, 0x00] } else { dim };
-        c[2] = if recording { [0xFF, 0x00, 0x00] } else { dim };
-        c[3] = [0x66, 0x55, 0x00]; // Rew: dim amber
-        // slots 4..=7 (unused, Prev, Next, Undo) stay dim
+        let sys = [0x40, 0x40, 0x40]; // system buttons: dim white
+        let mut c = [sys; 8];
+        c[0] = if playing { [0x00, 0xFF, 0x00] } else { [0x00, 0x40, 0x00] }; // green lit/dim
+        c[1] = if !playing && !recording { [0xFF, 0xDD, 0x00] } else { [0x40, 0x38, 0x00] }; // amber lit/dim
+        c[2] = if recording { [0xFF, 0x00, 0x00] } else { [0x40, 0x00, 0x00] }; // red lit/dim
+        c[3] = [0x50, 0x40, 0x00]; // Rew: dim amber
+        // slots 4..=7 (unused, Prev, Next, Undo) stay dim white (system)
         c
     }
 }
@@ -298,13 +301,13 @@ mod tests {
         let mut mutes = [false; 8];
         mutes[2] = true;
         let home = c.top_colors(Some(1), 3, 0, &mutes);
-        assert_eq!(home[0], [0xC0, 0xC0, 0xC0]); // MENU button
-        assert_eq!(home[1], [0xFF, 0x80, 0x00]); // active (perf_list idx 1)
-        assert_eq!(home[2], [0x30, 0x30, 0x30]); // filled
+        assert_eq!(home[0], [0xC8, 0xC8, 0xC8]); // MENU button (bright white)
+        assert_eq!(home[1], [0xFF, 0x80, 0x00]); // selected (bright orange)
+        assert_eq!(home[2], [0x50, 0x50, 0x50]); // available (dim white)
         assert_eq!(home[7], [0x00, 0x00, 0x00]); // empty -> LED off
         c.mode = Mode::Menu;
         let menu = c.top_colors(None, 0, 0, &mutes);
-        assert_eq!(menu[0], [0x40, 0x40, 0x40]);
+        assert_eq!(menu[0], [0x50, 0x50, 0x50]);
         assert_eq!(menu[4], [0x00, 0x00, 0x00]);
     }
 
@@ -313,6 +316,7 @@ mod tests {
         let c = LedConsole::new();
         let b = c.bottom_colors(true, false);
         assert_eq!(b[0], [0x00, 0xFF, 0x00]); // play lit
+        assert_eq!(b[4], [0x40, 0x40, 0x40]); // system buttons dim white
         let b = c.bottom_colors(false, true);
         assert_eq!(b[2], [0xFF, 0x00, 0x00]); // rec lit
     }
