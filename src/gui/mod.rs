@@ -317,6 +317,17 @@ pub struct App {
     pub drum_step_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_rec_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    // Bank-2 pad console
+    pub console: led_console::LedConsole,
+    pub console_rx: Option<std::sync::mpsc::Receiver<(u8, bool)>>,
+    pub led_snapshot: [[u8; 3]; 16],
+    pub led_dirty: bool,
+    pub led_socket: Option<std::sync::mpsc::Sender<String>>,
+    /// Task 5 (socket lifecycle) reads/writes these.
+    #[allow(dead_code)]
+    pub led_socket_alive: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    #[allow(dead_code)]
+    pub led_socket_failed_at: Option<std::time::Instant>,
     // Drum kit save/load
     pub drum_kit_name: String,
     pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
@@ -519,6 +530,64 @@ impl eframe::App for App {
         // Sync drum play/rec state from engine (for MIDI-triggered changes)
         self.drum_playing = self.drum_play_atom.load(Ordering::Relaxed) != 0;
         self.drum_recording = self.drum_rec_atom.load(Ordering::Relaxed) != 0;
+
+        // Bank-2 console pads -> state machine -> actions
+        let mut acts: Vec<led_console::Action> = Vec::new();
+        if let Some(rx) = &self.console_rx {
+            while let Ok((note, is_on)) = rx.try_recv() {
+                let now = std::time::Instant::now();
+                let ev = match (note, is_on) {
+                    (60..=67, true) => Some(led_console::PadEvent::Down((note - 60) as usize)),
+                    (60..=67, false) => Some(led_console::PadEvent::Up((note - 60) as usize)),
+                    (75, true) => Some(led_console::PadEvent::Undo),
+                    (78, true) => Some(led_console::PadEvent::Prev),
+                    (79, true) => Some(led_console::PadEvent::Next),
+                    (80, true) => {
+                        let _ = self.ctrl_tx.push(crate::synth::ControlEvent::LooperRewind);
+                        None
+                    }
+                    _ => None,
+                };
+                if let Some(ev) = ev {
+                    if let Some(a) = self.console.on_event(ev, now) {
+                        acts.push(a);
+                    }
+                }
+            }
+        }
+        let _ = self.console.tick(std::time::Instant::now()); // hold -> Menu (snapshot below)
+        for a in acts {
+            self.execute_console_action(a);
+        }
+
+        // LED snapshot (16 slots = pads 17..=32, top row first)
+        {
+            let playing = self.drum_playing;
+            let recording = self.drum_recording;
+            let mut mutes = [false; 8];
+            for (i, part) in self.parts.iter().take(8).enumerate() {
+                mutes[i] = part.mute;
+            }
+            let filled = self.perf_list.len().min(8);
+            let top = self.console.top_colors(self.active_perf_console(), filled,
+                                              self.drum_current_pattern as usize, &mutes);
+            let bottom = self.console.bottom_colors(playing, recording);
+            let mut snap = [[0u8; 3]; 16];
+            snap[..8].copy_from_slice(&top);
+            snap[8..].copy_from_slice(&bottom);
+            if snap != self.led_snapshot || self.led_dirty {
+                self.led_snapshot = snap;
+                self.led_dirty = false;
+                if let Some(sock) = &self.led_socket {
+                    let mut msg = String::from("STATE");
+                    for c in &snap {
+                        msg.push_str(&format!(" {:02X}{:02X}{:02X}", c[0], c[1], c[2]));
+                    }
+                    msg.push('\n');
+                    let _ = sock.send(msg);
+                }
+            }
+        }
 
         // MIDI Learn indicator
         if let Some(target_name) = self.midi_learn_target {
@@ -1663,6 +1732,56 @@ impl App {
             .get(self.parts[0].patch_idx)
             .map(|p| p.name.clone());
         let _ = self.config.save();
+    }
+
+    /// Execute an action from the bank-2 pad console state machine.
+    fn execute_console_action(&mut self, action: led_console::Action) {
+        match action {
+            led_console::Action::LoadPerf(i) => {
+                // perf_list: Vec<(String, PathBuf)>, index 0 = "(Init)".
+                // Console slots = perf_list indices 0..=7.
+                if let Some((name, _)) = self.perf_list.get(i) {
+                    let name = name.clone();
+                    if self.load_performance_by_name(&name) {
+                        log::info!("[console] perf slot {} loaded ({})", i + 1, name);
+                    }
+                }
+            }
+            led_console::Action::SelectPattern(i) => {
+                self.drum_current_pattern = i as u8;
+                let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: i as u8 });
+            }
+            led_console::Action::ToggleMute(i) => {
+                if let Some(part) = self.parts.get_mut(i) {
+                    let mute = !part.mute;
+                    part.mute = mute;
+                    let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part: i, mute });
+                }
+            }
+            led_console::Action::Undo => {
+                let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqUndo);
+            }
+            led_console::Action::StepPerf(dir) => {
+                let n = self.perf_list.len();
+                if n == 0 { return; }
+                let cur = self.active_perf_console().unwrap_or(0);
+                let next = (cur as i32 + dir).rem_euclid(n as i32) as usize;
+                if let Some((name, _)) = self.perf_list.get(next) {
+                    let name = name.clone();
+                    self.load_performance_by_name(&name);
+                }
+            }
+            led_console::Action::StepPattern(dir) => {
+                let next = (self.drum_current_pattern as i32 + dir).rem_euclid(8);
+                self.drum_current_pattern = next as u8;
+                let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: next as u8 });
+            }
+        }
+    }
+
+    /// Index of the current performance in perf_list (None if unknown).
+    fn active_perf_console(&self) -> Option<usize> {
+        self.perf_list.iter().position(|(n, _)| n == &self.perf_name)
     }
 
     /// Load a performance by name (for pad perf switching).

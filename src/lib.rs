@@ -95,8 +95,7 @@ struct CommonInit {
     note_state: midi::NoteState,
     pad_state: midi::PadState,
     midi_tx_shared: midi::SharedMidiTx,
-    /// Consumed by the GUI console (Task 4); until then it is dormant.
-    #[allow(dead_code)]
+    /// Bank-2 console pad notes, mirrored by the engine (Task 4).
     pub console_rx: std::sync::mpsc::Receiver<(u8, bool)>,
     ctrl_tx: metrics::CountingProducer<synth::ControlEvent>,
     feedback_rx: rtrb::Consumer<synth::ParamFeedback>,
@@ -773,6 +772,13 @@ pub fn run_gui(
         drum_step_atom: c.drum_step_atom,
         drum_play_atom: c.drum_play_atom,
         drum_rec_atom: c.drum_rec_atom,
+        console: gui::led_console::LedConsole::default(),
+        console_rx: Some(c.console_rx),
+        led_snapshot: [[0; 3]; 16],
+        led_dirty: true,
+        led_socket: None,
+        led_socket_alive: None,
+        led_socket_failed_at: None,
         drum_kit_name: String::new(),
         drum_kit_list: preset::list_drum_kits(),
         drum_midi_import_path: String::new(),

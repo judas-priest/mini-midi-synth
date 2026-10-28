@@ -19,7 +19,6 @@ pub enum Mode {
 }
 
 /// Console input events (note -> slot by the caller).
-#[allow(dead_code)] // wired in Task 4
 #[derive(Clone, Copy, Debug)]
 pub enum PadEvent {
     /// NoteOn on a top-row pad (slot 0..=7).
@@ -56,14 +55,9 @@ impl Default for LedConsole {
     }
 }
 
-#[allow(dead_code)] // wired in Task 4
 impl LedConsole {
     pub fn new() -> Self {
         Self { mode: Mode::Home, pending: None }
-    }
-
-    pub fn mode(&self) -> Mode {
-        self.mode
     }
 
     /// Poll: fire hold detection. Returns Some(Mode::Menu) on hold trigger.
