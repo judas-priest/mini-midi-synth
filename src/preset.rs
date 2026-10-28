@@ -38,10 +38,49 @@ pub fn sanitize_preset_filename(name: &str) -> String {
     if out.is_empty() { "preset".to_string() } else { out }
 }
 
+/// Resolve the save path: upsert only a file owned by THIS preset (its stored
+/// `name` equals ours exactly). Any other occupant — punctuation/case collision
+/// or foreign JSON — forces a numbered suffix instead of a silent overwrite.
+fn resolve_save_path(dir: &std::path::Path, name: &str) -> PathBuf {
+    #[derive(Deserialize)]
+    struct NameOnly { name: String }
+    let stem = sanitize_preset_filename(name);
+    let path = dir.join(stem.clone() + ".json");
+    if !path.exists() { return path; }
+    let same_owner = fs::read_to_string(&path).ok()
+        .and_then(|c| serde_json::from_str::<NameOnly>(&c).ok())
+        .map(|n| n.name == name)
+        .unwrap_or(false);
+    if same_owner { return path; }
+    let mut n = 2;
+    loop {
+        let p = dir.join(format!("{stem}_{n}.json"));
+        if !p.exists() { return p; }
+        n += 1;
+    }
+}
+
+/// Best-effort rename of a preset file whose stem no longer matches the
+/// sanitized name stored in its JSON (legacy filenames from the old sanitizer
+/// that kept `- + . ( )`). Repeat-saves then update the same file.
+/// NOTE: applies to any scanned directory, including the external
+/// (~/.local/share) one — hand-renamed files get canonicalized too.
+pub fn migrate_preset_filename(path: &std::path::Path, name: &str) {
+    let want = sanitize_preset_filename(name);
+    let have = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+    if want == have { return; }
+    // If the canonical stem is taken by another file, leave this one alone —
+    // suffixing here (`want_2`, `want_3`, ...) would re-suffix on every load:
+    // a file saved into a suffixed path by resolve_save_path must NOT migrate,
+    // otherwise the suffix grows forever.
+    if path.with_file_name(format!("{want}.json")).exists() { return; }
+    let _ = fs::rename(path, path.with_file_name(format!("{want}.json")));
+}
+
 fn save_json<T: Serialize>(obj: &T, dir: Option<PathBuf>, name: &str) -> Result<PathBuf> {
     let dir = dir.context("Could not determine config directory")?;
     fs::create_dir_all(&dir)?;
-    let path = dir.join(sanitize_preset_filename(name) + ".json");
+    let path = resolve_save_path(&dir, name);
     let json = serde_json::to_string_pretty(obj)?;
     crate::config::write_atomic(&path, &json)?;
     Ok(path)
@@ -477,7 +516,7 @@ fn user_preset_dir() -> Option<PathBuf> {
 
 /// Load all presets from a directory recursively (subdirs = categories).
 /// Also loads .wt wavetable data if patch references one.
-fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Patch>) {
+pub fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Patch>) {
     if !dir.exists() { return; }
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -494,6 +533,8 @@ fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Patch>) {
                                 p.category = cat.to_string();
                             }
                         }
+                        // One-time legacy filename migration (see fn doc).
+                        migrate_preset_filename(&path, &p.name);
                         // Load .wt if referenced
                         if let Some(ref wt_rel) = p.wavetable_file.clone() {
                             let wt_path = wavetable_dir().join(wt_rel);
@@ -555,15 +596,19 @@ pub fn load_all_patches() -> Vec<Patch> {
     presets
 }
 
-/// Save a patch to user directory.
-#[allow(dead_code)]
-pub fn save_patch(preset: &Patch) -> Result<PathBuf> {
-    let dir = user_preset_dir().context("Could not determine config directory")?;
+/// Save a patch to an explicit directory (user dir by default).
+pub fn save_patch_in(preset: &Patch, dir: Option<PathBuf>) -> Result<PathBuf> {
+    let dir = dir.context("Could not determine config directory")?;
     fs::create_dir_all(&dir)?;
-    let path = dir.join(sanitize_preset_filename(&preset.name) + ".json");
+    let path = resolve_save_path(&dir, &preset.name);
     let json = serde_json::to_string_pretty(preset)?;
     crate::config::write_atomic(&path, &json)?;
     Ok(path)
+}
+
+/// Save a patch to user directory.
+pub fn save_patch(preset: &Patch) -> Result<PathBuf> {
+    save_patch_in(preset, user_preset_dir())
 }
 
 // ---------------------------------------------------------------------------
