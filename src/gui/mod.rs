@@ -1095,8 +1095,10 @@ impl App {
         // configured, load_sf2_drums below overwrites this with the per-kit table).
         if self.sf2_drums_loaded_name.is_empty() {
             if let Some(v) = self.config.sf2.drums_remaps.get("internal") {
+                // migrate legacy slot-encoded values (0..16) to kit notes (+36)
+                let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
                 let mut t = [0u8; 16];
-                for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(i as u8).min(15); }
+                for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or((36 + i) as u8).min(55); }
                 self.drum_remap = t;
             }
             if let Some(v) = self.config.sf2.drums_vels.get("internal") {
@@ -1603,7 +1605,7 @@ impl App {
             for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(36 + i as u8).clamp(30, 55); }
             self.drum_remap = t;
         } else {
-            for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
+            for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
         }
         self.push_drum_remap();
         if let Some(v) = self.config.sf2.drums_vels.get(&self.drum_remap_key()) {
@@ -1638,7 +1640,7 @@ impl App {
         self.reset_kit_names();
         self.push_drum_choke_groups(); // back to GM choke layout
         // Internal kit: reset to identity remap.
-        for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = i as u8; }
+        for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
         self.push_drum_remap();
         self.drum_pad_vel = [0u8; 16];
         self.push_drum_pad_vel();
