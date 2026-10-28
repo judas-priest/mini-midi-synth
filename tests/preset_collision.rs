@@ -34,6 +34,23 @@ fn punctuation_only_distinct_names_do_not_collide() {
     assert_eq!(saved.name, "bass lead", "first preset was overwritten");
 }
 
+/// (b2) re-saving a collided name upserts its suffixed file instead of growing suffixes
+#[test]
+fn collided_name_re_save_upserts_suffixed_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().to_path_buf();
+    let a = test_patch("bass lead");
+    let b = test_patch("bass-lead!");
+    let _ = preset::save_patch_in(&a, Some(dir.clone())).unwrap();
+    let p1 = preset::save_patch_in(&b, Some(dir.clone())).unwrap();
+    let p2 = preset::save_patch_in(&b, Some(dir.clone())).unwrap();
+    assert_eq!(p1, p2, "collided re-save grew a new suffix instead of upserting");
+    // and the owner's file is untouched
+    let saved: preset::Patch =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("bass_lead.json")).unwrap()).unwrap();
+    assert_eq!(saved.name, "bass lead");
+}
+
 /// (c) foreign/malformed JSON at the target path gets a suffix
 #[test]
 fn foreign_json_at_target_path_gets_suffix() {

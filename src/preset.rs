@@ -44,18 +44,21 @@ pub fn sanitize_preset_filename(name: &str) -> String {
 fn resolve_save_path(dir: &std::path::Path, name: &str) -> PathBuf {
     #[derive(Deserialize)]
     struct NameOnly { name: String }
+    // True if `path` exists and its JSON's `name` field equals ours — i.e. the
+    // file is owned by THIS preset and may be upserted.
+    let owned_by_this = |path: &std::path::Path| -> bool {
+        fs::read_to_string(path).ok()
+            .and_then(|c| serde_json::from_str::<NameOnly>(&c).ok())
+            .map(|n| n.name == name)
+            .unwrap_or(false)
+    };
     let stem = sanitize_preset_filename(name);
     let path = dir.join(stem.clone() + ".json");
-    if !path.exists() { return path; }
-    let same_owner = fs::read_to_string(&path).ok()
-        .and_then(|c| serde_json::from_str::<NameOnly>(&c).ok())
-        .map(|n| n.name == name)
-        .unwrap_or(false);
-    if same_owner { return path; }
+    if !path.exists() || owned_by_this(&path) { return path; }
     let mut n = 2;
     loop {
         let p = dir.join(format!("{stem}_{n}.json"));
-        if !p.exists() { return p; }
+        if !p.exists() || owned_by_this(&p) { return p; }
         n += 1;
     }
 }
