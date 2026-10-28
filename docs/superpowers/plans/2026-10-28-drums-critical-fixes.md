@@ -1,5 +1,7 @@
 # Drums critical fixes (D1, D2, D3, D6) Implementation Plan
 
+status: executed 2026-10-28 (branch worktree-bugfix-batch, commits d10797b..87becf6)
+
 anchor-checked: 2026-10-28 (независимое ревью на master @ 329faac; находки вшиты)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -42,7 +44,7 @@ cargo test --features rt-assert --test rt_safety
 **Files:**
 - Modify: `tests/drum_remap.rs` (движковые контракты), `tests/sustain_audit.rs` (интеграционный record-тест)
 
-- [ ] **Step 1: Write engine-level tests в tests/drum_remap.rs**
+- [x] **Step 1: Write engine-level tests в tests/drum_remap.rs**
 
 Посмотреть существующие импорты/хелперы в файле и дописать:
 
@@ -120,7 +122,7 @@ fn sample_rate_change_resets_choke_state() {
 
 Импорт: `use mini_midi_synth::synth::drum::DrumEngine;` — уже есть в tests/drum_remap.rs:2. Поля `sf2_mode`/`fixed_velocity`/`volume` — уже `pub` (drum.rs:857-861), ассерты компилируются.
 
-- [ ] **Step 2: Write record-path underflow test в tests/sustain_audit.rs**
+- [x] **Step 2: Write record-path underflow test в tests/sustain_audit.rs**
 
 Harness (helpers `engine_with_init_patch`, `render_peak`) уже в файле. Имена вариантов: `ControlEvent::DrumSetRemap { table: Box<[u8; 16]> }` (mod.rs:212), `ControlEvent::DrumSeqRecord { recording: bool }` (mod.rs:191).
 
@@ -142,12 +144,12 @@ fn drum_record_with_out_of_range_remap_target_does_not_panic() {
 }
 ```
 
-- [ ] **Step 3: Run, verify failure**
+- [x] **Step 3: Run, verify failure**
 
 Run: `cargo test --test drum_remap --test sustain_audit`
 Expected: `sample_rate_change_preserves_user_state` FAIL (remap/pad_vel/sf2_mode сброшены), `drum_record_with_out_of_range_remap_target_does_not_panic` FAIL с паникой «attempt to subtract with overflow». Тесты identity/migration — PASS (движок уже корректен; они фиксируют контракт).
 
-- [ ] **Step 4: Commit (red)**
+- [x] **Step 4: Commit (red)**
 
 ```bash
 git add tests/drum_remap.rs tests/sustain_audit.rs
@@ -159,7 +161,7 @@ git commit -m "test: drums D1/D2/D3 regression cases (red)"
 **Files:**
 - Modify: `src/gui/mod.rs:1099` (internal-kit restore), `src/gui/mod.rs:1606` (kit load, нет сохранённой таблицы), `src/gui/mod.rs:1641` (unload), `src/gui/drums.rs:221` (detach дубликата в однопэдной модалке)
 
-- [ ] **Step 1: Fix all four anchors**
+- [x] **Step 1: Fix all four anchors**
 
 `src/gui/mod.rs:1096-1107` (internal-kit restore) — добавить ту же миграцию legacy slot-кодирования, что и в per-kit load (mod.rs:1601-1603), иначе конфиги от багованной сборки с 0..15 под ключом «internal» после фикса дадут цели 0..15 → пэды 36..51 молчат. Заменить блок:
 
@@ -193,12 +195,12 @@ git commit -m "test: drums D1/D2/D3 regression cases (red)"
 
 Эталон уже в кодовой базе: Reset в полной модалке `src/gui/drums.rs:150` (`*v = 36 + i as u8;`) и per-kit load `src/gui/mod.rs:1603`.
 
-- [ ] **Step 2: Build + clippy**
+- [x] **Step 2: Build + clippy**
 
 Run: `cargo clippy --all-targets -- -D warnings`
 Expected: зелёный. ВНИМАНИЕ: `cargo test` в этой точке ещё НЕ полностью зелёный — красные остаются `sample_rate_change_preserves_user_state`, `sample_rate_change_twice_still_preserves` (их закрывает Task 4) и `drum_record_with_out_of_range_remap_target_does_not_panic` (его закрывает Task 3). Это ожидаемо. GUI-код тестами напрямую не покрыт (приватные методы App) — контракт зафиксирован движковым тестом `identity_remap_is_full_notes_36_to_51`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/gui/mod.rs src/gui/drums.rs
@@ -210,7 +212,7 @@ git commit -m "fix: encode identity drum remap as notes 36..51 in all GUI paths"
 **Files:**
 - Modify: `src/synth/mod.rs:1580-1592` (live ch10 record в `handle_event`)
 
-- [ ] **Step 1: Guard the slot computation**
+- [x] **Step 1: Guard the slot computation**
 
 Не клампить (кламп 30→36 записал бы хит в чужой слот 0 — тихая порча паттерна), а пропускать запись. Заменить:
 
@@ -232,12 +234,12 @@ git commit -m "fix: encode identity drum remap as notes 36..51 in all GUI paths"
 
 Важно: `is_drum_note` выше вычислен по сырой ноте до ремапа — условие записи по remapped-ноте должно быть именно `(36..=51).contains(&note)`. SF2-триггер ниже по коду (`sampler_drums` ветка) не менять — ноты 30..55 там легитимны.
 
-- [ ] **Step 2: Run underflow test**
+- [x] **Step 2: Run underflow test**
 
 Run: `cargo test --test sustain_audit drum_record_with_out_of_range -- --nocapture`
 Expected: PASS (нет паники, нет bogus hit).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/synth/mod.rs
@@ -249,7 +251,7 @@ git commit -m "fix: skip drum record for remap targets outside 36..51 (underflow
 **Files:**
 - Modify: `src/synth/drum.rs:953-962`
 
-- [ ] **Step 1: Preserve state across rebuild**
+- [x] **Step 1: Preserve state across rebuild**
 
 Заменить `set_sample_rate` (сохранив существующий комментарий о вызове из RT-callback):
 
@@ -290,12 +292,12 @@ git commit -m "fix: skip drum record for remap targets outside 36..51 (underflow
 
 Поля `sf2_mode`/`fixed_velocity`/`volume` уже `pub` (drum.rs:857-861) — тест из Task 1 компилируется без изменений API. Синхронизация sampler: `Sampler::set_sample_rate` сохраняет `drums_sf2`, теперь и движок сохраняет `sf2_mode` — десинк устранён. GUI-десинка нет: атомы `step/play/rec` сохраняют те же Arc, `drum_volume` GUI и сохранённый движковый `volume` остаётся синхронным (Sampler `drums_sf2`/volume не трогает). Reset `group_last_note` согласован: при SR-change семплер всё равно перезагружает SF2-голоса.
 
-- [ ] **Step 2: Run drums tests**
+- [x] **Step 2: Run drums tests**
 
 Run: `cargo test --test drum_remap`
 Expected: все зелёные, включая `sample_rate_change_*`.
 
-- [ ] **Step 3: Full gates + rt_safety**
+- [x] **Step 3: Full gates + rt_safety**
 
 ```bash
 cargo clippy --all-targets -- -D warnings
@@ -304,7 +306,7 @@ cargo test --features rt-assert --test rt_safety
 ```
 Expected: зелёные. (Аллокация `Self::new` в callback — существующий techdebt #12, план его не трогает.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/synth/drum.rs
@@ -316,7 +318,7 @@ git commit -m "fix: DrumEngine::set_sample_rate preserves remap/pad_vel/choke/sf
 **Files:**
 - Modify: `src/gui/mod.rs:1490-1505` (`send_drum_state`)
 
-- [ ] **Step 1: Add choke push**
+- [x] **Step 1: Add choke push**
 
 Свежий движок после reconnect стартует с GM choke-таблицей; derived-таблица SF2-кита теряется. В конец `send_drum_state` (после `push_drum_pad_vel()`):
 
@@ -331,14 +333,14 @@ git commit -m "fix: DrumEngine::set_sample_rate preserves remap/pad_vel/choke/sf
 
 Метод `push_drum_choke_groups` уже существует (`src/gui/mod.rs:1424-1428`), idempotent, таблица `[u8; 26]` через Box — trash-паттерн как у остальных. Порядок безопасен: `DrumSetChokeGroups` сбрасывает `group_last_note` внутри движка (`drum.rs:1016-1019`). SF2-mode/soundfont восстановление остаётся на существующем пути `send_initial_presets` → `load_sf2_drums` (out of scope).
 
-- [ ] **Step 2: Gates**
+- [x] **Step 2: Gates**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test
 ```
 Expected: зелёные (GUI-код, движковых изменений нет).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/gui/mod.rs
