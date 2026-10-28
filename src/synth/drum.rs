@@ -893,11 +893,7 @@ impl DrumEngine {
             enabled: true,
             sf2_mode: false,
             fixed_velocity: false,
-            remap: {
-                let mut r = [0u8; NUM_DRUM_SLOTS];
-                for (i, v) in r.iter_mut().enumerate() { *v = i as u8; }
-                r
-            },
+            remap: core::array::from_fn(|i| i as u8),
             sample_rate,
             step_atom: Arc::new(AtomicU8::new(0)),
             play_atom: Arc::new(AtomicU8::new(0)),
@@ -947,7 +943,9 @@ impl DrumEngine {
     /// Notes outside the drum range pass through unchanged.
     pub fn remapped_note(&self, note: u8) -> u8 {
         match note.wrapping_sub(DRUM_NOTE_BASE) {
-            i if (i as usize) < NUM_DRUM_SLOTS => DRUM_NOTE_BASE + self.remap[i as usize],
+            i if (i as usize) < NUM_DRUM_SLOTS => {
+                DRUM_NOTE_BASE.saturating_add(self.remap[i as usize].min((NUM_DRUM_SLOTS - 1) as u8))
+            }
             _ => note,
         }
     }

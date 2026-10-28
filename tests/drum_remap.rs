@@ -28,6 +28,7 @@ fn tc4_out_of_range_passthrough_no_panic() {
     assert_eq!(eng.remapped_note(60), 60);
     assert_eq!(eng.remapped_note(35), 35);
     assert_eq!(eng.remapped_note(0), 0);
+    assert_eq!(eng.remapped_note(52), 52);
 }
 
 #[test]
@@ -50,12 +51,14 @@ fn tc6_config_without_remaps_is_default() {
 }
 
 #[test]
-fn tc5_on_off_use_same_translation() {
-    // note_on и note_off callers вызывают один и тот же remapped_note:
-    // переведённая нота для off обязана совпадать с on (иначе SF2-войс зависает)
+fn tc5_translation_is_stateless_and_stable() {
+    // переведённая нота для off обязана совпадать с on (иначе SF2-войс зависает);
+    // note_on не должен мутировать таблицу
     let mut eng = DrumEngine::new(48_000.0);
     eng.remap[(40 - DRUM_NOTE_BASE) as usize] = 0;
     let on = eng.remapped_note(40);
+    eng.note_on(40, 100);
+    eng.note_off(40);
     let off = eng.remapped_note(40);
     assert_eq!(on, off);
     assert_eq!(on, DRUM_NOTE_BASE);
