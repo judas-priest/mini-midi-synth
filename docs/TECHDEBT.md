@@ -223,7 +223,14 @@ Critical 2 (set_sample_rate wipe, drum.rs:953) НЕ исправлены в mast
 
 
 
-## 15. Банк-2 пэдов как динамическая панель управления (LED-меню) — идея одобрена, эксперименты проведены
+## 15. Банк-2 пэдов как динамическая LED-панель — РЕАЛИЗОВАНА v1 (2026-10-29)
+Спека: docs/superpowers/specs/2026-10-29-bank2-led-console-design.md; план:
+docs/superpowers/plans/2026-10-29-bank2-led-console.md (executed). Компоненты:
+автомат src/gui/led_console.rs (мультитач, tap/hold), swallow нот в parse_and_push
+(CONSOLE_TX), socket-клиент в GUI (led_companion toggle, alive/retry/heartbeat 2s),
+компаньон ~/Projects/smk37_config/pad_console.py (троттлинг 60ms — прошивка дропает
+быстрые записи). Ноты банка 2 перепрошиты (PADS_NOTES.md). v2-идеи: квантованное
+переключение паттернов, SCENE-режим, мьюты зоны B, Redo.
 Концепция (2026-10-28): банк-2 = Launchpad-style «мягкие клавиши»: пэд = вход в режим,
 остальные пэды перекрашиваются в действия режима (BLE GATT), второй пэд = выход/меню.
 Синт — источник правды о состоянии; ноты пэдов уже идут в синт (канал 10).
