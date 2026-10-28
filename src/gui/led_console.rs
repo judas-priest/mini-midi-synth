@@ -206,18 +206,25 @@ impl LedConsole {
     }
 
     /// Bottom-row (transport) colors: slots 8..=15 = pads 25..=32.
-    /// Warm family (green/red/yellow) + orange nav; idle = OFF.
+    /// Warm family (green/red/yellow) + orange specials; idle = OFF.
+    /// Prev/Next (slots 14/15 = pads 30/31) borrow the TOP-mode color: they
+    /// step that mode's items (blue = perfs, yellow = patterns).
     pub fn bottom_colors(&self, playing: bool, recording: bool) -> [[u8; 3]; 8] {
-        let nav = [0xFF, 0x80, 0x00]; // nav/rew/undo: orange
+        const SPECIAL: [u8; 3] = [0xFF, 0x80, 0x00]; // Rew / Undo: orange
+        let mode_color = match self.mode {
+            Mode::Home => [0x00, 0x66, 0xFF],        // blue: they step perfs
+            Mode::Pattern => [0xFF, 0xFF, 0x00],     // yellow: they step patterns
+            _ => SPECIAL,
+        };
         let mut c = [[0x00, 0x00, 0x00]; 8]; // idle = OFF
         c[0] = if playing { [0x00, 0xFF, 0x00] } else { [0x00, 0x00, 0x00] }; // green when playing
         c[1] = if !playing && !recording { [0xFF, 0xFF, 0x00] } else { [0x00, 0x00, 0x00] }; // yellow when stopped
         c[2] = if recording { [0xFF, 0x00, 0x00] } else { [0x00, 0x00, 0x00] }; // red when recording
-        c[3] = nav; // Rew
-        // slots 4..=7: unused, Prev, Next, Undo — orange nav
-        c[5] = nav;
-        c[6] = nav;
-        c[7] = nav;
+        c[3] = SPECIAL; // Rew (looper rewind)
+        // slots 4..=6: unused(4), Prev(5), Next(6) — mode color; Undo(7) orange
+        c[5] = mode_color;
+        c[6] = mode_color;
+        c[7] = SPECIAL;
         c
     }
 }
@@ -346,11 +353,15 @@ mod tests {
 
     #[test]
     fn bottom_transport_colors() {
-        let c = LedConsole::new();
+        let mut c = LedConsole::new();
         let b = c.bottom_colors(true, false);
         assert_eq!(b[0], [0x00, 0xFF, 0x00]); // play lit
         assert_eq!(b[1], [0x00, 0x00, 0x00]); // stop off while playing
-        assert_eq!(b[5], [0xFF, 0x80, 0x00]); // nav (Prev) orange
+        assert_eq!(b[5], [0x00, 0x66, 0xFF]); // Prev: blue in Home (steps perfs)
+        assert_eq!(b[7], [0xFF, 0x80, 0x00]); // Undo: orange
+        c.mode = Mode::Pattern;
+        let b = c.bottom_colors(false, false);
+        assert_eq!(b[6], [0xFF, 0xFF, 0x00]); // Next: yellow in Pattern
         let b = c.bottom_colors(false, true);
         assert_eq!(b[2], [0xFF, 0x00, 0x00]); // rec lit
     }
