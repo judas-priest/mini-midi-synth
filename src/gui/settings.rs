@@ -190,6 +190,10 @@ impl App {
         // engine (which owns the recorder) is dropped with the dead stream.
         let looper_snap: Vec<crate::synth::looper::LooperEventSnapshot>;
         let looper_len_ticks: u32;
+        // Snapshot ticks are sample counts in the OLD engine's rate; the new
+        // device may run at a different one (self.sample_rate is only updated
+        // to the new actual rate further down).
+        let looper_old_sr: u32 = self.sample_rate;
         {
             let mut snap = Vec::new();
             let mut len_ticks = 0u32;
@@ -303,13 +307,40 @@ impl App {
 
         if !looper_snap.is_empty() && looper_len_ticks > 0 {
             let n = looper_snap.len();
+            let mut events = looper_snap;
+            let mut len_ticks = looper_len_ticks;
+            // Ticks were recorded at the old sample rate; rescale if the new
+            // device runs at a different one (u64 intermediate: 48000 * 192000
+            // would overflow u32).
+            if looper_old_sr > 0 && looper_old_sr != actual_sr {
+                let rescale = |tick: u32| -> u32 {
+                    (tick as u64 * actual_sr as u64 / looper_old_sr as u64) as u32
+                };
+                for e in events.iter_mut() {
+                    e.tick = rescale(e.tick);
+                }
+                len_ticks = rescale(len_ticks);
+            }
             match self.ctrl_tx.push(crate::synth::ControlEvent::LooperRestore {
-                events: looper_snap.into_boxed_slice(),
-                loop_length_ticks: looper_len_ticks,
+                events: events.into_boxed_slice(),
+                loop_length_ticks: len_ticks,
             }) {
                 Ok(()) => log::info!("[reconnect] looper restored: {n} events"),
                 Err(_) => log::warn!("[reconnect] looper restore LOST: ring full ({n} events)"),
             }
+        }
+
+        // The fresh engine's looper has default mute/solo, but the GUI state
+        // (looper_layer_mute / looper_solo_layer) survives the reconnect.
+        // Re-push it so the engine matches what the UI shows; layer ids are
+        // preserved 1:1 by the restore.
+        for (layer, &mute) in self.looper_layer_mute.iter().enumerate() {
+            if mute {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: layer as u8, mute });
+            }
+        }
+        if let Some(layer) = self.looper_solo_layer {
+            let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: Some(layer) });
         }
 
         log::info!("[reconnect] Audio restarted: {actual_sr}Hz");
