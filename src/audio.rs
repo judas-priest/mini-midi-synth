@@ -99,6 +99,11 @@ pub struct AudioBackend {
     /// `None` = the backend failed to report a name; the name poll is
     /// disabled for the session (dead-stream flag still works).
     pub device_name: Option<String>,
+    /// Host the stream was actually built on. The hotplug poll must only
+    /// compare device names within one host (PR #9: the poller queries the
+    /// DEFAULT host; a JACK-host stream's name never matches a PipeWire
+    /// default name, which caused a false "device changed" reconnect).
+    pub host_id: HostId,
 }
 
 /// Everything the audio callback needs to share with the rest of the app.
@@ -286,15 +291,18 @@ impl AudioBackend {
                 crate::metrics::METRICS.note_stream_error();
                 let msg = err.to_string();
                 if let Some(sr_str) = msg.strip_prefix("A backend-specific error has occurred: sample rate changed to: ") {
+                    // JACK/PipeWire sample-rate notification. The stream
+                    // itself survives (see vendor patch: cpal no longer quits
+                    // on it) and the data callback re-tunes the synth live
+                    // via the jack_sr atom — so never set the reconnect flag
+                    // here. Flagging caused a reconnect storm (PipeWire
+                    // sends one spurious notification per client start;
+                    // 51 engine rebuilds in 10 s, observed 2026-10-30),
+                    // and with the vendor patch there is no dead stream to
+                    // recover (supersedes commit 9bf717e's flag).
                     if let Ok(sr) = sr_str.trim().parse::<u32>() {
                         jack_sr_err.store(sr, Ordering::Relaxed);
                     }
-                    // JACK/PipeWire SR renegotiation DESTROYS the stream here
-                    // (observed 2026-10-29: headphones hotplug → SR race at
-                    // startup → dead stream, no reconnect because this branch
-                    // never set the flag). The stream cannot recover on its
-                    // own: force a GUI reconnect.
-                    disconnected_err.store(true, Ordering::Relaxed);
                 } else if msg.contains("xrun") {
                     // Buffer over/under-run: a few dropped samples, the stream
                     // itself keeps running. Tearing down and rebuilding the
@@ -317,7 +325,7 @@ impl AudioBackend {
         std::thread::sleep(std::time::Duration::from_millis(150));
         let final_sr = jack_sr.load(Ordering::Relaxed);
 
-        Ok((Self { stream, disconnected, paused, device_name }, final_sr))
+        Ok((Self { stream, disconnected, paused, device_name, host_id: config.host_id }, final_sr))
     }
 
     /// Try requested SR + buffer, fall back step by step to device defaults.

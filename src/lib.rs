@@ -878,6 +878,7 @@ pub fn run_gui(
         toasts: Vec::new(),
         audio_disconnected: c.audio_disconnected.clone(),
         audio_device_name: c._audio_handle.device_name.clone(),
+        audio_host_id: c._audio_handle.host_id,
         audio_watch: crate::audio::ReconnectPolicy::default(),
         audio_poll_at: std::time::Instant::now(),
         _audio_handle: Some(c._audio_handle),

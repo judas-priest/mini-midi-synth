@@ -449,9 +449,16 @@ impl jack::NotificationHandler for JackNotificationHandler {
             }
             true => {
                 self.send_error(format!("sample rate changed to: {}", srate));
-                // Since CPAL currently has no way of signaling a sample rate change in order to make
-                // all necessary changes that would bring we choose to quit.
-                jack::Control::Quit
+                // MINI_MIDI_SYNTH vendor patch: keep the stream alive on a
+                // sample-rate change. Upstream quits here, which killed the
+                // stream on PipeWire's spurious second per-client-start rate
+                // notification (it reports the same unchanged rate) —
+                // observed 2026-10-29 as a reconnect storm: rebuild →
+                // notification → Quit → rebuild, 51 engine rebuilds in 10 s.
+                // The app tracks the reported rate via this error callback
+                // (jack_sr atom) and re-tunes the synth live, so quitting is
+                // both unnecessary and harmful.
+                jack::Control::Continue
             }
         }
     }

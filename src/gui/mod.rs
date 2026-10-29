@@ -433,6 +433,10 @@ pub struct App {
     /// unknown (device.name() failed) — name poll disabled, dead-stream flag
     /// still works.
     pub audio_device_name: Option<String>,
+    /// Host the current stream was built on (PR #9). The default-device name
+    /// poll only makes sense when the stream itself lives on the default
+    /// host; cross-host names never match and cause false reconnects.
+    pub audio_host_id: cpal::HostId,
     /// Hotplug reconnect retry state machine (TECHDEBT #18).
     pub audio_watch: crate::audio::ReconnectPolicy,
     /// Next default-device name poll deadline (desktop hotplug poller).
@@ -501,11 +505,20 @@ impl eframe::App for App {
         #[cfg(not(target_os = "android"))]
         if now >= self.audio_poll_at {
             self.audio_poll_at = now + AUDIO_POLL_INTERVAL;
-            if let Some(stored) = self.audio_device_name.as_deref() {
-                let current = crate::audio::default_output_device_name(cpal::default_host().id());
-                if crate::audio::ReconnectPolicy::device_changed(stored, current.as_deref()) {
-                    log::info!("[audio] default device changed: {stored:?} -> {current:?}");
-                    self.audio_disconnected.store(true, Ordering::Relaxed);
+            // Only poll the default-device name when the stream lives on the
+            // DEFAULT host (PR #9): the poller queries default_host(), so a
+            // JACK-host stream's name ("cpal_client_out") never matches a
+            // PipeWire default name ("default") and the comparison would
+            // fire a false reconnect on a healthy stream 1.5 s after startup.
+            // JACK hotplug is detected via the dead-stream/SR-error atom
+            // instead (commit 9bf717e).
+            if self.audio_host_id == cpal::default_host().id() {
+                if let Some(stored) = self.audio_device_name.as_deref() {
+                    let current = crate::audio::default_output_device_name(cpal::default_host().id());
+                    if crate::audio::ReconnectPolicy::device_changed(stored, current.as_deref()) {
+                        log::info!("[audio] default device changed: {stored:?} -> {current:?}");
+                        self.audio_disconnected.store(true, Ordering::Relaxed);
+                    }
                 }
             }
         }
@@ -515,6 +528,9 @@ impl eframe::App for App {
                     self.audio_watch.on_success();
                     self.audio_device_name =
                         self._audio_handle.as_ref().and_then(|b| b.device_name.clone());
+                    if let Some(b) = self._audio_handle.as_ref() {
+                        self.audio_host_id = b.host_id;
+                    }
                     self.show_toast("Audio reconnected".to_string(), ToastKind::Success);
                 }
                 Err(e) => {
