@@ -75,6 +75,12 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
                 self.save_global_to_config();
             }
+            if ui.checkbox(&mut self.drum_metronome, "Metro")
+                .on_hover_text("Metronome: click on every beat while the sequencer plays (accent on beat 1)").changed()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
+                self.save_global_to_config();
+            }
         });
 
         // Pad remap: incoming pad note -> internal slot (modal, off the main screen)

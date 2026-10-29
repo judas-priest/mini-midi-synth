@@ -317,6 +317,7 @@ pub struct App {
     pub drum_step_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_rec_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub drum_metronome: bool,
     pub perf_window: usize,   // first perf_list idx visible on slots 1..=7
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -1222,6 +1223,7 @@ impl App {
         // Send drum and part volumes to engine
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
         // Restore the internal-kit remap before the initial push (if an SF2 kit is
         // configured, load_sf2_drums below overwrites this with the per-kit table).
         if self.sf2_drums_loaded_name.is_empty() {
@@ -1298,6 +1300,7 @@ impl App {
         self.config.ui.pitch_bend_range = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as u8;
         self.config.ui.drum_volume = self.drum_volume;
         self.config.ui.drum_fixed_velocity = self.drum_fixed_velocity;
+        self.config.ui.drum_metronome = self.drum_metronome;
         if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
