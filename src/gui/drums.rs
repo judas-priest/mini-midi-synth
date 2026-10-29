@@ -232,27 +232,34 @@ impl App {
                 ui.spacing_mut().item_spacing = spacing;
                 ui.add_space(theme::SP_MD);
 
-                // Per-instrument controls
+                // Per-instrument controls. L/T/D/P are DSP-only by design: in
+                // SF2 mode sequencer triggers bypass trigger_slot entirely and
+                // go straight to the sampler as MIDI note-ons (drum.rs tick →
+                // synth/mod.rs drum_triggers loop), so these params have no
+                // effect on SF2 kits (TECHDEBT #33). Grayed out with a tooltip
+                // instead of silently doing nothing.
+                let dsp_kit = !(self.sf2_drums_enabled && self.sf2_drums_soundfont.is_some());
+                let dsp_hint = if dsp_kit { "" } else { " — DSP only, no effect in SF2 mode" };
                 ui.horizontal(|ui| {
                     let mut level = self.drum_params[slot].level;
                     let mut tune = self.drum_params[slot].tune;
                     let mut decay = self.drum_params[slot].decay;
 
                     ui.style_mut().spacing.slider_width = theme::SLIDER_DRUM;
-                    if ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text("Level").changed() {
+                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text(format!("Level{dsp_hint}")).changed() {
                         self.drum_params[slot].level = level;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
                     }
-                    if ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).on_hover_text("Tune (semitones)").changed() {
+                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).on_hover_text(format!("Tune (semitones){dsp_hint}")).changed() {
                         self.drum_params[slot].tune = tune;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
                     }
-                    if ui.add(egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).on_hover_text("Decay time").changed() {
+                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).on_hover_text(format!("Decay time{dsp_hint}")).changed() {
                         self.drum_params[slot].decay = decay;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
                     }
                     let mut pan = self.drum_params[slot].pan;
-                    if ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).on_hover_text("Pan L/R").changed() {
+                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).on_hover_text(format!("Pan L/R{dsp_hint}")).changed() {
                         self.drum_params[slot].pan = pan;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
                     }
