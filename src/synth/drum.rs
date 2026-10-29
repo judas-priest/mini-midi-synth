@@ -4,7 +4,7 @@
 
 use std::f32::consts::TAU;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -724,6 +724,9 @@ pub struct StepSequencer {
     pub current_step: u8,
     phase_acc: f64, // fractional sample accumulator
     undo_snapshot: Option<Box<[DrumPattern; MAX_PATTERNS]>>,
+    /// Shared atom so the GUI thread can check undo availability without
+    /// touching the (potentially mid-mutation) sequencer itself.
+    undo_atom: Arc<AtomicBool>,
 }
 
 impl StepSequencer {
@@ -738,7 +741,20 @@ impl StepSequencer {
             current_step: 0,
             phase_acc: 0.0,
             undo_snapshot: None,
+            undo_atom: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn undo_atom(&self) -> Arc<AtomicBool> {
+        self.undo_atom.clone()
+    }
+
+    pub fn undo_available(&self) -> bool {
+        self.undo_atom.load(Ordering::Relaxed)
+    }
+
+    fn sync_undo_atom(&self) {
+        self.undo_atom.store(self.undo_snapshot.is_some(), Ordering::Relaxed);
     }
 
     /// Clear all steps in the current pattern.
@@ -746,6 +762,7 @@ impl StepSequencer {
         self.undo_snapshot = Some(Box::new(self.patterns));
         let pat = &mut self.patterns[self.current_pattern as usize];
         pat.steps = [[StepData::default(); MAX_STEPS]; NUM_DRUM_SLOTS];
+        self.sync_undo_atom();
     }
 
     /// Undo last clear or restore pre-recording state.
@@ -753,11 +770,13 @@ impl StepSequencer {
         if let Some(snapshot) = self.undo_snapshot.take() {
             self.patterns = *snapshot;
         }
+        self.sync_undo_atom();
     }
 
     /// Save snapshot before destructive operation (e.g. recording start).
     pub fn save_snapshot(&mut self) {
         self.undo_snapshot = Some(Box::new(self.patterns));
+        self.sync_undo_atom();
     }
 
     /// Advance sequencer by one sample. Returns list of (slot_index, velocity) to trigger.
@@ -933,6 +952,14 @@ impl DrumEngine {
 
     pub fn rec_atom(&self) -> Arc<AtomicU8> {
         self.rec_atom.clone()
+    }
+
+    pub fn undo_atom(&self) -> Arc<AtomicBool> {
+        self.sequencer.undo_atom()
+    }
+
+    pub fn undo_available(&self) -> bool {
+        self.sequencer.undo_available()
     }
 
     /// Pad-transport record toggle: snapshots before enabling so undo

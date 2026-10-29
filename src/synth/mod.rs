@@ -209,7 +209,6 @@ pub enum ControlEvent {
     },
     LooperSetLayerMute { layer: u8, mute: bool },
     LooperSetSolo { layer: Option<u8> },
-    LooperRewind,
     SetSustain { on: bool },
     AllNotesOff,
     /// GUI sustain toggle (F1): same path as CC64
@@ -1579,6 +1578,9 @@ impl SynthEngine {
                             83 => {
                                 let rec = !self.drum_engine.sequencer.recording;
                                 self.drum_engine.set_recording(rec);
+                                if rec && !self.drum_engine.sequencer.playing {
+                                    self.drum_engine.set_playing(true);
+                                }
                                 return;
                             }
                             82 => {
@@ -2073,6 +2075,9 @@ impl SynthEngine {
                     self.drum_engine.sequencer.save_snapshot();
                 }
                 self.drum_engine.sequencer.recording = recording;
+                if recording && !self.drum_engine.sequencer.playing {
+                    self.drum_engine.set_playing(true);
+                }
             }
             ControlEvent::DrumSeqClear => {
                 self.drum_engine.sequencer.clear_pattern();
@@ -2134,9 +2139,6 @@ impl SynthEngine {
                         }
                     }
                 }
-            }
-            ControlEvent::LooperRewind => {
-                self.looper.rewind_to_start();
             }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
                 self.drum_engine.fixed_velocity = fixed;

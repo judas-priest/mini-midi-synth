@@ -118,6 +118,18 @@ fn sample_rate_change_twice_still_preserves() {
 }
 
 #[test]
+fn undo_atom_tracks_snapshot_lifecycle() {
+    let mut e = DrumEngine::new(48_000.0);
+    assert!(!e.undo_available(), "no snapshot at start");
+    e.sequencer.save_snapshot();
+    assert!(e.undo_available());
+    e.sequencer.undo();
+    assert!(!e.undo_available(), "snapshot consumed by undo");
+    e.sequencer.clear_pattern();
+    assert!(e.undo_available());
+}
+
+#[test]
 fn sample_rate_change_resets_choke_state() {
     let mut e = DrumEngine::new(48_000.0);
     let mut choke = [0u8; 26];
