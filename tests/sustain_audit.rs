@@ -821,3 +821,84 @@ fn legato_with_no_held_key_is_normal_attack() {
         "first note after silence must attack normally (mid-attack {before}, re-attack window {after})"
     );
 }
+
+// ── Arp latch (TECHDEBT 14.4) ──────────────────────────────────
+
+fn latched_arp_engine() -> SynthEngine {
+    let mut e = engine_with_init_patch();
+    let mut patch = init_patch_mut();
+    patch.params.insert("arp_enabled".to_string(), 1.0);
+    patch.params.insert("arp_rate".to_string(), 2.0); // 1/16 ≈ 125 ms steps @120 BPM
+    patch.params.insert("arp_gate".to_string(), 0.5);
+    patch.params.insert("arp_latch".to_string(), 1.0);
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
+    e
+}
+
+#[test]
+fn arp_latch_keeps_playing_after_key_release() {
+    let mut e = latched_arp_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "arp produced no sound");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let latched_peak = render_peak(&mut e, 300); // ~200 ms — spans further steps
+    assert!(
+        latched_peak > SILENCE,
+        "latch did not keep the arp alive after key release (peak {latched_peak})"
+    );
+    // Second latch-toggle press (latch off) stops the frozen set
+    let _ = e.handle_control(ControlEvent::SetArpLatch { latch: false });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "latch-off left sound ringing (peak {after})");
+}
+
+#[test]
+fn arp_latch_new_chord_takes_over() {
+    let mut e = latched_arp_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = render_peak(&mut e, 100);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let _ = render_peak(&mut e, 100);
+    assert!(render_peak(&mut e, 100) > SILENCE, "set did not freeze");
+    // New chord replaces the frozen set without stopping playback
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 127 });
+    let _ = render_peak(&mut e, 50);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 72 });
+    let peak = render_peak(&mut e, 300);
+    assert!(peak > SILENCE, "new chord broke the latched arp (peak {peak})");
+    let _ = e.handle_control(ControlEvent::SetArpLatch { latch: false });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "latch-off left sound ringing (peak {after})");
+}
+
+#[test]
+fn panic_cc_clears_latched_arp() {
+    let mut e = latched_arp_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = render_peak(&mut e, 100);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 100) > SILENCE, "set did not freeze");
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 120, value: 0 });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "CC120 left the latched arp ringing (peak {after})");
+}
+
+#[test]
+fn arp_latch_persists_through_patch_load() {
+    let e = latched_arp_engine();
+    assert!(e.arpeggiator.latch_enabled(), "arp_latch param did not sync on patch load");
+    // Absent key defaults to off
+    let patches = preset::load_all_patches();
+    let patch = patches
+        .iter()
+        .find(|p| p.name.eq_ignore_ascii_case("init"))
+        .expect("init preset exists")
+        .clone();
+    let mut e2 = SynthEngine::new(SR);
+    e2.set_patches(patches);
+    let _ = e2.handle_control(ControlEvent::load_patch_from(0, &patch));
+    assert!(!e2.arpeggiator.latch_enabled(), "default latch must be off");
+}

@@ -1406,6 +1406,15 @@ impl App {
                     });
                 }
 
+                let mut latch = self.parts[part].edited_params.get("arp_latch").copied().unwrap_or(0.0) > 0.5;
+                if ui.checkbox(&mut latch, "Latch").on_hover_text("Keep the arp playing after keys are released").changed() {
+                    self.push_undo_snapshot();
+                    self.parts[part].edited_params.insert("arp_latch".into(), if latch { 1.0 } else { 0.0 });
+                    changed = true;
+                    // Immediate live update (patch reload follows via send_edited_params)
+                    let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetArpLatch { latch });
+                }
+
                 let mut amode = self.parts[part].edited_params.get("arp_mode").copied().unwrap_or(0.0) as usize;
                 ui.label("Mode:");
                 egui::ComboBox::from_id_salt(format!("arp_mode_{part}"))
