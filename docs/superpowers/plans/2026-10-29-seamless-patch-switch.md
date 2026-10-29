@@ -224,11 +224,12 @@ fn steal_prefers_releasing_voice() {
     // отпустить НЕ-самый-старый голос (40) → он в release-фазе;
     // голос 36 — самый старый активный (старый вор взял бы ЕГО)
     p.note_off(40);
-    // новая нота: должна занять release-голос 40
+    // новая нота: должна занять release-голос 40 (src_note перезапишется на 80)
     p.note_on(80, 100);
-    let v40 = p.voices.iter().find(|v| v.src_note == 40).unwrap();
-    assert!(!v40.is_releasing() && v40.active && v40.note == 80,
-        "released voice 40 must be reused for the new note");
+    let v_new = p.voices.iter().find(|v| v.note == 80).unwrap();
+    assert_eq!(v_new.src_note, 40,
+        "must reuse the RELEASED voice 40 (old stealer takes voice 36)");
+    assert!(!v_new.is_releasing() && v_new.active);
     // самый старый активный (36) не тронут
     let v36 = p.voices.iter().find(|v| v.src_note == 36).unwrap();
     assert!(v36.active && !v36.is_releasing() && v36.note == 36,
@@ -238,10 +239,9 @@ fn steal_prefers_releasing_voice() {
 
 (VOICES_PER_LAYER = 8, mod.rs:376; конструктор `Part::new(48_000.0)` и поля
 voices — приватные, но tests.rs — child-модуль synth, доступ есть; прецедент:
-src/synth/tests.rs:750 уже правит patch.params. RED-фаза: старый вор берёт
-голос 36 (min age) → тест ПАНИКУЕТ на find(src_note==36) (src_note перезаписан
-на 80) — паника = валидный красный. НЕ-старый релиз (40) обязателен, иначе
-старый и новый вор совпадают и красной фазы нет.)
+src/synth/tests.rs:750 уже правит patch.params. RED-фаза: старый вор берёт голос 36 (min age) → первый ассерт ловит
+v_new.src_note == 36 (ожидался 40) → FAIL. НЕ-старый релиз (40) обязателен,
+иначе старый и новый вор совпадают и красной фазы нет.)
 
 - [ ] **Step 5: прогнать — зафиксировать красные**
 
@@ -307,12 +307,13 @@ src_note в `l.latch_held: Vec<u8>`; voice.src_note — u8. Если play_mode �
 enum-число, сравнение `== 3` корректно.)
 
 - [ ] **Step 2: ProgramChange arm** — удалить идентичный блок (mod.rs ~1908-1919:
-  от `self.sampler.part_all_notes_off(0);` до `l.root_active = None;` — весь
+  от `self.sampler.part_all_notes_off(0);` (1908) до `l.root_active = None;` (1919) — весь
   `if let Some(l) = self.parts.get_mut(0) { ... }` оборачивал ТОЛЬКО килл,
-  удалить его целиком) и добавить ТОТ ЖЕ latch-mismatch release после
-  `l.params = params;` / `l.min_note`/`l.max_note` (~1925-1927) — PC делает
-  тот же params-swap, без блока latch→не-latch оставит latch-голоса звенеть
-  вечно (ревью finding #4):
+  удалить его целиком) и добавить ТОТ ЖЕ latch-mismatch release ВНУТРЬ нового
+  `if let Some(l)` ПЕРЕД `l.params = params;` (~1925) — РАНЬШЕ присваивания:
+  блок сравнивает СТАРЫЙ play_mode с новым; после присваивания сравнение
+  всегда ложно (ревью round-2 C2). PC делает тот же params-swap, без блока
+  latch→не-latch оставит latch-голоса звенеть вечно:
 
 ```rust
                     if let Some(l) = self.parts.get_mut(0) {
