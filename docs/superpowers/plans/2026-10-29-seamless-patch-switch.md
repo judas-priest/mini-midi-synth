@@ -248,8 +248,8 @@ v_new.src_note == 36 (ожидался 40) → FAIL. НЕ-старый рели�
 Run: `cargo test --test sustain_audit -- --nocapture 2>&1 | tail -40`
 Expected RED (до Task 2): pedal/held/program_change seamless-тесты FAIL на
 своих settle-ассертах («killed a pedal-held voice» / «held key was killed»);
-latch-mismatch FAIL на decay-ассерте; steal-тест — ПАНИКА (find по
-src_note==36 не находит). Зелёные: panic-тест (guard) и
+latch-mismatch FAIL на decay-ассерте; steal-тест FAIL на
+assert_eq (v_new.src_note == 36, ожидался 40). Зелёные: panic-тест (guard) и
 new_notes_sound_after_patch_switch (guard). Остальные 36 sustain-тестов зелёные.
 
 - [ ] **Step 6: Commit**
@@ -330,7 +330,7 @@ enum-число, сравнение `== 3` корректно.)
 
 (params здесь из `preset_params_cache` — тип тот же PatchParams.)
 
-- [ ] **Step 3: вор голосов** — в fallback-ветке (mod.rs:732-738) приоритет
+- [ ] **Step 3: вор голосов** — в fallback-ветке (mod.rs:727-733) приоритет
   release-фазных:
 
 ```rust
@@ -350,7 +350,7 @@ enum-число, сравнение `== 3` корректно.)
 ```
 
 (только default-ветка; Poly-High/Low ветки не трогать. `is_releasing()` —
-voice.rs:547, существует.)
+voice.rs:569, существует.)
 
 - [ ] **Step 4: прогнать**
 
