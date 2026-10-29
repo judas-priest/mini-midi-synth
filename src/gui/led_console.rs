@@ -32,6 +32,10 @@ pub enum PadEvent {
     Prev,
     /// Bottom-row nav: Next (note 79).
     Next,
+    /// Bottom-row: PAGE back (note 80, pad 28).
+    PageBack,
+    /// Bottom-row: PAGE forward (note 76, pad 29).
+    PageForward,
 }
 
 /// Console output: what GUI must do.
@@ -43,6 +47,8 @@ pub enum Action {
     Undo,
     StepPerf(i32),
     StepPattern(i32),
+    PageBack,
+    PageForward,
 }
 
 pub struct LedConsole {
@@ -97,6 +103,8 @@ impl LedConsole {
             PadEvent::Undo => Some(Action::Undo),
             PadEvent::Prev => Some(self.step(-1)),
             PadEvent::Next => Some(self.step(1)),
+            PadEvent::PageBack => Some(Action::PageBack),
+            PadEvent::PageForward => Some(Action::PageForward),
         }
     }
 
@@ -133,34 +141,36 @@ impl LedConsole {
         }
     }
 
-    /// LED colors for slots 0..=7 (top row) given current state.
+    /// LED colors for slots 0..=7 (top row). `w_perf`/`w_pat` — first index of
+    /// the visible window: slot i (1..=7) shows item window + i - 1.
+    /// Slot 0 is the MENU button (white).
     pub fn top_colors(
         &self,
         active_perf: Option<usize>,
         filled_perfs: usize,
         current_pattern: usize,
         mutes: &[bool; 8],
+        w_perf: usize,
+        w_pat: usize,
     ) -> [[u8; 3]; 8] {
         // Palette uses ONLY hues visually validated on this hardware (see
         // PADS_NOTES.md bank-1 kit colors: FF0000/00FF00/FFFF00/0066FF/FF8000/
         // FF00FF/FFFFFF render correctly; untested hues render unpredictably).
         // TOP row = white / magenta / blue / orange; BOTTOM row = green / red /
         // yellow / orange. Off = disabled everywhere.
-        const MENU_W: [u8; 3] = [0xFF, 0xFF, 0xFF]; // MENU button
         const SEL: [u8; 3] = [0xFF, 0x00, 0xFF]; // selected: magenta
         const AVAIL: [u8; 3] = [0x00, 0x66, 0xFF]; // available: blue
         let mut c = [[0u8; 3]; 8];
         if self.mode != Mode::Menu {
-            // slot 0 is the always-visible MENU button (white)
-            c[0] = MENU_W;
+            c[0] = [0xFF, 0xFF, 0xFF]; // MENU button (white)
         }
         match self.mode {
             Mode::Home => {
-                // slot i (1..=7) <-> perf_list index i ("(Init)" at 0 has no slot)
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
-                    if Some(i) == active_perf {
+                    let idx = w_perf + i - 1;
+                    if Some(idx) == active_perf {
                         *col = SEL;
-                    } else if i < filled_perfs {
+                    } else if idx < filled_perfs {
                         *col = AVAIL;
                     } else {
                         *col = [0x00, 0x00, 0x00]; // empty: OFF
@@ -168,19 +178,18 @@ impl LedConsole {
                 }
             }
             Mode::Pattern => {
-                // slot i (1..=7) <-> pattern i-1 (pattern 8 via Prev/Next).
-                // Pattern mode speaks YELLOW (selected = magenta marker).
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
-                    if i - 1 == current_pattern {
+                    let idx = w_pat + i - 1;
+                    if idx == current_pattern {
                         *col = SEL;
-                    } else {
+                    } else if idx < 8 {
                         *col = [0xFF, 0xFF, 0x00]; // available: yellow
+                    } else {
+                        *col = [0x00, 0x00, 0x00];
                     }
                 }
             }
             Mode::Mute => {
-                // slot i (1..=7) <-> part i-1 (part 8 via GUI).
-                // Mute mode speaks GREEN (muted = OFF).
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
                     if mutes[i - 1] {
                         *col = [0x00, 0x00, 0x00]; // muted: OFF
@@ -194,9 +203,9 @@ impl LedConsole {
                 // picking them: HOME -> blue perfs, PATTERN -> yellow, MUTE -> green
                 for (i, col) in c.iter_mut().enumerate() {
                     *col = match i {
-                        0 => AVAIL,                 // HOME: blue (perfs)
-                        1 => [0xFF, 0xFF, 0x00],    // PATTERN: yellow
-                        2 => [0x00, 0xFF, 0x00],    // MUTE: green
+                        0 => AVAIL,              // HOME: blue (perfs)
+                        1 => [0xFF, 0xFF, 0x00], // PATTERN: yellow
+                        2 => [0x00, 0xFF, 0x00], // MUTE: green
                         _ => [0x00, 0x00, 0x00],
                     };
                 }
@@ -205,27 +214,40 @@ impl LedConsole {
         c
     }
 
-    /// Bottom-row (transport) colors: slots 8..=15 = pads 25..=32.
-    /// Warm family (green/red/yellow) + orange specials; idle = OFF.
-    /// Prev/Next (slots 14/15 = pads 30/31) borrow the TOP-mode color: they
-    /// step that mode's items (blue = perfs, yellow = patterns).
-    pub fn bottom_colors(&self, playing: bool, recording: bool) -> [[u8; 3]; 8] {
-        const SPECIAL: [u8; 3] = [0xFF, 0x80, 0x00]; // Rew / Undo: orange
-        let mode_color = match self.mode {
-            Mode::Home => [0x00, 0x66, 0xFF],        // blue: they step perfs
-            Mode::Pattern => [0xFF, 0xFF, 0x00],     // yellow: they step patterns
-            _ => SPECIAL,
-        };
-        let mut c = [[0x00, 0x00, 0x00]; 8]; // idle = OFF
-        c[0] = if playing { [0x00, 0xFF, 0x00] } else { [0x00, 0x00, 0x00] }; // green when playing
-        c[1] = if !playing && !recording { [0xFF, 0xFF, 0x00] } else { [0x00, 0x00, 0x00] }; // yellow when stopped
-        c[2] = if recording { [0xFF, 0x00, 0x00] } else { [0x00, 0x00, 0x00] }; // red when recording
-        c[3] = SPECIAL; // Rew (looper rewind)
-        // slots 4..=6: unused(4), Prev(5), Next(6) — mode color; Undo(7) orange
-        c[5] = mode_color;
-        c[6] = mode_color;
-        c[7] = SPECIAL;
+    /// Bottom-row colors. `page_depth` — сколько PAGE-нажатий вглубь (0 = база);
+    /// оттенки синего темнеют с глубиной (EXPERIMENTAL — юзер проверяет рендер;
+    /// fallback: заменить все shades на [0x00, 0x66, 0xFF]).
+    /// Undo (slot 15 = pad 32): розовый FF5080 (EXPERIMENTAL; fallback FF00FF)
+    /// когда есть снимок, иначе OFF. Prev/Next — фиксированный оранжевый.
+    pub fn bottom_colors(
+        &self,
+        playing: bool,
+        recording: bool,
+        page_depth: usize,
+        undo_available: bool,
+    ) -> [[u8; 3]; 8] {
+        const PAGE_SHADES: [[u8; 3]; 4] = [
+            [0x00, 0x66, 0xFF], // depth 0: validated blue
+            [0x00, 0x48, 0xB5], // depth 1
+            [0x00, 0x32, 0x77], // depth 2
+            [0x00, 0x21, 0x4D], // depth 3+
+        ];
+        let shade = PAGE_SHADES[page_depth.min(PAGE_SHADES.len() - 1)];
+        let mut c = [[0x00, 0x00, 0x00]; 8];
+        c[0] = if playing { [0x00, 0xFF, 0x00] } else { [0x00, 0x00, 0x00] };
+        c[1] = if !playing && !recording { [0xFF, 0xFF, 0x00] } else { [0x00, 0x00, 0x00] };
+        c[2] = if recording { [0xFF, 0x00, 0x00] } else { [0x00, 0x00, 0x00] };
+        c[3] = shade; // PAGE back (pad 28)
+        c[4] = shade; // PAGE forward (pad 29)
+        c[5] = [0xFF, 0x80, 0x00]; // Prev: fixed orange
+        c[6] = [0xFF, 0x80, 0x00]; // Next: fixed orange
+        c[7] = if undo_available { [0xFF, 0x50, 0x80] } else { [0x00, 0x00, 0x00] };
         c
+    }
+
+    /// Current top-row mode (for window paging in the GUI).
+    pub fn mode(&self) -> Mode {
+        self.mode
     }
 }
 
@@ -334,36 +356,37 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_colors_home_and_menu() {
+    fn window_offsets_map_targets_to_slots() {
         let mut c = LedConsole::new();
-        let mut mutes = [false; 8];
-        mutes[2] = true;
-        let home = c.top_colors(Some(1), 3, 0, &mutes);
-        assert_eq!(home[0], [0xFF, 0xFF, 0xFF]); // MENU button (white)
-        assert_eq!(home[1], [0xFF, 0x00, 0xFF]); // selected (magenta)
-        assert_eq!(home[2], [0x00, 0x66, 0xFF]); // available (blue)
-        assert_eq!(home[7], [0x00, 0x00, 0x00]); // empty -> OFF
-        c.mode = Mode::Menu;
-        let menu = c.top_colors(None, 0, 0, &mutes);
-        assert_eq!(menu[0], [0x00, 0x66, 0xFF]); // HOME: blue
-        assert_eq!(menu[1], [0xFF, 0xFF, 0x00]); // PATTERN: yellow
-        assert_eq!(menu[2], [0x00, 0xFF, 0x00]); // MUTE: green
-        assert_eq!(menu[4], [0x00, 0x00, 0x00]);
+        let mutes = [false; 8];
+        // window 2: slot 1 = perf idx 2 (selected), slot 2 = idx 3 (filled)
+        let home = c.top_colors(Some(2), 5, 0, &mutes, 2, 0);
+        assert_eq!(home[1], [0xFF, 0x00, 0xFF]); // selected (idx 2)
+        assert_eq!(home[2], [0x00, 0x66, 0xFF]); // available (idx 3)
+        // slot 4 = idx 5 -> за концом списка (count 5) -> OFF
+        assert_eq!(home[4], [0x00, 0x00, 0x00]);
+        // pattern window 1: slot 1 = pattern 1 (selected при current=1)
+        c.mode = Mode::Pattern;
+        let pat = c.top_colors(None, 0, 1, &mutes, 0, 1);
+        assert_eq!(pat[1], [0xFF, 0x00, 0xFF]);
+        assert_eq!(pat[2], [0xFF, 0xFF, 0x00]); // pattern mode speaks yellow
     }
 
     #[test]
-    fn bottom_transport_colors() {
+    fn bottom_page_shades_and_undo_pink() {
         let mut c = LedConsole::new();
-        let b = c.bottom_colors(true, false);
-        assert_eq!(b[0], [0x00, 0xFF, 0x00]); // play lit
-        assert_eq!(b[1], [0x00, 0x00, 0x00]); // stop off while playing
-        assert_eq!(b[5], [0x00, 0x66, 0xFF]); // Prev: blue in Home (steps perfs)
-        assert_eq!(b[7], [0xFF, 0x80, 0x00]); // Undo: orange
+        let b = c.bottom_colors(false, false, 0, false);
+        assert_eq!(b[3], [0x00, 0x66, 0xFF]); // page 0: base blue
+        assert_eq!(b[4], [0x00, 0x66, 0xFF]);
+        assert_eq!(b[7], [0x00, 0x00, 0x00]); // undo off (no snapshot)
+        let b = c.bottom_colors(false, false, 2, true);
+        assert_eq!(b[3], [0x00, 0x32, 0x77], "page 2: darker blue");
+        assert_eq!(b[7], [0xFF, 0x50, 0x80]); // undo pink when available
+        // nav 30/31 — фиксированный оранжевый, НЕ зависит от режима
         c.mode = Mode::Pattern;
-        let b = c.bottom_colors(false, false);
-        assert_eq!(b[6], [0xFF, 0xFF, 0x00]); // Next: yellow in Pattern
-        let b = c.bottom_colors(false, true);
-        assert_eq!(b[2], [0xFF, 0x00, 0x00]); // rec lit
+        let b = c.bottom_colors(false, false, 0, true);
+        assert_eq!(b[5], [0xFF, 0x80, 0x00]);
+        assert_eq!(b[6], [0xFF, 0x80, 0x00]);
     }
 
     #[test]

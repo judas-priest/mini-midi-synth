@@ -317,6 +317,9 @@ pub struct App {
     pub drum_step_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_rec_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub perf_window: usize,   // first perf_list idx visible on slots 1..=7
+    pub pat_window: usize,    // first pattern idx visible on slots 1..=7
+    pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // Bank-2 pad console
     pub console: led_console::LedConsole,
     pub console_rx: Option<std::sync::mpsc::Receiver<(u8, bool)>>,
@@ -540,10 +543,8 @@ impl eframe::App for App {
                     (75, true) => Some(led_console::PadEvent::Undo),
                     (78, true) => Some(led_console::PadEvent::Prev),
                     (79, true) => Some(led_console::PadEvent::Next),
-                    (80, true) => {
-                        let _ = self.ctrl_tx.push(crate::synth::ControlEvent::LooperRewind);
-                        None
-                    }
+                    (80, true) => Some(led_console::PadEvent::PageBack),
+                    (76, true) => Some(led_console::PadEvent::PageForward),
                     _ => None,
                 };
                 if let Some(ev) = ev {
@@ -615,10 +616,16 @@ impl eframe::App for App {
             for (i, part) in self.parts.iter().take(8).enumerate() {
                 mutes[i] = part.mute;
             }
-            let filled = self.perf_list.len().min(8);
+            let filled = self.perf_list.len();
+            let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
+            let page_depth = match self.console.mode() {
+                led_console::Mode::Pattern => self.pat_window, // окна {0,1} — сама глубина
+                _ => self.perf_window / 7,
+            };
             let top = self.console.top_colors(self.active_perf_console(), filled,
-                                              self.drum_current_pattern as usize, &mutes);
-            let bottom = self.console.bottom_colors(playing, recording);
+                                              self.drum_current_pattern as usize, &mutes,
+                                              self.perf_window, self.pat_window);
+            let bottom = self.console.bottom_colors(playing, recording, page_depth, undo_avail);
             let mut snap = [[0u8; 3]; 16];
             snap[..8].copy_from_slice(&top);
             snap[8..].copy_from_slice(&bottom);
@@ -1792,18 +1799,23 @@ impl App {
     fn execute_console_action(&mut self, action: led_console::Action) {
         match action {
             led_console::Action::LoadPerf(i) => {
-                // perf_list: Vec<(String, PathBuf)>, index 0 = "(Init)".
-                // Console slots = perf_list indices 0..=7.
-                if let Some((name, _)) = self.perf_list.get(i) {
+                let idx = self.perf_window + i - 1; // slot -> real index
+                if let Some((name, _)) = self.perf_list.get(idx) {
                     let name = name.clone();
                     if self.load_performance_by_name(&name) {
-                        log::info!("[console] perf slot {} loaded ({})", i + 1, name);
+                        log::info!("[console] perf slot {} loaded ({})", i, name);
+                        self.follow_window(idx, true);
                     }
                 }
             }
             led_console::Action::SelectPattern(i) => {
-                self.drum_current_pattern = i as u8;
-                let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: i as u8 });
+                // консоль шлёт УЖЕ window-local 0-based (slot-1 из tap())
+                let idx = self.pat_window + i;
+                if idx < 8 {
+                    self.drum_current_pattern = idx as u8;
+                    let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: idx as u8 });
+                    self.follow_window(idx, false);
+                }
             }
             led_console::Action::ToggleMute(i) => {
                 if let Some(part) = self.parts.get_mut(i) {
@@ -1824,12 +1836,53 @@ impl App {
                     let name = name.clone();
                     self.load_performance_by_name(&name);
                 }
+                self.follow_window(next, true);
             }
             led_console::Action::StepPattern(dir) => {
                 let next = (self.drum_current_pattern as i32 + dir).rem_euclid(8);
                 self.drum_current_pattern = next as u8;
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: next as u8 });
+                self.follow_window(next as usize, false);
             }
+            led_console::Action::PageBack => {
+                self.page_window(-7);
+                // не оставлять пурпур за экраном (Important-фикс ревью)
+                if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
+                self.follow_window(self.drum_current_pattern as usize, false);
+            }
+            led_console::Action::PageForward => {
+                self.page_window(7);
+                if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
+                self.follow_window(self.drum_current_pattern as usize, false);
+            }
+        }
+    }
+
+    /// Auto-follow: keep the active index inside [w, w+7); if it escapes past
+    /// the right edge it becomes the FIRST visible slot (user-requested).
+    fn follow_window(&mut self, idx: usize, is_perf: bool) {
+        if is_perf {
+            if !(self.perf_window..self.perf_window + 7).contains(&idx) {
+                self.perf_window = idx.min(self.perf_list.len().saturating_sub(1));
+            }
+        } else if !(self.pat_window..self.pat_window + 7).contains(&idx) {
+            self.pat_window = idx.min(7);
+        }
+    }
+
+    /// Shift the active mode's window by `delta` slots, clamped to the list.
+    fn page_window(&mut self, delta: i32) {
+        match self.console.mode() {
+            led_console::Mode::Home => {
+                let n = self.perf_list.len();
+                let max_w = n.saturating_sub(7);
+                self.perf_window = (self.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
+            }
+            led_console::Mode::Pattern => {
+                // 8 patterns, window shows 7: max start = 1
+                self.pat_window = (self.pat_window as i32 + delta).clamp(0, 1) as usize;
+            }
+            _ => {}
         }
     }
 
