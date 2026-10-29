@@ -1,6 +1,6 @@
 # Metronome (drum-sequencer BPM) + Init Performance Reset — Implementation Plan
 
-anchor-checked: 2026-10-29 (якоря сняты с master @ ccdd519 чтением кода в этой сессии)
+anchor-checked: 2026-10-29 (refreshed on worktree-carried-fixes @ 492dea2) (якоря сняты с master @ ccdd519 чтением кода в этой сессии)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -155,8 +155,8 @@ fn click_events(e: &mut SynthEngine, blocks: usize) -> Vec<(usize, f32)> {
 fn tc1_click_on_every_beat_at_120bpm() {
     let mut e = metronome_engine(120.0, true);
     let _ = e.handle_control(ControlEvent::DrumSeqPlay { playing: true });
-    // 120 BPM: beat = 0.5 s = 24000 samples = 750 blocks of 32.
-    // 2260 blocks (~3 s) → beats land at blocks ~750 / 1500 / 2250.
+    // 120 BPM: beat = 0.5 s = 24000 samples = 750 blocks; first boundary fires at sample 6000 (block ~187) after DrumSeqPlay resets step 0 of 32.
+    // 2260 blocks (~3 s) → beats land at blocks ~187 / 937 / 1687 (после DrumSeqPlay первый беат приходит рано — старт с границы шага 0).
     let events = click_events(&mut e, 2260);
     assert!(events.len() >= 2, "expected >= 2 beats, got {events:?}");
     for w in events.windows(2) {
