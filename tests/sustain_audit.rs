@@ -258,6 +258,44 @@ fn mute_releases_sounding_notes() {
 }
 
 #[test]
+fn mute_gates_the_mix_within_10ms() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound to mute");
+    let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: true });
+    // Discard the ~5 ms fade window (240 samples @48k = 8 blocks of 32);
+    // everything after it must be gated to zero even though the voice is
+    // still in its 0.3 s release.
+    let _ = render_peak(&mut e, 8);
+    let silenced = render_peak(&mut e, 16);
+    assert!(silenced < SILENCE, "muted part still sounding ~10ms after mute (peak {silenced})");
+}
+
+#[test]
+fn unmute_restores_sound() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound");
+    let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: true });
+    let _ = render_peak(&mut e, 200);
+    let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: false });
+    // The release tail (0.3 s) is still alive; fade-in must bring it back
+    let back = render_peak(&mut e, 200);
+    assert!(back > SILENCE, "unmute did not restore sound (peak {back})");
+}
+
+#[test]
+fn mute_toggles_on_silent_engine_are_noop() {
+    let mut e = engine_with_init_patch();
+    for _ in 0..5 {
+        let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: true });
+        let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: false });
+    }
+    let peak = render_peak(&mut e, 50);
+    assert!(peak < SILENCE, "mute toggling produced sound (peak {peak})");
+}
+
+#[test]
 fn midi_learn_rejects_cc64() {
     use mini_midi_synth::cc_map::{CcBindingRaw, CcMap, CcMapRaw};
     use std::collections::BTreeMap;

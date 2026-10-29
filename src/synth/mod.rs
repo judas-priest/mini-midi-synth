@@ -424,6 +424,9 @@ struct Part {
     volume: f32,
     enabled: bool,   // part is in scene (has patch, receives MIDI)
     mute: bool,      // temporary silence without removing from scene
+    /// Mix gate for mute: 1.0 open; ramps to 0 over ~5 ms when muted, back to
+    /// 1.0 on unmute (click-free). Per-sample, audio thread only.
+    mute_gain: f32,
     min_note: u8,
     max_note: u8,
     vel_min: u8,     // velocity range (1-127)
@@ -487,7 +490,7 @@ impl Part {
     fn new(sample_rate: f32) -> Self {
         let voices = (0..VOICES_PER_LAYER).map(|_| Voice::new(sample_rate)).collect();
         Self {
-            voices, age_counter: 0, volume: 0.8, enabled: false, mute: false,
+            voices, age_counter: 0, volume: 0.8, enabled: false, mute: false, mute_gain: 1.0,
             min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
             pan: 0.0, transpose: 0,
             params: PatchParams::default(),
@@ -1996,6 +1999,11 @@ impl SynthEngine {
                         // A muted part must not keep sounding; SF2 voices live
                         // in the sampler, not in l.voices.
                         self.sampler.part_all_notes_off(part);
+                        // SF2 output is summed globally in tick_block, so the
+                        // mix gate cannot reach it — gate at the source with
+                        // CC7 (instant; a click is possible but the release
+                        // drain above keeps the tail short).
+                        self.sampler.set_layer_volume(part, if l.mute { 0.0 } else { l.volume });
                         for voice in &mut l.voices {
                             if voice.active { voice.note_off(); }
                         }
@@ -2003,6 +2011,9 @@ impl SynthEngine {
                         l.keys_down = [false; 128];
                         l.note_stack.clear();
                         l.latch_held.clear();
+                    } else {
+                        // Restore the SF2 channel volume zeroed on mute.
+                        self.sampler.set_layer_volume(part, l.volume);
                     }
                 }
             }
@@ -2749,15 +2760,26 @@ impl SynthEngine {
             let (mut out_l, mut out_r) = (0.0_f32, 0.0_f32);
 
             // Voice ticks (audio rate, using cached modulation)
+            let mute_fade_step = 1.0 / (0.005 * self.sample_rate);
             for (li, part) in self.parts.iter_mut().enumerate() {
                 if !part.enabled { continue; }
                 let (l, r) = part.tick(&layer_mods_snapshot[li]);
+                // Mute is a mix gate: a muted part contributes zero within ~5 ms
+                // (linear fade both ways, so the gate itself does not click).
+                // Voices keep ticking so their release envelopes reach idle and
+                // the voice slot is freed.
+                part.mute_gain = if part.mute {
+                    (part.mute_gain - mute_fade_step).max(0.0)
+                } else {
+                    (part.mute_gain + mute_fade_step).min(1.0)
+                };
+                let fade = part.mute_gain;
                 // Apply per-part pan (constant-power: sqrt of (0.5 ± pan*0.5))
                 let pan = part.pan.clamp(-1.0, 1.0);
                 let gain_l = ((0.5 - pan * 0.5) as f64).sqrt() as f32;
                 let gain_r = ((0.5 + pan * 0.5) as f64).sqrt() as f32;
-                out_l += l * gain_l;
-                out_r += r * gain_r;
+                out_l += l * gain_l * fade;
+                out_r += r * gain_r * fade;
             }
 
             // SF2 + drums
