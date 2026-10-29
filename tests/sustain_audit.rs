@@ -750,3 +750,74 @@ fn sf2_release_scale_event_updates_sampler_scale() {
     let _ = e.handle_control(ControlEvent::SetSf2ReleaseScale { scale: 1.0 });
     assert!((e.sampler_release_scale() - 1.0).abs() < 1e-6, "scale reset did not stick");
 }
+
+// ── Mono legato (TECHDEBT 14.5) ────────────────────────────────
+
+fn legato_engine(play_mode: f32) -> SynthEngine {
+    let mut e = engine_with_init_patch();
+    let mut patch = init_patch_mut();
+    patch.params.insert("play_mode".to_string(), play_mode);
+    patch.params.insert("amp_attack".to_string(), 0.2);
+    patch.params.insert("amp_decay".to_string(), 0.0); // review patch: stable sustain plateau
+    patch.params.insert("amp_sustain".to_string(), 0.7);
+    patch.params.insert("amp_release".to_string(), 0.1);
+    patch.params.insert("filter_env_amount".to_string(), 0.0);
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
+    e
+}
+
+/// Sustain level reached, then peak of the 150 ms window after the second
+/// note-on, relative to the sustain peak.
+fn reattack_ratio(e: &mut SynthEngine) -> f32 {
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = render_peak(e, 600); // 0.4 s — attack (0.2 s) done, at sustain
+    let before = render_peak(e, 100);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 127 });
+    let after = render_peak(e, 225); // 150 ms window
+    after / before
+}
+
+#[test]
+fn mono_legato_keeps_sustain_level_through_note_change() {
+    let mut e = legato_engine(2.0); // Mono-ST: no re-attack while a key is held
+    let ratio = reattack_ratio(&mut e);
+    // CALIBRATED: measured legato ratio = 0.99994 (flat sustain); the mono
+    // re-attack measures 1.140. Threshold 1.05 sits mid-gap between them.
+    assert!(
+        ratio < 1.05,
+        "legato re-attacked the envelope (peak ratio {ratio})"
+    );
+}
+
+#[test]
+fn mono_retrigger_restarts_attack() {
+    let mut e = legato_engine(1.0); // Mono: full re-attack
+    let ratio = reattack_ratio(&mut e);
+    // CALIBRATED: measured re-attack ratio = 1.140 (Sqrt-shape IIR toward the
+    // 1.3 overshoot target from sustain — the real bump is ~14 %, not the
+    // plan's estimated 25 %+); legato measures 1.000. Threshold 1.10 sits
+    // mid-gap between the two modes.
+    assert!(
+        ratio > 1.10,
+        "mono retrigger did not restart the attack (peak ratio {ratio})"
+    );
+}
+
+#[test]
+fn legato_with_no_held_key_is_normal_attack() {
+    let mut e = legato_engine(2.0);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let before = render_peak(&mut e, 100); // mid-attack: well below the peak
+    let _ = render_peak(&mut e, 600);      // reach sustain
+    // Let the first note go fully, then play again: single note = full attack
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let _ = render_peak(&mut e, 600); // release 0.1 s → idle
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 127 });
+    let after = render_peak(&mut e, 225);
+    // CALIBRATED: measured mid-attack/window ratio = 1.793 (plan guessed 1.8+;
+    // it lands just under, so the threshold is 1.7).
+    assert!(
+        after > before * 1.7,
+        "first note after silence must attack normally (mid-attack {before}, re-attack window {after})"
+    );
+}
