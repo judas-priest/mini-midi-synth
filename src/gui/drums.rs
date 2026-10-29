@@ -238,8 +238,6 @@ impl App {
     pub(super) fn draw_drum_kit_controls(&mut self, ui: &mut egui::Ui) {
         // Mix row
         ui.horizontal(|ui| {
-            ui.separator();
-
             // BPM
             ui.label("BPM:");
             if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
