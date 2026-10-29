@@ -11,9 +11,13 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
 - Current: drum step sequencer records hits into the active drum pattern; part/looper recording targets a single layer (`active_part`). Expected: "record" captures the whole performance (all enabled parts), not just one layer.
 - Needs design: multi-layer capture is what the looper already does (audio). Decide: extend looper to capture all enabled layers, or make the sequencer/PitchSeq record across parts.
 
-## 3. Default empty init performance
-- No factory "Init" performance exists — pad perf slots start empty and the first saved perf becomes the reference.
-- Add `Init` performance (single part A1 = init preset, full range, no SF2) compiled into the binary the same way the Init preset is in `FACTORY_PRESETS`; reset action restores it.
+## 3. Default empty init performance — РЕАЛИЗОВАНО (уточнено 2026-10-29)
+Заявление было частично устаревшим: `preset::init_performance()` (одна часть
+A1 = Init-пресет, полный диапазон, без SF2, split_point None) встроен в бинарь,
+подаётся виртуальной записью "(Init)" в perf_list и грузится из комбо Layers,
+из pad-perf-слотов и LED-консоли. Файл на диске не нужен: фабричные пресеты
+тоже in-memory (load_all_patches). Добавлена кнопка Reset в perf-строке
+Layers (план docs/superpowers/plans/2026-10-29-metronome-init-perf.md).
 
 ## 4. Panorama: works for DSP parts, not for SF2 parts
 - DSP: per-part pan applied in `tick_block` (constant-power, mod.rs ~2560).
