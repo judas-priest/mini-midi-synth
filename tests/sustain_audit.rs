@@ -213,10 +213,12 @@ fn new_notes_sound_after_patch_switch() {
     let mut e = engine_with_init_patch();
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
-    assert!(render_peak(&mut e, 20) > SILENCE, "new patch produced no sound");
+    let sounded = render_peak(&mut e, 20);
+    assert!(sounded > SILENCE, "new patch produced no sound");
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    // grand_piano has ~5s decay — assert DECAY, not absolute silence
     settle(&mut e);
-    assert!(render_peak(&mut e, 4) < SILENCE);
+    assert!(render_peak(&mut e, 4) < sounded / 10.0);
 }
 
 #[test]
