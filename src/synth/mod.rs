@@ -1421,9 +1421,6 @@ impl SynthEngine {
 
 
 
-    /// Last held arp key released: the arpeggiator resets pattern_len, so
-    /// tick() will never dispatch the pending gate-off — the sounding voice
-    /// would hang forever. Dispatch the off here (same routing as tick_block).
     /// Dispatches an arp note-off to every enabled part with part transpose
     /// applied: SF2 channels are keyed by transposed pitch, DSP parts receive
     /// the raw note (they match offs by src_note). Shared by flush_arp_note_off
@@ -2018,8 +2015,13 @@ impl SynthEngine {
                 }
             }
             ControlEvent::SetPartVolume { part, volume } => {
-                if let Some(l) = self.parts.get_mut(part) { l.volume = volume; }
-                self.sampler.set_layer_volume(part, volume);
+                if let Some(l) = self.parts.get_mut(part) {
+                    l.volume = volume;
+                    // Muted parts are gated at the sampler with CC7 (see
+                    // SetPartMute); keep the gate closed or a volume-knob
+                    // tweak would un-mute the part while l.mute stays true.
+                    self.sampler.set_layer_volume(part, if l.mute { 0.0 } else { volume });
+                }
             }
             ControlEvent::SetPartRange { part, min_note, max_note } => {
                 if let Some(l) = self.parts.get_mut(part) { l.min_note = min_note; l.max_note = max_note; }
