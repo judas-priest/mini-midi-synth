@@ -326,3 +326,19 @@ poll-подход: раз в 1-2с сравнивать имя default_output_de
 появится). Затем спека: (a) poller в GUI-треде (не RT); (b) reconnect_audio
 безопасно вызывать повторно (проверить идемпотентность — looper restore уже
 умеет, см. PR #2); (c) выбор устройства: дефолт системы или из config.
+
+## 19. Аудит производительности: DSP клипует, CPU до ~80% при игре synth-частью
+Репорт пользователя (2026-10-29, после батча PR #4/#5): во время игры synth-частью
+DSP клипует, CPU доходит до ~80%. Причина неизвестна — подозреваемые после этого
+батча: метроном (sin/floor на каждый сэмпл в DrumEngine::tick — даже при
+выключенном метрономе вычисляется фаза?), mute-fade в tick_block (per-sample
+max/min), glide-slew в Voice::tick, root-only route-обёртки, SR needs-bitmap в
+set_sustain. Плюс общий фон: 16 частей + полифония.
+
+ЧТО ДЕЛАТЬ ПОЗЖЕ. Сначала гугл лучших практик профилирования RT-audio (perf,
+flamegraph, criterion, RT-safety vs load; типовые причины клиппинга в
+полифонических синтхах: denormals, per-sample div/sin, cache-miss voice layout),
+затем: (a) измерить базу до/после батча на тех же пресетах (git bisect по
+коммитам PR #4/#5 с perf-замером), (b) flamegraph горячего пути tick_block,
+(в) метроном: проверка — не считается ли sin/floor когда click_env == 0 (guard),
+(г) denormals flush-to-zero (MMFTZ) — включён ли.
