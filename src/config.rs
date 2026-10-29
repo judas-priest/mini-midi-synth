@@ -136,6 +136,9 @@ pub struct UiSettings {
     /// Bank-2 LED console companion (unix socket). Off = never connect.
     #[serde(default)]
     pub led_companion: bool,
+    /// Companion spawn command path (python3 hardcoded); `~/` expands to HOME.
+    #[serde(default = "default_led_companion_cmd")]
+    pub led_companion_cmd: String,
     /// Sync looper BPM with drum sequencer BPM.
     #[serde(default = "default_looper_sync_bpm")]
     pub looper_sync_bpm: bool,
@@ -145,6 +148,18 @@ pub struct UiSettings {
 }
 
 fn default_looper_sync_bpm() -> bool { true }
+
+fn default_led_companion_cmd() -> String { "~/Projects/smk37_config/pad_console.py".to_string() }
+
+/// Expand a leading `~/` to the user home directory; everything else verbatim.
+pub fn expand_home(p: &str) -> std::path::PathBuf {
+    if let Some(rest) = p.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    std::path::PathBuf::from(p)
+}
 
 fn default_sf2_release_scale() -> f32 { 1.0 }
 
@@ -189,6 +204,7 @@ impl Default for Config {
                 pad_perf_map: Vec::new(),
                 split_point: None,
                 led_companion: false,
+                led_companion_cmd: default_led_companion_cmd(),
             parts_state: Vec::new(),
                 looper_sync_bpm: true,
                 keybinds: std::collections::HashMap::new(),
