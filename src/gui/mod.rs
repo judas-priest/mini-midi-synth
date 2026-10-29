@@ -1982,8 +1982,9 @@ impl App {
                 Err(_) => return false,
             }
         };
-        // AllNotesOff for smooth transition
-        let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+        // NO AllNotesOff here: seamless perf switch — sounding tails ring out
+        // naturally (SF2 voices keep the old instrument), held keys keep
+        // sustaining without re-attack; new notes use the new perf.
         // Legacy 8-part migration is centralized in preset::load_performance.
         let parts = perf.parts;
         // Restore the stored split point; legacy perfs derive it from the
