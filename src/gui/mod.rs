@@ -919,8 +919,7 @@ impl eframe::App for App {
         egui::SidePanel::right("preset_panel")
             .resizable(true)
             .default_width(160.0)
-            .min_width(120.0)
-            .max_width(260.0)
+            .width_range(120.0..=260.0)
             .show(ctx, |ui| {
                 let part = self.active_part;
                 let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
