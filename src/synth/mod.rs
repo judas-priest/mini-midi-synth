@@ -212,6 +212,7 @@ pub enum ControlEvent {
     DrumSeqRecord { recording: bool },
     DrumSeqClear,
     DrumSeqUndo,
+    DrumSeqRedo,
     DrumLoadKit { patterns: Box<[DrumPattern; 8]>, params: Box<[DrumSlotParams; NUM_DRUM_SLOTS]>, bpm: f32, swing: f32, volume: f32 },
     // Looper controls
     LooperRecord,
@@ -1725,26 +1726,49 @@ impl SynthEngine {
     pub fn handle_event(&mut self, event: MidiEvent) {
         match event {
             MidiEvent::NoteOn { channel, note, velocity } => {
-                // SMK-37 Pro: SEQ buttons (any channel, notes 123/124)
-                if note == 123 && velocity > 0 {
+                // SMK-37 Pro transport, unified: SEQ buttons (any channel,
+                // notes 123/124) and bank-2 pads ch9 (82 = pad 25 play,
+                // 83 = pad 27 rec) follow seq_target. Stop (81, pad 26) arm
+                // below. Pad notes must not fall into the trigger path.
+                if velocity > 0 && (note == 123 || (channel == 9 && note == 82)) {
                     let target = self.seq_target.load(std::sync::atomic::Ordering::Relaxed);
                     if target == 0 {
-                        // Drums mode
-                        let seq = &mut self.drum_engine.sequencer;
-                        seq.playing = !seq.playing;
-                        if !seq.playing { seq.reset(); }
+                        // Drums mode (set_playing keeps play_atom coherent
+                        // for the GUI between audio ticks)
+                        let playing = !self.drum_engine.sequencer.playing;
+                        self.drum_engine.set_playing(playing);
+                        if !playing { self.drum_engine.sequencer.reset(); }
                     } else {
                         // Looper mode
                         self.looper.toggle_play();
                     }
                     return;
                 }
-                if note == 124 && velocity > 0 {
+                if velocity > 0 && (note == 124 || (channel == 9 && note == 83)) {
                     let target = self.seq_target.load(std::sync::atomic::Ordering::Relaxed);
                     if target == 0 {
-                        self.drum_engine.sequencer.recording = !self.drum_engine.sequencer.recording;
+                        // set_recording snapshots (undoable) — same path as
+                        // DrumSeqRecord / pad 27 before the unification.
+                        let rec = !self.drum_engine.sequencer.recording;
+                        self.drum_engine.set_recording(rec);
+                        if rec && !self.drum_engine.sequencer.playing {
+                            self.drum_engine.set_playing(true);
+                        }
                     } else {
                         self.looper.toggle_record();
+                    }
+                    return;
+                }
+                // Pad 26 (note 81, ch9): stop — outside the drum-note gate so
+                // it works at seq_target=1 (looper) too.
+                if channel == 9 && velocity > 0 && note == 81 {
+                    if self.seq_target.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+                        self.drum_engine.set_playing(false);
+                        self.drum_engine.sequencer.reset();
+                    } else if matches!(self.looper.state,
+                                       crate::synth::looper::LooperState::Playing
+                                       | crate::synth::looper::LooperState::Overdubbing) {
+                        self.looper.toggle_play();
                     }
                     return;
                 }
@@ -1754,34 +1778,11 @@ impl SynthEngine {
                 let drum_mode = self.seq_target.load(std::sync::atomic::Ordering::Relaxed) == 0;
                 let sampler_drums = self.sampler.drums_enabled();
                 if channel == 9 || (is_drum_note && drum_mode) {
-                    // Pad bank 2 transport (notes outside the drum range 36-51):
-                    // 83 (B5) record, 82 (A#5) play/pause, 81 (A5) pause/stop,
-                    // 64 (E4) undo. Never reach the drum trigger path.
-                    if channel == 9 && velocity > 0 {
-                        match note {
-                            83 => {
-                                let rec = !self.drum_engine.sequencer.recording;
-                                self.drum_engine.set_recording(rec);
-                                if rec && !self.drum_engine.sequencer.playing {
-                                    self.drum_engine.set_playing(true);
-                                }
-                                return;
-                            }
-                            82 => {
-                                let playing = !self.drum_engine.sequencer.playing;
-                                self.drum_engine.set_playing(playing);
-                                return;
-                            }
-                            81 => {
-                                self.drum_engine.set_playing(false);
-                                return;
-                            }
-                            64 => {
-                                self.drum_engine.sequencer.undo();
-                                return;
-                            }
-                            _ => {}
-                        }
+                    // Pad bank 2 legacy undo (64, E4) lives here; 83/82/81
+                    // moved above — they follow seq_target now.
+                    if channel == 9 && velocity > 0 && note == 64 {
+                        self.drum_engine.sequencer.undo();
+                        return;
                     }
                     if velocity > 0 {
                         let velocity = if self.drum_engine.fixed_velocity { 127 } else { velocity };
@@ -2320,7 +2321,11 @@ impl SynthEngine {
             ControlEvent::DrumSeqUndo => {
                 self.drum_engine.sequencer.undo();
             }
+            ControlEvent::DrumSeqRedo => {
+                self.drum_engine.sequencer.redo();
+            }
             ControlEvent::DrumLoadKit { patterns, params, bpm, swing, volume } => {
+                self.drum_engine.sequencer.cancel_redo();
                 // Both arrays are Copy; the boxes travel back for freeing.
                 self.drum_engine.sequencer.patterns = *patterns;
                 self.drum_engine.params = *params;

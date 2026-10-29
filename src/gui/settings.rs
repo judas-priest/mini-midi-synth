@@ -249,6 +249,7 @@ impl App {
         self.drum_play_atom = engine.drum_engine.play_atom();
         self.drum_rec_atom = engine.drum_engine.rec_atom();
         self.drum_undo_atom = engine.drum_engine.undo_atom();
+        self.drum_redo_atom = engine.drum_engine.redo_atom();
         self.looper_atoms = engine.looper.atoms();
         self.looper_display = engine.looper.display();
         self.seq_target_atom = engine.seq_target_atom();

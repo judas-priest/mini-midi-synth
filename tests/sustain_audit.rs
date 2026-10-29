@@ -477,6 +477,7 @@ fn init_performance_exists_and_loads() {
 #[test]
 fn pad_transport_controls_drum_seq() {
     let mut e = engine_with_init_patch();
+    e.seq_target_atom().store(0, Ordering::Relaxed); // pad transport: drums
     // NOTE: record_hit fires only while recording AND playing (drum.rs:799);
     // rec auto-plays a stopped transport, so playback starts with the record arm.
     // record on (B5)
@@ -509,6 +510,7 @@ fn pad_transport_controls_drum_seq() {
 #[test]
 fn pad_transport_notes_do_not_trigger_drums() {
     let mut e = engine_with_init_patch();
+    e.seq_target_atom().store(0, Ordering::Relaxed); // pad transport: drums
     e.handle_event(MidiEvent::NoteOn { channel: 9, note: 82, velocity: 127 });
     e.handle_event(MidiEvent::NoteOn { channel: 9, note: 81, velocity: 127 });
     e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
@@ -698,6 +700,7 @@ fn drum_record_with_out_of_range_remap_target_does_not_panic() {
 #[test]
 fn rec_on_stopped_transport_auto_plays() {
     let mut e = engine_with_init_patch();
+    e.seq_target_atom().store(0, Ordering::Relaxed); // pad transport: drums
     assert!(!e.drum_engine.sequencer.playing);
     e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
     assert!(e.drum_engine.sequencer.playing, "rec must auto-start play");

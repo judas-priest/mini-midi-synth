@@ -333,7 +333,9 @@ pub struct App {
     pub drum_beat_flash: Option<std::time::Instant>,
     pub perf_window: usize,   // first perf_list idx visible on slots 1..=7
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
+    pub mute_window: usize,   // first part idx visible on MUTE slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub drum_redo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // Bank-2 pad console
     pub console: led_console::LedConsole,
     pub console_rx: Option<std::sync::mpsc::Receiver<(u8, bool)>>,
@@ -601,7 +603,8 @@ impl eframe::App for App {
                 let ev = match (note, is_on) {
                     (60..=67, true) => Some(led_console::PadEvent::Down((note - 60) as usize)),
                     (60..=67, false) => Some(led_console::PadEvent::Up((note - 60) as usize)),
-                    (75, true) => Some(led_console::PadEvent::Undo),
+                    (75, true) => Some(led_console::PadEvent::UndoDown),
+                    (75, false) => Some(led_console::PadEvent::UndoUp),
                     (78, true) => Some(led_console::PadEvent::Prev),
                     (79, true) => Some(led_console::PadEvent::Next),
                     (80, true) => Some(led_console::PadEvent::PageBack),
@@ -720,22 +723,40 @@ impl eframe::App for App {
 
         // LED snapshot (16 slots = pads 17..=32, top row first)
         {
-            let playing = self.drum_playing;
-            let recording = self.drum_recording;
-            let mut mutes = [false; 8];
-            for (i, part) in self.parts.iter().take(8).enumerate() {
+            // Bottom row shows the ACTIVE target's transport (spec v2): drums
+            // atoms at target=0, looper state (Recording=1, Playing=2,
+            // Overdubbing=3) at target=1.
+            let target = self.seq_target_atom.load(Ordering::Relaxed);
+            let lstate = crate::synth::looper::LooperState::from_u8(
+                self.looper_atoms.state.load(Ordering::Relaxed));
+            let (playing, recording) = if target == 0 {
+                (self.drum_playing, self.drum_recording)
+            } else {
+                (
+                    matches!(lstate, crate::synth::looper::LooperState::Playing
+                            | crate::synth::looper::LooperState::Overdubbing),
+                    matches!(lstate, crate::synth::looper::LooperState::Recording
+                            | crate::synth::looper::LooperState::Overdubbing),
+                )
+            };
+            let mut mutes = [false; 16];
+            for (i, part) in self.parts.iter().enumerate().take(16) {
                 mutes[i] = part.mute;
             }
             let filled = self.perf_list.len();
             let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
+            let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
             let page_depth = match self.console.mode() {
-                led_console::Mode::Pattern => self.pat_window, // окна {0,1} — сама глубина
+                led_console::Mode::Pattern => self.pat_window,
+                led_console::Mode::Mute => self.mute_window / 7,
                 _ => self.perf_window / 7,
             };
             let top = self.console.top_colors(self.active_perf_console(), filled,
                                               self.drum_current_pattern as usize, &mutes,
-                                              self.perf_window, self.pat_window);
-            let bottom = self.console.bottom_colors(playing, recording, page_depth, undo_avail);
+                                              self.perf_window, self.pat_window,
+                                              self.mute_window, target);
+            let bottom = self.console.bottom_colors(playing, recording, page_depth,
+                                                    undo_avail, redo_avail);
             let mut snap = [[0u8; 3]; 16];
             snap[..8].copy_from_slice(&top);
             snap[8..].copy_from_slice(&bottom);
@@ -1988,15 +2009,26 @@ impl App {
                 }
             }
             led_console::Action::ToggleMute(i) => {
-                if let Some(part) = self.parts.get_mut(i) {
-                    let mute = !part.mute;
-                    part.mute = mute;
-                    let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part: i, mute });
+                let part = self.mute_window + i; // i уже 0-based (slot-1 из консоли) // slot -> real part
+                if let Some(p) = self.parts.get_mut(part) {
+                    let mute = !p.mute;
+                    p.mute = mute;
+                    let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part, mute });
                     self.persist_parts_state();
                 }
             }
+            led_console::Action::ToggleTransportTarget => {
+                let cur = self.seq_target_atom.load(Ordering::Relaxed);
+                let new = if cur == 0 { 1 } else { 0 };
+                self.seq_target_atom.store(new, Ordering::Relaxed);
+                log::info!("[console] seq_target -> {}",
+                           if new == 0 { "drums" } else { "looper" });
+            }
             led_console::Action::Undo => {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqUndo);
+            }
+            led_console::Action::Redo => {
+                let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqRedo);
             }
             led_console::Action::StepPerf(dir) => {
                 let n = self.perf_list.len();
@@ -2052,6 +2084,11 @@ impl App {
             led_console::Mode::Pattern => {
                 // 8 patterns, window shows 7: max start = 1
                 self.pat_window = (self.pat_window as i32 + delta).clamp(0, 1) as usize;
+            }
+            led_console::Mode::Mute => {
+                let n = self.parts.len();
+                let max_w = n.saturating_sub(7);
+                self.mute_window = (self.mute_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             _ => {}
         }
