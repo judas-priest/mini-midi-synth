@@ -279,17 +279,6 @@ impl MidiLooper {
         }
     }
 
-    /// Rewind playback position to the loop start (audio thread). Content,
-    /// length and mute/solo state are untouched. Sounding notes are closed on
-    /// the next tick (needs_note_offs honored in both Idle and
-    /// Playing/Overdubbing branches).
-    pub fn rewind_to_start(&mut self) {
-        self.playback_tick = 0;
-        self.playback_cursor = 0;
-        self.needs_note_offs = true;
-        self.update_display();
-    }
-
     fn stop(&mut self) {
         self.state = LooperState::Idle;
         // Signal tick() to emit note-offs for any still-active notes
@@ -501,8 +490,8 @@ impl MidiLooper {
         // Playback / Overdub: emit events at current tick
         let mut count = 0;
         if self.needs_note_offs {
-            // rewind_to_start mid-playback: close sounding notes once, before
-            // the scheduled events at tick 0 fill the remaining slots
+            // Close sounding notes once, before the scheduled events at the
+            // current tick fill the remaining slots
             for note in 0..128u8 {
                 let part = self.active_notes[note as usize];
                 if part != 255 && count < MAX_SIMULTANEOUS {
@@ -643,39 +632,4 @@ mod restore_tests {
         assert_eq!(l.len() as usize, MAX_LOOP_EVENTS);
     }
 
-    #[test]
-    fn rewind_to_start_resets_playback_cursor() {
-        let mut l = MidiLooper::new(48_000.0);
-        l.restore(&[super::LooperEventSnapshot { tick: 0, note: 60, velocity: 127, layer_id: 0, part_id: 0 }], 48_000);
-        // rewind must reset playback_tick/cursor without touching events/len.
-        let len_before = l.len();
-        l.rewind_to_start();
-        assert_eq!(l.len(), len_before, "rewind must not drop events");
-        assert_eq!(l.state, LooperState::Idle);
-    }
-
-    #[test]
-    fn rewind_to_start_mid_playback_drains_active_notes() {
-        let mut l = MidiLooper::new(48_000.0);
-        l.restore(&[super::LooperEventSnapshot { tick: 0, note: 60, velocity: 127, layer_id: 0, part_id: 0 }], 48_000);
-        // Simulate a held note recorded earlier in playback.
-        l.active_notes[60] = 0;
-        l.active_note_layers[60] = 0;
-        l.toggle_play(); // public API: Idle → Playing (len > 0)
-        assert_eq!(l.state, LooperState::Playing);
-        l.rewind_to_start();
-        let out = l.tick();
-        assert!(
-            out.iter().any(|&(n, v, _)| n == 60 && v == 0),
-            "rewind mid-playback must emit note-off for note 60, got {:?}",
-            out
-        );
-        // Scheduled loop event at tick 0 still fires despite the drain (and
-        // re-arms the note as active, which is correct).
-        assert!(
-            out.iter().any(|&(n, v, _)| n == 60 && v == 127),
-            "tick-0 note-on must still fire, got {:?}",
-            out
-        );
-    }
 }
