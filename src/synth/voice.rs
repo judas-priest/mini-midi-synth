@@ -551,12 +551,18 @@ impl Voice {
         let new_freq = midi_to_freq(note);
         self.target_freq = new_freq;
         self.log_target_freq = new_freq.ln();
-        // Apply portamento glide (uses existing portamento_time from params)
-        if params.portamento_time > 0.001 {
-            // log_freq will glide toward log_target_freq in tick() naturally
+        // Apply portamento glide (log_freq slews toward log_target_freq in
+        // tick()). Gated on portamento_mode so mode 0 (Off) is instant even
+        // with a glide time set — matches the note-on path. porta_coeff MUST
+        // be (re)computed here: tick() only slews while porta_coeff < 0.999,
+        // so a voice whose last full note_on was instant would otherwise snap.
+        if params.portamento_time > 0.001 && params._portamento_mode as u8 > 0 {
+            let samples = params.portamento_time * self.sample_rate;
+            self.porta_coeff = 1.0 - (-4.0 / samples).exp();
         } else {
             self.freq = new_freq;
             self.log_freq = new_freq.ln();
+            self.porta_coeff = 1.0;
         }
     }
 

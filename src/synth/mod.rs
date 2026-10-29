@@ -656,7 +656,16 @@ impl Part {
             let idx = self.voices.iter().position(|v| v.active).unwrap_or_else(|| {
                 self.voices.iter().position(|v| !v.active).unwrap_or(0)
             });
-            let prev_freq = self.last_note_freq;
+            // Same gating as the poly path: portamento_mode 0 (Off) never
+            // glides; 2 (Fingered) glides only while another key is held
+            // (the new note is already pushed, so len > 1 means a key was
+            // held); 1 (Always) glides from the last pitch.
+            let porta_mode = self.params.portamento_mode as u8;
+            let prev_freq = match porta_mode {
+                1 => self.last_note_freq,
+                2 => if self.note_stack.len() > 1 { self.last_note_freq } else { None },
+                _ => None,
+            };
             let voice_params = self.build_voice_params();
             let retrigger = play_mode == 2 && self.note_stack.len() > 1; // ST: don't retrigger env
             if retrigger {
