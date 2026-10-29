@@ -564,6 +564,13 @@ impl Voice {
         self.amp_env.is_releasing()
     }
 
+    /// Test-only: expose the current (pre-modulation) voice pitch for
+    /// portamento assertions. Compiles out of release builds.
+    #[cfg(test)]
+    pub(crate) fn current_freq(&self) -> f32 {
+        self.freq
+    }
+
     #[inline]
     fn next_noise(&mut self) -> f32 {
         self.noise_state ^= self.noise_state << 13;

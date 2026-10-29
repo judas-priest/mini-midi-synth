@@ -729,3 +729,166 @@ fn midi_seq_stop_clears_part_sustain_state() {
     assert!(!e.parts[0].sustained_notes.iter().any(|&s| s),
         "sustained_notes stuck ON after seq stop");
 }
+
+// ── Mono / legato / portamento ─────────────────────────────────
+
+// `f32::powf` is not const-stable, so these are runtime helpers, not consts.
+fn f60() -> f32 {
+    440.0 * 2.0_f32.powf(-9.0 / 12.0)
+}
+fn f72() -> f32 {
+    440.0 * 2.0_f32.powf(3.0 / 12.0)
+}
+
+fn patch_engine(play_mode: f32, porta_time: f32, porta_mode: f32) -> SynthEngine {
+    let patches = crate::preset::load_all_patches();
+    let mut patch = patches
+        .iter()
+        .find(|p| p.name.eq_ignore_ascii_case("init"))
+        .expect("init preset exists")
+        .clone();
+    patch.params.insert("play_mode".into(), play_mode);
+    patch.params.insert("portamento_time".into(), porta_time);
+    patch.params.insert("portamento_mode".into(), porta_mode);
+    patch.params.insert("amp_release".into(), 0.05);
+    let mut e = SynthEngine::new(48000.0);
+    e.set_patches(patches);
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    e
+}
+
+fn render_blocks(e: &mut SynthEngine, blocks: usize) {
+    let mut l = [0.0f32; BLOCK_SIZE];
+    let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..blocks {
+        l.fill(0.0);
+        r.fill(0.0);
+        e.tick_block(&mut l, &mut r);
+    }
+}
+
+fn active_freq(e: &SynthEngine) -> f32 {
+    e.parts[0]
+        .voices
+        .iter()
+        .find(|v| v.active)
+        .map(|v| v.current_freq())
+        .unwrap_or(0.0)
+}
+
+fn note(e: &mut SynthEngine, n: u8) {
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: n, velocity: 100 });
+}
+
+fn unnote(e: &mut SynthEngine, n: u8) {
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: n });
+}
+
+#[test]
+fn mono_mode_is_single_voice() {
+    let mut e = patch_engine(1.0, 0.0, 0.0);
+    note(&mut e, 60);
+    render_blocks(&mut e, 5);
+    note(&mut e, 72);
+    render_blocks(&mut e, 5);
+    let active = e.parts[0].voices.iter().filter(|v| v.active).count();
+    assert_eq!(active, 1, "mono mode must keep exactly one voice");
+    let v = e.parts[0].voices.iter().find(|v| v.active).unwrap();
+    assert_eq!(v.note, 72, "mono must follow the last note");
+}
+
+#[test]
+fn glide_slews_pitch_in_mono_mode() {
+    let mut e = patch_engine(1.0, 0.2, 1.0); // 200 ms, Always
+    note(&mut e, 60);
+    render_blocks(&mut e, 20);
+    note(&mut e, 72);
+    render_blocks(&mut e, 7); // ~4.7 ms — well inside the 200 ms glide
+    let f = active_freq(&e);
+    assert!(
+        f > f60() && f < f72(),
+        "expected mid-glide pitch between {} and {}, got {f}",
+        f60(),
+        f72()
+    );
+    render_blocks(&mut e, 800); // 0.53 s >> glide time
+    let f = active_freq(&e);
+    assert!((f - f72()).abs() < 1.0, "glide did not land on target: {f}");
+}
+
+#[test]
+fn glide_off_is_instant() {
+    // Time is SET but mode is Off — must not glide (mono path ignores mode
+    // today: RED until the fix).
+    let mut e = patch_engine(1.0, 0.2, 0.0);
+    note(&mut e, 60);
+    render_blocks(&mut e, 20);
+    note(&mut e, 72);
+    render_blocks(&mut e, 1);
+    let f = active_freq(&e);
+    assert!((f - f72()).abs() < 0.5, "glide must be instant in mode Off: {f}");
+}
+
+#[test]
+fn fingered_portamento_does_not_glide_from_released_note() {
+    // Mode Fingered (legato): first note after all keys released must be
+    // instant, not a glide from the previous phrase's last pitch (RED until
+    // the fix).
+    let mut e = patch_engine(1.0, 0.2, 2.0);
+    note(&mut e, 60);
+    render_blocks(&mut e, 20);
+    unnote(&mut e, 60);
+    render_blocks(&mut e, 400); // release 0.05 s → voice idle
+    note(&mut e, 72);
+    render_blocks(&mut e, 1);
+    let f = active_freq(&e);
+    assert!((f - f72()).abs() < 0.5, "stale glide from released note: {f}");
+}
+
+#[test]
+fn legato_retrigger_glides_when_first_note_was_instant() {
+    // Mono-ST + Fingered: the first note has no glide (porta_coeff = 1.0);
+    // the second, held-key note must still glide (RED until retrigger_note
+    // sets porta_coeff).
+    let mut e = patch_engine(2.0, 0.2, 2.0);
+    note(&mut e, 60);
+    render_blocks(&mut e, 20);
+    note(&mut e, 72);
+    render_blocks(&mut e, 7);
+    let f = active_freq(&e);
+    assert!(
+        f > f60() && f < f72(),
+        "legato retrigger snapped instead of gliding: {f}"
+    );
+}
+
+#[test]
+fn set_part_mono_legato_glide_events() {
+    let mut e = patch_engine(0.0, 0.0, 0.0);
+    let _ = e.handle_control(ControlEvent::SetPartMono { part: 0, mono: true });
+    assert_eq!(e.parts[0].params.play_mode, 1.0);
+    let _ = e.handle_control(ControlEvent::SetPartLegato { part: 0, legato: true });
+    assert_eq!(e.parts[0].params.play_mode, 2.0);
+    let _ = e.handle_control(ControlEvent::SetPartGlide { part: 0, ms: 150.0 });
+    assert!((e.parts[0].params.portamento_time - 0.15).abs() < 1e-4);
+    assert_eq!(e.parts[0].params.portamento_mode, 1.0);
+    let _ = e.handle_control(ControlEvent::SetPartGlide { part: 0, ms: 0.0 });
+    assert_eq!(e.parts[0].params.portamento_time, 0.0);
+    let _ = e.handle_control(ControlEvent::SetPartGlide { part: 0, ms: 5000.0 });
+    assert!((e.parts[0].params.portamento_time - 2.0).abs() < 1e-4, "ms must clamp to 2 s");
+    // Mono off clears the stale stack and returns to poly
+    note(&mut e, 60);
+    render_blocks(&mut e, 1);
+    let _ = e.handle_control(ControlEvent::SetPartMono { part: 0, mono: false });
+    assert_eq!(e.parts[0].params.play_mode, 0.0);
+    assert!(e.parts[0].note_stack.is_empty(), "mono-off must clear note_stack");
+    // Latch mode is left alone by the mono toggle
+    let _ = e.handle_control(ControlEvent::SetPartMono { part: 0, mono: true });
+    e.parts[0].params.play_mode = 3.0;
+    let _ = e.handle_control(ControlEvent::SetPartMono { part: 0, mono: true });
+    assert_eq!(e.parts[0].params.play_mode, 3.0, "latch mode must not be clobbered");
+    // Out-of-range part: no-op, no panic
+    let _ = e.handle_control(ControlEvent::SetPartGlide { part: 99, ms: 50.0 });
+    let _ = e.handle_control(ControlEvent::SetPartMono { part: 99, mono: true });
+}
