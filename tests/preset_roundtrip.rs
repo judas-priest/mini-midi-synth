@@ -78,3 +78,16 @@ fn parse_wt_rejects_garbage_without_panicking() {
     truncated.extend_from_slice(&0u16.to_le_bytes());
     assert!(preset::parse_wt(&truncated).is_none());
 }
+
+#[test]
+fn init_performance_references_existing_factory_patch() {
+    let perf = preset::init_performance();
+    assert_eq!(perf.split_point, None, "Init perf must not force a split point");
+    assert_eq!(perf.parts.len(), 1);
+    // The part references a preset by NAME — a factory rename would silently
+    // fall back to patch_idx 0 (gui/mod.rs:1928) and change the Init sound.
+    let patches = preset::load_factory_patches();
+    assert!(patches.iter().any(|p| p.name == perf.parts[0].patch_name),
+        "Init perf part references '{}', which is not a factory preset",
+        perf.parts[0].patch_name);
+}
