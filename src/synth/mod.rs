@@ -273,6 +273,9 @@ pub enum ControlEvent {
     MidiSeqSetTrackMute { track_idx: usize, muted: bool },
     // Arpeggiator
     SetArpParams { enabled: bool, mode: u8, rate: u8, octaves: u8, gate: f32 },
+    /// Arp latch (TECHDEBT 14.4): true — arp keeps playing after keys are
+    /// released; false — a frozen latched set is stopped immediately.
+    SetArpLatch { latch: bool },
 }
 
 impl ControlEvent {
@@ -1602,8 +1605,8 @@ impl SynthEngine {
     /// tick() will never dispatch the pending gate-off — the sounding voice
     /// would hang forever. Dispatch the off here (same routing as tick_block).
     fn flush_arp_note_off(&mut self) {
-        if self.arpeggiator.has_held_notes() {
-            return; // tick() still owns gate-offs
+        if self.arpeggiator.keeps_playing() {
+            return; // tick() still owns gate-offs (includes a latched/frozen set)
         }
         if let Some(off) = self.arpeggiator.flush_current_note() {
             self.dispatch_arp_note_off(off);
@@ -1984,6 +1987,10 @@ impl SynthEngine {
                         // Same transposed routing as flush_arp_note_off.
                         self.dispatch_arp_note_off(off_note);
                     }
+                    // Panic must also drop held/latched arp notes — held
+                    // notes surviving CC120 would resume the old pattern on
+                    // the next key (AllNotesOff already clears, mod.rs:2211).
+                    self.arpeggiator.clear();
                     return;
                 }
                 // Check assignable mod sources (CC1..CC4)
@@ -2116,6 +2123,7 @@ impl SynthEngine {
                         params.arp_octaves as u8,
                         params.arp_gate,
                     );
+                    self.arpeggiator.set_latch(params.arp_latch > 0.5);
                 }
                 self.reset_preset_pickups();
                 return Some(ControlEvent::LoadPatch(ev));
@@ -2589,6 +2597,17 @@ impl SynthEngine {
                     }
                 }
                 self.arpeggiator.set_params(enabled, mode, rate, octaves, gate);
+            }
+            ControlEvent::SetArpLatch { latch } => {
+                if !latch {
+                    // Stop the frozen set first so the sounding arp voice
+                    // gets a matching note-off before the set is cleared.
+                    if let Some(off_note) = self.arpeggiator.flush_current_note() {
+                        // Same transposed routing as flush_arp_note_off.
+                        self.dispatch_arp_note_off(off_note);
+                    }
+                }
+                self.arpeggiator.set_latch(latch);
             }
         }
 

@@ -22,6 +22,12 @@ pub struct Arpeggiator {
     bpm: f32,
     sample_rate: f32,
     rng_state: u32,     // xorshift32 for Random mode
+    /// Latch mode: the pattern keeps playing after all keys are released.
+    latch: bool,
+    /// Runtime "frozen" flag: latch set alive with zero physical keys held.
+    latched: bool,
+    /// Latch mode: how many of the pattern's keys are still physically down.
+    phys_down: usize,
 }
 
 impl Arpeggiator {
@@ -44,6 +50,9 @@ impl Arpeggiator {
             bpm: 120.0,
             sample_rate,
             rng_state: 0xDEAD_BEEF,
+            latch: false,
+            latched: false,
+            phys_down: 0,
         };
         arp.recalc_timing();
         arp
@@ -69,6 +78,13 @@ impl Arpeggiator {
     }
 
     pub fn note_on(&mut self, note: u8, velocity: u8) {
+        if self.latch && self.latched {
+            // Frozen latched set: a new chord replaces it in place — playback
+            // continues from the current pattern position without a gap.
+            self.held_count = 0;
+            self.latched = false;
+            self.phys_down = 0;
+        }
         // Don't add duplicates
         for i in 0..self.held_count {
             if self.held_notes[i].0 == note {
@@ -80,11 +96,37 @@ impl Arpeggiator {
         if self.held_count < MAX_HELD {
             self.held_notes[self.held_count] = (note, velocity);
             self.held_count += 1;
+            if self.latch {
+                self.phys_down += 1;
+            }
             self.rebuild_pattern();
         }
     }
 
     pub fn note_off(&mut self, note: u8) {
+        // Latch mode: a released key STAYS in the pattern until ALL keys are
+        // released — only then does the whole chord freeze (DEViation from
+        // plan step 3: removing keys one-by-one before the freeze would leave
+        // a 1-note pattern; the requirement is that the full chord keeps
+        // cycling after release).
+        if self.latch {
+            let mut found = false;
+            for i in 0..self.held_count {
+                if self.held_notes[i].0 == note {
+                    found = true;
+                    break;
+                }
+            }
+            if found && self.phys_down > 0 {
+                self.phys_down -= 1;
+                if self.phys_down == 0 {
+                    // Last physical key released: freeze in place. Position/
+                    // tick counter untouched — no gap, pattern keeps cycling.
+                    self.latched = true;
+                }
+            }
+            return;
+        }
         let mut found = false;
         for i in 0..self.held_count {
             if self.held_notes[i].0 == note {
@@ -99,7 +141,7 @@ impl Arpeggiator {
         }
         if found {
             if self.held_count == 0 {
-                // Reset when all notes released
+                // Reset when all notes released (existing behavior)
                 self.position = 0;
                 self.tick_counter = 0;
                 self.pattern_len = 0;
@@ -152,6 +194,26 @@ impl Arpeggiator {
         self.held_count > 0
     }
 
+    /// The arp owns sound: keys physically held, or a latched (frozen) set.
+    /// Gates flush_arp_note_off so the key-off that freezes a latched set
+    /// does not kill the sounding voice.
+    pub fn keeps_playing(&self) -> bool {
+        self.has_held_notes() || (self.latch && self.latched)
+    }
+
+    pub fn latch_enabled(&self) -> bool {
+        self.latch
+    }
+
+    pub fn set_latch(&mut self, latch: bool) {
+        self.latch = latch;
+        if !latch && self.latched {
+            // Turning latch off while frozen: the held set is abandoned.
+            self.latched = false;
+            self.clear();
+        }
+    }
+
     /// Returns note-off for any currently sounding arp note (used when arp is disabled or all notes off).
     pub fn flush_current_note(&mut self) -> Option<u8> {
         let note = self.current_note;
@@ -165,6 +227,8 @@ impl Arpeggiator {
         self.position = 0;
         self.tick_counter = 0;
         self.current_note = None;
+        self.latched = false;
+        self.phys_down = 0;
     }
 
     fn recalc_timing(&mut self) {
