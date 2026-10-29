@@ -199,12 +199,14 @@ Critical 2 (set_sample_rate wipe, drum.rs:953) НЕ исправлены в mast
   (записи 2647+5*(n-1), CC-байт 1), синту — обработчик CC -> ControlEvent.
 
 ### 14.4 Arp live-контролы: Latch/Hold + sync + transpose (ПРИОРИТЕТ 4)
+— РЕАЛИЗОВАНА (частично) 2026-10-29: latch + panic-очистка + arp_latch парам; rate sync уже был безусловным (set_bpm из sequencer.bpm каждый блок, mod.rs tick_block); transpose арпа — отдельный пункт.
 - Практика Ableton/Logic: Latch = арп играет после отпускания клавиш; новый
   аккорд подхватывается без остановки; Hold-кнопка; rate sync к BPM секвенсора;
   transpose одной нотой/октавой. Арп и пресеты уже есть — добавить режимы.
 - Latch-выключение: повторное нажатие кнопки или пустая пауза N тактов.
 
 ### 14.5 Mono Legato + Portamento (glide) для слоя (ПРИОРИТЕТ 5)
+— DSP-часть РЕАЛИЗОВАНА 2026-10-29: mono/legato/glide жили в patch params (play_mode 1/2, portamento_time/mode); добавлены SetPartMono/Legato/Glide live-события; исправлены баги (mono-путь игнорировал portamento_mode; retrigger_note не задавал porta_coeff — glide щёлкал мгновенно). SF2 legato/glide (skip-attack через startAddrsOffset, glide через pitch bend) — осталось, отдельный пункт.
 - Запрос пользователя: «нажимаешь вторую ноту — первая перестаёт, вторая
   без атаки плавно въезжает» = mono-режим (last-note priority) + legato
   (не ре-триггерить огибающую) + portamento (скольжение высоты, время N мс).
