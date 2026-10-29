@@ -289,6 +289,12 @@ impl AudioBackend {
                     if let Ok(sr) = sr_str.trim().parse::<u32>() {
                         jack_sr_err.store(sr, Ordering::Relaxed);
                     }
+                    // JACK/PipeWire SR renegotiation DESTROYS the stream here
+                    // (observed 2026-10-29: headphones hotplug → SR race at
+                    // startup → dead stream, no reconnect because this branch
+                    // never set the flag). The stream cannot recover on its
+                    // own: force a GUI reconnect.
+                    disconnected_err.store(true, Ordering::Relaxed);
                 } else if msg.contains("xrun") {
                     // Buffer over/under-run: a few dropped samples, the stream
                     // itself keeps running. Tearing down and rebuilding the
