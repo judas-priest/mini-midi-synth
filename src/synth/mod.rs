@@ -725,9 +725,15 @@ impl Part {
                         .unwrap_or(0)
                 }
                 _ => {
-                    // Default (Poly / Piano / Latch): steal oldest voice
-                    self.voices.iter().enumerate()
-                        .min_by_key(|(_, v)| v.age)
+                    // Default (Poly / Piano / Latch): JUCE-style steal order —
+                    // voices already in release phase die first (their tails
+                    // are almost done), then the oldest sustained voice.
+                    let releasing = self.voices.iter().enumerate()
+                        .filter(|(_, v)| v.active && v.is_releasing())
+                        .min_by_key(|(_, v)| v.age);
+                    releasing
+                        .or_else(|| self.voices.iter().enumerate()
+                            .min_by_key(|(_, v)| v.age))
                         .map(|(i, _)| i)
                         .unwrap_or(0)
                 }
@@ -1901,27 +1907,22 @@ impl SynthEngine {
                 }
             }
             MidiEvent::ProgramChange { program, .. } => {
-                // Same hang-prevention as LoadPatch: release voices the old
-                // patch held (pedal holds, mono/latch holds) BEFORE anything
-                // else — including when the program is out of range and the
-                // cache lookup below bails.
-                self.sampler.part_all_notes_off(0);
-                if let Some(l) = self.parts.get_mut(0) {
-                    for voice in &mut l.voices {
-                        if voice.active { voice.note_off(); }
-                    }
-                    l.sustained_notes = [false; 128];
-                    l.keys_down = [false; 128];
-                    l.note_stack.clear();
-                    l.latch_held.clear();
-                    l.root_held = [false; 128];
-                    l.root_active = None;
-                }
                 // In SF2 mode, change the SF2 program; in synth mode, change the synth patch
                 if self.parts.first().map(|l| l.sf2_mode).unwrap_or(false) {
                     self.sampler.set_part_program(0, program, 0);
                 } else if let Some(&params) = self.preset_params_cache.get(program as usize) {
                     if let Some(l) = self.parts.get_mut(0) {
+                        // Seamless switch: same latch-mismatch release as
+                        // LoadPatch — must run BEFORE the params swap, while
+                        // l.params still holds the OLD play_mode.
+                        if l.params.play_mode as u8 == 3 && params.play_mode as u8 != 3 {
+                            for voice in &mut l.voices {
+                                if voice.active && l.latch_held.contains(&voice.src_note) {
+                                    voice.note_off();
+                                }
+                            }
+                            l.latch_held.clear();
+                        }
                         l.params = params;
                         l.min_note = params.min_note as u8;
                         l.max_note = params.max_note as u8;
@@ -2059,20 +2060,21 @@ impl SynthEngine {
                 let lfo_step_seq = ev.lfo_step_seq.take();
                 let wavetable = ev.wavetable.take();
                 if let Some(l) = self.parts.get_mut(part) {
-                    // Release anything the old patch left hanging: notes held
-                    // by the sustain pedal would otherwise ring forever under
-                    // the new patch (its envelope keeps the voice active).
-                    // SF2 voices live in rustysynth, not in l.voices.
-                    self.sampler.part_all_notes_off(part);
-                    for voice in &mut l.voices {
-                        if voice.active { voice.note_off(); }
+                    // Seamless switch (TECHDEBT: политика «хвосты живы»):
+                    // sounding voices keep the OLD patch (params are copied
+                    // into the voice at note_on); pedal-up / key-offs release
+                    // them naturally (set_sustain:1484-1518, note_off:835).
+                    // Only a latch-mode mismatch releases the latch-held
+                    // voices — a non-latch patch cannot toggle them off, and
+                    // they would ring forever (audit fact 6).
+                    if l.params.play_mode as u8 == 3 && params.play_mode as u8 != 3 {
+                        for voice in &mut l.voices {
+                            if voice.active && l.latch_held.contains(&voice.src_note) {
+                                voice.note_off();
+                            }
+                        }
+                        l.latch_held.clear();
                     }
-                    l.sustained_notes = [false; 128];
-                    l.keys_down = [false; 128];
-                    l.note_stack.clear();
-                    l.latch_held.clear();
-                    l.root_held = [false; 128];
-                    l.root_active = None;
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
                     // Sync macro values from preset into live part state

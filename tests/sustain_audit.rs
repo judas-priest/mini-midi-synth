@@ -409,9 +409,17 @@ fn program_change_with_empty_patch_cache_cleans_voices() {
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
     e.handle_event(MidiEvent::ProgramChange { channel: 0, program: 200 }); // out of range
+    // Seamless policy (TECHDEBT #28): out-of-range PC changes nothing —
+    // the pedal-held note keeps sustaining; pedal-up releases it.
+    settle(&mut e);
+    assert!(render_peak(&mut e, 20) > SILENCE,
+        "out-of-range PC must not kill a held voice");
+    // key-off (pedal still holds) → pedal-up → now it must release
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    pedal_up(&mut e);
     settle(&mut e);
     let after = render_peak(&mut e, 200);
-    assert!(after < SILENCE, "empty-cache ProgramChange left sound (peak {after})");
+    assert!(after < SILENCE, "key-off + pedal-up must release it (peak {after})");
 }
 
 #[test]
@@ -978,3 +986,4 @@ fn arp_latch_persists_through_patch_load() {
     let _ = e2.handle_control(ControlEvent::load_patch_from(0, &patch));
     assert!(!e2.arpeggiator.latch_enabled(), "default latch must be off");
 }
+

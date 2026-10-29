@@ -905,13 +905,13 @@ fn steal_prefers_releasing_voice() {
     // отпустить НЕ-самый-старый голос (40) → он в release-фазе;
     // голос 36 — самый старый активный (старый вор взял бы ЕГО)
     p.note_off(40);
-    // новая нота: должна занять release-голос 40 (src_note перезапишется на 80)
+    // новая нота: занимает release-голос 40 (его src_note перезаписывается
+    // на 80 — ассерт по src_note==40 невозможен по определению)
     p.note_on(80, 100);
     let v_new = p.voices.iter().find(|v| v.note == 80).unwrap();
-    assert_eq!(v_new.src_note, 40,
-        "must reuse the RELEASED voice 40 (old stealer takes voice 36)");
-    assert!(!v_new.is_releasing() && v_new.active);
-    // самый старый активный (36) не тронут
+    assert!(v_new.active && !v_new.is_releasing(), "new voice must attack");
+    // ДИСКРИМИНАТОР: голос 36 (самый старый активный) НЕ тронут. Старый вор
+    // взял бы ЕГО: src_note перезаписался бы на 80 → find(36) запаниковал бы.
     let v36 = p.voices.iter().find(|v| v.src_note == 36).unwrap();
     assert!(v36.active && !v36.is_releasing() && v36.note == 36,
         "old stealer would have taken voice 36");
