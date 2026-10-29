@@ -778,6 +778,9 @@ pub struct PartConfig {
     pub vel_min: u8,
     #[serde(default = "default_vel_max")]
     pub vel_max: u8,
+    /// Root-note-only mode (bass split): sounds only the lowest held key.
+    #[serde(default)]
+    pub root_only: bool,
 }
 
 fn default_vel_min() -> u8 { 1 }
@@ -850,6 +853,7 @@ pub fn init_performance() -> Performance {
             mute: false,
             vel_min: 1,
             vel_max: 127,
+            root_only: false,
         }],
     }
 }

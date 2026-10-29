@@ -151,6 +151,8 @@ pub struct PartState {
     pub vel_max: u8,
     pub pan: f32,        // -1..+1
     pub transpose: i8,   // semitones
+    /// Root-only (bass split): engine gates this part to the lowest held key
+    pub root_only: bool,
     pub sf2_mode: bool,
     pub sf2_program: u8,
     /// Macro knob values (0..1) — live, sent to engine via SetMacro
@@ -169,7 +171,7 @@ impl PartState {
             patch_idx: 0, edited_params: Default::default(), params_dirty: false,
             enabled: false, mute: false, volume: 0.8,
             min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
-            pan: 0.0, transpose: 0, sf2_mode: false, sf2_program: 0,
+            pan: 0.0, transpose: 0, root_only: false, sf2_mode: false, sf2_program: 0,
             macro_vals: [0.0; 8],
             macro_names: (1..=8).map(|i| format!("Macro {i}")).collect(),
             xy_macro_x: 0,

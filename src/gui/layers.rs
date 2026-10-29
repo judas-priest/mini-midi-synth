@@ -156,6 +156,15 @@ impl App {
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute: muted });
                 }
 
+                let mut root_only = self.parts[part].root_only;
+                if ui.checkbox(&mut root_only, "Root").on_hover_text(
+                    "Root-only (bass split): this part sounds only the lowest held key")
+                    .changed()
+                {
+                    self.parts[part].root_only = root_only;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part, on: root_only });
+                }
+
                 ui.label("Vol:");
                 let mut vol = self.parts[part].volume;
                 let vol_r = ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
@@ -228,6 +237,7 @@ impl App {
                         sf2_mode: l.sf2_mode, sf2_program: l.sf2_program,
                         pan: l.pan, transpose: l.transpose, mute: l.mute,
                         vel_min: l.vel_min, vel_max: l.vel_max,
+                        root_only: l.root_only,
                     }
                 }).collect();
                 match preset::save_performance(&Performance {
@@ -286,6 +296,7 @@ impl App {
                         self.parts[i].pan = part.pan;
                         self.parts[i].transpose = part.transpose;
                         self.parts[i].mute = part.mute;
+                        self.parts[i].root_only = part.root_only;
                         self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
                         self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
                         self.send_edited_params(i);
@@ -295,6 +306,7 @@ impl App {
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan: part.pan });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: part.transpose });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: part.mute });
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part: i, on: part.root_only });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange {
                             part: i, vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: part.sf2_mode });
