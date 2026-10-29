@@ -274,6 +274,11 @@ docs/superpowers/plans/2026-10-29-bank2-led-console.md (executed). Компон�
 надо отмаршрутизировать из «ноты канала 1» в мастер-транспорт (ControlEvent).
 
 ## 16. Компаньон LED-консоли: автозапуск из синта (заявка 2026-10-29)
+РЕШЕНО (2026-10-29): автоспавн реализован, см. план
+docs/superpowers/plans/2026-10-29-companion-autospawn.md. Галка led_companion on →
+синт сам спавнит компаньона (respawn с backoff 5с), off → убивает только своего
+child'а; дубликаты разруливает probe-guard в pad_console.py.
+
 Сейчас компаньон запускается вручную (`python3 ~/Projects/smk37_config/pad_console.py`).
 Хочется: галка led_companion on → синт сам spawned'ит процесс компаньона; off → убивает.
 
