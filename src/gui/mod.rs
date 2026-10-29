@@ -34,6 +34,9 @@ const LFO_WAVEFORM_NAMES: &[&str] = &["Sine", "Triangle", "Square", "Sample & Ho
 const PORTAMENTO_MODE_NAMES: &[&str] = &["Off", "Always", "Fingered (Legato)"];
 const PLAY_MODE_NAMES: &[&str] = &["Poly", "Mono", "Mono-ST", "Latch", "Poly-High", "Poly-Low", "Piano"];
 
+/// Hotplug poll cadence for the default-output-device name (TECHDEBT #18).
+const AUDIO_POLL_INTERVAL: Duration = Duration::from_millis(1500);
+
 const NOTE_NAMES: &[&str] = &[
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
 ];
@@ -424,6 +427,14 @@ pub struct App {
     pub redo_stack: Vec<std::collections::BTreeMap<String, f32>>,
     // Audio device disconnect detection + reconnect
     pub audio_disconnected: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Device name the current stream was built on (TECHDEBT #18). `None` =
+    /// unknown (device.name() failed) — name poll disabled, dead-stream flag
+    /// still works.
+    pub audio_device_name: Option<String>,
+    /// Hotplug reconnect retry state machine (TECHDEBT #18).
+    pub audio_watch: crate::audio::ReconnectPolicy,
+    /// Next default-device name poll deadline (desktop hotplug poller).
+    pub audio_poll_at: Instant,
     pub _audio_handle: Option<crate::audio::AudioBackend>,
     pub midi_tx_shared: crate::midi::SharedMidiTx,
     /// Heap objects the engine and the audio callback handed back. Dropping
@@ -476,11 +487,39 @@ impl eframe::App for App {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
 
-        // Check for audio device disconnect (headphones unplugged etc.)
-        if self.audio_disconnected.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        // Audio hotplug (TECHDEBT #18): (1) dead-stream flag from the cpal
+        // error callback; (2) desktop poller — the system default output
+        // device name changed (a device swap does not error the old stream:
+        // cpal keeps "playing" into the dead device); (3) a failed reconnect
+        // retries every RECONNECT_BACKOFF until the device returns. The first
+        // failure of a streak toasts; retries are silent. reconnect_audio is
+        // a GUI-thread operation (rebuilds the stream); the audio callback
+        // only ever sees the finished new stream.
+        let now = Instant::now();
+        #[cfg(not(target_os = "android"))]
+        if now >= self.audio_poll_at {
+            self.audio_poll_at = now + AUDIO_POLL_INTERVAL;
+            if let Some(stored) = self.audio_device_name.as_deref() {
+                let current = crate::audio::default_output_device_name(cpal::default_host().id());
+                if crate::audio::ReconnectPolicy::device_changed(stored, current.as_deref()) {
+                    log::info!("[audio] default device changed: {stored:?} -> {current:?}");
+                    self.audio_disconnected.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+        if self.audio_disconnected.swap(false, Ordering::Relaxed) || self.audio_watch.retry_due(now) {
             match self.reconnect_audio() {
-                Ok(()) => self.show_toast("Audio reconnected".to_string(), ToastKind::Success),
-                Err(e) => self.show_toast(format!("Audio reconnect failed: {e}"), ToastKind::Error),
+                Ok(()) => {
+                    self.audio_watch.on_success();
+                    self.audio_device_name =
+                        self._audio_handle.as_ref().and_then(|b| b.device_name.clone());
+                    self.show_toast("Audio reconnected".to_string(), ToastKind::Success);
+                }
+                Err(e) => {
+                    if self.audio_watch.on_failure(now) {
+                        self.show_toast(format!("Audio reconnect failed: {e}"), ToastKind::Error);
+                    }
+                }
             }
         }
 

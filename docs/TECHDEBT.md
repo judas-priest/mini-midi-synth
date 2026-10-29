@@ -332,6 +332,14 @@ poll-подход: раз в 1-2с сравнивать имя default_output_de
 безопасно вызывать повторно (проверить идемпотентность — looper restore уже
 умеет, см. PR #2); (c) выбор устройства: дефолт системы или из config.
 
+РЕАЛИЗОВАНО 2026-10-29 (план docs/superpowers/plans/2026-10-29-metronome-hotplug.md):
+GUI-поллер default-output-device (1.5 c, desktop; Android off — AAudio-роутинг),
+ReconnectPolicy (Connected | Retrying{at, attempts}, backoff 2 c, тост только на
+первой неудаче серии), AudioBackend.device_name. Подпункт (б) снят чтением:
+reconnect_audio не пересоздаёт console_rx/LED-socket. Осталось: ручная
+верификация hotplug по чеклисту плана; известное ограничение — ALSA-хост
+(константное имя «default») поллером не отслеживается.
+
 ## 19. Аудит производительности: DSP клипует, CPU до ~80% при игре synth-частью
 Репорт пользователя (2026-10-29): DSP загрузка ~80% и клиппинг при игре
 synth-частью. УТОЧНЕНИЕ юзера: клиппинг был ЕЩЁ ДО метронома — это НЕ регресс
@@ -345,7 +353,10 @@ flamegraph, criterion, RT-safety vs load; типовые причины клип
 полифонических синтхах: denormals, per-sample div/sin, cache-miss voice layout),
 затем: (a) измерить базу до/после батча на тех же пресетах (git bisect по
 коммитам PR #4/#5 с perf-замером), (b) flamegraph горячего пути tick_block,
-(в) метроном: проверка — не считается ли sin/floor когда click_env == 0 (guard),
+(в) метроном: ПРОВЕРЕНО 2026-10-29 — guard уже есть: sin/floor считаются только
+при click_env > 0.0, env зануляется при < 0.001 (drum.rs:1218-1226 @ ecf67e7);
+в покое cost = один f32-компарер на сэмпл. Оптимизация не требуется; полный
+аудит (#19: flamegraph/denormals/bisect) остаётся отдельной работой,
 (г) denormals flush-to-zero (MMFTZ) — включён ли.
 
 ## 20. Ждёт пользовательской проверки (батч PR #5, 2026-10-29)
@@ -391,9 +402,16 @@ flamegraph, criterion, RT-safety vs load; типовые причины клип
   см. транспорт-переключатель #15 v2), либо вернуть банку 2 драм-ноты и меню
   на другие пэды. Также проверить: не papered ли velocity-0 путь и route_note_on
   обёртки (root-only) в record-ветке для банк-1.
-- (a) метроном: при Rec авто-старте проверь set_playing/set_recording → не
-  сбрасывает ли click_env/state; или drum-хиты маскируют клик по громкости
-  (клик масштабируется drum_volume) — сравнить громкость до/во время записи.
+- (a) метроном: РАССЛЕДОВАНО 2026-10-29 (план
+  docs/superpowers/plans/2026-10-29-metronome-hotplug.md) — движок чист:
+  клик продолжает звучать при старте записи во всех путях (GUI DrumSeqRecord,
+  клавиатурный note-83, авто-play из стопа, двойной toggle), rec-путь не трогает
+  click_*/volume/phase (set_playing без reset, save_snapshot без click-поля).
+  Покрытие: tests/metronome.rs tc6-tc10. Вероятные причины репорта: (1) соседние
+  пэды 82 (play/pause) / 81 (stop) — без playing клик молчит by design;
+  (2) маскировка: клик 0.55/0.9 × drumVol² против полноразмерных записанных
+  хитов (отдельный «Metro volume» — возможный будущий UX-Item, не баг).
+  П. (b) (#22) остаётся design-Item, не трогается.
 
 ## 23. GUI-пэды (нижняя строка) зеркалят LED-консоль — ПОКА НЕ ДЕЛАТЬ
 Причина (юзер, 2026-10-29): физический переключатель банка MIDI не шлёт —

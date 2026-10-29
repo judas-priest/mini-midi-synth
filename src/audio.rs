@@ -94,6 +94,11 @@ pub struct AudioBackend {
     /// Audio callback outputs silence when paused to save battery.
     #[allow(dead_code)]
     pub paused: Arc<AtomicBool>,
+    /// Name of the output device this stream was built on (TECHDEBT #18
+    /// hotplug poll compares it against the current system default).
+    /// `None` = the backend failed to report a name; the name poll is
+    /// disabled for the session (dead-stream flag still works).
+    pub device_name: Option<String>,
 }
 
 /// Everything the audio callback needs to share with the rest of the app.
@@ -122,6 +127,7 @@ impl AudioBackend {
         let device = host
             .default_output_device()
             .context("No audio output device found")?;
+        let device_name = device.name().ok();
 
         let supported = device.default_output_config()?;
         let channels = supported.channels() as usize;
@@ -305,7 +311,7 @@ impl AudioBackend {
         std::thread::sleep(std::time::Duration::from_millis(150));
         let final_sr = jack_sr.load(Ordering::Relaxed);
 
-        Ok((Self { stream, disconnected, paused }, final_sr))
+        Ok((Self { stream, disconnected, paused, device_name }, final_sr))
     }
 
     /// Try requested SR + buffer, fall back step by step to device defaults.
@@ -339,5 +345,71 @@ impl AudioBackend {
         }
 
         (device_sr, 0)
+    }
+}
+
+/// Name of the current system default output device. GUI-thread only
+/// (enumerates devices, may allocate). `None` = no default device right now,
+/// or the backend failed to report the name.
+pub fn default_output_device_name(host_id: cpal::HostId) -> Option<String> {
+    let host = cpal::host_from_id(host_id).ok()?;
+    let device = host.default_output_device()?;
+    device.name().ok()
+}
+
+/// Backoff between reconnect attempts (TECHDEBT #18: 2 s).
+pub const RECONNECT_BACKOFF: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// GUI-side hotplug reconnect state machine (TECHDEBT #18).
+/// `Connected` = stream alive, watching the default-device name.
+/// `Retrying` = last reconnect attempt failed; retry no earlier than `at`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconnectState {
+    Connected,
+    Retrying { at: std::time::Instant, attempts: u32 },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ReconnectPolicy {
+    pub state: ReconnectState,
+}
+
+impl Default for ReconnectPolicy {
+    fn default() -> Self {
+        Self { state: ReconnectState::Connected }
+    }
+}
+
+impl ReconnectPolicy {
+    /// Pure decision: does the system default device no longer match the one
+    /// the stream was built on? `None` (device temporarily absent) is NOT a
+    /// change — absence after a dead stream is handled by the retry path.
+    pub fn device_changed(stored: &str, current: Option<&str>) -> bool {
+        match current {
+            Some(name) => name != stored,
+            None => false,
+        }
+    }
+
+    /// Record a failed reconnect attempt: arms a +2 s retry, counts attempts.
+    /// Returns true exactly once per failure streak (the FIRST failure) —
+    /// the GUI shows a toast only then; retries stay silent.
+    pub fn on_failure(&mut self, now: std::time::Instant) -> bool {
+        let attempts = match self.state {
+            ReconnectState::Retrying { attempts, .. } => attempts,
+            ReconnectState::Connected => 0,
+        } + 1;
+        self.state = ReconnectState::Retrying { at: now + RECONNECT_BACKOFF, attempts };
+        attempts == 1
+    }
+
+    /// Reconnect succeeded: back to watching, retry bookkeeping cleared.
+    pub fn on_success(&mut self) {
+        self.state = ReconnectState::Connected;
+    }
+
+    /// Is a retry attempt due?
+    pub fn retry_due(&self, now: std::time::Instant) -> bool {
+        matches!(self.state, ReconnectState::Retrying { at, .. } if now >= at)
     }
 }

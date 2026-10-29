@@ -1,7 +1,7 @@
 //! Metronome click synced to the drum step sequencer.
 //! Plan: docs/superpowers/plans/2026-10-29-metronome-init-perf.md
 
-use mini_midi_synth::synth::{ControlEvent, SynthEngine, BLOCK_SIZE};
+use mini_midi_synth::synth::{ControlEvent, MidiEvent, SynthEngine, BLOCK_SIZE};
 
 const SR: f32 = 48_000.0;
 const CLICK_THRESHOLD: f32 = 0.05;
@@ -90,4 +90,84 @@ fn tc5_config_missing_drum_metronome_defaults_off() {
         serde_json::from_str(json).expect("legacy config must parse");
     assert!(!cfg.ui.drum_metronome);
     assert!(!mini_midi_synth::config::Config::default().ui.drum_metronome);
+}
+
+/// Stitch two click_events runs into one absolute timeline: `tail` block
+/// indices are shifted by `pre_blocks`.
+fn stitched(mut pre: Vec<(usize, f32)>, mut tail: Vec<(usize, f32)>, pre_blocks: usize)
+    -> Vec<(usize, f32)>
+{
+    for t in tail.iter_mut() { t.0 += pre_blocks; }
+    pre.append(&mut tail);
+    pre
+}
+
+fn assert_beat_intervals(events: &[(usize, f32)], min_events: usize) {
+    assert!(events.len() >= min_events, "expected >= {min_events} beats, got {events:?}");
+    for w in events.windows(2) {
+        let dt = (w[1].0 - w[0].0) as f32;
+        assert!((dt - 750.0).abs() < 4.0, "beat interval {dt} blocks, expected ~750: {events:?}");
+    }
+}
+
+/// Requirement: metronome click must keep sounding at the same beat interval
+/// when sequencer recording starts mid-playback (TECHDEBT #22a).
+#[test]
+fn tc6_rec_mid_playback_click_continues() {
+    let mut e = metronome_engine(120.0, true);
+    let _ = e.handle_control(ControlEvent::DrumSeqPlay { playing: true });
+    let pre = click_events(&mut e, 500);
+    let _ = e.handle_control(ControlEvent::DrumSeqRecord { recording: true });
+    let tail = click_events(&mut e, 1250);
+    assert!(!pre.is_empty(), "no clicks before rec");
+    assert!(!tail.is_empty(), "clicks vanished after rec start");
+    assert_beat_intervals(&stitched(pre, tail, 500), 3);
+}
+
+/// Same via the keyboard transport path (pad note 83 on ch 9).
+#[test]
+fn tc7_keyboard_rec_note83_click_continues() {
+    let mut e = metronome_engine(120.0, true);
+    let _ = e.handle_control(ControlEvent::DrumSeqPlay { playing: true });
+    let pre = click_events(&mut e, 500);
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 9, note: 83 });
+    let tail = click_events(&mut e, 1250);
+    assert!(!pre.is_empty(), "no clicks before kb rec toggle");
+    assert!(!tail.is_empty(), "clicks vanished after kb rec toggle");
+    assert_beat_intervals(&stitched(pre, tail, 500), 3);
+}
+
+/// Rec from a stopped transport auto-plays (commit 0983413) — the click must
+/// START (it was silent while stopped by design).
+#[test]
+fn tc8_rec_from_stopped_autoplay_clicks_start() {
+    let mut e = metronome_engine(120.0, true);
+    assert!(click_events(&mut e, 400).is_empty(), "click while stopped");
+    let _ = e.handle_control(ControlEvent::DrumSeqRecord { recording: true });
+    let events = click_events(&mut e, 1600);
+    assert_beat_intervals(&events, 2);
+}
+
+/// Double press of note 83: rec ends OFF, click timeline must not break.
+#[test]
+fn tc9_double_toggle_click_continues() {
+    let mut e = metronome_engine(120.0, true);
+    let _ = e.handle_control(ControlEvent::DrumSeqPlay { playing: true });
+    let pre = click_events(&mut e, 500);
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 }); // rec on
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 }); // rec off
+    let tail = click_events(&mut e, 1250);
+    assert!(!tail.is_empty(), "clicks vanished after double toggle");
+    assert_beat_intervals(&stitched(pre, tail, 500), 3);
+}
+
+/// NoteOn with velocity 0 is the MIDI note-off encoding: it must NOT toggle
+/// rec (no auto-play, hence silence while the transport is stopped).
+#[test]
+fn tc10_note83_velocity0_does_not_toggle_rec() {
+    let mut e = metronome_engine(120.0, true);
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 0 });
+    assert!(click_events(&mut e, 800).is_empty(),
+        "velocity-0 toggled rec / started transport");
 }
