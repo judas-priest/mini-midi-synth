@@ -1956,6 +1956,11 @@ impl SynthEngine {
             ControlEvent::SetPartEnabled { part, enabled } => {
                 if let Some(l) = self.parts.get_mut(part) {
                     if !enabled {
+                        // Single cleanup: drain SF2 voices, release DSP voices,
+                        // clear held-note state. (This used to be duplicated in
+                        // a second `if !enabled` block below, whose note_off
+                        // pass re-armed the release envelope of voices that
+                        // were already releasing.)
                         self.sampler.part_all_notes_off(part);
                         for voice in &mut l.voices {
                             if voice.active { voice.note_off(); }
@@ -1966,12 +1971,6 @@ impl SynthEngine {
                         l.latch_held.clear();
                     }
                     l.enabled = enabled;
-                    if !enabled {
-                        // Graceful note-off all voices
-                        for v in &mut l.voices { if v.active { v.note_off(); } }
-                        l.note_stack.clear();
-                        l.latch_held.clear();
-                    }
                 }
             }
             ControlEvent::SetPartMute { part, mute } => {

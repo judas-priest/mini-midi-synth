@@ -533,3 +533,32 @@ fn polivoks_drive_increases_harmonic_content() {
     }
     assert!(rms_driven > rms_clean, "Drive should increase RMS (adds harmonics), clean={rms_clean}, driven={rms_driven}");
 }
+
+// ── Part enable/disable state guard ────────────────────────────
+
+#[test]
+fn part_disable_releases_each_voice_once_and_cleans_state() {
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    let active: Vec<bool> = e.parts[0].voices.iter().map(|v| v.active).collect();
+    assert!(active.iter().any(|&a| a), "no active voice to disable");
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: false });
+    for (i, v) in e.parts[0].voices.iter().enumerate() {
+        if active[i] {
+            assert!(v.is_releasing(), "voice {i} not released after part disable");
+        }
+    }
+    assert!(e.parts[0].note_stack.is_empty(), "note_stack not cleared");
+    assert!(e.parts[0].latch_held.is_empty(), "latch_held not cleared");
+    assert!(!e.parts[0].sustained_notes.iter().any(|&s| s), "sustained_notes not cleared");
+    assert!(!e.parts[0].keys_down.iter().any(|&k| k), "keys_down not cleared");
+    // Re-enable: notes must sound again
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active), "part did not restart after re-enable");
+}
