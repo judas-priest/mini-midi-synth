@@ -340,6 +340,10 @@ pub struct App {
     pub led_socket_alive: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub led_socket_failed_at: Option<std::time::Instant>,
     pub led_last_send: Option<std::time::Instant>,
+    /// Companion process WE spawned (never kill a foreign one).
+    pub led_child: Option<std::process::Child>,
+    /// Backoff gate for (re)spawn attempts (crash / spawn failure).
+    pub led_spawn_backoff: Option<std::time::Instant>,
     // Drum kit save/load
     pub drum_kit_name: String,
     pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
@@ -575,6 +579,55 @@ impl eframe::App for App {
         let _ = self.console.tick(std::time::Instant::now()); // hold -> Menu (snapshot below)
         for a in acts {
             self.execute_console_action(a);
+        }
+
+        // Companion process lifecycle (TECHDEBT #16): spawn on toggle-on /
+        // first need, kill only OUR child on toggle-off, respawn with 5s
+        // backoff if it dies while enabled.
+        if !self.config.ui.led_companion {
+            if let Some(mut child) = self.led_child.take() {
+                log::info!("[console] killing companion child");
+                if let Err(e) = child.kill() {
+                    log::warn!("[console] companion kill: {e}");
+                }
+                if let Err(e) = child.wait() {
+                    log::warn!("[console] companion wait: {e}");
+                }
+            }
+            self.led_spawn_backoff = None;
+        } else {
+            // reap exited child (crash, foreign kill, guard-exit 0)
+            if let Some(mut child) = self.led_child.take() {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        log::info!("[console] companion child exited: {status}");
+                        self.led_spawn_backoff = Some(std::time::Instant::now());
+                    }
+                    Ok(None) => self.led_child = Some(child),
+                    Err(e) => log::warn!("[console] companion try_wait: {e}"),
+                }
+            }
+            // Spawn only when nothing connected (a live foreign companion means
+            // led_socket connects and we must not churn-spawn every 5s).
+            let backoff_ok = self.led_spawn_backoff
+                .map(|t| t.elapsed() > std::time::Duration::from_secs(5))
+                .unwrap_or(true);
+            if self.led_child.is_none()
+                && self.led_socket.is_none()
+                && backoff_ok
+            {
+                let path = crate::config::expand_home(&self.config.ui.led_companion_cmd);
+                match std::process::Command::new("python3").arg(&path).spawn() {
+                    Ok(child) => {
+                        log::info!("[console] spawned companion: {}", path.display());
+                        self.led_child = Some(child);
+                    }
+                    Err(e) => {
+                        log::warn!("[console] companion spawn failed: {e}");
+                        self.led_spawn_backoff = Some(std::time::Instant::now());
+                    }
+                }
+            }
         }
 
         // LED companion socket lifecycle
