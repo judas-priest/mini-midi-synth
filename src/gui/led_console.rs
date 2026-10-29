@@ -44,6 +44,8 @@ pub enum Action {
     LoadPerf(usize),
     SelectPattern(usize),
     ToggleMute(usize),
+    /// Menu slot 3: flip seq_target (drums <-> looper). Stays in Menu.
+    ToggleTransportTarget,
     Undo,
     StepPerf(i32),
     StepPattern(i32),
@@ -110,14 +112,13 @@ impl LedConsole {
 
     fn tap(&mut self, slot: usize) -> Option<Action> {
         if self.mode == Mode::Menu {
-            let m = match slot {
-                0 => Mode::Home,
-                1 => Mode::Pattern,
-                2 => Mode::Mute,
-                _ => return None, // dark slot in menu: no-op
+            return match slot {
+                0 => { self.mode = Mode::Home; None }
+                1 => { self.mode = Mode::Pattern; None }
+                2 => { self.mode = Mode::Mute; None }
+                3 => Some(Action::ToggleTransportTarget), // toggle, stays in Menu
+                _ => None, // dark slot in menu: no-op
             };
-            self.mode = m;
-            return None; // mode switch only; GUI repaints via snapshot
         }
         if slot == 0 {
             // always-visible MENU button (top-left): tap = open menu
@@ -144,6 +145,7 @@ impl LedConsole {
     /// LED colors for slots 0..=7 (top row). `w_perf`/`w_pat` — first index of
     /// the visible window: slot i (1..=7) shows item window + i - 1.
     /// Slot 0 is the MENU button (white).
+    #[allow(clippy::too_many_arguments)] // flat LED snapshot, callers build it inline
     pub fn top_colors(
         &self,
         active_perf: Option<usize>,
@@ -152,6 +154,7 @@ impl LedConsole {
         mutes: &[bool; 8],
         w_perf: usize,
         w_pat: usize,
+        seq_target: u8,
     ) -> [[u8; 3]; 8] {
         // Palette uses ONLY hues visually validated on this hardware (see
         // PADS_NOTES.md bank-1 kit colors: FF0000/00FF00/FFFF00/0066FF/FF8000/
@@ -200,12 +203,15 @@ impl LedConsole {
             }
             Mode::Menu => {
                 // menu items are color-coded to what the row becomes after
-                // picking them: HOME -> blue perfs, PATTERN -> yellow, MUTE -> green
+                // picking them: HOME -> blue perfs, PATTERN -> yellow,
+                // MUTE -> green; slot 3 IS the toggle: shows the current
+                // target (blue = drums, green = looper)
                 for (i, col) in c.iter_mut().enumerate() {
                     *col = match i {
                         0 => AVAIL,              // HOME: blue (perfs)
                         1 => [0xFF, 0xFF, 0x00], // PATTERN: yellow
                         2 => [0x00, 0xFF, 0x00], // MUTE: green
+                        3 => if seq_target == 0 { AVAIL } else { [0x00, 0xFF, 0x00] },
                         _ => [0x00, 0x00, 0x00],
                     };
                 }
@@ -360,14 +366,14 @@ mod tests {
         let mut c = LedConsole::new();
         let mutes = [false; 8];
         // window 2: slot 1 = perf idx 2 (selected), slot 2 = idx 3 (filled)
-        let home = c.top_colors(Some(2), 5, 0, &mutes, 2, 0);
+        let home = c.top_colors(Some(2), 5, 0, &mutes, 2, 0, 0);
         assert_eq!(home[1], [0xFF, 0x00, 0xFF]); // selected (idx 2)
         assert_eq!(home[2], [0x00, 0x66, 0xFF]); // available (idx 3)
         // slot 4 = idx 5 -> за концом списка (count 5) -> OFF
         assert_eq!(home[4], [0x00, 0x00, 0x00]);
         // pattern window 1: slot 1 = pattern 1 (selected при current=1)
         c.mode = Mode::Pattern;
-        let pat = c.top_colors(None, 0, 1, &mutes, 0, 1);
+        let pat = c.top_colors(None, 0, 1, &mutes, 0, 1, 0);
         assert_eq!(pat[1], [0xFF, 0x00, 0xFF]);
         assert_eq!(pat[2], [0xFF, 0xFF, 0x00]); // pattern mode speaks yellow
     }
@@ -398,6 +404,32 @@ mod tests {
         assert_eq!(c.tick(now + Duration::from_millis(510)), Some(Mode::Menu));
         assert_eq!(c.on_event(PadEvent::Up(6), now + Duration::from_millis(600)), None);
         assert_eq!(c.mode, Mode::Menu);
+    }
+
+    #[test]
+    fn menu_slot3_toggles_target_and_stays_menu() {
+        let mut c = LedConsole::new();
+        c.mode = Mode::Menu;
+        let now = Instant::now();
+        c.on_event(PadEvent::Down(3), now);
+        assert_eq!(c.on_event(PadEvent::Up(3), now + Duration::from_millis(30)),
+                   Some(Action::ToggleTransportTarget));
+        assert_eq!(c.mode, Mode::Menu, "toggle item must not leave the menu");
+    }
+
+    #[test]
+    fn menu_slot3_led_shows_target() {
+        let mut c = LedConsole::new();
+        c.mode = Mode::Menu;
+        let mutes = [false; 8];
+        let drums = c.top_colors(None, 0, 0, &mutes, 0, 0, 0);
+        assert_eq!(drums[3], [0x00, 0x66, 0xFF], "target=0 (drums): blue");
+        let looper = c.top_colors(None, 0, 0, &mutes, 0, 0, 1);
+        assert_eq!(looper[3], [0x00, 0xFF, 0x00], "target=1 (looper): green");
+        // остальные пункты меню не изменились
+        assert_eq!(drums[0], [0x00, 0x66, 0xFF]); // HOME: blue
+        assert_eq!(drums[1], [0xFF, 0xFF, 0x00]); // PATTERN: yellow
+        assert_eq!(drums[2], [0x00, 0xFF, 0x00]); // MUTE: green
     }
 
     #[test]

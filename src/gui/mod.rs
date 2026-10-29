@@ -720,8 +720,22 @@ impl eframe::App for App {
 
         // LED snapshot (16 slots = pads 17..=32, top row first)
         {
-            let playing = self.drum_playing;
-            let recording = self.drum_recording;
+            // Bottom row shows the ACTIVE target's transport (spec v2): drums
+            // atoms at target=0, looper state (Recording=1, Playing=2,
+            // Overdubbing=3) at target=1.
+            let target = self.seq_target_atom.load(Ordering::Relaxed);
+            let lstate = crate::synth::looper::LooperState::from_u8(
+                self.looper_atoms.state.load(Ordering::Relaxed));
+            let (playing, recording) = if target == 0 {
+                (self.drum_playing, self.drum_recording)
+            } else {
+                (
+                    matches!(lstate, crate::synth::looper::LooperState::Playing
+                            | crate::synth::looper::LooperState::Overdubbing),
+                    matches!(lstate, crate::synth::looper::LooperState::Recording
+                            | crate::synth::looper::LooperState::Overdubbing),
+                )
+            };
             let mut mutes = [false; 8];
             for (i, part) in self.parts.iter().take(8).enumerate() {
                 mutes[i] = part.mute;
@@ -734,7 +748,7 @@ impl eframe::App for App {
             };
             let top = self.console.top_colors(self.active_perf_console(), filled,
                                               self.drum_current_pattern as usize, &mutes,
-                                              self.perf_window, self.pat_window);
+                                              self.perf_window, self.pat_window, target);
             let bottom = self.console.bottom_colors(playing, recording, page_depth, undo_avail);
             let mut snap = [[0u8; 3]; 16];
             snap[..8].copy_from_slice(&top);
@@ -1994,6 +2008,13 @@ impl App {
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part: i, mute });
                     self.persist_parts_state();
                 }
+            }
+            led_console::Action::ToggleTransportTarget => {
+                let cur = self.seq_target_atom.load(Ordering::Relaxed);
+                let new = if cur == 0 { 1 } else { 0 };
+                self.seq_target_atom.store(new, Ordering::Relaxed);
+                log::info!("[console] seq_target -> {}",
+                           if new == 0 { "drums" } else { "looper" });
             }
             led_console::Action::Undo => {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqUndo);
