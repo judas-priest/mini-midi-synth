@@ -335,6 +335,7 @@ pub struct App {
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
     pub mute_window: usize,   // first part idx visible on MUTE slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub drum_redo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // Bank-2 pad console
     pub console: led_console::LedConsole,
     pub console_rx: Option<std::sync::mpsc::Receiver<(u8, bool)>>,
@@ -602,7 +603,8 @@ impl eframe::App for App {
                 let ev = match (note, is_on) {
                     (60..=67, true) => Some(led_console::PadEvent::Down((note - 60) as usize)),
                     (60..=67, false) => Some(led_console::PadEvent::Up((note - 60) as usize)),
-                    (75, true) => Some(led_console::PadEvent::Undo),
+                    (75, true) => Some(led_console::PadEvent::UndoDown),
+                    (75, false) => Some(led_console::PadEvent::UndoUp),
                     (78, true) => Some(led_console::PadEvent::Prev),
                     (79, true) => Some(led_console::PadEvent::Next),
                     (80, true) => Some(led_console::PadEvent::PageBack),
@@ -743,6 +745,7 @@ impl eframe::App for App {
             }
             let filled = self.perf_list.len();
             let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
+            let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
             let page_depth = match self.console.mode() {
                 led_console::Mode::Pattern => self.pat_window,
                 led_console::Mode::Mute => self.mute_window / 7,
@@ -752,7 +755,8 @@ impl eframe::App for App {
                                               self.drum_current_pattern as usize, &mutes,
                                               self.perf_window, self.pat_window,
                                               self.mute_window, target);
-            let bottom = self.console.bottom_colors(playing, recording, page_depth, undo_avail);
+            let bottom = self.console.bottom_colors(playing, recording, page_depth,
+                                                    undo_avail, redo_avail);
             let mut snap = [[0u8; 3]; 16];
             snap[..8].copy_from_slice(&top);
             snap[8..].copy_from_slice(&bottom);
@@ -2022,6 +2026,9 @@ impl App {
             }
             led_console::Action::Undo => {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqUndo);
+            }
+            led_console::Action::Redo => {
+                let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqRedo);
             }
             led_console::Action::StepPerf(dir) => {
                 let n = self.perf_list.len();

@@ -111,6 +111,8 @@ struct CommonInit {
     #[cfg(feature = "gui")]
     drum_undo_atom: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(feature = "gui")]
+    drum_redo_atom: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(feature = "gui")]
     looper_atoms: Arc<synth::looper::LooperAtoms>,
     #[cfg(feature = "gui")]
     looper_display: Arc<std::sync::Mutex<synth::looper::LooperDisplay>>,
@@ -211,6 +213,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     let drum_rec_atom = engine.drum_engine.rec_atom();
     #[cfg(feature = "gui")]
     let drum_undo_atom = engine.drum_engine.undo_atom();
+    #[cfg(feature = "gui")]
+    let drum_redo_atom = engine.drum_engine.redo_atom();
     #[cfg(feature = "gui")]
     let looper_atoms = engine.looper.atoms();
     #[cfg(feature = "gui")]
@@ -332,6 +336,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         #[cfg(feature = "gui")]
         drum_rec_atom,
         drum_undo_atom,
+        #[cfg(feature = "gui")]
+        drum_redo_atom,
         #[cfg(feature = "gui")]
         looper_atoms,
         #[cfg(feature = "gui")]
@@ -786,6 +792,7 @@ pub fn run_gui(
         pat_window: 0,
         mute_window: 0,
         drum_undo_atom: c.drum_undo_atom,
+        drum_redo_atom: c.drum_redo_atom,
         console: gui::led_console::LedConsole::default(),
         console_rx: Some(c.console_rx),
         led_snapshot: [[0; 3]; 16],

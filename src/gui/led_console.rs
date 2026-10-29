@@ -26,8 +26,10 @@ pub enum PadEvent {
     Down(usize),
     /// NoteOff on a top-row pad (slot 0..=7).
     Up(usize),
-    /// Bottom-row: Undo (note 75).
-    Undo,
+    /// Bottom-row pad 32 (note 75) pressed.
+    UndoDown,
+    /// Bottom-row pad 32 (note 75) released: tap (< HOLD) = Undo, hold = Redo.
+    UndoUp,
     /// Bottom-row nav: Prev (note 78).
     Prev,
     /// Bottom-row nav: Next (note 79).
@@ -47,6 +49,8 @@ pub enum Action {
     /// Menu slot 3: flip seq_target (drums <-> looper). Stays in Menu.
     ToggleTransportTarget,
     Undo,
+    /// Pad 32 held >= HOLD: redo the last undone sequencer edit.
+    Redo,
     StepPerf(i32),
     StepPattern(i32),
     PageBack,
@@ -58,6 +62,8 @@ pub struct LedConsole {
     /// Currently pressed pads (multi-touch: several simultaneous taps each
     /// fire their own action on release). Deduplicated by slot.
     pending: Vec<(usize, Instant)>,
+    /// Pad 32 press instant (tap/hold disambiguation on release).
+    undo_down: Option<Instant>,
 }
 
 impl Default for LedConsole {
@@ -68,7 +74,7 @@ impl Default for LedConsole {
 
 impl LedConsole {
     pub fn new() -> Self {
-        Self { mode: Mode::Home, pending: Vec::new() }
+        Self { mode: Mode::Home, pending: Vec::new(), undo_down: None }
     }
 
     /// Poll: fire hold detection. Returns Some(Mode::Menu) on hold trigger
@@ -102,7 +108,11 @@ impl LedConsole {
                     None // hold consumed by tick()
                 }
             }
-            PadEvent::Undo => Some(Action::Undo),
+            PadEvent::UndoDown => { self.undo_down = Some(now); None }
+            PadEvent::UndoUp => {
+                let t0 = self.undo_down.take()?;
+                if now.duration_since(t0) >= HOLD { Some(Action::Redo) } else { Some(Action::Undo) }
+            }
             PadEvent::Prev => Some(self.step(-1)),
             PadEvent::Next => Some(self.step(1)),
             PadEvent::PageBack => Some(Action::PageBack),
@@ -226,13 +236,15 @@ impl LedConsole {
     /// оттенки синего темнеют с глубиной (EXPERIMENTAL — юзер проверяет рендер;
     /// fallback: заменить все shades на [0x00, 0x66, 0xFF]).
     /// Undo (slot 15 = pad 32): розовый FF5080 (EXPERIMENTAL; fallback FF00FF)
-    /// когда есть снимок, иначе OFF. Prev/Next — фиксированный оранжевый.
+    /// когда есть снимок, белый FFFFFF когда armed redo (приоритет), иначе OFF.
+    /// Prev/Next — фиксированный оранжевый.
     pub fn bottom_colors(
         &self,
         playing: bool,
         recording: bool,
         page_depth: usize,
         undo_available: bool,
+        redo_available: bool,
     ) -> [[u8; 3]; 8] {
         const PAGE_SHADES: [[u8; 3]; 4] = [
             [0x00, 0x66, 0xFF], // depth 0: validated blue
@@ -249,7 +261,13 @@ impl LedConsole {
         c[4] = shade; // PAGE forward (pad 29)
         c[5] = [0xFF, 0x80, 0x00]; // Prev: fixed orange
         c[6] = [0xFF, 0x80, 0x00]; // Next: fixed orange
-        c[7] = if undo_available { [0xFF, 0x50, 0x80] } else { [0x00, 0x00, 0x00] };
+        c[7] = if redo_available {
+            [0xFF, 0xFF, 0xFF] // redo armed: white (validated hue)
+        } else if undo_available {
+            [0xFF, 0x50, 0x80] // undo available: pink (EXPERIMENTAL, fallback FF00FF)
+        } else {
+            [0x00, 0x00, 0x00]
+        };
         c
     }
 
@@ -381,23 +399,6 @@ mod tests {
     }
 
     #[test]
-    fn bottom_page_shades_and_undo_pink() {
-        let mut c = LedConsole::new();
-        let b = c.bottom_colors(false, false, 0, false);
-        assert_eq!(b[3], [0x00, 0x66, 0xFF]); // page 0: base blue
-        assert_eq!(b[4], [0x00, 0x66, 0xFF]);
-        assert_eq!(b[7], [0x00, 0x00, 0x00]); // undo off (no snapshot)
-        let b = c.bottom_colors(false, false, 2, true);
-        assert_eq!(b[3], [0x00, 0x32, 0x77], "page 2: darker blue");
-        assert_eq!(b[7], [0xFF, 0x50, 0x80]); // undo pink when available
-        // nav 30/31 — фиксированный оранжевый, НЕ зависит от режима
-        c.mode = Mode::Pattern;
-        let b = c.bottom_colors(false, false, 0, true);
-        assert_eq!(b[5], [0xFF, 0x80, 0x00]);
-        assert_eq!(b[6], [0xFF, 0x80, 0x00]);
-    }
-
-    #[test]
     fn hold_in_menu_stays_menu() {
         let mut c = LedConsole::new();
         c.mode = Mode::Menu;
@@ -453,8 +454,56 @@ mod tests {
     }
 
     #[test]
-    fn undo_action_passes_through() {
+    fn pad32_tap_is_undo() {
         let mut c = LedConsole::new();
-        assert_eq!(c.on_event(PadEvent::Undo, Instant::now()), Some(Action::Undo));
+        let now = Instant::now();
+        assert_eq!(c.on_event(PadEvent::UndoDown, now), None);
+        assert_eq!(c.on_event(PadEvent::UndoUp, now + Duration::from_millis(50)),
+                   Some(Action::Undo));
+    }
+
+    #[test]
+    fn pad32_hold_is_redo() {
+        let mut c = LedConsole::new();
+        let now = Instant::now();
+        c.on_event(PadEvent::UndoDown, now);
+        // hold does NOT open the menu (bottom pads are not top-row pending)
+        assert_eq!(c.tick(now + Duration::from_millis(600)), None);
+        assert_eq!(c.on_event(PadEvent::UndoUp, now + Duration::from_millis(600)),
+                   Some(Action::Redo));
+    }
+
+    #[test]
+    fn stray_undo_up_is_noop() {
+        let mut c = LedConsole::new();
+        assert_eq!(c.on_event(PadEvent::UndoUp, Instant::now()), None);
+    }
+
+    #[test]
+    fn pad32_led_redo_white_precedence() {
+        let c = LedConsole::new();
+        assert_eq!(c.bottom_colors(false, false, 0, false, false)[7], [0x00, 0x00, 0x00]);
+        assert_eq!(c.bottom_colors(false, false, 0, true, false)[7], [0xFF, 0x50, 0x80],
+                   "undo: pink");
+        assert_eq!(c.bottom_colors(false, false, 0, true, true)[7], [0xFF, 0xFF, 0xFF],
+                   "redo armed wins: white");
+        assert_eq!(c.bottom_colors(false, false, 0, false, true)[7], [0xFF, 0xFF, 0xFF]);
+    }
+
+    #[test]
+    fn bottom_page_shades_and_undo_pink() {
+        let mut c = LedConsole::new();
+        let b = c.bottom_colors(false, false, 0, false, false);
+        assert_eq!(b[3], [0x00, 0x66, 0xFF]); // page 0: base blue
+        assert_eq!(b[4], [0x00, 0x66, 0xFF]);
+        assert_eq!(b[7], [0x00, 0x00, 0x00]); // undo off (no snapshot)
+        let b = c.bottom_colors(false, false, 2, true, false);
+        assert_eq!(b[3], [0x00, 0x32, 0x77], "page 2: darker blue");
+        assert_eq!(b[7], [0xFF, 0x50, 0x80]); // undo pink when available
+        // nav 30/31 — фиксированный оранжевый, НЕ зависит от режима
+        c.mode = Mode::Pattern;
+        let b = c.bottom_colors(false, false, 0, true, false);
+        assert_eq!(b[5], [0xFF, 0x80, 0x00]);
+        assert_eq!(b[6], [0xFF, 0x80, 0x00]);
     }
 }
