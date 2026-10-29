@@ -71,6 +71,35 @@ impl App {
                 }
             }
             ui.separator();
+            // Time-signature quick buttons (TECHDEBT #21). The sequencer bar IS
+            // `length` steps of 16ths, so a signature sets length = beats * 4.
+            // Capped at 4/4: MAX_STEPS = 16 (drum.rs). "Free" = drag the Steps
+            // DragValue to any 1..=16 — no button matches then (length !=
+            // beats_per_bar * 4).
+            const SIGS: [(u8, &str); 3] = [(2, "2/4"), (3, "3/4"), (4, "4/4")];
+            let active_sig = {
+                let p = &self.drum_patterns[pat_idx];
+                if p.length == p.beats_per_bar.saturating_mul(4) {
+                    Some(p.beats_per_bar)
+                } else {
+                    None
+                }
+            };
+            for (bpb, label) in SIGS {
+                let selected = active_sig == Some(bpb);
+                if ui.selectable_label(selected, label)
+                    .on_hover_text(format!(
+                        "{label}: {} steps ({} beats of 16ths)", bpb * 4, bpb
+                    ))
+                    .clicked() && !selected
+                {
+                    let pat = &mut self.drum_patterns[pat_idx];
+                    pat.beats_per_bar = bpb;
+                    pat.length = bpb * 4;
+                    let _ = self.ctrl_tx.push(ControlEvent::DrumSeqTimeSig { beats_per_bar: bpb });
+                }
+            }
+            ui.separator();
             let mut length = self.drum_patterns[pat_idx].length as i32;
             ui.label("Steps:");
             if ui.add(egui::DragValue::new(&mut length).range(1..=16).speed(0.2)).changed() {
