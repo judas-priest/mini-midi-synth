@@ -2446,6 +2446,11 @@ impl SynthEngine {
                 self.dispose_sf2(displaced);
             }
             ControlEvent::SetPartSf2Mode { part, enabled } => {
+                // No-op switch (perf load pushes current state for every part):
+                // draining here would cut SF2 tails on every perf change.
+                if let Some(l) = self.parts.get(part) {
+                    if l.sf2_mode == enabled { return None; }
+                }
                 // Engine switch: both voice owners must be drained
                 self.sampler.part_all_notes_off(part);
                 if let Some(l) = self.parts.get_mut(part) {
@@ -2469,8 +2474,9 @@ impl SynthEngine {
                 self.sampler.set_part_mode(part, enabled);
             }
             ControlEvent::SetPartSf2Program { part, program, bank } => {
-                // 0xC0 kills nothing in rustysynth: drain the channel first
-                self.sampler.part_all_notes_off(part);
+                // NO drain: rustysynth 0xC0 = channel.set_patch only — sounding
+                // voices keep their captured region data (seamless tails);
+                // new notes use the new program.
                 self.sampler.set_part_program(part, program, bank);
             }
             ControlEvent::SetDrumsSf2Mode { enabled } => {

@@ -916,3 +916,29 @@ fn steal_prefers_releasing_voice() {
     assert!(v36.active && !v36.is_releasing() && v36.note == 36,
         "old stealer would have taken voice 36");
 }
+
+// ── SF2 no-op mode switch (seamless perf switch) ───────────────
+
+#[test]
+fn sf2_mode_noop_does_not_clear_dsp_state() {
+    // Perf load pushes SetPartSf2Mode for EVERY part with its current
+    // sf2_mode; the no-op arm must return before draining DSP voices.
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    assert!(!e.parts[0].sf2_mode, "part 0 must start in DSP mode");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active), "no sounding voice");
+    // No-op switch: enabled == part.sf2_mode (false == false)
+    let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: false });
+    assert!(
+        e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()),
+        "no-op SetPartSf2Mode must not release sounding DSP voices"
+    );
+    assert!(!e.parts[0].sustained_notes.iter().any(|&s| s), "no-op switch must not clear sustained_notes");
+    assert!(e.parts[0].keys_down[60], "no-op switch must not clear keys_down");
+    // Out-of-range part: no-op, no panic
+    let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part: 99, enabled: true });
+}
