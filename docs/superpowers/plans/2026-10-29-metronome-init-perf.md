@@ -107,7 +107,7 @@ cargo test --features rt-assert --test rt_safety
 - Modify: `src/synth/mod.rs` (ControlEvent вариант + handle_control arm)
 - Create: `tests/metronome.rs` (аудио-наблюдаемые тесты)
 
-- [ ] **Step 1: failing-тест** — создать `tests/metronome.rs`:
+- [x] **Step 1: failing-тест** — создать `tests/metronome.rs`:
 
 ```rust
 //! Metronome click synced to the drum step sequencer.
@@ -212,7 +212,7 @@ cargo test --test metronome
 # error[E0599]: no variant or associated item named `DrumSetMetronome` found
 ```
 
-- [ ] **Step 2: ControlEvent вариант** — `src/synth/mod.rs`, после
+- [x] **Step 2: ControlEvent вариант** — `src/synth/mod.rs`, после
   `DrumSetFixedVelocity { fixed: bool },` (строка 216):
 
 ```rust
@@ -220,7 +220,7 @@ cargo test --test metronome
     DrumSetMetronome { on: bool },
 ```
 
-- [ ] **Step 3: handle_control arm** — `src/synth/mod.rs`, сразу после arm
+- [x] **Step 3: handle_control arm** — `src/synth/mod.rs`, сразу после arm
   `DrumSetFixedVelocity` (строки 2143-2145):
 
 ```rust
@@ -229,7 +229,7 @@ cargo test --test metronome
             }
 ```
 
-- [ ] **Step 4: DrumEngine — поля и константы** — `src/synth/drum.rs`.
+- [x] **Step 4: DrumEngine — поля и константы** — `src/synth/drum.rs`.
 
 Константы рядом с `NUM_CHOKE_GROUPS` (строка 37):
 
@@ -281,7 +281,7 @@ const CLICK_LEN_S: f32 = 0.03;         // 30 ms tail
         self.click_env = 0.0;
 ```
 
-- [ ] **Step 5: триггер + рендер в `DrumEngine::tick`** (строки 1138-1177).
+- [x] **Step 5: триггер + рендер в `DrumEngine::tick`** (строки 1138-1177).
 
 Заменить начало обработки секвенсора (строки 1142-1146) — зафиксировать
 prev_step ДО tick:
@@ -337,7 +337,7 @@ SF2-режиме:
 
 (`decay_coeff` уже есть в drum.rs:74, `TAU` импортирован drum.rs:5.)
 
-- [ ] **Step 6: зелёный** —
+- [x] **Step 6: зелёный** —
 
 ```bash
 cargo test --test metronome
@@ -347,7 +347,7 @@ cargo test --test metronome
 Если TC1/TC2 красные: проверить, что `DrumSeqPlay` ресетит step (mod.rs:2060-2063
 — да), что первый event действительно step 0, и порог/выигрыши.
 
-- [ ] **Step 7: гейты + коммит** —
+- [x] **Step 7: гейты + коммит** —
 
 ```bash
 cargo clippy --all-targets -- -D warnings
@@ -361,7 +361,7 @@ git commit -m "feat: synthesized metronome click synced to drum sequencer BPM"
 **Files:**
 - Modify: `tests/rt_safety.rs`
 
-- [ ] **Step 1: failing-тест** — добавить в `tests/rt_safety.rs` (импорты уже
+- [x] **Step 1: failing-тест** — добавить в `tests/rt_safety.rs` (импорты уже
   есть; тест создаёт клики внутри guarded-зоны: если в клик-пути появится
   аллокация, процесс abort'нется):
 
@@ -384,7 +384,7 @@ fn metronome_click_does_not_allocate() {
 }
 ```
 
-- [ ] **Step 2: зелёный** (реализация уже per-sample: ожидаем green сразу;
+- [x] **Step 2: зелёный** (реализация уже per-sample: ожидаем green сразу;
   тест страхует регрессию) —
 
 ```bash
@@ -395,7 +395,7 @@ cargo test --features rt-assert --test rt_safety
 Если red (abort "memory allocation ..."): искать аллокацию в клик-пути —
 заменять Vec/format на массивы; `decay_coeff` аллокационно чист.
 
-- [ ] **Step 3: коммит** —
+- [x] **Step 3: коммит** —
 
 ```bash
 git add tests/rt_safety.rs
@@ -410,9 +410,9 @@ git commit -m "test: metronome click path is RT-safe"
 - Modify: `src/lib.rs` (App construction)
 - Modify: `src/gui/drums.rs` (checkbox)
 
-- [ ] **Step 1: тест уже есть** — tc5 в tests/metronome.rs (красный до Step 2).
+- [x] **Step 1: тест уже есть** — tc5 в tests/metronome.rs (красный до Step 2).
 
-- [ ] **Step 2: config** — `src/config.rs`, в `UiSettings` после
+- [x] **Step 2: config** — `src/config.rs`, в `UiSettings` после
   `drum_fixed_velocity` (строки 103-105):
 
 ```rust
@@ -428,7 +428,7 @@ git commit -m "test: metronome click path is RT-safe"
                 drum_metronome: false,
 ```
 
-- [ ] **Step 3: App-поля** — `src/gui/mod.rs`, после
+- [x] **Step 3: App-поля** — `src/gui/mod.rs`, после
   `pub drum_rec_atom: ...` (строка 319):
 
 ```rust
@@ -442,7 +442,7 @@ git commit -m "test: metronome click path is RT-safe"
 (`drum_prev_step`/`drum_beat_flash` используются в Task A4 — добавить сразу,
 чтобы не трогать инициализацию дважды.)
 
-- [ ] **Step 4: инициализация в lib.rs** — в литерале App после
+- [x] **Step 4: инициализация в lib.rs** — в литерале App после
   `drum_rec_atom: c.drum_rec_atom,` (строка 779):
 
 ```rust
@@ -451,21 +451,21 @@ git commit -m "test: metronome click path is RT-safe"
         drum_beat_flash: None,
 ```
 
-- [ ] **Step 5: стартовый пуш** — `src/gui/mod.rs`, `send_initial_presets`,
+- [x] **Step 5: стартовый пуш** — `src/gui/mod.rs`, `send_initial_presets`,
   после `DrumSetFixedVelocity` пуша (строка 1224):
 
 ```rust
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
 ```
 
-- [ ] **Step 6: персист** — `save_global_to_config` (строки 1293-1309), после
+- [x] **Step 6: персист** — `save_global_to_config` (строки 1293-1309), после
   `drum_fixed_velocity` (строка 1300):
 
 ```rust
         self.config.ui.drum_metronome = self.drum_metronome;
 ```
 
-- [ ] **Step 7: checkbox** — `src/gui/drums.rs`, transport-строка, сразу после
+- [x] **Step 7: checkbox** — `src/gui/drums.rs`, transport-строка, сразу после
   V127-checkbox (строки 72-77, до закрывающей `});` горизонтальной панели на
   строке 78):
 
@@ -478,7 +478,7 @@ git commit -m "test: metronome click path is RT-safe"
             }
 ```
 
-- [ ] **Step 8: зелёный + гейты** —
+- [x] **Step 8: зелёный + гейты** —
 
 ```bash
 cargo test --test metronome   # tc5 green
@@ -486,7 +486,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-- [ ] **Step 9: коммит** —
+- [x] **Step 9: коммит** —
 
 ```bash
 git add src/config.rs src/gui/mod.rs src/lib.rs src/gui/drums.rs tests/metronome.rs
@@ -502,7 +502,7 @@ git commit -m "feat: metronome GUI toggle with config persistence"
 GUI-код автотестами не покрывается — тестовый слой уже в A1/A3 (атом step
 управляет обоими). Проверка вручную после Step 3.
 
-- [ ] **Step 1: edge-детекция** — `src/gui/mod.rs`, блок синка (строки 531-533),
+- [x] **Step 1: edge-детекция** — `src/gui/mod.rs`, блок синка (строки 531-533),
   дополнить:
 
 ```rust
@@ -518,7 +518,7 @@ GUI-код автотестами не покрывается — тестовы
         self.drum_prev_step = step_now;
 ```
 
-- [ ] **Step 2: flash-индикатор** — `src/gui/drums.rs`, transport-строка,
+- [x] **Step 2: flash-индикатор** — `src/gui/drums.rs`, transport-строка,
   сразу после Rec-кнопки (строки 30-35):
 
 ```rust
@@ -535,7 +535,7 @@ GUI-код автотестами не покрывается — тестовы
             );
 ```
 
-- [ ] **Step 3: акцент плейхеда** — там же, блок "Current step playhead"
+- [x] **Step 3: акцент плейхеда** — там же, блок "Current step playhead"
   (строки 415-423) заменить на:
 
 ```rust
@@ -559,7 +559,7 @@ GUI-код автотестами не покрывается — тестовы
 
 (`is_current` определён на строке 380: `self.drum_playing && step == current_step`.)
 
-- [ ] **Step 4: гейты + ручная проверка** —
+- [x] **Step 4: гейты + ручная проверка** —
 
 ```bash
 cargo clippy --all-targets -- -D warnings
@@ -571,7 +571,7 @@ cargo test --features rt-assert --test rt_safety
 клик каждые 0.5 с, первый громче, колонка 0 обведена янтарным толще, кружок
 после Rec вспыхивает на каждой доле.
 
-- [ ] **Step 5: коммит** —
+- [x] **Step 5: коммит** —
 
 ```bash
 git add src/gui/mod.rs src/gui/drums.rs
@@ -599,7 +599,7 @@ git commit -m "feat: metronome downbeat accent and beat-1 flash in drum grid"
 **Files:**
 - Modify: `tests/preset_roundtrip.rs`
 
-- [ ] **Step 1: failing-тест** — добавить в `tests/preset_roundtrip.rs`:
+- [x] **Step 1: failing-тест** — добавить в `tests/preset_roundtrip.rs`:
 
 ```rust
 #[test]
@@ -616,7 +616,7 @@ fn init_performance_references_existing_factory_patch() {
 }
 ```
 
-- [ ] **Step 2: зелёный** (тест фиксировал бы дрейф; сейчас должен проходить —
+- [x] **Step 2: зелёный** (тест фиксировал бы дрейф; сейчас должен проходить —
   "Init" есть в FACTORY_PRESETS, preset.rs:181):
 
 ```bash
@@ -627,7 +627,7 @@ cargo test --test preset_roundtrip
 Если red — Init-перф ссылается на несуществующее имя: чинить
 `init_performance()` (patch_name = фактическое имя фабричного init), не тест.
 
-- [ ] **Step 3: коммит** —
+- [x] **Step 3: коммит** —
 
 ```bash
 git add tests/preset_roundtrip.rs
@@ -645,7 +645,7 @@ git commit -m "test: Init performance references a real factory preset, no split
 покажет, если понадобится `pub(super)` — тогда сменить сигнатуру на
 `pub(super) fn load_performance_by_name`.
 
-- [ ] **Step 1: реализация** — `src/gui/layers.rs`, perf-строка (строки 216-260),
+- [x] **Step 1: реализация** — `src/gui/layers.rs`, perf-строка (строки 216-260),
   между `ui.separator();` (строка 245) и `let mut load_perf ...` (строка 246)
   вставить:
 
@@ -661,7 +661,7 @@ git commit -m "test: Init performance references a real factory preset, no split
 Кнопка переиспользует существующий путь загрузки (AllNotesOff + split_point +
 apply-цикл + sf2-режимы), а не дублирует его.
 
-- [ ] **Step 2: гейты + ручная проверка** —
+- [x] **Step 2: гейты + ручная проверка** —
 
 ```bash
 cargo clippy --all-targets -- -D warnings
@@ -675,7 +675,7 @@ cargo deny check
 (консольные слоты подсвечивают его как активный — `active_perf_console`,
 gui/mod.rs:1890).
 
-- [ ] **Step 3: коммит** —
+- [x] **Step 3: коммит** —
 
 ```bash
 git add src/gui/layers.rs
@@ -687,7 +687,7 @@ git commit -m "feat: Reset button loads the built-in (Init) performance"
 **Files:**
 - Modify: `docs/TECHDEBT.md`
 
-- [ ] **Step 1:** заменить пункт 3 (строки 14-16) на:
+- [x] **Step 1:** заменить пункт 3 (строки 14-16) на:
 
 ```markdown
 ## 3. Default empty init performance — РЕАЛИЗОВАНО (уточнено 2026-10-29)
@@ -699,7 +699,7 @@ A1 = Init-пресет, полный диапазон, без SF2, split_point N
 Layers (план docs/superpowers/plans/2026-10-29-metronome-init-perf.md).
 ```
 
-- [ ] **Step 2: коммит** —
+- [x] **Step 2: коммит** —
 
 ```bash
 git add docs/TECHDEBT.md docs/superpowers/plans/2026-10-29-metronome-init-perf.md
