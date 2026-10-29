@@ -900,12 +900,26 @@ impl eframe::App for App {
             });
         }
 
+        // TECHDEBT #25: drum step-sequencer docked to the bottom on every tab.
+        // egui carves panels in registration order (first bottom panel = the
+        // bottom-most strip), so registering AFTER keyboard_panel puts this
+        // ABOVE the keyboard/pads strip, and registering BEFORE CentralPanel
+        // makes the main field reflow instead of being overlapped.
+        egui::TopBottomPanel::bottom("drum_seq_panel")
+            .resizable(true)
+            .default_height(460.0)
+            .height_range(120.0..=640.0)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    self.draw_drum_seq_docked(ui);
+                });
+            });
+
         // Right: patch list (for active part) or GM instrument list (SF2 mode)
         egui::SidePanel::right("preset_panel")
             .resizable(true)
             .default_width(160.0)
-            .min_width(120.0)
-            .max_width(260.0)
+            .width_range(120.0..=260.0)
             .show(ctx, |ui| {
                 let part = self.active_part;
                 let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
@@ -1210,7 +1224,7 @@ impl eframe::App for App {
                 });
             } else if self.show_drums {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                    self.draw_drum_sequencer(ui);
+                    self.draw_drum_kit_controls(ui);
                 });
             } else {
                 self.draw_looper(ui);
