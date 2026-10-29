@@ -710,13 +710,23 @@ pub struct StepData {
 pub struct DrumPattern {
     pub steps: [[StepData; MAX_STEPS]; NUM_DRUM_SLOTS],
     pub length: u8, // 1..16
+    /// Beats per bar of the intended signature (2..=4, default 4). The bar
+    /// the sequencer loops IS `length` steps, so the engine never reads this
+    /// today: metronome accent stays at step 0, which is always the downbeat.
+    /// Persists the signature for kit files and GUI highlighting; must equal
+    /// `length / 4` whenever the GUI signature buttons are used.
+    #[serde(default = "default_beats_per_bar")]
+    pub beats_per_bar: u8,
 }
+
+fn default_beats_per_bar() -> u8 { 4 }
 
 impl Default for DrumPattern {
     fn default() -> Self {
         Self {
             steps: [[StepData::default(); MAX_STEPS]; NUM_DRUM_SLOTS],
             length: 16,
+            beats_per_bar: 4,
         }
     }
 }
