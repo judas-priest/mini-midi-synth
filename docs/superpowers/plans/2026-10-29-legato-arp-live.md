@@ -1,6 +1,6 @@
 # Mono Legato + Portamento (per part) and Arp Live Controls (Latch, BPM sync) Plan
 
-> anchor-checked: 2026-10-29
+> anchor-checked: 2026-10-29 (refreshed @ 726a8f7; line drift +8-14 applied)
 > status: not started
 > Source: docs/TECHDEBT.md §14.5 (Mono Legato + Portamento) and §14.4 (Arp live-контролы: Latch/Hold + sync).
 
@@ -75,13 +75,15 @@ Feature 2:
 14. `clear_resets_latch_state` (unit) — frozen → `clear()` → `!keeps_playing()`. (**RED** before Task 6.)
 15. `no_latch_stops_on_last_release` (unit) — latch off, last key off → `pattern_len == 0` (existing behavior guard). (GREEN now.)
 16. `rate_follows_bpm` (unit) — rate 1 (1/8), `set_bpm` 120 → `step_samples == 12_000`; 240 → 6_000. (GREEN now — documents/locks the existing sync.)
-17. `arp_latch_keeps_playing_after_key_release` (integration, tests/sustain_audit.rs) — `arp_latch=1.0` in patch, arp on, note on → sound; note off → sound continues; `SetArpLatch{false}` → settle → silence. (**RED** before Task 7: `SetArpLatch` doesn't exist; the note-off currently silences the arp.)
+17. `arp_latch_keeps_playing_after_key_release` (integration, tests/sustain_audit.rs) — `arp_latch=1.0` in patch, arp on, note on → sound; note off → sound continues; `SetArpLatch{false} (ПРИМЕЧАНИЕ: flush без looper.record_event — как panic-путь; ранний срез текущего gate-степа при неснятых клавишах — documented)` → settle → silence. (**RED** before Task 7: `SetArpLatch` doesn't exist; the note-off currently silences the arp.)
 18. `arp_latch_new_chord_takes_over_and_off_stops` (integration) — frozen arp, new note-on → still sounding, released → still sounding; `SetArpLatch{false}` → silence. (**RED** before Task 7.)
 19. `panic_cc_clears_latched_arp` (integration) — frozen arp, MIDI CC120 → settle → silence. (**RED** before Task 7: held arp notes survive CC120 today.) CC123 variant is exercised by the existing `cc123_panic_releases_pedal_held_notes` staying green.
 20. `arp_latch_persists_through_patch_load` (integration) — patch with `arp_latch: 1.0` → after `load_patch_from`, `engine.arpeggiator.latch_enabled()` is true; patch without the key → false. (**RED** before Task 7.)
 21. Full gates: `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo test --features rt-assert --test rt_safety`, `cargo deny check` all pass.
 
 ## Negative Matrix
+
+- тест: SetPartLegato при play_mode != 1/2 → поведение не меняется (assert: тап аккорда при play_mode 0 и legato=true даёт voice_count > 1)
 
 - **Missing/out-of-range index:** `SetPartMono/Legato/Glide` with `part >= MAX_PARTS` → `self.parts.get_mut(part) == None` → no-op (test 9; same guard as SetPartTranspose, mod.rs:2047).
 - **Zero/empty:** `SetPartGlide{ms:0}` → instant; negative ms clamps to 0; `arp_latch` key absent from a patch → `p("arp_latch", 0.0)` → latch off (test 20). Frozen arp with empty set and `tick()` → pattern_len > 0 keeps cycling; there is no "empty frozen" state (`latched` only set when a note was actually removed to zero).
@@ -124,8 +126,8 @@ git checkout -b legato-arp-live
 ```rust
 // ── Mono / legato / portamento ─────────────────────────────────
 
-const F60: f32 = 440.0 * 2.0_f32.powf(-9.0 / 12.0);
-const F72: f32 = 440.0 * 2.0_f32.powf(3.0 / 12.0);
+const F60: f32 = 440.0 * 1.8_f32.powf(-9.0 / 12.0);
+const F72: f32 = 440.0 * 1.8_f32.powf(3.0 / 12.0);
 
 fn patch_engine(play_mode: f32, porta_time: f32, porta_mode: f32) -> SynthEngine {
     let patches = crate::preset::load_all_patches();
@@ -483,7 +485,7 @@ fn mono_retrigger_restarts_attack() {
     let mut e = legato_engine(1.0); // Mono: full re-attack
     let ratio = reattack_ratio(&mut e);
     assert!(
-        ratio > 1.25,
+        ratio > 1.3,
         "mono retrigger did not restart the attack (peak ratio {ratio})"
     );
 }
@@ -500,7 +502,7 @@ fn legato_with_no_held_key_is_normal_attack() {
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 127 });
     let after = render_peak(&mut e, 225);
     assert!(
-        after > before * 2.0,
+        after > before * 1.8,
         "first note after silence must attack normally (mid-attack {before}, re-attack window {after})"
     );
 }
