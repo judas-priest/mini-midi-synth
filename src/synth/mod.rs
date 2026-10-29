@@ -186,6 +186,17 @@ pub enum ControlEvent {
     SetPartVelRange { part: usize, vel_min: u8, vel_max: u8 },
     SetPartPan { part: usize, pan: f32 },
     SetPartTranspose { part: usize, semitones: i8 },
+    /// Mono mode per part (last-note priority). true: poly/piano → mono
+    /// (1), Mono-ST (2) → mono (1); false: mono/mono-ST → poly (0). Latch
+    /// (3) / Poly-High / Poly-Low are left untouched. Clears the stale
+    /// mono note stack on every transition.
+    SetPartMono { part: usize, mono: bool },
+    /// Legato per part: mono (1) ↔ mono-ST (2). No-op in other modes.
+    SetPartLegato { part: usize, legato: bool },
+    /// Portamento glide time in milliseconds (0 = instant). Clamped to
+    /// 0..2000 ms (patch param `portamento_time` stays in seconds). A
+    /// non-zero value also raises portamento_mode 0→1 ("Always").
+    SetPartGlide { part: usize, ms: f32 },
     SetMacro { part: usize, index: usize, value: f32 },
     SetCcMap { map: Box<CcMap> },
     SetGlobalParam { key: &'static str, value: f32 },
@@ -2200,6 +2211,39 @@ impl SynthEngine {
                 // engine-side and are covered by the state-change drains
                 // (SetPartSf2Mode/ProgramChange/panic) — no extra action here.
                 if let Some(l) = self.parts.get_mut(part) { l.transpose = semitones; }
+            }
+            ControlEvent::SetPartMono { part, mono } => {
+                if let Some(l) = self.parts.get_mut(part) {
+                    let cur = l.params.play_mode as u8;
+                    match (mono, cur) {
+                        (true, 0) | (true, 6) => l.params.play_mode = 1.0, // poly/piano → mono
+                        (true, 2) => l.params.play_mode = 1.0,             // mono-ST → mono
+                        (false, 1) | (false, 2) => l.params.play_mode = 0.0, // → poly
+                        _ => {} // already in the requested state; latch/high/low untouched
+                    }
+                    // A stale mono stack from the previous mode must not
+                    // resurrect notes in the new mode.
+                    l.note_stack.clear();
+                }
+            }
+            ControlEvent::SetPartLegato { part, legato } => {
+                if let Some(l) = self.parts.get_mut(part) {
+                    let cur = l.params.play_mode as u8;
+                    if legato && cur == 1 {
+                        l.params.play_mode = 2.0;
+                    } else if !legato && cur == 2 {
+                        l.params.play_mode = 1.0;
+                    }
+                }
+            }
+            ControlEvent::SetPartGlide { part, ms } => {
+                if let Some(l) = self.parts.get_mut(part) {
+                    let secs = (ms / 1000.0).clamp(0.0, 2.0);
+                    l.params.portamento_time = secs;
+                    if secs > 0.0 && l.params.portamento_mode < 0.5 {
+                        l.params.portamento_mode = 1.0; // "Always" — a glide time without a mode is dead config
+                    }
+                }
             }
             ControlEvent::SetMacro { part, index, value } => {
                 if let Some(l) = self.parts.get_mut(part) {
