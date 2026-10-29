@@ -1,6 +1,7 @@
 # Seamless Patch Switch Implementation Plan
 
-anchor-checked: 2026-10-29 (якоря сняты с master @ 90ecfab чтением кода в этой сессии; аудит семантики: см. диалог 2026-10-29, факты 1–7)
+anchor-checked: 2026-10-29 (якоря сняты с master @ 90ecfab чтением кода; аудит семантики — диалог 2026-10-29, факты 1–7)
+status: executed 2026-10-29 (worktree-seamless-switch; ревью плана 3 раунда, ревью реализации SIGN OFF WITH NITS)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -91,13 +92,13 @@ cargo test --features rt-assert --test rt_safety
   перед заменой: там паттерн переключения патча через LoadPatch — он понадобится
   в новых тестах)
 
-- [ ] **Step 1: прочитать оба старых теста целиком** (sustain_audit.rs:161-184) —
+- [x] **Step 1: прочитать оба старых теста целиком** (sustain_audit.rs:161-184) —
   все их механизмы уже вшиты в код ниже: переключение патча =
   `let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));`;
   педаль = `pedal_down(&mut e)` / `pedal_up(&mut e)`; ProgramChange =
   `e.handle_event(MidiEvent::ProgramChange { channel: 0, program: 1 })`.
 
-- [ ] **Step 2: заменить оба старых теста и добавить новые** (код ниже; адаптируй
+- [x] **Step 2: заменить оба старых теста и добавить новые** (код ниже; адаптируй
   имена хелперов/патчей под реальные из Step 1 — НЕ менять харнесс):
 
 ```rust
@@ -173,7 +174,7 @@ fn panic_still_kills_after_seamless_switch() {
 }
 ```
 
-- [ ] **Step 3: latch-mismatch тест** (в `tests/sustain_audit.rs`; конструирование
+- [x] **Step 3: latch-mismatch тест** (в `tests/sustain_audit.rs`; конструирование
   PatchParams с play_mode=3 — взять init params и поменять поле; как хелпер
   грузит патчи — из Step 1):
 
@@ -208,7 +209,7 @@ fn latch_mismatch_releases_latch_voices() {
 }
 ```
 
-- [ ] **Step 4: stealer unit-тест** — в `src/synth/tests.rs` (там `use super::*`,
+- [x] **Step 4: stealer unit-тест** — в `src/synth/tests.rs` (там `use super::*`,
   есть доступ к Part приватно):
 
 ```rust
@@ -243,7 +244,7 @@ src/synth/tests.rs:750 уже правит patch.params. RED-фаза: стар�
 v_new.src_note == 36 (ожидался 40) → FAIL. НЕ-старый релиз (40) обязателен,
 иначе старый и новый вор совпадают и красной фазы нет.)
 
-- [ ] **Step 5: прогнать — зафиксировать красные**
+- [x] **Step 5: прогнать — зафиксировать красные**
 
 Run: `cargo test --test sustain_audit -- --nocapture 2>&1 | tail -40`
 Expected RED (до Task 2): pedal/held/program_change seamless-тесты FAIL на
@@ -252,7 +253,7 @@ latch-mismatch FAIL на decay-ассерте; steal-тест FAIL на
 assert_eq (v_new.src_note == 36, ожидался 40). Зелёные: panic-тест (guard) и
 new_notes_sound_after_patch_switch (guard). Остальные 36 sustain-тестов зелёные.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/sustain_audit.rs src/synth/tests.rs
@@ -266,7 +267,7 @@ git commit -m "test: seamless patch switch contracts (red — old kill semantics
   (ProgramChange release-блок), вор голосов `:709-740`
 - Modify: `src/synth/mod.rs` (latch-mismatch release в LoadPatch)
 
-- [ ] **Step 1: LoadPatch arm** — удалить из блока (mod.rs ~2067-2082) СТРОКИ:
+- [x] **Step 1: LoadPatch arm** — удалить из блока (mod.rs ~2067-2082) СТРОКИ:
 
 ```rust
                     self.sampler.part_all_notes_off(part);
@@ -306,7 +307,7 @@ git commit -m "test: seamless patch switch contracts (red — old kill semantics
 src_note в `l.latch_held: Vec<u8>`; voice.src_note — u8. Если play_mode — u8
 enum-число, сравнение `== 3` корректно.)
 
-- [ ] **Step 2: ProgramChange arm** — удалить идентичный блок (mod.rs ~1908-1919:
+- [x] **Step 2: ProgramChange arm** — удалить идентичный блок (mod.rs ~1908-1919:
   от `self.sampler.part_all_notes_off(0);` (1908) до `l.root_active = None;` (1919) — весь
   `if let Some(l) = self.parts.get_mut(0) { ... }` оборачивал ТОЛЬКО килл,
   удалить его целиком) и добавить ТОТ ЖЕ latch-mismatch release ВНУТРЬ нового
@@ -330,7 +331,7 @@ enum-число, сравнение `== 3` корректно.)
 
 (params здесь из `preset_params_cache` — тип тот же PatchParams.)
 
-- [ ] **Step 3: вор голосов** — в fallback-ветке (mod.rs:727-733) приоритет
+- [x] **Step 3: вор голосов** — в fallback-ветке (mod.rs:727-733) приоритет
   release-фазных:
 
 ```rust
@@ -352,7 +353,7 @@ enum-число, сравнение `== 3` корректно.)
 (только default-ветка; Poly-High/Low ветки не трогать. `is_releasing()` —
 voice.rs:569, существует.)
 
-- [ ] **Step 4: прогнать**
+- [x] **Step 4: прогнать**
 
 Run: `cargo test --test sustain_audit && cargo test --lib && cargo test && cargo clippy --all-targets -- -D warnings && cargo test --features rt-assert --test rt_safety`
 Expected: ВСЕ зелёные, включая новые тесты Task 1 и все существующие
@@ -360,7 +361,7 @@ Expected: ВСЕ зелёные, включая новые тесты Task 1 и 
 пара тестов — они уже заменены в Task 1; любые другие падения = регресс,
 разбирать, не ослаблять.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/synth/mod.rs
@@ -372,7 +373,7 @@ git commit -m "feat: seamless patch switch — tails ring out, held keys sustain
 **Files:**
 - Modify: `docs/TECHDEBT.md`
 
-- [ ] **Step 1:** в TECHDEBT.md добавить (после #27):
+- [x] **Step 1:** в TECHDEBT.md добавить (после #27):
 
 ```markdown
 ## 28. Политика смены патча: seamless вместо kill-on-switch (2026-10-29, одобрено юзером)
@@ -389,7 +390,7 @@ release-фазные. Известные компромиссы: DSP-хвост 
 pedal-up/CC123; SF2 latch отпускается pedal-up) — задокументировано ревью.
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/TECHDEBT.md
