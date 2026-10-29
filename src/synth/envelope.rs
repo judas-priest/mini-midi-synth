@@ -157,6 +157,12 @@ impl Envelope {
         self.stage = EnvStage::Release;
     }
 
+    /// Immediate kill (CC120): zero output, Idle stage. No allocation.
+    pub fn kill(&mut self) {
+        self.stage = EnvStage::Idle;
+        self.output = 0.0;
+    }
+
     pub fn is_idle(&self) -> bool {
         self.stage == EnvStage::Idle
     }

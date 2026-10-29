@@ -1812,9 +1812,12 @@ impl SynthEngine {
                     // gates CC123 on the channel hold pedal, and the GUI
                     // sustain atom must not stay stuck ON.
                     self.set_sustain(0);
+                    let all_sound_off = cc == 120; // All Sound Off kills, All Notes Off releases
                     for part in &mut self.parts {
                         for v in &mut part.voices {
-                            if v.active { v.note_off(); }
+                            if v.active {
+                                if all_sound_off { v.kill(); } else { v.note_off(); }
+                            }
                         }
                         part.note_stack.clear();
                         part.latch_held.clear();
@@ -1822,7 +1825,11 @@ impl SynthEngine {
                         part.sustained_notes = [false; 128];
                         part.keys_down = [false; 128];
                     }
-                    self.sampler.all_notes_off();
+                    if all_sound_off {
+                        self.sampler.all_sound_off();
+                    } else {
+                        self.sampler.all_notes_off();
+                    }
                     self.drum_engine.reset_choke_state();
                     if let Some(off_note) = self.arpeggiator.flush_current_note() {
                         // Same transposed routing as flush_arp_note_off.

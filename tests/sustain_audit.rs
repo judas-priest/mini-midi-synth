@@ -125,6 +125,39 @@ fn cc120_panic_releases_pedal_held_notes() {
 }
 
 #[test]
+fn cc120_kills_sound_immediately() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 100) > SILENCE, "no sound to kill");
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 120, value: 0 });
+    // No settle: All Sound Off must be audible silence within two blocks
+    let right_after = render_peak(&mut e, 2);
+    assert!(right_after < SILENCE, "CC120 left a release tail (peak {right_after})");
+}
+
+#[test]
+fn cc123_keeps_release_tail_then_silences() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 100) > SILENCE);
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 123, value: 0 });
+    // All Notes Off is release-style: the tail must still be audible right after
+    let tail = render_peak(&mut e, 2);
+    assert!(tail > SILENCE, "CC123 lost its release tail (peak {tail})");
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "CC123 left ringing (peak {after})");
+}
+
+#[test]
+fn cc120_on_silent_engine_is_noop() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 120, value: 0 });
+    let peak = render_peak(&mut e, 10);
+    assert!(peak < SILENCE, "CC120 on a silent engine produced sound (peak {peak})");
+}
+
+#[test]
 fn patch_switch_releases_pedal_held_notes() {
     let mut e = engine_with_init_patch();
     pedal_down(&mut e);

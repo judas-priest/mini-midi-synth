@@ -510,6 +510,15 @@ impl Voice {
         self.filter_env.note_off();
     }
 
+    /// Immediate kill (CC120 All Sound Off): voice stops producing sound from
+    /// the next tick, no release tail, no allocation. Compare `note_off`,
+    /// which only arms the release envelope.
+    pub fn kill(&mut self) {
+        self.active = false;
+        self.amp_env.kill();
+        self.filter_env.kill();
+    }
+
     /// Re-trigger envelopes without resetting oscillator state.
     /// Used by step sequencer for per-step articulation.
     pub fn retrigger_envelope(&mut self) {

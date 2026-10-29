@@ -506,6 +506,15 @@ impl SamplerEngine {
         }
     }
 
+    /// All Sound Off (CC120): kill every rustysynth voice immediately, no
+    /// release tail. Pedal state is irrelevant (voices are cleared) but is
+    /// still cleared so a later note-off is not swallowed.
+    pub fn all_sound_off(&mut self) {
+        self.sustain = false;
+        if let Some(synth) = &mut self.keys.synth { synth.note_off_all(true); }
+        if let Some(synth) = &mut self.drums.synth { synth.note_off_all(true); }
+    }
+
     /// Get next stereo sample from both keys and drums synths.
     #[inline]
     pub fn tick(&mut self) -> (f32, f32) {
