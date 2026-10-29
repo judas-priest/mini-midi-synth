@@ -209,6 +209,10 @@ pub enum ControlEvent {
     DrumSeqSwing { swing: f32 },
     DrumSeqPattern { pattern: u8 },
     DrumSeqLength { length: u8 },
+    /// Time signature for the current pattern: sets `beats_per_bar` and
+    /// `length = beats_per_bar * 4` (16th steps). Clamped to 2..=4 —
+    /// MAX_STEPS = 16 caps the bar at 4/4 (see docs/TECHDEBT.md §21).
+    DrumSeqTimeSig { beats_per_bar: u8 },
     DrumSeqRecord { recording: bool },
     DrumSeqClear,
     DrumSeqUndo,
@@ -2303,8 +2307,19 @@ impl SynthEngine {
                 self.drum_engine.sequencer.current_pattern = pattern;
             }
             ControlEvent::DrumSeqLength { length } => {
+                // Clamp: record_hit делит на len (drum.rs) — ноль из кольца
+                // это div-by-zero; 0..=255 → 1..=16.
                 let pat = self.drum_engine.sequencer.current_pattern as usize;
-                self.drum_engine.sequencer.patterns[pat].length = length;
+                self.drum_engine.sequencer.patterns[pat].length = length.clamp(1, 16);
+            }
+            ControlEvent::DrumSeqTimeSig { beats_per_bar } => {
+                // Signature = beats_per_bar; the bar IS `length` steps of 16ths,
+                // so length follows: 4 steps per beat at any signature.
+                // Clamp 2..=4: MAX_STEPS = 16 caps the bar at 4/4.
+                let pat = self.drum_engine.sequencer.current_pattern as usize;
+                let bpb = beats_per_bar.clamp(2, 4);
+                self.drum_engine.sequencer.patterns[pat].beats_per_bar = bpb;
+                self.drum_engine.sequencer.patterns[pat].length = bpb * 4;
             }
             ControlEvent::DrumSeqRecord { recording } => {
                 if recording && !self.drum_engine.sequencer.recording {

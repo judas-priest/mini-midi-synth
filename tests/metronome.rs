@@ -175,3 +175,74 @@ fn tc10_note83_velocity0_does_not_toggle_rec() {
     assert!(click_events(&mut e, 800).is_empty(),
         "velocity-0 toggled rec / started transport");
 }
+
+// --- Time signatures (TECHDEBT #21): метроном уже корректен при любой длине.
+// 120 BPM, 48 kHz, BLOCK_SIZE=32 → шаг = 6000 сэмплов = 187.5 блоков, доля
+// (4 шага) = 750 блоков. DrumSeqPlay сбрасывает step в 0, первый клик приходит
+// рано (~блок 187) — интервалы меряем windows().
+
+fn engine_with_length(bpm: f32, length: u8) -> SynthEngine {
+    let mut e = metronome_engine(bpm, true);
+    let _ = e.handle_control(ControlEvent::DrumSeqLength { length });
+    let _ = e.handle_control(ControlEvent::DrumSeqPlay { playing: true });
+    e
+}
+
+/// Акценты (пики > 1.2× соседнего бита) идут с периодом `bar_events` событий.
+/// Последнее событие не проверяется: замыкание периода сравнивало бы такт
+/// с тактом (равные gain'и), а не такт с долей.
+fn assert_bar_period(events: &[(usize, f32)], bar_events: usize) {
+    assert!(events.len() >= 2 * bar_events, "too few events: {events:?}");
+    for i in 0..events.len() - 1 {
+        let is_bar_start = i % bar_events == 0;
+        let next = events[i + 1].1;
+        let louder = events[i].1 > next * 1.2;
+        if is_bar_start {
+            assert!(louder, "event {i} (bar start) not accented: {events:?}");
+        } else {
+            assert!(!louder, "event {i} unexpectedly accented: {events:?}");
+        }
+    }
+}
+
+/// TC11 (3/4, length=12): доли 0,4,8; такт = 12 шагов = 3 события. ~6000 блоков ≈ 3 такта.
+#[test]
+fn tc11_three_quarter_length_12_clicks_and_accents() {
+    let mut e = engine_with_length(120.0, 12);
+    let events = click_events(&mut e, 6000);
+    assert!(events.len() >= 6, "expected >= 6 beats, got {events:?}");
+    for w in events.windows(2) {
+        let dt = (w[1].0 - w[0].0) as f32;
+        assert!((dt - 750.0).abs() < 4.0, "beat interval {dt} blocks, expected ~750");
+    }
+    assert_bar_period(&events, 3);
+}
+
+/// TC12 (2/4, length=8): доля = 4 шага, такт = 2 события.
+#[test]
+fn tc12_two_quarter_length_8_clicks_and_accents() {
+    let mut e = engine_with_length(120.0, 8);
+    let events = click_events(&mut e, 6000);
+    assert!(events.len() >= 6, "expected >= 6 beats, got {events:?}");
+    for w in events.windows(2) {
+        let dt = (w[1].0 - w[0].0) as f32;
+        assert!((dt - 750.0).abs() < 4.0, "beat interval {dt} blocks, expected ~750");
+    }
+    assert_bar_period(&events, 2);
+}
+
+/// TC13 (free, length=5): клики на шагах 0 и 4 → интервалы чередуются
+/// 750 / 187.5. Акцент на шаге 0 = каждое ЧЁТНОЕ событие.
+#[test]
+fn tc13_free_length_5_clicks_at_0_and_4() {
+    let mut e = engine_with_length(120.0, 5);
+    let events = click_events(&mut e, 6000);
+    assert!(events.len() >= 6, "expected >= 6 clicks, got {events:?}");
+    for (i, w) in events.windows(2).enumerate() {
+        let dt = (w[1].0 - w[0].0) as f32;
+        // Чётное событие = такт (шаг 0) → до следующего 4 шага; нечётное = шаг 4 → 1 шаг до края такта.
+        let expect = if i % 2 == 0 { 750.0 } else { 187.5 };
+        assert!((dt - expect).abs() < 4.0, "interval {dt} blocks, expected ~{expect}: {events:?}");
+    }
+    assert_bar_period(&events, 2);
+}
