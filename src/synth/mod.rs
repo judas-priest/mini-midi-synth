@@ -212,6 +212,7 @@ pub enum ControlEvent {
     DrumSeqRecord { recording: bool },
     DrumSeqClear,
     DrumSeqUndo,
+    DrumSeqRedo,
     DrumLoadKit { patterns: Box<[DrumPattern; 8]>, params: Box<[DrumSlotParams; NUM_DRUM_SLOTS]>, bpm: f32, swing: f32, volume: f32 },
     // Looper controls
     LooperRecord,
@@ -2320,7 +2321,11 @@ impl SynthEngine {
             ControlEvent::DrumSeqUndo => {
                 self.drum_engine.sequencer.undo();
             }
+            ControlEvent::DrumSeqRedo => {
+                self.drum_engine.sequencer.redo();
+            }
             ControlEvent::DrumLoadKit { patterns, params, bpm, swing, volume } => {
+                self.drum_engine.sequencer.cancel_redo();
                 // Both arrays are Copy; the boxes travel back for freeing.
                 self.drum_engine.sequencer.patterns = *patterns;
                 self.drum_engine.params = *params;

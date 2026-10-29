@@ -734,6 +734,9 @@ pub struct StepSequencer {
     /// Shared atom so the GUI thread can check undo availability without
     /// touching the (potentially mid-mutation) sequencer itself.
     undo_atom: Arc<AtomicBool>,
+    redo_snapshot: Option<Box<[DrumPattern; MAX_PATTERNS]>>,
+    /// Shared flag for the GUI LED (pad 32 white when armed).
+    redo_atom: Arc<AtomicBool>,
 }
 
 impl StepSequencer {
@@ -749,6 +752,8 @@ impl StepSequencer {
             phase_acc: 0.0,
             undo_snapshot: None,
             undo_atom: Arc::new(AtomicBool::new(false)),
+            redo_snapshot: None,
+            redo_atom: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -764,24 +769,60 @@ impl StepSequencer {
         self.undo_atom.store(self.undo_snapshot.is_some(), Ordering::Relaxed);
     }
 
+    /// Redo the last undone destructive op (single level, same Box pattern as
+    /// undo_snapshot). undo() pushes the pre-restore state here; redo() swaps
+    /// it back and re-arms undo.
+    pub fn redo(&mut self) {
+        if let Some(snapshot) = self.redo_snapshot.take() {
+            self.undo_snapshot = Some(Box::new(self.patterns));
+            self.patterns = *snapshot;
+        }
+        self.sync_undo_atom();
+        self.sync_redo_atom();
+    }
+
+    /// A new destructive op invalidates redo: the saved state is stale and
+    /// redoing it would resurrect patterns the user has since replaced.
+    pub fn cancel_redo(&mut self) {
+        self.redo_snapshot = None;
+        self.sync_redo_atom();
+    }
+
+    fn sync_redo_atom(&self) {
+        self.redo_atom.store(self.redo_snapshot.is_some(), Ordering::Relaxed);
+    }
+
+    pub fn redo_atom(&self) -> Arc<AtomicBool> {
+        self.redo_atom.clone()
+    }
+
+    pub fn redo_available(&self) -> bool {
+        self.redo_atom.load(Ordering::Relaxed)
+    }
+
     /// Clear all steps in the current pattern.
     pub fn clear_pattern(&mut self) {
+        self.cancel_redo();
         self.undo_snapshot = Some(Box::new(self.patterns));
         let pat = &mut self.patterns[self.current_pattern as usize];
         pat.steps = [[StepData::default(); MAX_STEPS]; NUM_DRUM_SLOTS];
         self.sync_undo_atom();
     }
 
-    /// Undo last clear or restore pre-recording state.
+    /// Undo last clear or restore pre-recording state. The pre-restore state
+    /// goes to redo_snapshot so redo() can bring it back.
     pub fn undo(&mut self) {
         if let Some(snapshot) = self.undo_snapshot.take() {
+            self.redo_snapshot = Some(Box::new(self.patterns));
             self.patterns = *snapshot;
         }
         self.sync_undo_atom();
+        self.sync_redo_atom();
     }
 
     /// Save snapshot before destructive operation (e.g. recording start).
     pub fn save_snapshot(&mut self) {
+        self.cancel_redo();
         self.undo_snapshot = Some(Box::new(self.patterns));
         self.sync_undo_atom();
     }
@@ -975,6 +1016,10 @@ impl DrumEngine {
 
     pub fn undo_atom(&self) -> Arc<AtomicBool> {
         self.sequencer.undo_atom()
+    }
+
+    pub fn redo_atom(&self) -> Arc<AtomicBool> {
+        self.sequencer.redo_atom()
     }
 
     pub fn undo_available(&self) -> bool {
@@ -1232,5 +1277,65 @@ impl DrumEngine {
     #[allow(dead_code)]
     pub fn slot_name(slot: usize) -> &'static str {
         if slot < NUM_DRUM_SLOTS { DRUM_NAMES[slot] } else { "?" }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seq() -> StepSequencer {
+        let mut s = StepSequencer::new();
+        // mark one step so roundtrips are observable
+        s.patterns[0].steps[0][0].velocity = 100;
+        s
+    }
+
+    #[test]
+    fn undo_redo_roundtrip() {
+        let mut s = seq();
+        s.save_snapshot();
+        s.patterns[0].steps[0][0].velocity = 0; // destructive edit
+        s.undo();
+        assert_eq!(s.patterns[0].steps[0][0].velocity, 100, "undo restores");
+        assert!(s.redo_available(), "undo arms redo");
+        s.redo();
+        assert_eq!(s.patterns[0].steps[0][0].velocity, 0, "redo re-applies the edit");
+        assert!(s.undo_available(), "redo re-arms undo");
+        assert!(!s.redo_available(), "single level: redo consumed");
+        s.undo();
+        assert_eq!(s.patterns[0].steps[0][0].velocity, 100);
+        assert!(s.redo_available());
+    }
+
+    #[test]
+    fn redo_without_undo_is_noop() {
+        let mut s = seq();
+        s.redo();
+        assert_eq!(s.patterns[0].steps[0][0].velocity, 100);
+        assert!(!s.redo_available(), "no pending undo -> no redo");
+    }
+
+    #[test]
+    fn destructive_op_invalidates_redo() {
+        let mut s = seq();
+        s.save_snapshot();
+        s.undo();
+        assert!(s.redo_available());
+        s.save_snapshot(); // new destructive op
+        assert!(!s.redo_available(), "stale redo must not resurrect old patterns");
+        s.clear_pattern();
+        assert!(!s.redo_available(), "clear_pattern must not create redo");
+    }
+
+    #[test]
+    fn redo_atom_tracks_snapshot() {
+        let mut s = StepSequencer::new();
+        assert!(!s.redo_available());
+        s.save_snapshot();
+        s.undo();
+        assert!(s.redo_available());
+        s.redo();
+        assert!(!s.redo_available(), "redo consumed");
     }
 }
