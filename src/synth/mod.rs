@@ -167,10 +167,20 @@ pub struct LoadPatchEvent {
     pub wavetable: Option<(Arc<Vec<f32>>, usize, usize)>,
 }
 
+/// Root-only gate decision for one note-on (TECHDEBT #6).
+pub(crate) enum RootDecision {
+    /// Suppressed: an equal-or-lower key is already the sounding root.
+    Suppress,
+    /// Sound `note`; `release` (raw) is the old root to release first.
+    Sound { release: Option<u8>, note: u8 },
+}
+
 pub enum ControlEvent {
     LoadPatch(Box<LoadPatchEvent>),
     SetPartEnabled { part: usize, enabled: bool },
     SetPartMute { part: usize, mute: bool },
+    /// Root-note-only mode (bass split): part sounds only the lowest held key
+    SetPartRootOnly { part: usize, on: bool },
     SetPartVolume { part: usize, volume: f32 },
     SetPartRange { part: usize, min_note: u8, max_note: u8 },
     SetPartVelRange { part: usize, vel_min: u8, vel_max: u8 },
@@ -470,6 +480,10 @@ struct Part {
     release_vel: f32,       // last note-off velocity
     sustained_notes: [bool; 128], // notes held by sustain pedal
     keys_down: [bool; 128],   // raw key physically held (pedal-up must spare these)
+    /// Root-only mode (TECHDEBT #6): gate + per-part lowest-note tracking.
+    root_only: bool,
+    root_held: [bool; 128],   // keys currently physically held, for re-keying
+    root_active: Option<u8>,  // raw note currently sounding as the root
     breath: f32,            // CC2, 0..1
     expression: f32,        // CC11, 0..1
     sustain_pedal: f32,     // CC64: 0.0 or 1.0
@@ -514,6 +528,7 @@ impl Part {
             alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
             sustained_notes: [false; 128],
             keys_down: [false; 128],
+            root_only: false, root_held: [false; 128], root_active: None,
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
             cached_mod_sources: mod_matrix::ModSources {
@@ -866,6 +881,34 @@ impl Part {
 
     fn has_active_notes(&self) -> bool {
         self.voices.iter().any(|v| v.active && !v.is_releasing())
+    }
+
+    /// Root-only gate, note-on side. Called for EVERY in-range note-on routed
+    /// to this part (both engines) via SynthEngine::route_note_on.
+    fn root_on(&mut self, raw: u8) -> RootDecision {
+        self.root_held[raw as usize] = true;
+        // Latch mode is NOT gated: latch toggles on note-on and the gate would
+        // break the toggle contract (tap-off suppressed under root-only).
+        if !self.root_only || self.params.play_mode as u8 == 3 {
+            return RootDecision::Sound { release: None, note: raw };
+        }
+        match self.root_active {
+            None => { self.root_active = Some(raw); RootDecision::Sound { release: None, note: raw } }
+            Some(cur) if raw < cur => {
+                self.root_active = Some(raw);
+                RootDecision::Sound { release: Some(cur), note: raw }
+            }
+            Some(_) => RootDecision::Suppress, // duplicate or higher key
+        }
+    }
+
+    /// Root-only gate, note-off side. Returns the next-lowest still-held key
+    /// to re-key to (Some only when `raw` WAS the sounding root).
+    fn root_off(&mut self, raw: u8) -> Option<u8> {
+        self.root_held[raw as usize] = false;
+        if !self.root_only || self.root_active != Some(raw) { return None; }
+        self.root_active = (0u8..128).find(|&n| self.root_held[n as usize]);
+        self.root_active
     }
 
     fn update_held_range(&mut self) {
@@ -1437,6 +1480,60 @@ impl SynthEngine {
         }
     }
 
+    /// Shared part note-on dispatch: range/velocity gate, root-only gate
+    /// (TECHDEBT #6), DSP voice or SF2 sampler. The enabled/mute guards stay
+    /// at the call sites, which intentionally differ (offs skip mute).
+    fn route_note_on(&mut self, i: usize, raw: u8, velocity: u8) {
+        let (sf2_mode, transpose, lo, hi, vmin, vmax) = {
+            let p = &self.parts[i];
+            (p.sf2_mode, p.transpose, p.min_note, p.max_note, p.vel_min, p.vel_max)
+        };
+        if raw < lo || raw > hi || velocity < vmin || velocity > vmax { return; }
+        let RootDecision::Sound { release, note } = self.parts[i].root_on(raw) else { return };
+        let tr = |n: u8| (n as i16 + transpose as i16).clamp(0, 127) as u8;
+        if sf2_mode {
+            if let Some(old) = release { self.sampler.note_off(i, tr(old)); }
+            self.sampler.note_on(i, tr(note), velocity);
+        } else {
+            if let Some(old) = release {
+                // The replaced root leaves outright: a bass layer must not
+                // pile up pedal-sustained roots.
+                let part = &mut self.parts[i];
+                for v in &mut part.voices {
+                    if v.active && v.src_note == old { v.note_off(); }
+                }
+                part.sustained_notes[old as usize] = false;
+            }
+            self.parts[i].note_on(note, velocity);
+        }
+    }
+
+    /// Shared part note-off dispatch with root-only re-keying. Offs skip the
+    /// range check (matching today's behavior) so a range change mid-note
+    /// cannot orphan a voice.
+    fn route_note_off(&mut self, i: usize, raw: u8) {
+        let (sf2_mode, transpose, root_only, last_vel) = {
+            let p = &self.parts[i];
+            (p.sf2_mode, p.transpose, p.root_only, p.last_velocity)
+        };
+        let next = self.parts[i].root_off(raw);
+        let tr = |n: u8| (n as i16 + transpose as i16).clamp(0, 127) as u8;
+        if sf2_mode {
+            self.sampler.note_off(i, tr(raw));
+            if let Some(n) = next { self.sampler.note_on(i, tr(n), (last_vel * 127.0) as u8); }
+        } else {
+            self.parts[i].note_off(raw);
+            if root_only {
+                let part = &mut self.parts[i];
+                for v in &mut part.voices {
+                    if v.active && v.src_note == raw { v.note_off(); }
+                }
+                part.sustained_notes[raw as usize] = false;
+                if let Some(n) = next { part.note_on(n, (last_vel * 127.0) as u8); }
+            }
+        }
+    }
+
     /// Last held arp key released: the arpeggiator resets pattern_len, so
     /// tick() will never dispatch the pending gate-off — the sounding voice
     /// would hang forever. Dispatch the off here (same routing as tick_block).
@@ -1659,30 +1756,17 @@ impl SynthEngine {
                         self.arpeggiator.note_on(note, velocity);
                     }
                 } else if velocity == 0 {
-                    for (i, part) in self.parts.iter_mut().enumerate() {
-                        if !part.enabled { continue; }
-                        let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
-                        if part.sf2_mode {
-                            self.sampler.note_off(i, transposed);
-                        } else {
-                            part.note_off(note); // raw: part matches by src_note
-                        }
+                    for i in 0..self.parts.len() {
+                        if !self.parts[i].enabled { continue; }
+                        self.route_note_off(i, note);
                         // Whole-performance recording: tag with the part that
                         // receives the off (looper replay routes per part id).
                         self.looper.record_event(note, 0, i as u8);
                     }
                 } else {
-                    for (i, part) in self.parts.iter_mut().enumerate() {
-                        if !part.enabled || part.mute { continue; }
-                        // Key range + velocity range check
-                        let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
-                        if note < part.min_note || note > part.max_note { continue; }
-                        if velocity < part.vel_min || velocity > part.vel_max { continue; }
-                        if part.sf2_mode {
-                            self.sampler.note_on(i, transposed, velocity);
-                        } else {
-                            part.note_on(note, velocity); // raw: part transposes internally
-                        }
+                    for i in 0..self.parts.len() {
+                        if !self.parts[i].enabled || self.parts[i].mute { continue; }
+                        self.route_note_on(i, note, velocity);
                         // Whole-performance recording: tag the event with the
                         // part that actually sounds it (looper replay routes
                         // per part id).
@@ -1711,13 +1795,8 @@ impl SynthEngine {
                     self.arpeggiator.note_off(note);
                     self.flush_arp_note_off();
                 } else {
-                    for (i, part) in self.parts.iter_mut().enumerate() {
-                        let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
-                        if part.sf2_mode {
-                            self.sampler.note_off(i, transposed);
-                        } else {
-                            part.note_off(note); // raw: part matches by src_note
-                        }
+                    for i in 0..self.parts.len() {
+                        self.route_note_off(i, note);
                         // Whole-performance recording: tag with the part that
                         // receives the off (looper replay routes per part id).
                         self.looper.record_event(note, 0, i as u8);
@@ -1768,6 +1847,8 @@ impl SynthEngine {
                     l.keys_down = [false; 128];
                     l.note_stack.clear();
                     l.latch_held.clear();
+                    l.root_held = [false; 128];
+                    l.root_active = None;
                 }
                 // In SF2 mode, change the SF2 program; in synth mode, change the synth patch
                 if self.parts.first().map(|l| l.sf2_mode).unwrap_or(false) {
@@ -1823,6 +1904,8 @@ impl SynthEngine {
                         }
                         part.note_stack.clear();
                         part.latch_held.clear();
+                        part.root_held = [false; 128];
+                        part.root_active = None;
                         part.sustain_pedal = 0.0;
                         part.sustained_notes = [false; 128];
                         part.keys_down = [false; 128];
@@ -1917,6 +2000,8 @@ impl SynthEngine {
                     l.keys_down = [false; 128];
                     l.note_stack.clear();
                     l.latch_held.clear();
+                    l.root_held = [false; 128];
+                    l.root_active = None;
                     l.min_note = params.min_note as u8;
                     l.max_note = params.max_note as u8;
                     // Sync macro values from preset into live part state
@@ -1987,6 +2072,8 @@ impl SynthEngine {
                         l.keys_down = [false; 128];
                         l.note_stack.clear();
                         l.latch_held.clear();
+                        l.root_held = [false; 128];
+                        l.root_active = None;
                     }
                     l.enabled = enabled;
                 }
@@ -2010,10 +2097,21 @@ impl SynthEngine {
                         l.keys_down = [false; 128];
                         l.note_stack.clear();
                         l.latch_held.clear();
+                        l.root_held = [false; 128];
+                        l.root_active = None;
                     } else {
                         // Restore the SF2 channel volume zeroed on mute.
                         self.sampler.set_layer_volume(part, l.volume);
                     }
+                }
+            }
+            ControlEvent::SetPartRootOnly { part, on } => {
+                if let Some(l) = self.parts.get_mut(part) {
+                    l.root_only = on;
+                    // Reset tracking both ways: a stale root_active across the
+                    // toggle would re-key on the next unrelated note-off.
+                    l.root_held = [false; 128];
+                    l.root_active = None;
                 }
             }
             ControlEvent::SetPartVolume { part, volume } => {
@@ -2248,6 +2346,8 @@ impl SynthEngine {
                     l.keys_down = [false; 128];
                     l.note_stack.clear();
                     l.latch_held.clear();
+                    l.root_held = [false; 128];
+                    l.root_active = None;
                     l.sf2_mode = enabled;
                     // (Re)apply the part's pan on the SF2 channel — CC10 was
                     // never sent while the part was in DSP mode.
@@ -2688,7 +2788,10 @@ impl SynthEngine {
                         }
                         midi_player::TrackInstrument::DspLayer0 => {
                             self.seq_route[ch as usize] = 0;
-                            if let Some(part) = self.parts.get_mut(0) {
+                            if self.parts.first().map(|p| p.root_only).unwrap_or(false) {
+                                // Root-only gate (range/velocity checked inside)
+                                if !self.parts.is_empty() { self.route_note_on(0, note, velocity); }
+                            } else if let Some(part) = self.parts.get_mut(0) {
                                 part.note_on(note, velocity);
                             }
                         }
@@ -2700,7 +2803,9 @@ impl SynthEngine {
                     },
                     midi_player::SeqEventData::NoteOff { note } => match self.seq_route[ch as usize] {
                         0 => {
-                            if let Some(part) = self.parts.get_mut(0) {
+                            if self.parts.first().map(|p| p.root_only).unwrap_or(false) {
+                                if !self.parts.is_empty() { self.route_note_off(0, note); }
+                            } else if let Some(part) = self.parts.get_mut(0) {
                                 part.note_off(note);
                             }
                         }
@@ -2729,24 +2834,18 @@ impl SynthEngine {
             {
                 let (arp_on, arp_off) = self.arpeggiator.tick();
                 if let Some(off_note) = arp_off {
-                    for (i, part) in self.parts.iter_mut().enumerate() {
-                        if !part.enabled { continue; }
-                        let transposed = (off_note as i16 + part.transpose as i16).clamp(0, 127) as u8;
-                        if part.sf2_mode { self.sampler.note_off(i, transposed); }
-                        else { part.note_off(off_note); } // raw: part matches by src_note
+                    for i in 0..self.parts.len() {
+                        if !self.parts[i].enabled { continue; }
+                        self.route_note_off(i, off_note);
                     }
                     let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
                     self.looper.record_event(off_note, 0, ap);
                 }
                 if let Some((note, vel)) = arp_on {
                     let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
-                    for (i, part) in self.parts.iter_mut().enumerate() {
-                        if !part.enabled || part.mute { continue; }
-                        let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
-                        if note < part.min_note || note > part.max_note { continue; }
-                        if vel < part.vel_min || vel > part.vel_max { continue; }
-                        if part.sf2_mode { self.sampler.note_on(i, transposed, vel); }
-                        else { part.note_on(note, vel); } // raw: part transposes internally
+                    for i in 0..self.parts.len() {
+                        if !self.parts[i].enabled || self.parts[i].mute { continue; }
+                        self.route_note_on(i, note, vel);
                     }
                     self.looper.record_event(note, vel, ap);
                 }
@@ -2757,8 +2856,12 @@ impl SynthEngine {
             for &(note, vel, part_id) in &looper_events {
                 if note == 0 && vel == 0 && part_id == 255 { break; }
                 let pi = part_id as usize;
-                if let Some(part) = self.parts.get_mut(pi) {
-                    if !part.enabled { continue; }
+                if self.parts.get(pi).map(|p| !p.enabled).unwrap_or(true) { continue; }
+                if self.parts[pi].root_only {
+                    // Root-only gate (range/velocity checked inside)
+                    if vel > 0 { self.route_note_on(pi, note, vel); }
+                    else { self.route_note_off(pi, note); }
+                } else if let Some(part) = self.parts.get_mut(pi) {
                     let transposed = (note as i16 + part.transpose as i16).clamp(0, 127) as u8;
                     if vel > 0 {
                         if part.sf2_mode {

@@ -580,6 +580,90 @@ fn dispatch_arp_note_off_releases_dsp_voice_with_transpose_set() {
     );
 }
 
+// ── Root-only mode (TECHDEBT #6) ───────────────────────────────
+
+fn root_only_engine() -> SynthEngine {
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    e
+}
+
+#[test]
+fn root_only_suppresses_higher_notes() {
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active), "lowest note did not sound");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].voices.iter().filter(|v| v.active && !v.is_releasing()).count(), 1,
+        "higher note was not suppressed");
+    assert_eq!(e.parts[0].root_active, Some(60));
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 64 }); // non-root off: no-op
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(60), "non-root note-off re-keyed the root");
+}
+
+#[test]
+fn root_only_rekeys_to_new_lowest() {
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 60),
+        "new lowest did not start a voice");
+    assert!(e.parts[0].voices.iter().filter(|v| v.active && v.is_releasing() && v.src_note == 64).count() >= 1,
+        "old root was not released");
+    assert_eq!(e.parts[0].root_active, Some(60));
+}
+
+#[test]
+fn root_only_release_of_root_rekeys_next_lowest() {
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 64),
+        "next-lowest key did not re-key after root release");
+    assert_eq!(e.parts[0].root_active, Some(64));
+}
+
+#[test]
+fn root_only_toggle_resets_tracking() {
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: false });
+    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    assert_eq!(e.parts[0].root_active, None, "toggle did not reset root_active");
+    assert!(!e.parts[0].root_held.iter().any(|&h| h), "toggle did not reset root_held");
+    // A stale root would have swallowed this note:
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()),
+        "note after toggle was suppressed by stale tracking");
+}
+
+#[test]
+fn root_only_out_of_range_key_does_not_join_held_mask() {
+    let mut e = root_only_engine();
+    let _ = e.handle_control(ControlEvent::SetPartRange { part: 0, min_note: 48, max_note: 70 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 30, velocity: 100 }); // out of range
+    for _ in 0..100 { e.tick(); }
+    assert!(!e.parts[0].root_held[30], "out-of-range key joined the held mask");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, None, "out-of-range key re-keyed after root off");
+}
+
 // ── Sustain-atom coherence on MIDI-seq stop ────────────────────
 
 #[test]
