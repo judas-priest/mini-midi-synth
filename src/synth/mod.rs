@@ -1421,17 +1421,29 @@ impl SynthEngine {
     /// Last held arp key released: the arpeggiator resets pattern_len, so
     /// tick() will never dispatch the pending gate-off — the sounding voice
     /// would hang forever. Dispatch the off here (same routing as tick_block).
+    /// Dispatches an arp note-off to every enabled part with part transpose
+    /// applied: SF2 channels are keyed by transposed pitch, DSP parts receive
+    /// the raw note (they match offs by src_note). Shared by flush_arp_note_off
+    /// and the panic paths (CC120/123, AllNotesOff, SetArpParams-off) so the
+    /// SF2 gate voice always gets a matching off, transposed like its on.
+    fn dispatch_arp_note_off(&mut self, off: u8) {
+        for (i, part) in self.parts.iter_mut().enumerate() {
+            if !part.enabled { continue; }
+            let transposed = (off as i16 + part.transpose as i16).clamp(0, 127) as u8;
+            if part.sf2_mode { self.sampler.note_off(i, transposed); }
+            else { part.note_off(off); } // raw: part matches by src_note
+        }
+    }
+
+    /// Last held arp key released: the arpeggiator resets pattern_len, so
+    /// tick() will never dispatch the pending gate-off — the sounding voice
+    /// would hang forever. Dispatch the off here (same routing as tick_block).
     fn flush_arp_note_off(&mut self) {
         if self.arpeggiator.has_held_notes() {
             return; // tick() still owns gate-offs
         }
         if let Some(off) = self.arpeggiator.flush_current_note() {
-            for (i, part) in self.parts.iter_mut().enumerate() {
-                if !part.enabled { continue; }
-                let transposed = (off as i16 + part.transpose as i16).clamp(0, 127) as u8;
-                if part.sf2_mode { self.sampler.note_off(i, transposed); }
-                else { part.note_off(off); } // raw: part matches by src_note
-            }
+            self.dispatch_arp_note_off(off);
             let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
             self.looper.record_event(off, 0, ap);
         }
@@ -1813,11 +1825,8 @@ impl SynthEngine {
                     self.sampler.all_notes_off();
                     self.drum_engine.reset_choke_state();
                     if let Some(off_note) = self.arpeggiator.flush_current_note() {
-                        for (i, part) in self.parts.iter_mut().enumerate() {
-                            if !part.enabled { continue; }
-                            if part.sf2_mode { self.sampler.note_off(i, off_note); }
-                            else { part.note_off(off_note); }
-                        }
+                        // Same transposed routing as flush_arp_note_off.
+                        self.dispatch_arp_note_off(off_note);
                     }
                     return;
                 }
@@ -2176,11 +2185,8 @@ impl SynthEngine {
                 self.drum_engine.reset_choke_state();
                 // Clear arpeggiator held notes
                 if let Some(off_note) = self.arpeggiator.flush_current_note() {
-                    for (i, part) in self.parts.iter_mut().enumerate() {
-                        if !part.enabled { continue; }
-                        if part.sf2_mode { self.sampler.note_off(i, off_note); }
-                        else { part.note_off(off_note); }
-                    }
+                    // Same transposed routing as flush_arp_note_off.
+                    self.dispatch_arp_note_off(off_note);
                 }
                 self.arpeggiator.clear();
             }
@@ -2341,11 +2347,8 @@ impl SynthEngine {
                 // If disabling, send note-off for current arp note
                 if !enabled {
                     if let Some(off_note) = self.arpeggiator.flush_current_note() {
-                        for (i, part) in self.parts.iter_mut().enumerate() {
-                            if !part.enabled { continue; }
-                            if part.sf2_mode { self.sampler.note_off(i, off_note); }
-                            else { part.note_off(off_note); }
-                        }
+                        // Same transposed routing as flush_arp_note_off.
+                        self.dispatch_arp_note_off(off_note);
                     }
                 }
                 self.arpeggiator.set_params(enabled, mode, rate, octaves, gate);

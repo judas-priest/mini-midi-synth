@@ -562,3 +562,20 @@ fn part_disable_releases_each_voice_once_and_cleans_state() {
     for _ in 0..100 { e.tick(); }
     assert!(e.parts[0].voices.iter().any(|v| v.active), "part did not restart after re-enable");
 }
+
+#[test]
+fn dispatch_arp_note_off_releases_dsp_voice_with_transpose_set() {
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartTranspose { part: 0, semitones: 12 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active), "no sounding voice");
+    e.dispatch_arp_note_off(60); // raw key; DSP matches by src_note
+    assert!(
+        e.parts[0].voices.iter().all(|v| !v.active || v.is_releasing()),
+        "dispatch_arp_note_off did not release the sounding voice"
+    );
+}
