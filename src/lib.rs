@@ -880,6 +880,7 @@ pub fn run_gui(
     #[cfg(not(target_os = "android"))]
     let viewport = eframe::egui::ViewportBuilder::default()
         .with_app_id("mini_midi_synth")
+        .with_title("Mini MIDI Synth") // TECHDEBT #27: egui-winit defaults to "egui window"
         .with_inner_size([c.config.ui.window_width, c.config.ui.window_height])
         .with_min_inner_size([500.0, 300.0])
         .with_icon(make_piano_icon());
