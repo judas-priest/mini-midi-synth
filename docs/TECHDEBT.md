@@ -83,10 +83,9 @@ docs/superpowers/plans/2026-10-29-console-gui-polish.md Tasks 2-3.
 - Manual confirms: knobs/pads messages are configurable only via MidiSuite
   (smk37-firmware-custom-mod/firmware_work/manual_text.txt:115-121).
 
-## 9. F2 (Tone) не реагирует на ITCH wheel и mod wheel
-- Колёса (pitch/mod/itch) работают на синт-движок, но F2 (Master Tone) не
-  реагирует на их движение. Пользователь ожидает связь колёс с F2.
-- Уточнить у пользователя желаемое поведение при выборе решения.
+## 9. F2 (Tone) и колёса — ЗАКРЫТО (2026-10-29, не воспроизводится)
+Проверка юзера: F2 работает с тоном (DSP и SF2), pitch bend -> высота,
+mod wheel -> вибрато (на большинстве SF2). Проблемы нет — пункт устарел.
 
 ## 10. Хай-хет: закрытый хет должен глушить открытый (choke)
 - Сценарий: сыграл открытый хет → сыграл закрытый → открытый должен
