@@ -154,6 +154,7 @@ impl App {
                 if ui.toggle_value(&mut muted, "Mute").on_hover_text("Mute this part").changed() {
                     self.parts[part].mute = muted;
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute: muted });
+                    self.persist_parts_state();
                 }
 
                 let mut root_only = self.parts[part].root_only;
@@ -163,6 +164,7 @@ impl App {
                 {
                     self.parts[part].root_only = root_only;
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part, on: root_only });
+                    self.persist_parts_state();
                 }
 
                 ui.label("Vol:");

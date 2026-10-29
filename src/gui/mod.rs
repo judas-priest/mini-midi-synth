@@ -1259,6 +1259,15 @@ impl eframe::App for App {
 impl App {
     /// Send initial patches to all parts at startup
     pub fn send_initial_presets(&mut self) {
+        // Restore persisted live toggles (mute / root-only) — survives restarts
+        for (i, st) in self.config.ui.parts_state.iter().enumerate() {
+            if let Some(part) = self.parts.get_mut(i) {
+                part.mute = st.mute;
+                part.root_only = st.root_only;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: st.mute });
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part: i, on: st.root_only });
+            }
+        }
         for i in 0..self.parts.len() {
             self.send_edited_params(i);
         }
@@ -1877,6 +1886,7 @@ impl App {
                     let mute = !part.mute;
                     part.mute = mute;
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part: i, mute });
+                    self.persist_parts_state();
                 }
             }
             led_console::Action::Undo => {
@@ -1939,6 +1949,17 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// Persist live per-part toggles (mute / root-only) to config so they
+    /// survive restarts (they are NOT part of performance files' semantics).
+    pub fn persist_parts_state(&mut self) {
+        self.config.ui.parts_state = self
+            .parts
+            .iter()
+            .map(|p| crate::config::PartUiState { mute: p.mute, root_only: p.root_only })
+            .collect();
+        self.save_global_to_config();
     }
 
     /// Index of the current performance in perf_list (None if unknown).

@@ -79,6 +79,14 @@ pub struct MidiSettings {
     pub port_name: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PartUiState {
+    #[serde(default)]
+    pub mute: bool,
+    #[serde(default)]
+    pub root_only: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
     pub window_width: f32,
@@ -122,6 +130,9 @@ pub struct UiSettings {
     /// Keyboard split note persisted across restarts.
     #[serde(default)]
     pub split_point: Option<u8>,
+    /// Live per-part toggles that must survive restarts (mute / root-only).
+    #[serde(default)]
+    pub parts_state: Vec<PartUiState>,
     /// Bank-2 LED console companion (unix socket). Off = never connect.
     #[serde(default)]
     pub led_companion: bool,
@@ -178,6 +189,7 @@ impl Default for Config {
                 pad_perf_map: Vec::new(),
                 split_point: None,
                 led_companion: false,
+            parts_state: Vec::new(),
                 looper_sync_bpm: true,
                 keybinds: std::collections::HashMap::new(),
             },
