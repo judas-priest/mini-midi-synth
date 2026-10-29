@@ -1156,6 +1156,9 @@ impl eframe::App for App {
             ctx.request_repaint();
         }
 
+        // Pad remap dialogs — global so pad clicks work on any tab (TECHDEBT #11)
+        self.draw_drum_remap_modals(ctx);
+
         // Central: part tabs + parameters / drum sequencer
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(theme::SP_SM);
