@@ -357,6 +357,22 @@ pub fn default_output_device_name(host_id: cpal::HostId) -> Option<String> {
     device.name().ok()
 }
 
+/// System default sink via PipeWire/Pulse (`pactl get-default-sink`).
+/// JACK-host cpal devices keep a stable name across hotplug (PipeWire reroutes
+/// the graph), so the sink name is the only observable hotplug signal there.
+/// None when pactl is unavailable or fails.
+pub fn system_default_sink() -> Option<String> {
+    let out = std::process::Command::new("pactl")
+        .arg("get-default-sink")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
 /// Backoff between reconnect attempts (TECHDEBT #18: 2 s).
 pub const RECONNECT_BACKOFF: std::time::Duration = std::time::Duration::from_secs(2);
 
