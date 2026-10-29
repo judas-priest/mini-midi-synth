@@ -77,55 +77,73 @@ fn undo_atom_tracks_snapshot_lifecycle() {
     e.sequencer.clear_pattern();
     assert!(e.undo_available());
 }
+
+#[test]
+fn rec_on_stopped_transport_auto_plays() {
+    let mut e = engine_with_init_patch();
+    assert!(!e.drum_engine.sequencer.playing);
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
+    assert!(e.drum_engine.sequencer.playing, "rec must auto-start play");
+    assert!(e.drum_engine.sequencer.recording);
+    // toggle off while playing: auto-play must NOT fire
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
+    assert!(!e.drum_engine.sequencer.recording);
+    assert!(e.drum_engine.sequencer.playing, "play persists after rec-off");
+}
 ```
 
-(`undo_available` не существует → red.)
+(`undo_available`/`engine_with_init_patch` не существуют → red. Второй тест —
+в tests/sustain_audit.rs, где живёт harness; импорты MidiEvent уже там.)
 
-- [ ] **Step 2: atom в DrumEngine** (рядом с `rec_atom`, drum.rs:878):
+- [ ] **Step 2: atom на StepSequencer** (НЕ на DrumEngine: снимок мутируют
+  напрямую в 6 местах, включая mod.rs:1594/2071-2081 — атом рядом со снимком
+  покрывает все сайты автоматически):
+
+В `StepSequencer` (рядом с полями drum.rs:726):
 
 ```rust
     undo_atom: Arc<AtomicBool>,
 ```
 
-`use std::sync::atomic::AtomicBool` — проверить импорт (AtomicU8 уже есть;
-AtomicBool скорее всего нет — добавить в существующий use). В `DrumEngine::new`
-рядом с rec_atom: `undo_atom: Arc::new(AtomicBool::new(false)),`. accessor рядом
-с `rec_atom()`:
+`use std::sync::atomic::AtomicBool` — проверить импорт в drum.rs (AtomicU8 уже
+импортирован; AtomicBool добавить в тот же use). В `StepSequencer::new`
+(drum.rs:740):
 
 ```rust
-    pub fn undo_available(&self) -> bool {
-        self.undo_atom.load(std::sync::atomic::Ordering::Relaxed)
+    undo_atom: Arc::new(AtomicBool::new(false)),
+```
+
+Синхронизация ВНУТРИ StepSequencer — в конце `save_snapshot` (~760),
+`clear_pattern` (~746) и `undo` (~755):
+
+```rust
+        self.undo_atom.store(self.undo_snapshot.is_some(),
+                             std::sync::atomic::Ordering::Relaxed);
+```
+
+Приватный хелпер не нужен — одна строка в трёх местах. `set_sample_rate`
+НЕ трогать: sequencer переносится целиком через mem::replace (drum.rs:961,975),
+атом переживает rebuild вместе со снимком.
+
+Accessors: в `impl StepSequencer`:
+
+```rust
+    pub fn undo_atom(&self) -> Arc<AtomicBool> {
+        self.undo_atom.clone()
     }
 ```
 
-Приватный метод синхронизации (рядом с set_playing/set_recording ~940):
+в `impl DrumEngine` (рядом с `rec_atom()` ~936, делегирование):
 
 ```rust
-    fn sync_undo_atom(&mut self) {
-        let has = self.sequencer.undo_snapshot.is_some();
-        self.undo_atom.store(has, std::sync::atomic::Ordering::Relaxed);
+    pub fn undo_atom(&self) -> Arc<AtomicBool> {
+        self.sequencer.undo_atom()
     }
 ```
 
-(поле sequencer в DrumEngine — `self.sequencer`; сверить имя. Вызвать
-`self.sync_undo_atom();` в: `save_snapshot`, `clear_pattern`, `undo`
-(в конце), и в `set_sample_rate` после rebuild (там snapshots теряются → false).
-АТТЕНЦИЯ: atom лежит на DrumEngine, а snapshot на sequencer — sync читает
-`self.sequencer.undo_snapshot`; атом НЕ пересоздаётся в set_sample_rate
-сохранением — он в *self = Self::new() умрёт... СЛЕДУЯ паттерну: set_sample_rate
-сохраняет step/play/rec атомы (drum.rs:953-962 в master) — НЕ сохранять
-undo_atom (после SR-change snapshot гарантированно потерян → false корректно).)
-
-- [ ] **Step 3: expose в SynthEngine** — в `src/synth/mod.rs` рядом с
-  `pub fn drum_rec_atom`-подобными (grep `rec_atom()` в mod.rs):
-
-```rust
-    pub fn drum_undo_atom(&self) -> Arc<AtomicBool> {
-        self.drum_engine.undo_atom.clone()
-    }
-```
-
-(сверить: mod.rs уже импортирует Arc/AtomicBool.)
+- [ ] **Step 3: expose в GUI** — SynthEngine-обёртка НЕ нужна: settings.rs
+  зовёт `engine.drum_engine.undo_atom()` напрямую (шаблон `drum_rec_atom`
+  в settings.rs:250 зовёт `engine.drum_engine.rec_atom()`).
 
 - [ ] **Step 4: Rec auto-play** — в `src/synth/mod.rs`:
   arm ноты 83 (~1581): после `set_recording(rec);` добавить
@@ -173,7 +191,7 @@ git commit -m "feat: sequencer undo_available atom + Rec auto-plays stopped tran
         // pattern window 1: slot 1 = pattern 1 (selected при current=1)
         let pat = c.top_colors(None, 0, 1, &mutes, 0, 1);
         assert_eq!(pat[1], [0xFF, 0x00, 0xFF]);
-        assert_eq!(pat[2], [0x00, 0x66, 0xFF]);
+        assert_eq!(pat[2], [0xFF, 0xFF, 0x00]); // pattern mode speaks yellow
     }
 
     #[test]
@@ -324,9 +342,9 @@ Run: `cargo test --lib led_console` — Expected: COMPILE FAIL (сигнатур
     PageForward,
 ```
 
-Проверить: `pub fn mode(&self)` существует (используется GUI в Step 6); если
-удалялся в прошлой итерации — вернуть:
-`pub fn mode(&self) -> Mode { self.mode }`.
+ОБЯЗАТЕЛЬНО: `pub fn mode(&self) -> Mode { self.mode }` в impl LedConsole —
+сейчас его НЕТ в файле (удалён как dead в прошлой итерации), GUI в Step 6/7
+его зовёт. Добавить вместе с остальными правками.
 
 - [ ] **Step 5: App-поля и plumbing** — в gui/mod.rs рядом с led-полями (~327):
 
@@ -385,18 +403,46 @@ settings.rs (~250, рядом с drum_rec_atom):
     }
 ```
 
-Arms в `execute_console_action`:
+Arms в `execute_console_action` — ВАЖНО: консоль возвращает SLOT (1..=7),
+реальный индекс = окно + slot − 1; без перевода тапы грузят не те перфы:
 
 ```rust
-            led_console::Action::PageBack => { self.page_window(-7); }
-            led_console::Action::PageForward => { self.page_window(7); }
+            led_console::Action::LoadPerf(i) => {
+                let idx = self.perf_window + i - 1; // slot -> real index
+                if let Some((name, _)) = self.perf_list.get(idx) {
+                    let name = name.clone();
+                    if self.load_performance_by_name(&name) {
+                        log::info!("[console] perf slot {} loaded ({})", i, name);
+                        self.follow_window(idx, true);
+                    }
+                }
+            }
+            led_console::Action::SelectPattern(i) => {
+                let idx = self.pat_window + i - 1; // slot -> real index
+                if idx < 8 {
+                    self.drum_current_pattern = idx as u8;
+                    let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: idx as u8 });
+                    self.follow_window(idx, false);
+                }
+            }
+            led_console::Action::PageBack => {
+                self.page_window(-7);
+                // не оставлять пурпур за экраном (Important-фикс ревью)
+                if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
+                self.follow_window(self.drum_current_pattern as usize, false);
+            }
+            led_console::Action::PageForward => {
+                self.page_window(7);
+                if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
+                self.follow_window(self.drum_current_pattern as usize, false);
+            }
 ```
 
-Вызовы follow_window: в `LoadPerf` после успешной загрузки
-`follow_window(i, true)`; в `StepPerf` после загрузки next
-`follow_window(next, true)`; в `SelectPattern`
-`follow_window(idx as usize, false)` (idx = slot-1 из консоли); в `StepPattern`
-после смены `follow_window(next as usize, false)`.
+(старые arm'ы LoadPerf/SelectPattern из Task-2-плана консоли v1 ЗАМЕНИТЬ этими;
+StepPerf/StepPattern arms работают в абсолютных индексах — оставаться как есть,
+но добавить follow_window(next, true/false) как в Step 7.)
+
+Undo arm остаётся без изменений (DrumSeqUndo).
 
 - [ ] **Step 8: undo atom + окна в snapshot** — в LED-snapshot блоке перед
   вызовами top_colors/bottom_colors:
@@ -404,7 +450,7 @@ Arms в `execute_console_action`:
 ```rust
             let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
             let page_depth = match self.console.mode() {
-                led_console::Mode::Pattern => self.pat_window / 7,
+                led_console::Mode::Pattern => self.pat_window, // окна {0,1} — сама глубина
                 _ => self.perf_window / 7,
             };
 ```
@@ -418,7 +464,9 @@ Arms в `execute_console_action`:
             let bottom = self.console.bottom_colors(playing, recording, page_depth, undo_avail);
 ```
 
-(строку `let filled = self.perf_list.len().min(8);` не трогать.)
+(`let filled` ИЗМЕНИТЬ: было `self.perf_list.len().min(8)` — теперь
+`let filled = self.perf_list.len();` без cap, иначе страницы за 8-м перфом
+рисуют чёрную стену.)
 
 - [ ] **Step 9: прогнать + Commit**
 
@@ -439,7 +487,10 @@ git commit -m "feat: LED console pages, window auto-follow, undo LED"
 
 - [ ] **Step 1:** удалить `LooperRewind` из enum + arm из handle_control;
   удалить `rewind_to_start` + тесты `rewind_to_start_resets_playback_cursor`,
-  `rewind_to_start_mid_playback_drains_active_notes` из looper.rs.
+  `rewind_to_start_mid_playback_drains_active_notes` + висячий doc-комментарий
+  про rewind (looper.rs:504, внутри tick-Playing ветки комментарий
+  «rewind_to_start mid-playback...» — заменить на нейтральный
+  «close sounding notes once») из looper.rs.
 - [ ] **Step 2: gates**
 
 ```bash
