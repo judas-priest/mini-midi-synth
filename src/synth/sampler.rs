@@ -245,16 +245,10 @@ impl SamplerEngine {
     pub fn load_keys_soundfont(&mut self, sf: Arc<SoundFont>) -> Displaced {
         self.seq_channel_program = [255; 16]; // new synth instance — reset program cache
         let displaced = self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
-        // Restore programs on new synth
-        if let Some(synth) = &mut self.keys.synth {
-            for (i, ch) in self.part_channel.iter().enumerate() {
-                let Some(ch) = ch else { continue };
-                if self.part_sf2[i] {
-                    synth.process_midi_message(*ch as i32, 0xB0, 0, self.part_bank[i] as i32);
-                    synth.process_midi_message(*ch as i32, 0xC0, self.part_program[i] as i32, 0);
-                }
-            }
-        }
+        // Restore programs on the new synth — but not on channels the
+        // sequencer currently owns (it re-asserts per note-on; the cache
+        // reset above makes that happen).
+        self.send_part_programs(true);
         self.apply_sustain();
         if let Some(synth) = &mut self.keys.synth {
             synth.set_release_time_scale(self.release_scale);
@@ -288,19 +282,19 @@ impl SamplerEngine {
     pub fn set_block_size(&mut self, size: usize) -> (Displaced, Displaced) {
         let size = size.clamp(8, MAX_BLOCK_SIZE);
         self.block_size = size;
+        // A rebuild (even a deferred/no-op one with no soundfont loaded)
+        // invalidates the sequencer's dedup cache: reset it so seq note-ons
+        // re-assert their programs. Hoisted outside the soundfont guard so
+        // the reset happens unconditionally (review fix).
+        self.seq_channel_program = [255; 16];
         let mut keys_displaced = Displaced::default();
         if let Some(sf) = self.keys.soundfont.clone() {
             keys_displaced = self.keys.rebuild(Some(sf), self.sample_rate, self.block_size);
-            // Restore programs
+            // Restore part programs only on channels the sequencer does not
+            // own — the seq re-asserts per note-on after the reset above.
+            self.send_part_programs(true);
+            // Rebuild made a fresh Synthesizer — re-apply the release scale
             if let Some(synth) = &mut self.keys.synth {
-                for (i, ch) in self.part_channel.iter().enumerate() {
-                    let Some(ch) = ch else { continue };
-                    if self.part_sf2[i] {
-                        synth.process_midi_message(*ch as i32, 0xB0, 0, self.part_bank[i] as i32);
-                        synth.process_midi_message(*ch as i32, 0xC0, self.part_program[i] as i32, 0);
-                    }
-                }
-                // Rebuild made a fresh Synthesizer — re-apply the release scale
                 synth.set_release_time_scale(self.release_scale);
             }
         }
@@ -354,6 +348,21 @@ impl SamplerEngine {
     /// Channel of an SF2-enabled part (None for DSP parts / unallocated).
     fn part_channel_of(&self, part: usize) -> Option<usize> {
         self.part_channel.get(part).copied().flatten()
+    }
+
+    /// Re-send bank+program for every SF2-enabled part that owns a channel.
+    /// With `skip_seq_channels`, channels currently owned by the MIDI-file
+    /// sequencer are left alone: the sequencer owns the program there while
+    /// it plays, and re-asserts it per note-on after a rebuild (its dedup
+    /// cache resets to 255). RT-safe: fixed loops, existing `keys.midi`.
+    fn send_part_programs(&mut self, skip_seq_channels: bool) {
+        for (i, ch) in self.part_channel.iter().enumerate() {
+            let Some(ch) = *ch else { continue };
+            if !self.part_sf2[i] { continue; }
+            if skip_seq_channels && self.seq_channel_used[ch] { continue; }
+            self.keys.midi(ch as i32, 0xB0, 0, self.part_bank[i] as i32);
+            self.keys.midi(ch as i32, 0xC0, self.part_program[i] as i32, 0);
+        }
     }
 
     pub fn set_part_program(&mut self, part: usize, program: u8, bank: u8) {
@@ -560,5 +569,21 @@ mod tests {
         s.seq_program_set(16, 7);
         assert!(s.seq_channel_used.iter().skip(1).all(|&u| !u),
             "out-of-range channel polluted the used mask");
+    }
+
+    #[test]
+    fn block_size_change_resets_seq_program_cache() {
+        let mut e = SynthEngine::new(48000.0);
+        e.sampler.seq_program_set(2, 60);
+        let _ = e.handle_control(ControlEvent::SetSf2BlockSize { size: 16 });
+        assert_eq!(e.sampler.seq_channel_program[2], 255,
+            "keys rebuild left a stale seq dedup cache — the sequencer never re-asserts");
+        assert!(e.sampler.seq_channel_used[2],
+            "used mask must survive a rebuild so a later stop re-asserts part programs");
+        // Same guarantee through the sample-rate path (routes through load_keys_soundfont)
+        e.sampler.seq_program_set(5, 33);
+        let _ = e.handle_control(ControlEvent::SetSf2BlockSize { size: 32 });
+        assert_eq!(e.sampler.seq_channel_program[5], 255,
+            "second rebuild kept a stale seq dedup cache");
     }
 }
