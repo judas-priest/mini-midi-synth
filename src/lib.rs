@@ -879,7 +879,6 @@ pub fn run_gui(
         audio_disconnected: c.audio_disconnected.clone(),
         audio_device_name: c._audio_handle.device_name.clone(),
         audio_watch: crate::audio::ReconnectPolicy::default(),
-        audio_pw_sink: None,
         audio_poll_at: std::time::Instant::now(),
         _audio_handle: Some(c._audio_handle),
         midi_tx_shared: c.midi_tx_shared.clone(),

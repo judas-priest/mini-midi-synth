@@ -435,7 +435,6 @@ pub struct App {
     pub audio_device_name: Option<String>,
     /// Hotplug reconnect retry state machine (TECHDEBT #18).
     pub audio_watch: crate::audio::ReconnectPolicy,
-    pub audio_pw_sink: Option<String>,
     /// Next default-device name poll deadline (desktop hotplug poller).
     pub audio_poll_at: Instant,
     pub _audio_handle: Option<crate::audio::AudioBackend>,
@@ -502,32 +501,12 @@ impl eframe::App for App {
         #[cfg(not(target_os = "android"))]
         if now >= self.audio_poll_at {
             self.audio_poll_at = now + AUDIO_POLL_INTERVAL;
-            let mut device_changed = false;
             if let Some(stored) = self.audio_device_name.as_deref() {
                 let current = crate::audio::default_output_device_name(cpal::default_host().id());
-                device_changed =
-                    crate::audio::ReconnectPolicy::device_changed(stored, current.as_deref());
-                // JACK host: the cpal device name is stable across hotplug
-                // (PipeWire reroutes the graph), so watch the system default
-                // sink instead — its change means the stream must be rebuilt
-                // to follow the new output.
-                if !device_changed && self.config.audio.backend == "JACK" {
-                    if let Some(sink) = crate::audio::system_default_sink() {
-                        match self.audio_pw_sink.as_deref() {
-                            None => self.audio_pw_sink = Some(sink), // baseline, no trigger
-                            Some(prev) if prev != sink => {
-                                log::info!("[audio] default sink changed: {prev} -> {sink}");
-                                self.audio_pw_sink = Some(sink.clone());
-                                device_changed = true;
-                            }
-                            _ => {}
-                        }
-                    }
+                if crate::audio::ReconnectPolicy::device_changed(stored, current.as_deref()) {
+                    log::info!("[audio] default device changed: {stored:?} -> {current:?}");
+                    self.audio_disconnected.store(true, Ordering::Relaxed);
                 }
-            }
-            if device_changed {
-                log::info!("[audio] output changed — reconnecting stream");
-                self.audio_disconnected.store(true, Ordering::Relaxed);
             }
         }
         if self.audio_disconnected.swap(false, Ordering::Relaxed) || self.audio_watch.retry_due(now) {
