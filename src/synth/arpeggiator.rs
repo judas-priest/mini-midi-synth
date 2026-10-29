@@ -305,3 +305,84 @@ impl Arpeggiator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arp() -> Arpeggiator {
+        let mut a = Arpeggiator::new(48000.0);
+        a.set_params(true, 0, 1, 1, 0.5); // Up, 1/8, 1 octave, gate 0.5
+        a
+    }
+
+    /// Freeze an arp on the set {60, 64}.
+    fn frozen() -> Arpeggiator {
+        let mut a = arp();
+        a.set_latch(true);
+        a.note_on(60, 100);
+        a.note_on(64, 100);
+        a.note_off(60);
+        a.note_off(64);
+        a
+    }
+
+    #[test]
+    fn latch_freezes_pattern_after_last_key_release() {
+        let mut a = frozen();
+        assert!(a.keeps_playing(), "latch must keep the pattern alive");
+        assert_eq!(a.pattern_len, 2, "frozen pattern must survive key-off");
+        let mut fired = 0;
+        for _ in 0..48_000 {
+            if a.tick().0.is_some() {
+                fired += 1;
+            }
+        }
+        assert!(fired >= 1, "frozen arp produced no notes in 1 s");
+    }
+
+    #[test]
+    fn latch_new_chord_replaces_held_set() {
+        let mut a = frozen();
+        a.note_on(72, 100); // replaces the frozen set, playback continues
+        assert!(!a.latched, "new key must unfreeze");
+        assert_eq!(a.held_count, 1);
+        assert_eq!(a.held_notes[0].0, 72);
+        assert!(a.keeps_playing());
+        assert_eq!(a.pattern_len, 1);
+    }
+
+    #[test]
+    fn latch_off_while_frozen_stops() {
+        let mut a = frozen();
+        a.set_latch(false);
+        assert!(!a.keeps_playing());
+        assert_eq!(a.pattern_len, 0);
+    }
+
+    #[test]
+    fn clear_resets_latch_state() {
+        let mut a = frozen();
+        a.clear();
+        assert!(!a.latched);
+        assert!(!a.keeps_playing());
+    }
+
+    #[test]
+    fn no_latch_stops_on_last_release() {
+        let mut a = arp(); // latch off — existing behavior
+        a.note_on(60, 100);
+        a.note_off(60);
+        assert!(!a.keeps_playing());
+        assert_eq!(a.pattern_len, 0);
+    }
+
+    #[test]
+    fn rate_follows_bpm() {
+        let a = arp(); // rate 1 = 1/8 = 0.5 beats
+        assert_eq!(a.step_samples, 12_000, "0.5 * 60/120 * 48000");
+        let mut a = arp();
+        a.set_bpm(240.0);
+        assert_eq!(a.step_samples, 6_000, "arp rate must track sequencer BPM");
+    }
+}
