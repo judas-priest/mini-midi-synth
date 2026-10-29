@@ -664,6 +664,51 @@ fn root_only_out_of_range_key_does_not_join_held_mask() {
     assert_eq!(e.parts[0].root_active, None, "out-of-range key re-keyed after root off");
 }
 
+#[test]
+fn root_only_rekey_releases_old_root_even_under_pedal() {
+    // route_note_off DSP path: root key-up force-releases the old root voice
+    // (v.note_off(), sustained_notes cleared) even while the pedal holds it,
+    // then re-keys to the next-lowest held key.
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 }); // pedal down
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 }); // suppressed
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active), "root did not sound");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pedal still holding it
+    for _ in 0..100 { e.tick(); }
+    assert!(
+        !e.parts[0].voices.iter().any(|v| v.active && v.src_note == 60 && !v.is_releasing()),
+        "old root voice is still sustain-held after its key-up under pedal"
+    );
+    assert!(!e.parts[0].sustained_notes[60], "old root left in sustained_notes");
+    assert_eq!(e.parts[0].root_active, Some(64), "did not re-key to note 64");
+    assert!(
+        e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 64),
+        "re-keyed voice for note 64 did not sound"
+    );
+}
+
+#[test]
+fn root_only_key_up_kills_pedal_held_bass() {
+    // Plain key release with no re-key target: the root voice is force-killed
+    // at key-up even under the pedal (bass-split semantics: key-up = note
+    // done, the pedal must not resurrect the bass).
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 }); // pedal down
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()), "root did not sound");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pedal still down
+    for _ in 0..100 { e.tick(); }
+    assert!(!e.parts[0].sustained_notes[60], "bass left in sustained_notes");
+    assert!(
+        !e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()),
+        "pedal-held bass survived its key-up"
+    );
+    assert_eq!(e.parts[0].root_active, None, "stale root_active after key-up");
+}
+
 // ── Sustain-atom coherence on MIDI-seq stop ────────────────────
 
 #[test]

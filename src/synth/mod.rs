@@ -1524,6 +1524,12 @@ impl SynthEngine {
         } else {
             self.parts[i].note_off(raw);
             if root_only {
+                // Bass-split semantics (TECHDEBT #6): key-up = the note is DONE.
+                // Force-release the root voice even when the pedal holds it and
+                // clear its sustained_notes flag — the pedal must not resurrect
+                // a bass root whose key the player has already let go (that
+                // would drone the old root under the re-keyed one). Same for
+                // the replaced root in route_note_on above.
                 let part = &mut self.parts[i];
                 for v in &mut part.voices {
                     if v.active && v.src_note == raw { v.note_off(); }
