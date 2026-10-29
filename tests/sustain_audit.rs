@@ -158,29 +158,103 @@ fn cc120_on_silent_engine_is_noop() {
 }
 
 #[test]
-fn patch_switch_releases_pedal_held_notes() {
+fn patch_switch_seamless_tail_and_pedal_up_releases() {
     let mut e = engine_with_init_patch();
+    // pedal down, play a note, release key (pedal holds it)
     pedal_down(&mut e);
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
-    assert!(render_peak(&mut e, 20) > SILENCE);
+    assert!(render_peak(&mut e, 4) > SILENCE);
+    // switch patch (seamless): pedal-held voice KEEPS SUSTAINING.
+    // Дискриминатор против kill-семантики: kill = voice в release → после
+    // settle (8s) тишина; seamless = sustain продолжается → громко.
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
     settle(&mut e);
-    let after = render_peak(&mut e, 200);
-    assert!(after < SILENCE, "patch switch left pedal note ringing (peak {after})");
+    assert!(render_peak(&mut e, 20) > SILENCE,
+        "patch switch killed a pedal-held voice (it should keep sustaining)");
+    // pedal up: everything releases
+    pedal_up(&mut e);
+    settle(&mut e);
+    assert!(render_peak(&mut e, 4) < SILENCE);
 }
 
 #[test]
-fn program_change_releases_pedal_held_notes() {
+fn held_key_keeps_sounding_across_patch_switch() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
+    // key STILL HELD: kill-семантика выпустила бы голос в release → после
+    // settle тишина; seamless → голос продолжает сустейниться
+    settle(&mut e);
+    assert!(render_peak(&mut e, 20) > SILENCE,
+        "held key was killed by patch switch");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    settle(&mut e);
+    assert!(render_peak(&mut e, 4) < SILENCE);
+}
+
+#[test]
+fn program_change_seamless_tail() {
     let mut e = engine_with_init_patch();
     pedal_down(&mut e);
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
-    assert!(render_peak(&mut e, 20) > SILENCE);
     e.handle_event(MidiEvent::ProgramChange { channel: 0, program: 1 });
     settle(&mut e);
-    let after = render_peak(&mut e, 200);
-    assert!(after < SILENCE, "ProgramChange left pedal note ringing (peak {after})");
+    assert!(render_peak(&mut e, 20) > SILENCE,
+        "program change killed a pedal-held voice");
+    pedal_up(&mut e);
+    settle(&mut e);
+    assert!(render_peak(&mut e, 4) < SILENCE);
+}
+
+#[test]
+fn new_notes_sound_after_patch_switch() {
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 20) > SILENCE, "new patch produced no sound");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    settle(&mut e);
+    assert!(render_peak(&mut e, 4) < SILENCE);
+}
+
+#[test]
+fn panic_still_kills_after_seamless_switch() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 120, value: 0 });
+    assert!(render_peak(&mut e, 4) < SILENCE, "CC120 must still hard-kill");
+}
+
+#[test]
+fn latch_mismatch_releases_latch_voices() {
+    let mut e = engine_with_init_patch();
+    // LoadPatch с play_mode=3 (latch): берём второй фабричный патч и правим
+    // параметр (ключ "play_mode" — см. src/synth/tests.rs:750 прецедент)
+    let mut latch_patch = second_patch();
+    latch_patch.params.insert("play_mode".into(), 3.0);
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &latch_patch));
+    // аккорд: две ноты, отпускание — latch держит
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 64 });
+    assert!(render_peak(&mut e, 4) > SILENCE, "latch must hold the chord");
+    // switch to non-latch patch: latch voices released
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
+    // release tail length depends on the new patch's release — assert DECAY,
+    // not absolute silence (robust against long-release factory patches);
+    // если first non-init factory patch окажется latch-ным (маловероятно) —
+    // взять другой патч явно
+    let right_after = render_peak(&mut e, 20);
+    assert!(right_after > SILENCE, "release tail should still be decaying");
+    settle(&mut e);
+    settle(&mut e);
+    assert!(render_peak(&mut e, 20) < right_after / 10.0,
+        "latch voices must release on latch-mismatch switch (peak {} -> {})",
+        right_after, render_peak(&mut e, 20));
 }
 
 #[test]

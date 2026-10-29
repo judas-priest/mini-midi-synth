@@ -892,3 +892,27 @@ fn set_part_mono_legato_glide_events() {
     let _ = e.handle_control(ControlEvent::SetPartGlide { part: 99, ms: 50.0 });
     let _ = e.handle_control(ControlEvent::SetPartMono { part: 99, mono: true });
 }
+
+#[test]
+fn steal_prefers_releasing_voice() {
+    let mut p = Part::new(48_000.0);
+    p.enabled = true; // note_on бейлится на !enabled (mod.rs:613)
+    // занять ВСЕ 8 голосов (VOICES_PER_LAYER = 8, mod.rs:376) sustained-нотами;
+    // Part::note_on(raw_note: u8, velocity: u8)
+    for n in 36..36 + p.voices.len() {
+        p.note_on(n as u8, 100);
+    }
+    // отпустить НЕ-самый-старый голос (40) → он в release-фазе;
+    // голос 36 — самый старый активный (старый вор взял бы ЕГО)
+    p.note_off(40);
+    // новая нота: должна занять release-голос 40 (src_note перезапишется на 80)
+    p.note_on(80, 100);
+    let v_new = p.voices.iter().find(|v| v.note == 80).unwrap();
+    assert_eq!(v_new.src_note, 40,
+        "must reuse the RELEASED voice 40 (old stealer takes voice 36)");
+    assert!(!v_new.is_releasing() && v_new.active);
+    // самый старый активный (36) не тронут
+    let v36 = p.voices.iter().find(|v| v.src_note == 36).unwrap();
+    assert!(v36.active && !v36.is_releasing() && v36.note == 36,
+        "old stealer would have taken voice 36");
+}
