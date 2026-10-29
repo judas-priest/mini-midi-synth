@@ -11,9 +11,13 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
 - Current: drum step sequencer records hits into the active drum pattern; part/looper recording targets a single layer (`active_part`). Expected: "record" captures the whole performance (all enabled parts), not just one layer.
 - Needs design: multi-layer capture is what the looper already does (audio). Decide: extend looper to capture all enabled layers, or make the sequencer/PitchSeq record across parts.
 
-## 3. Default empty init performance
-- No factory "Init" performance exists — pad perf slots start empty and the first saved perf becomes the reference.
-- Add `Init` performance (single part A1 = init preset, full range, no SF2) compiled into the binary the same way the Init preset is in `FACTORY_PRESETS`; reset action restores it.
+## 3. Default empty init performance — РЕАЛИЗОВАНО (уточнено 2026-10-29)
+Заявление было частично устаревшим: `preset::init_performance()` (одна часть
+A1 = Init-пресет, полный диапазон, без SF2, split_point None) встроен в бинарь,
+подаётся виртуальной записью "(Init)" в perf_list и грузится из комбо Layers,
+из pad-perf-слотов и LED-консоли. Файл на диске не нужен: фабричные пресеты
+тоже in-memory (load_all_patches). Добавлена кнопка Reset в perf-строке
+Layers (план docs/superpowers/plans/2026-10-29-metronome-init-perf.md).
 
 ## 4. Panorama: works for DSP parts, not for SF2 parts
 - DSP: per-part pan applied in `tick_block` (constant-power, mod.rs ~2560).
@@ -33,12 +37,13 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
 - Problem: sequencer/looper records every played note; user wants to play a chord shape and have a single chord recorded (smart chord capture), not N separate notes.
 - Research when picked up: chord detection algorithms (pitch-class-set → chord name/midi chord), how Smart Chord on M-VAVE / DAW chord tracks capture; likely: detect simultaneously-pressed notes within a window, collapse to one chord event.
 
-## 6. Root-note-only mode for a layer (bass split)
-- Problem: many layers play the full chord; bass gets muddy. User wants a per-layer mode "play only the root note" (lowest played note / detected chord root), transposed down an octave — bass layer follows the chord root while other layers play the chord.
-- Research when picked up: chord-root detection from held notes (same detection as #5), existing implementations (arpeggiator root mode, "bass follow" in workstations).
-- Depends on #5 (root detection).
+## 6. Root-note-only mode for a layer (bass split) — РЕАЛИЗОВАНО (2026-10-29)
+Per-part root-only gate (lowest-held-key priority, без chord-detection #5 —
+не потребовался), SetPartRootOnly + PartConfig-персистенция + Root-чекбокс в
+routing-строке; ключ-ап под педалью убивает бас (force-release). План:
+docs/superpowers/plans/2026-10-29-console-gui-polish.md Tasks 2-3.
 
-## 7. Custom sustain release (SR) — вернуть как статичную настройку
+## 7. Custom sustain release (SR) — вернуть как статичную настройку — РЕАЛИЗОВАНО (2026-10-29)
 - Research done 2026-10-27 (best practices: Ravenscroft 275, Ivory II, NI Claire).
 - Industry standard: TWO-VALUE model — release while pedal held (native/long) vs
   release after pedal-up (user-configurable). NOT coupled to fader/pedal
@@ -47,11 +52,10 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
 - Half-pedal (continuous pedal scaling release+resonance) needs a continuous
   pedal with configurable Min/Max CC range — out of scope until such a pedal.
 - Re-pedal (quick off→on re-catch) already works.
-- Implementation exists in git history: DSP override `Envelope::note_off_for` +
-  `SetSustainRelease` (commit 9a200a4), SF2 vendor `set_release_time_scale`
-  (commit 1d11ee2, vendor patch, default 1.0 = file defaults). Restore as a
-  GUI static setting "Pedal-up release: default / X ms", applies to both
-  engines; never read CC64 value into it.
+- Сделано: DSP `Envelope::note_off_for` + `SetSustainRelease` (сек, None =
+  патчовый релиз), SF2 `SetSf2ReleaseScale` → sampler, оба проброшены в GUI
+  (кнопка SR + слайдер, DragValue «SF2 rel»), персистенция в config.ui.
+  План: docs/superpowers/plans/2026-10-29-console-gui-polish.md Tasks 4-5.
 
 ## 8. Bank 2 (knobs/pads) config — MidiSuite под Wine не работает
 - Fader bank 2 передаёт события из коробки; knob bank 2 и pad bank 2 молчат
@@ -92,14 +96,9 @@ Recorded 2026-10-27. Ordered roughly by user-perceived impact.
   должны к choke-группе open HH, но с учётом того, что ЗАКРЫТЫЙ глушит
   ОТКРЫТЫЙ (обратное — нет).
 
-## 11. Диалоги ремапа пэдов живут на вкладке Drums
-- Remap-модалка (полная таблица) и диалог клика по нарисованному пэду
-  рисуются внутри `draw_drum_sequencer` — на других вкладках клик по пэду
-  молчит, диалог не открывается. Пользователь ждёт, что клик по пэду работает
-  всегда (пэды видны на любом экране, они в нижней панели).
-- Фикс: вынести обе модалки из `gui/drums.rs` в главный цикл отрисовки
-  (`gui/mod.rs::update`, вызов с `ctx` вместо `ui.ctx()`); кнопка Remap
-  остаётся на панели ударки.
+## 11. Диалоги ремапа пэдов живут на вкладке Drums — РЕАЛИЗОВАНО (2026-10-29)
+Обе модалки вынесены в `gui/mod.rs::update` (рисуются на любой вкладке, ctx
+корневой). План: docs/superpowers/plans/2026-10-29-console-gui-polish.md Task 1.
 
 ## 12. set_sample_rate аллоцирует в аудио-колбэке (rt-assert abort под JACK)
 - При старте под JACK/PipeWire stream отдаёт 48000 после старта → колбэк
@@ -200,12 +199,14 @@ Critical 2 (set_sample_rate wipe, drum.rs:953) НЕ исправлены в mast
   (записи 2647+5*(n-1), CC-байт 1), синту — обработчик CC -> ControlEvent.
 
 ### 14.4 Arp live-контролы: Latch/Hold + sync + transpose (ПРИОРИТЕТ 4)
+— РЕАЛИЗОВАНА (частично) 2026-10-29: latch + panic-очистка + arp_latch парам; rate sync уже был безусловным (set_bpm из sequencer.bpm каждый блок, mod.rs tick_block); transpose арпа — отдельный пункт.
 - Практика Ableton/Logic: Latch = арп играет после отпускания клавиш; новый
   аккорд подхватывается без остановки; Hold-кнопка; rate sync к BPM секвенсора;
   transpose одной нотой/октавой. Арп и пресеты уже есть — добавить режимы.
 - Latch-выключение: повторное нажатие кнопки или пустая пауза N тактов.
 
 ### 14.5 Mono Legato + Portamento (glide) для слоя (ПРИОРИТЕТ 5)
+— DSP-часть РЕАЛИЗОВАНА 2026-10-29: mono/legato/glide жили в patch params (play_mode 1/2, portamento_time/mode); добавлены SetPartMono/Legato/Glide live-события; исправлены баги (mono-путь игнорировал portamento_mode; retrigger_note не задавал porta_coeff — glide щёлкал мгновенно). SF2 legato/glide (skip-attack через startAddrsOffset, glide через pitch bend) — осталось, отдельный пункт.
 - Запрос пользователя: «нажимаешь вторую ноту — первая перестаёт, вторая
   без атаки плавно въезжает» = mono-режим (last-note priority) + legato
   (не ре-триггерить огибающую) + portamento (скольжение высоты, время N мс).

@@ -125,6 +125,39 @@ fn cc120_panic_releases_pedal_held_notes() {
 }
 
 #[test]
+fn cc120_kills_sound_immediately() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 100) > SILENCE, "no sound to kill");
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 120, value: 0 });
+    // No settle: All Sound Off must be audible silence within two blocks
+    let right_after = render_peak(&mut e, 2);
+    assert!(right_after < SILENCE, "CC120 left a release tail (peak {right_after})");
+}
+
+#[test]
+fn cc123_keeps_release_tail_then_silences() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 100) > SILENCE);
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 123, value: 0 });
+    // All Notes Off is release-style: the tail must still be audible right after
+    let tail = render_peak(&mut e, 2);
+    assert!(tail > SILENCE, "CC123 lost its release tail (peak {tail})");
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "CC123 left ringing (peak {after})");
+}
+
+#[test]
+fn cc120_on_silent_engine_is_noop() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 120, value: 0 });
+    let peak = render_peak(&mut e, 10);
+    assert!(peak < SILENCE, "CC120 on a silent engine produced sound (peak {peak})");
+}
+
+#[test]
 fn patch_switch_releases_pedal_held_notes() {
     let mut e = engine_with_init_patch();
     pedal_down(&mut e);
@@ -225,6 +258,44 @@ fn mute_releases_sounding_notes() {
 }
 
 #[test]
+fn mute_gates_the_mix_within_10ms() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound to mute");
+    let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: true });
+    // Discard the ~5 ms fade window (240 samples @48k = 8 blocks of 32);
+    // everything after it must be gated to zero even though the voice is
+    // still in its 0.3 s release.
+    let _ = render_peak(&mut e, 8);
+    let silenced = render_peak(&mut e, 16);
+    assert!(silenced < SILENCE, "muted part still sounding ~10ms after mute (peak {silenced})");
+}
+
+#[test]
+fn unmute_restores_sound() {
+    let mut e = engine_with_init_patch();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound");
+    let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: true });
+    let _ = render_peak(&mut e, 200);
+    let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: false });
+    // The release tail (0.3 s) is still alive; fade-in must bring it back
+    let back = render_peak(&mut e, 200);
+    assert!(back > SILENCE, "unmute did not restore sound (peak {back})");
+}
+
+#[test]
+fn mute_toggles_on_silent_engine_are_noop() {
+    let mut e = engine_with_init_patch();
+    for _ in 0..5 {
+        let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: true });
+        let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: false });
+    }
+    let peak = render_peak(&mut e, 50);
+    assert!(peak < SILENCE, "mute toggling produced sound (peak {peak})");
+}
+
+#[test]
 fn midi_learn_rejects_cc64() {
     use mini_midi_synth::cc_map::{CcBindingRaw, CcMap, CcMapRaw};
     use std::collections::BTreeMap;
@@ -284,12 +355,14 @@ fn performance_part_config_roundtrip() {
         mute: true,
         vel_min: 40,
         vel_max: 100,
+        root_only: true,
     };
     let json = serde_json::to_string(&orig).expect("serialize");
     let back: PartConfig = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back.pan, -0.5);
     assert_eq!(back.transpose, -12);
     assert!(back.mute);
+    assert!(back.root_only);
     assert_eq!(back.vel_min, 40);
     assert_eq!(back.vel_max, 100);
     // Old file without the new fields must deserialize to neutral defaults
@@ -298,6 +371,7 @@ fn performance_part_config_roundtrip() {
     assert_eq!(legacy.pan, 0.0);
     assert_eq!(legacy.transpose, 0);
     assert!(!legacy.mute);
+    assert!(!legacy.root_only);
     assert_eq!(legacy.vel_min, 1);
     assert_eq!(legacy.vel_max, 127);
 }
@@ -548,4 +622,283 @@ fn rec_on_stopped_transport_auto_plays() {
     e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
     assert!(!e.drum_engine.sequencer.recording);
     assert!(e.drum_engine.sequencer.playing, "play persists after rec-off");
+}
+
+// ── Sustain-atom coherence on MIDI-seq stop/load ───────────────
+
+fn empty_seq_data() -> Box<mini_midi_synth::synth::midi_player::MidiSeqData> {
+    Box::new(mini_midi_synth::synth::midi_player::MidiSeqData {
+        ticks_per_beat: 480,
+        total_ticks: 480,
+        events: Vec::new(),
+        track_names: Vec::new(),
+        track_channels: Vec::new(),
+    })
+}
+
+#[test]
+fn midi_seq_stop_lifts_sustain_atom() {
+    let mut e = engine_with_init_patch();
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 20) > SILENCE, "note not held by pedal");
+    let _ = e.handle_control(ControlEvent::MidiSeqPlay { playing: false });
+    assert!(!e.sustain_atom().load(Ordering::Relaxed),
+        "seq stop left sustain atom ON");
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "seq stop left pedal-held note ringing (peak {after})");
+}
+
+#[test]
+fn midi_seq_stop_stops_sustaining_new_notes() {
+    let mut e = engine_with_init_patch();
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let _ = e.handle_control(ControlEvent::MidiSeqPlay { playing: false });
+    // The stop force-lifted the pedal everywhere: a NEW note must not be
+    // held after its key-off (no new CC64 edge arrives in between).
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 62 });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "seq stop left DSP sustaining new notes (peak {after})");
+}
+
+#[test]
+fn midi_seq_load_lifts_sustain_and_stops_sustaining_new_notes() {
+    let mut e = engine_with_init_patch();
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 20) > SILENCE);
+    let _ = e.handle_control(ControlEvent::MidiSeqLoad { data: empty_seq_data() });
+    assert!(!e.sustain_atom().load(Ordering::Relaxed),
+        "seq load left sustain atom ON");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 62 });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "seq load left DSP sustaining new notes (peak {after})");
+}
+
+// ── Static pedal-up release (TECHDEBT #7, restored from 9a200a4) ──
+
+#[test]
+fn pedal_rel_setting_shortens_pedal_up_tail() {
+    // Static SR 0.03s: pedal-up tail is far below the patch's amp_release
+    // (0.3s on init) — ≈ silent at ~100ms post-release.
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetSustainRelease { seconds: Some(0.03) });
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 20) > SILENCE, "note not held");
+    pedal_up(&mut e);
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..150 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~100ms
+    let peak = render_peak(&mut e, 10);
+    assert!(peak < 0.15, "SR did not shorten the pedal-up tail (peak {peak})");
+}
+
+#[test]
+fn pedal_rel_off_keeps_full_default_tails() {
+    // SR off: pedal-up takes the patch's full amp_release (0.3s on init)
+    // — still audible at ~250ms post-release.
+    let mut e = engine_with_init_patch();
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 20) > SILENCE, "note not held");
+    pedal_up(&mut e);
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..375 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~250ms
+    let peak = render_peak(&mut e, 10);
+    assert!(peak > 0.15, "default tail lost with SR off (peak {peak})");
+}
+
+#[test]
+fn pedal_rel_held_keys_keep_patch_release_on_their_own_key_up() {
+    // The override must touch only pedal-released voices: a key-held voice
+    // survives pedal-up and keeps the PATCH release when its key goes up.
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetSustainRelease { seconds: Some(0.03) });
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound");
+    pedal_up(&mut e); // key still held — voice must keep sounding untouched
+    assert!(render_peak(&mut e, 20) > SILENCE, "pedal-up killed a key-held voice");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // patch release 0.3s
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..375 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~250ms
+    let peak = render_peak(&mut e, 10);
+    assert!(peak > 0.15, "key-held voice lost its patch release after SR pedal-up (peak {peak})");
+}
+
+#[test]
+fn sf2_release_scale_event_updates_sampler_scale() {
+    // Unit-level: the ControlEvent plumbing reaches SamplerEngine and the
+    // scale persists (it is re-applied on every rustysynth rebuild, which is
+    // where it matters — no SF2 is loaded here, so no audio assertion).
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetSf2ReleaseScale { scale: 2.5 });
+    assert!((e.sampler_release_scale() - 2.5).abs() < 1e-6, "scale did not reach the sampler");
+    let _ = e.handle_control(ControlEvent::SetSf2ReleaseScale { scale: 1.0 });
+    assert!((e.sampler_release_scale() - 1.0).abs() < 1e-6, "scale reset did not stick");
+}
+
+// ── Mono legato (TECHDEBT 14.5) ────────────────────────────────
+
+fn legato_engine(play_mode: f32) -> SynthEngine {
+    let mut e = engine_with_init_patch();
+    let mut patch = init_patch_mut();
+    patch.params.insert("play_mode".to_string(), play_mode);
+    patch.params.insert("amp_attack".to_string(), 0.2);
+    patch.params.insert("amp_decay".to_string(), 0.0); // review patch: stable sustain plateau
+    patch.params.insert("amp_sustain".to_string(), 0.7);
+    patch.params.insert("amp_release".to_string(), 0.1);
+    patch.params.insert("filter_env_amount".to_string(), 0.0);
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
+    e
+}
+
+/// Sustain level reached, then peak of the 150 ms window after the second
+/// note-on, relative to the sustain peak.
+fn reattack_ratio(e: &mut SynthEngine) -> f32 {
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = render_peak(e, 600); // 0.4 s — attack (0.2 s) done, at sustain
+    let before = render_peak(e, 100);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 127 });
+    let after = render_peak(e, 225); // 150 ms window
+    after / before
+}
+
+#[test]
+fn mono_legato_keeps_sustain_level_through_note_change() {
+    let mut e = legato_engine(2.0); // Mono-ST: no re-attack while a key is held
+    let ratio = reattack_ratio(&mut e);
+    // CALIBRATED: measured legato ratio = 0.99994 (flat sustain); the mono
+    // re-attack measures 1.140. Threshold 1.05 sits mid-gap between them.
+    assert!(
+        ratio < 1.05,
+        "legato re-attacked the envelope (peak ratio {ratio})"
+    );
+}
+
+#[test]
+fn mono_retrigger_restarts_attack() {
+    let mut e = legato_engine(1.0); // Mono: full re-attack
+    let ratio = reattack_ratio(&mut e);
+    // CALIBRATED: measured re-attack ratio = 1.140 (Sqrt-shape IIR toward the
+    // 1.3 overshoot target from sustain — the real bump is ~14 %, not the
+    // plan's estimated 25 %+); legato measures 1.000. Threshold 1.10 sits
+    // mid-gap between the two modes.
+    assert!(
+        ratio > 1.10,
+        "mono retrigger did not restart the attack (peak ratio {ratio})"
+    );
+}
+
+#[test]
+fn legato_with_no_held_key_is_normal_attack() {
+    let mut e = legato_engine(2.0);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let before = render_peak(&mut e, 100); // mid-attack: well below the peak
+    let _ = render_peak(&mut e, 600);      // reach sustain
+    // Let the first note go fully, then play again: single note = full attack
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let _ = render_peak(&mut e, 600); // release 0.1 s → idle
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 127 });
+    let after = render_peak(&mut e, 225);
+    // CALIBRATED: measured mid-attack/window ratio = 1.793 (plan guessed 1.8+;
+    // it lands just under, so the threshold is 1.7).
+    assert!(
+        after > before * 1.7,
+        "first note after silence must attack normally (mid-attack {before}, re-attack window {after})"
+    );
+}
+
+// ── Arp latch (TECHDEBT 14.4) ──────────────────────────────────
+
+fn latched_arp_engine() -> SynthEngine {
+    let mut e = engine_with_init_patch();
+    let mut patch = init_patch_mut();
+    patch.params.insert("arp_enabled".to_string(), 1.0);
+    patch.params.insert("arp_rate".to_string(), 2.0); // 1/16 ≈ 125 ms steps @120 BPM
+    patch.params.insert("arp_gate".to_string(), 0.5);
+    patch.params.insert("arp_latch".to_string(), 1.0);
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
+    e
+}
+
+#[test]
+fn arp_latch_keeps_playing_after_key_release() {
+    let mut e = latched_arp_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "arp produced no sound");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let latched_peak = render_peak(&mut e, 300); // ~200 ms — spans further steps
+    assert!(
+        latched_peak > SILENCE,
+        "latch did not keep the arp alive after key release (peak {latched_peak})"
+    );
+    // Second latch-toggle press (latch off) stops the frozen set
+    let _ = e.handle_control(ControlEvent::SetArpLatch { latch: false });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "latch-off left sound ringing (peak {after})");
+}
+
+#[test]
+fn arp_latch_new_chord_takes_over() {
+    let mut e = latched_arp_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = render_peak(&mut e, 100);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let _ = render_peak(&mut e, 100);
+    assert!(render_peak(&mut e, 100) > SILENCE, "set did not freeze");
+    // New chord replaces the frozen set without stopping playback
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 127 });
+    let _ = render_peak(&mut e, 50);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 72 });
+    let peak = render_peak(&mut e, 300);
+    assert!(peak > SILENCE, "new chord broke the latched arp (peak {peak})");
+    let _ = e.handle_control(ControlEvent::SetArpLatch { latch: false });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "latch-off left sound ringing (peak {after})");
+}
+
+#[test]
+fn panic_cc_clears_latched_arp() {
+    let mut e = latched_arp_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = render_peak(&mut e, 100);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 100) > SILENCE, "set did not freeze");
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 120, value: 0 });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "CC120 left the latched arp ringing (peak {after})");
+}
+
+#[test]
+fn arp_latch_persists_through_patch_load() {
+    let e = latched_arp_engine();
+    assert!(e.arpeggiator.latch_enabled(), "arp_latch param did not sync on patch load");
+    // Absent key defaults to off
+    let patches = preset::load_all_patches();
+    let patch = patches
+        .iter()
+        .find(|p| p.name.eq_ignore_ascii_case("init"))
+        .expect("init preset exists")
+        .clone();
+    let mut e2 = SynthEngine::new(SR);
+    e2.set_patches(patches);
+    let _ = e2.handle_control(ControlEvent::load_patch_from(0, &patch));
+    assert!(!e2.arpeggiator.latch_enabled(), "default latch must be off");
 }

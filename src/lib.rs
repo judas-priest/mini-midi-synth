@@ -738,6 +738,8 @@ pub fn run_gui(
         pending_remove_part: None,
         _program_change_atom: c.program_change_atom,
         sustain_atom: c.sustain_atom,
+        sustain_release: c.config.ui.sustain_release,
+        sf2_release_scale: c.config.ui.sf2_release_scale,
         show_help: false,
         global_params: {
             let mut gp = std::collections::BTreeMap::new();
@@ -777,6 +779,9 @@ pub fn run_gui(
         drum_step_atom: c.drum_step_atom,
         drum_play_atom: c.drum_play_atom,
         drum_rec_atom: c.drum_rec_atom,
+        drum_metronome: c.config.ui.drum_metronome,
+        drum_prev_step: 0,
+        drum_beat_flash: None,
         perf_window: 1,
         pat_window: 0,
         drum_undo_atom: c.drum_undo_atom,

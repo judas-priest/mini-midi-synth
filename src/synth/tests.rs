@@ -533,3 +533,362 @@ fn polivoks_drive_increases_harmonic_content() {
     }
     assert!(rms_driven > rms_clean, "Drive should increase RMS (adds harmonics), clean={rms_clean}, driven={rms_driven}");
 }
+
+// ── Part enable/disable state guard ────────────────────────────
+
+#[test]
+fn part_disable_releases_each_voice_once_and_cleans_state() {
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    let active: Vec<bool> = e.parts[0].voices.iter().map(|v| v.active).collect();
+    assert!(active.iter().any(|&a| a), "no active voice to disable");
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: false });
+    for (i, v) in e.parts[0].voices.iter().enumerate() {
+        if active[i] {
+            assert!(v.is_releasing(), "voice {i} not released after part disable");
+        }
+    }
+    assert!(e.parts[0].note_stack.is_empty(), "note_stack not cleared");
+    assert!(e.parts[0].latch_held.is_empty(), "latch_held not cleared");
+    assert!(!e.parts[0].sustained_notes.iter().any(|&s| s), "sustained_notes not cleared");
+    assert!(!e.parts[0].keys_down.iter().any(|&k| k), "keys_down not cleared");
+    // Re-enable: notes must sound again
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active), "part did not restart after re-enable");
+}
+
+#[test]
+fn dispatch_arp_note_off_releases_dsp_voice_with_transpose_set() {
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartTranspose { part: 0, semitones: 12 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active), "no sounding voice");
+    e.dispatch_arp_note_off(60); // raw key; DSP matches by src_note
+    assert!(
+        e.parts[0].voices.iter().all(|v| !v.active || v.is_releasing()),
+        "dispatch_arp_note_off did not release the sounding voice"
+    );
+}
+
+// ── Root-only mode (TECHDEBT #6) ───────────────────────────────
+
+fn root_only_engine() -> SynthEngine {
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    e
+}
+
+#[test]
+fn root_only_suppresses_higher_notes() {
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active), "lowest note did not sound");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].voices.iter().filter(|v| v.active && !v.is_releasing()).count(), 1,
+        "higher note was not suppressed");
+    assert_eq!(e.parts[0].root_active, Some(60));
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 64 }); // non-root off: no-op
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(60), "non-root note-off re-keyed the root");
+}
+
+#[test]
+fn root_only_rekeys_to_new_lowest() {
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 60),
+        "new lowest did not start a voice");
+    assert!(e.parts[0].voices.iter().filter(|v| v.active && v.is_releasing() && v.src_note == 64).count() >= 1,
+        "old root was not released");
+    assert_eq!(e.parts[0].root_active, Some(60));
+}
+
+#[test]
+fn root_only_release_of_root_rekeys_next_lowest() {
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 64),
+        "next-lowest key did not re-key after root release");
+    assert_eq!(e.parts[0].root_active, Some(64));
+}
+
+#[test]
+fn root_only_toggle_resets_tracking() {
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: false });
+    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    assert_eq!(e.parts[0].root_active, None, "toggle did not reset root_active");
+    assert!(!e.parts[0].root_held.iter().any(|&h| h), "toggle did not reset root_held");
+    // A stale root would have swallowed this note:
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()),
+        "note after toggle was suppressed by stale tracking");
+}
+
+#[test]
+fn root_only_out_of_range_key_does_not_join_held_mask() {
+    let mut e = root_only_engine();
+    let _ = e.handle_control(ControlEvent::SetPartRange { part: 0, min_note: 48, max_note: 70 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 30, velocity: 100 }); // out of range
+    for _ in 0..100 { e.tick(); }
+    assert!(!e.parts[0].root_held[30], "out-of-range key joined the held mask");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, None, "out-of-range key re-keyed after root off");
+}
+
+#[test]
+fn root_only_rekey_releases_old_root_even_under_pedal() {
+    // route_note_off DSP path: root key-up force-releases the old root voice
+    // (v.note_off(), sustained_notes cleared) even while the pedal holds it,
+    // then re-keys to the next-lowest held key.
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 }); // pedal down
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 }); // suppressed
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active), "root did not sound");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pedal still holding it
+    for _ in 0..100 { e.tick(); }
+    assert!(
+        !e.parts[0].voices.iter().any(|v| v.active && v.src_note == 60 && !v.is_releasing()),
+        "old root voice is still sustain-held after its key-up under pedal"
+    );
+    assert!(!e.parts[0].sustained_notes[60], "old root left in sustained_notes");
+    assert_eq!(e.parts[0].root_active, Some(64), "did not re-key to note 64");
+    assert!(
+        e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 64),
+        "re-keyed voice for note 64 did not sound"
+    );
+}
+
+#[test]
+fn root_only_key_up_kills_pedal_held_bass() {
+    // Plain key release with no re-key target: the root voice is force-killed
+    // at key-up even under the pedal (bass-split semantics: key-up = note
+    // done, the pedal must not resurrect the bass).
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 }); // pedal down
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()), "root did not sound");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pedal still down
+    for _ in 0..100 { e.tick(); }
+    assert!(!e.parts[0].sustained_notes[60], "bass left in sustained_notes");
+    assert!(
+        !e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()),
+        "pedal-held bass survived its key-up"
+    );
+    assert_eq!(e.parts[0].root_active, None, "stale root_active after key-up");
+}
+
+// ── Sustain-atom coherence on MIDI-seq stop ────────────────────
+
+#[test]
+fn midi_seq_stop_clears_part_sustain_state() {
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    for _ in 0..50 { e.tick(); }
+    assert!(e.parts[0].sustain_pedal > 0.5, "pedal did not engage the part flag");
+    let _ = e.handle_control(ControlEvent::MidiSeqPlay { playing: false });
+    assert!(!e.sustain_atom().load(std::sync::atomic::Ordering::Relaxed),
+        "seq stop left sustain atom ON");
+    assert_eq!(e.parts[0].sustain_pedal, 0.0, "part pedal flag stuck ON after seq stop");
+    assert!(!e.parts[0].sustained_notes.iter().any(|&s| s),
+        "sustained_notes stuck ON after seq stop");
+}
+
+// ── Mono / legato / portamento ─────────────────────────────────
+
+// `f32::powf` is not const-stable, so these are runtime helpers, not consts.
+fn f60() -> f32 {
+    440.0 * 2.0_f32.powf(-9.0 / 12.0)
+}
+fn f72() -> f32 {
+    440.0 * 2.0_f32.powf(3.0 / 12.0)
+}
+
+fn patch_engine(play_mode: f32, porta_time: f32, porta_mode: f32) -> SynthEngine {
+    let patches = crate::preset::load_all_patches();
+    let mut patch = patches
+        .iter()
+        .find(|p| p.name.eq_ignore_ascii_case("init"))
+        .expect("init preset exists")
+        .clone();
+    patch.params.insert("play_mode".into(), play_mode);
+    patch.params.insert("portamento_time".into(), porta_time);
+    patch.params.insert("portamento_mode".into(), porta_mode);
+    patch.params.insert("amp_release".into(), 0.05);
+    let mut e = SynthEngine::new(48000.0);
+    e.set_patches(patches);
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    e
+}
+
+fn render_blocks(e: &mut SynthEngine, blocks: usize) {
+    let mut l = [0.0f32; BLOCK_SIZE];
+    let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..blocks {
+        l.fill(0.0);
+        r.fill(0.0);
+        e.tick_block(&mut l, &mut r);
+    }
+}
+
+fn active_freq(e: &SynthEngine) -> f32 {
+    e.parts[0]
+        .voices
+        .iter()
+        .find(|v| v.active)
+        .map(|v| v.current_freq())
+        .unwrap_or(0.0)
+}
+
+fn note(e: &mut SynthEngine, n: u8) {
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: n, velocity: 100 });
+}
+
+fn unnote(e: &mut SynthEngine, n: u8) {
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: n });
+}
+
+#[test]
+fn mono_mode_is_single_voice() {
+    let mut e = patch_engine(1.0, 0.0, 0.0);
+    note(&mut e, 60);
+    render_blocks(&mut e, 5);
+    note(&mut e, 72);
+    render_blocks(&mut e, 5);
+    let active = e.parts[0].voices.iter().filter(|v| v.active).count();
+    assert_eq!(active, 1, "mono mode must keep exactly one voice");
+    let v = e.parts[0].voices.iter().find(|v| v.active).unwrap();
+    assert_eq!(v.note, 72, "mono must follow the last note");
+}
+
+#[test]
+fn glide_slews_pitch_in_mono_mode() {
+    let mut e = patch_engine(1.0, 0.2, 1.0); // 200 ms, Always
+    note(&mut e, 60);
+    render_blocks(&mut e, 20);
+    note(&mut e, 72);
+    render_blocks(&mut e, 7); // ~4.7 ms — well inside the 200 ms glide
+    let f = active_freq(&e);
+    assert!(
+        f > f60() && f < f72(),
+        "expected mid-glide pitch between {} and {}, got {f}",
+        f60(),
+        f72()
+    );
+    render_blocks(&mut e, 800); // 0.53 s >> glide time
+    let f = active_freq(&e);
+    assert!((f - f72()).abs() < 1.0, "glide did not land on target: {f}");
+}
+
+#[test]
+fn glide_off_is_instant() {
+    // Time is SET but mode is Off — must not glide (mono path ignores mode
+    // today: RED until the fix).
+    let mut e = patch_engine(1.0, 0.2, 0.0);
+    note(&mut e, 60);
+    render_blocks(&mut e, 20);
+    note(&mut e, 72);
+    render_blocks(&mut e, 1);
+    let f = active_freq(&e);
+    assert!((f - f72()).abs() < 0.5, "glide must be instant in mode Off: {f}");
+}
+
+#[test]
+fn fingered_portamento_does_not_glide_from_released_note() {
+    // Mode Fingered (legato): first note after all keys released must be
+    // instant, not a glide from the previous phrase's last pitch (RED until
+    // the fix).
+    let mut e = patch_engine(1.0, 0.2, 2.0);
+    note(&mut e, 60);
+    render_blocks(&mut e, 20);
+    unnote(&mut e, 60);
+    render_blocks(&mut e, 400); // release 0.05 s → voice idle
+    note(&mut e, 72);
+    render_blocks(&mut e, 1);
+    let f = active_freq(&e);
+    assert!((f - f72()).abs() < 0.5, "stale glide from released note: {f}");
+}
+
+#[test]
+fn legato_retrigger_glides_when_first_note_was_instant() {
+    // Mono-ST + Fingered: the first note has no glide (porta_coeff = 1.0);
+    // the second, held-key note must still glide (RED until retrigger_note
+    // sets porta_coeff).
+    let mut e = patch_engine(2.0, 0.2, 2.0);
+    note(&mut e, 60);
+    render_blocks(&mut e, 20);
+    note(&mut e, 72);
+    render_blocks(&mut e, 7);
+    let f = active_freq(&e);
+    assert!(
+        f > f60() && f < f72(),
+        "legato retrigger snapped instead of gliding: {f}"
+    );
+}
+
+#[test]
+fn set_part_mono_legato_glide_events() {
+    let mut e = patch_engine(0.0, 0.0, 0.0);
+    let _ = e.handle_control(ControlEvent::SetPartMono { part: 0, mono: true });
+    assert_eq!(e.parts[0].params.play_mode, 1.0);
+    let _ = e.handle_control(ControlEvent::SetPartLegato { part: 0, legato: true });
+    assert_eq!(e.parts[0].params.play_mode, 2.0);
+    let _ = e.handle_control(ControlEvent::SetPartGlide { part: 0, ms: 150.0 });
+    assert!((e.parts[0].params.portamento_time - 0.15).abs() < 1e-4);
+    assert_eq!(e.parts[0].params.portamento_mode, 1.0);
+    let _ = e.handle_control(ControlEvent::SetPartGlide { part: 0, ms: 0.0 });
+    assert_eq!(e.parts[0].params.portamento_time, 0.0);
+    let _ = e.handle_control(ControlEvent::SetPartGlide { part: 0, ms: 5000.0 });
+    assert!((e.parts[0].params.portamento_time - 2.0).abs() < 1e-4, "ms must clamp to 2 s");
+    // Mono off clears the stale stack and returns to poly
+    note(&mut e, 60);
+    render_blocks(&mut e, 1);
+    let _ = e.handle_control(ControlEvent::SetPartMono { part: 0, mono: false });
+    assert_eq!(e.parts[0].params.play_mode, 0.0);
+    assert!(e.parts[0].note_stack.is_empty(), "mono-off must clear note_stack");
+    // Latch mode is left alone by the mono toggle
+    let _ = e.handle_control(ControlEvent::SetPartMono { part: 0, mono: true });
+    e.parts[0].params.play_mode = 3.0;
+    let _ = e.handle_control(ControlEvent::SetPartMono { part: 0, mono: true });
+    assert_eq!(e.parts[0].params.play_mode, 3.0, "latch mode must not be clobbered");
+    // Out-of-range part: no-op, no panic
+    let _ = e.handle_control(ControlEvent::SetPartGlide { part: 99, ms: 50.0 });
+    let _ = e.handle_control(ControlEvent::SetPartMono { part: 99, mono: true });
+}

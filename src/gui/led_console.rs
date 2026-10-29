@@ -1,7 +1,7 @@
 //! Bank-2 pad console state machine (pure logic, GUI thread only).
 //! Slots 0..=7 = top-row pads 17..=24 (notes 60..=67). Slot 0 (pad 17) is
 //! the always-visible MENU button; targets live on slots 1..=7.
-//! Prev/Next/Rewind arrive as actions from notes 78/79/80 (routed by caller).
+//! Prev/Next arrive from notes 78/79, PAGE back/forward from 80/76 (routed by caller).
 //! Engine-side transport notes 81/82/83 (mod.rs:1573-1598) never reach this
 //! module; console Undo is note 75 (engine's legacy 64-arm superseded).
 

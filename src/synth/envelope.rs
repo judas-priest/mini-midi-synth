@@ -157,6 +157,32 @@ impl Envelope {
         self.stage = EnvStage::Release;
     }
 
+    /// Note-off with an explicit release duration (seconds), overriding the
+    /// configured release rate. Used for the static pedal-up release setting
+    /// (TECHDEBT #7). Plain f32 math — RT-safe.
+    pub fn note_off_for(&mut self, seconds: f32) {
+        if self.stage == EnvStage::Idle { return; }
+        self.stage = EnvStage::Release;
+        self.phase = 0.0; // Decay leaves phase at 1.0; without the reset a
+                          // sustained note under a Linear/Quadratic shape
+                          // would cut to zero instantly.
+        self.release_start = self.output;
+        let t = seconds.max(0.02);
+        // BOTH release representations must be set: IIR shapes read
+        // release_coeff, Linear/Quadratic shapes read phase_step_r
+        // (user-selectable via env_release_shape). Missing one silently
+        // keeps the patch release for that shape. The override is transient:
+        // Voice::note_on re-applies set_adsr on every retrigger.
+        self.release_coeff = time_to_coeff(t, self.sample_rate);
+        self.phase_step_r = 1.0 / (t * self.sample_rate);
+    }
+
+    /// Immediate kill (CC120): zero output, Idle stage. No allocation.
+    pub fn kill(&mut self) {
+        self.stage = EnvStage::Idle;
+        self.output = 0.0;
+    }
+
     pub fn is_idle(&self) -> bool {
         self.stage == EnvStage::Idle
     }
@@ -295,5 +321,45 @@ impl Envelope {
                 out.max(0.0)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn note_off_for_sets_both_release_representations() {
+        let mut env = Envelope::new(48000.0);
+        env.set_adsr(0.01, 0.1, 0.7, 0.3);
+        env.note_off(); // enter Release so note_off_for skips its idle early-return
+        env.note_off_for(0.05);
+        assert!(env.is_releasing());
+        // Linear/Quadratic shapes read phase_step_r
+        assert!((env.phase_step_r - 1.0 / (0.05 * 48000.0)).abs() < 1e-9);
+        // IIR shapes read release_coeff
+        assert!(env.release_coeff > 0.0 && env.release_coeff < 1.0);
+        // The full duration actually elapses: silent just past 0.05s
+        for _ in 0..(0.055 * 48000.0) as usize { env.tick(); }
+        assert!(env.output < 1e-3, "release did not complete in the requested time");
+    }
+
+    #[test]
+    fn note_off_for_on_idle_is_noop() {
+        let mut env = Envelope::new(48000.0);
+        env.note_off_for(0.05);
+        assert!(env.is_idle());
+    }
+
+    #[test]
+    fn retrigger_restores_patch_release_after_override() {
+        // The override clobbers the release representations; Voice::note_on
+        // re-applies set_adsr, so the next plain note_off uses the patch rate.
+        let mut env = Envelope::new(48000.0);
+        env.set_adsr(0.01, 0.1, 0.7, 0.3);
+        env.note_off();
+        env.note_off_for(0.03);
+        env.set_adsr(0.01, 0.1, 0.7, 0.3); // what Voice::note_on does per retrigger
+        assert!((env.phase_step_r - 1.0 / (0.3 * 48000.0)).abs() < 1e-9);
     }
 }

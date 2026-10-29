@@ -510,6 +510,22 @@ impl Voice {
         self.filter_env.note_off();
     }
 
+    /// Release with an explicit duration; amp env only (filter env keeps the
+    /// patch's own release so tonal closure stays unchanged). Used for the
+    /// static pedal-up release setting (TECHDEBT #7).
+    pub fn note_off_for(&mut self, seconds: f32) {
+        self.amp_env.note_off_for(seconds);
+    }
+
+    /// Immediate kill (CC120 All Sound Off): voice stops producing sound from
+    /// the next tick, no release tail, no allocation. Compare `note_off`,
+    /// which only arms the release envelope.
+    pub fn kill(&mut self) {
+        self.active = false;
+        self.amp_env.kill();
+        self.filter_env.kill();
+    }
+
     /// Re-trigger envelopes without resetting oscillator state.
     /// Used by step sequencer for per-step articulation.
     pub fn retrigger_envelope(&mut self) {
@@ -535,17 +551,30 @@ impl Voice {
         let new_freq = midi_to_freq(note);
         self.target_freq = new_freq;
         self.log_target_freq = new_freq.ln();
-        // Apply portamento glide (uses existing portamento_time from params)
-        if params.portamento_time > 0.001 {
-            // log_freq will glide toward log_target_freq in tick() naturally
+        // Apply portamento glide (log_freq slews toward log_target_freq in
+        // tick()). Gated on portamento_mode so mode 0 (Off) is instant even
+        // with a glide time set — matches the note-on path. porta_coeff MUST
+        // be (re)computed here: tick() only slews while porta_coeff < 0.999,
+        // so a voice whose last full note_on was instant would otherwise snap.
+        if params.portamento_time > 0.001 && params._portamento_mode as u8 > 0 {
+            let samples = params.portamento_time * self.sample_rate;
+            self.porta_coeff = 1.0 - (-4.0 / samples).exp();
         } else {
             self.freq = new_freq;
             self.log_freq = new_freq.ln();
+            self.porta_coeff = 1.0;
         }
     }
 
     pub fn is_releasing(&self) -> bool {
         self.amp_env.is_releasing()
+    }
+
+    /// Test-only: expose the current (pre-modulation) voice pitch for
+    /// portamento assertions. Compiles out of release builds.
+    #[cfg(test)]
+    pub(crate) fn current_freq(&self) -> f32 {
+        self.freq
     }
 
     #[inline]

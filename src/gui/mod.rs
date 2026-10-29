@@ -151,6 +151,8 @@ pub struct PartState {
     pub vel_max: u8,
     pub pan: f32,        // -1..+1
     pub transpose: i8,   // semitones
+    /// Root-only (bass split): engine gates this part to the lowest held key
+    pub root_only: bool,
     pub sf2_mode: bool,
     pub sf2_program: u8,
     /// Macro knob values (0..1) — live, sent to engine via SetMacro
@@ -169,7 +171,7 @@ impl PartState {
             patch_idx: 0, edited_params: Default::default(), params_dirty: false,
             enabled: false, mute: false, volume: 0.8,
             min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
-            pan: 0.0, transpose: 0, sf2_mode: false, sf2_program: 0,
+            pan: 0.0, transpose: 0, root_only: false, sf2_mode: false, sf2_program: 0,
             macro_vals: [0.0; 8],
             macro_names: (1..=8).map(|i| format!("Macro {i}")).collect(),
             xy_macro_x: 0,
@@ -287,6 +289,10 @@ pub struct App {
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
     pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Static pedal-up release duration (None = off, patch release)
+    pub sustain_release: Option<f32>,
+    /// SF2 release-time scale (1.0 = file defaults)
+    pub sf2_release_scale: f32,
     /// Show help dialog
     pub show_help: bool,
     /// Global params display values (effects, volume, lfo rate)
@@ -317,6 +323,11 @@ pub struct App {
     pub drum_step_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_rec_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub drum_metronome: bool,
+    /// Previous sequencer step (downbeat-flash edge detection)
+    pub drum_prev_step: u8,
+    /// Instant of the last beat-1 transition (GUI flash)
+    pub drum_beat_flash: Option<std::time::Instant>,
     pub perf_window: usize,   // first perf_list idx visible on slots 1..=7
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -531,6 +542,13 @@ impl eframe::App for App {
         // Sync drum play/rec state from engine (for MIDI-triggered changes)
         self.drum_playing = self.drum_play_atom.load(Ordering::Relaxed) != 0;
         self.drum_recording = self.drum_rec_atom.load(Ordering::Relaxed) != 0;
+        // Beat-1 flash: the step atom shows the NEXT step, so step 0 has just
+        // sounded when the atom transitions 0 -> 1 while playing.
+        let step_now = self.drum_step_atom.load(Ordering::Relaxed);
+        if self.drum_playing && self.drum_prev_step == 0 && step_now == 1 {
+            self.drum_beat_flash = Some(std::time::Instant::now());
+        }
+        self.drum_prev_step = step_now;
 
         // Bank-2 console pads -> state machine -> actions
         let mut acts: Vec<led_console::Action> = Vec::new();
@@ -746,6 +764,34 @@ impl eframe::App for App {
                     .fill(if sus { theme::KEY_WHITE_ACTIVE } else { theme::BG_PAD_EMPTY });
                 if ui.add(sus_btn).on_hover_text("Sustain pedal (CC64): holds notes. Click to toggle.").clicked() {
                     let _ = self.ctrl_tx.push(ControlEvent::SetSustain { on: !sus });
+                }
+
+                // Static pedal-up release (TECHDEBT #7): CC64 value never enters it
+                let sr_on = self.sustain_release.is_some();
+                if ui.button("SR").on_hover_text(
+                    "Pedal-up release: held notes release in a fixed time instead of the patch release.").clicked()
+                {
+                    self.sustain_release = if sr_on { None } else { Some(0.3) };
+                    let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: self.sustain_release });
+                    self.save_global_to_config();
+                }
+                if sr_on {
+                    let mut secs = self.sustain_release.unwrap_or(0.3);
+                    if ui.add(egui::Slider::new(&mut secs, 0.05..=8.0)
+                        .fixed_decimals(2).suffix(" s")).changed() {
+                        self.sustain_release = Some(secs);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: Some(secs) });
+                        self.save_global_to_config();
+                    }
+                }
+                ui.label("SF2 rel:");
+                let mut scale = self.sf2_release_scale;
+                if ui.add(egui::DragValue::new(&mut scale).range(0.05..=3.0).speed(0.05).suffix("\u{00d7}"))
+                    .on_hover_text("SF2 release-time scale (1.0 = file defaults)").changed()
+                {
+                    self.sf2_release_scale = scale;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale });
+                    self.save_global_to_config();
                 }
 
                 ui.separator();
@@ -1144,6 +1190,9 @@ impl eframe::App for App {
             ctx.request_repaint();
         }
 
+        // Pad remap dialogs — global so pad clicks work on any tab (TECHDEBT #11)
+        self.draw_drum_remap_modals(ctx);
+
         // Central: part tabs + parameters / drum sequencer
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(theme::SP_SM);
@@ -1222,6 +1271,9 @@ impl App {
         // Send drum and part volumes to engine
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+        let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: self.sustain_release });
+        let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale: self.sf2_release_scale });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
         // Restore the internal-kit remap before the initial push (if an SF2 kit is
         // configured, load_sf2_drums below overwrites this with the per-kit table).
         if self.sf2_drums_loaded_name.is_empty() {
@@ -1298,6 +1350,9 @@ impl App {
         self.config.ui.pitch_bend_range = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as u8;
         self.config.ui.drum_volume = self.drum_volume;
         self.config.ui.drum_fixed_velocity = self.drum_fixed_velocity;
+        self.config.ui.sustain_release = self.sustain_release;
+        self.config.ui.sf2_release_scale = self.sf2_release_scale;
+        self.config.ui.drum_metronome = self.drum_metronome;
         if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();

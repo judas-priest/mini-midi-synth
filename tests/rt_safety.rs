@@ -50,6 +50,23 @@ fn loading_a_patch_does_not_free_on_the_audio_thread() {
 }
 
 #[test]
+fn metronome_click_does_not_allocate() {
+    // 400 BPM → beat every 7200 samples; 800 blocks = 25600 samples
+    // crosses 3 beat boundaries with click triggers inside the guarded region.
+    let mut engine = SynthEngine::new(SR);
+    let _ = engine.handle_control(ControlEvent::DrumSetMetronome { on: true });
+    let _ = engine.handle_control(ControlEvent::DrumSeqBpm { bpm: 400.0 });
+    let _ = engine.handle_control(ControlEvent::DrumSeqPlay { playing: true });
+    let mut l = [0.0f32; BLOCK_SIZE];
+    let mut r = [0.0f32; BLOCK_SIZE];
+    assert_no_alloc(|| {
+        for _ in 0..800 {
+            engine.tick_block(&mut l, &mut r);
+        }
+    });
+}
+
+#[test]
 fn looper_control_events_do_not_allocate() {
     // start_record / undo / clear all call update_display, which used to push
     // up to MAX_LOOP_EVENTS entries into an empty Vec on the audio thread.
