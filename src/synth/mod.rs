@@ -2315,6 +2315,8 @@ impl SynthEngine {
                 // until the next CC64 edge (same ordering as the CC120/123 arm).
                 self.set_sustain(0);
                 self.sampler.all_notes_off();
+                // The sequencer no longer owns any channel program
+                self.sampler.seq_channels_release();
                 for part in &mut self.parts {
                     for voice in &mut part.voices {
                         if voice.active { voice.note_off(); }
@@ -2344,6 +2346,8 @@ impl SynthEngine {
                     self.set_sustain(0);
                     // All notes off on all engines
                     self.sampler.all_notes_off();
+                    // Playback stopped: give the shared channels back to the parts
+                    self.sampler.seq_channels_release();
                     for part in &mut self.parts {
                         for voice in &mut part.voices {
                             if voice.active { voice.note_off(); }

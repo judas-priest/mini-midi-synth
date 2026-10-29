@@ -365,6 +365,18 @@ impl SamplerEngine {
         }
     }
 
+    /// MIDI-file playback stopped or a new file loaded: the sequencer no
+    /// longer owns any channel's program. Reset both seq caches and re-assert
+    /// every part's program so live keys get their own timbre back (a seq
+    /// program change on a shared channel used to desync `part_program[]`
+    /// until an explicit SetPartSf2Program). RT-safe: array writes + the
+    /// fixed `send_part_programs` loop.
+    pub fn seq_channels_release(&mut self) {
+        self.seq_channel_program = [255; 16];
+        self.seq_channel_used = [false; 16];
+        self.send_part_programs(false);
+    }
+
     pub fn set_part_program(&mut self, part: usize, program: u8, bank: u8) {
         if part >= 16 { return; }
         self.part_program[part] = program;
@@ -585,5 +597,44 @@ mod tests {
         let _ = e.handle_control(ControlEvent::SetSf2BlockSize { size: 32 });
         assert_eq!(e.sampler.seq_channel_program[5], 255,
             "second rebuild kept a stale seq dedup cache");
+    }
+
+    #[test]
+    fn seq_stop_resets_seq_program_ownership() {
+        let mut e = SynthEngine::new(48000.0);
+        e.sampler.seq_program_set(3, 90);
+        let _ = e.handle_control(ControlEvent::MidiSeqPlay { playing: false });
+        assert_eq!(e.sampler.seq_channel_program[3], 255,
+            "stop did not reset the seq program cache");
+        assert!(!e.sampler.seq_channel_used[3],
+            "stop did not clear the seq used mask");
+    }
+
+    #[test]
+    fn seq_load_resets_seq_program_ownership() {
+        let mut e = SynthEngine::new(48000.0);
+        e.sampler.seq_program_set(3, 90);
+        let data = Box::new(crate::synth::midi_player::MidiSeqData {
+            ticks_per_beat: 480,
+            total_ticks: 480,
+            events: Vec::new(),
+            track_names: Vec::new(),
+            track_channels: Vec::new(),
+        });
+        let _ = e.handle_control(ControlEvent::MidiSeqLoad { data });
+        assert_eq!(e.sampler.seq_channel_program[3], 255,
+            "load did not reset the seq program cache");
+        assert!(!e.sampler.seq_channel_used[3],
+            "load did not clear the seq used mask");
+    }
+
+    #[test]
+    fn seq_ownership_survives_rebuild_but_not_stop() {
+        let mut e = SynthEngine::new(48000.0);
+        e.sampler.seq_program_set(1, 70);
+        let _ = e.handle_control(ControlEvent::SetSf2BlockSize { size: 24 });
+        assert!(e.sampler.seq_channel_used[1], "rebuild must not release ownership");
+        let _ = e.handle_control(ControlEvent::MidiSeqPlay { playing: false });
+        assert!(!e.sampler.seq_channel_used[1], "stop must release ownership");
     }
 }
