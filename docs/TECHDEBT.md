@@ -345,7 +345,10 @@ flamegraph, criterion, RT-safety vs load; типовые причины клип
 полифонических синтхах: denormals, per-sample div/sin, cache-miss voice layout),
 затем: (a) измерить базу до/после батча на тех же пресетах (git bisect по
 коммитам PR #4/#5 с perf-замером), (b) flamegraph горячего пути tick_block,
-(в) метроном: проверка — не считается ли sin/floor когда click_env == 0 (guard),
+(в) метроном: ПРОВЕРЕНО 2026-10-29 — guard уже есть: sin/floor считаются только
+при click_env > 0.0, env зануляется при < 0.001 (drum.rs:1218-1226 @ ecf67e7);
+в покое cost = один f32-компарер на сэмпл. Оптимизация не требуется; полный
+аудит (#19: flamegraph/denormals/bisect) остаётся отдельной работой,
 (г) denormals flush-to-zero (MMFTZ) — включён ли.
 
 ## 20. Ждёт пользовательской проверки (батч PR #5, 2026-10-29)
