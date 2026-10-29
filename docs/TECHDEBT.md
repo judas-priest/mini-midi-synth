@@ -332,6 +332,14 @@ poll-подход: раз в 1-2с сравнивать имя default_output_de
 безопасно вызывать повторно (проверить идемпотентность — looper restore уже
 умеет, см. PR #2); (c) выбор устройства: дефолт системы или из config.
 
+РЕАЛИЗОВАНО 2026-10-29 (план docs/superpowers/plans/2026-10-29-metronome-hotplug.md):
+GUI-поллер default-output-device (1.5 c, desktop; Android off — AAudio-роутинг),
+ReconnectPolicy (Connected | Retrying{at, attempts}, backoff 2 c, тост только на
+первой неудаче серии), AudioBackend.device_name. Подпункт (б) снят чтением:
+reconnect_audio не пересоздаёт console_rx/LED-socket. Осталось: ручная
+верификация hotplug по чеклисту плана; известное ограничение — ALSA-хост
+(константное имя «default») поллером не отслеживается.
+
 ## 19. Аудит производительности: DSP клипует, CPU до ~80% при игре synth-частью
 Репорт пользователя (2026-10-29): DSP загрузка ~80% и клиппинг при игре
 synth-частью. УТОЧНЕНИЕ юзера: клиппинг был ЕЩЁ ДО метронома — это НЕ регресс
