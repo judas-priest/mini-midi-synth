@@ -109,9 +109,13 @@ fn patch_switch_seamless_tail_and_pedal_up_releases() {
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
     assert!(render_peak(&mut e, 4) > SILENCE);
-    // switch patch: tail must keep sounding (seamless)
+    // switch patch (seamless): pedal-held voice KEEPS SUSTAINING.
+    // Дискриминатор против kill-семантики: kill = voice в release → после
+    // settle (8s) тишина; seamless = sustain продолжается → громко.
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
-    assert!(render_peak(&mut e, 4) > SILENCE, "patch switch killed the tail");
+    settle(&mut e);
+    assert!(render_peak(&mut e, 20) > SILENCE,
+        "patch switch killed a pedal-held voice (it should keep sustaining)");
     // pedal up: everything releases
     pedal_up(&mut e);
     settle(&mut e);
@@ -123,7 +127,11 @@ fn held_key_keeps_sounding_across_patch_switch() {
     let mut e = engine_with_init_patch();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
-    assert!(render_peak(&mut e, 4) > SILENCE, "held voice killed by patch switch");
+    // key STILL HELD: kill-семантика выпустила бы голос в release → после
+    // settle тишина; seamless → голос продолжает сустейниться
+    settle(&mut e);
+    assert!(render_peak(&mut e, 20) > SILENCE,
+        "held key was killed by patch switch");
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
     settle(&mut e);
     assert!(render_peak(&mut e, 4) < SILENCE);
@@ -136,8 +144,21 @@ fn program_change_seamless_tail() {
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
     e.handle_event(MidiEvent::ProgramChange { channel: 0, program: 1 });
-    assert!(render_peak(&mut e, 4) > SILENCE, "program change killed the tail");
+    settle(&mut e);
+    assert!(render_peak(&mut e, 20) > SILENCE,
+        "program change killed a pedal-held voice");
     pedal_up(&mut e);
+    settle(&mut e);
+    assert!(render_peak(&mut e, 4) < SILENCE);
+}
+
+#[test]
+fn new_notes_sound_after_patch_switch() {
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 20) > SILENCE, "new patch produced no sound");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
     settle(&mut e);
     assert!(render_peak(&mut e, 4) < SILENCE);
 }
@@ -174,7 +195,9 @@ fn latch_mismatch_releases_latch_voices() {
     // switch to non-latch patch: latch voices released
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
     // release tail length depends on the new patch's release — assert DECAY,
-    // not absolute silence (robust against long-release factory patches)
+    // not absolute silence (robust against long-release factory patches);
+    // если first non-init factory patch окажется latch-ным (маловероятно) —
+    // взять другой патч явно
     let right_after = render_peak(&mut e, 20);
     assert!(right_after > SILENCE, "release tail should still be decaying");
     settle(&mut e);
@@ -192,35 +215,42 @@ fn latch_mismatch_releases_latch_voices() {
 #[test]
 fn steal_prefers_releasing_voice() {
     let mut p = Part::new(48_000.0);
+    p.enabled = true; // note_on бейлится на !enabled (mod.rs:613)
     // занять ВСЕ 8 голосов (VOICES_PER_LAYER = 8, mod.rs:376) sustained-нотами;
     // Part::note_on(raw_note: u8, velocity: u8)
     for n in 36..36 + p.voices.len() {
         p.note_on(n as u8, 100);
     }
-    // одну отпустить → она в release-фазе
-    p.note_off(36);
-    // новая нота: должна занять release-голос (36), а не самый старый активный
+    // отпустить НЕ-самый-старый голос (40) → он в release-фазе;
+    // голос 36 — самый старый активный (старый вор взял бы ЕГО)
+    p.note_off(40);
+    // новая нота: должна занять release-голос 40
     p.note_on(80, 100);
+    let v40 = p.voices.iter().find(|v| v.src_note == 40).unwrap();
+    assert!(!v40.is_releasing() && v40.active && v40.note == 80,
+        "released voice 40 must be reused for the new note");
+    // самый старый активный (36) не тронут
     let v36 = p.voices.iter().find(|v| v.src_note == 36).unwrap();
-    assert!(!v36.is_releasing() && v36.active, "released voice was reused");
-    assert_eq!(v36.note, 80);
-    // sustained-голос 37 не тронут
-    let v37 = p.voices.iter().find(|v| v.src_note == 37).unwrap();
-    assert!(v37.active && !v37.is_releasing() && v37.note == 37);
+    assert!(v36.active && !v36.is_releasing() && v36.note == 36,
+        "old stealer would have taken voice 36");
 }
 ```
 
 (VOICES_PER_LAYER = 8, mod.rs:376; конструктор `Part::new(48_000.0)` и поля
 voices — приватные, но tests.rs — child-модуль synth, доступ есть; прецедент:
-src/synth/tests.rs:750 уже правит patch.params.)
+src/synth/tests.rs:750 уже правит patch.params. RED-фаза: старый вор берёт
+голос 36 (min age) → тест ПАНИКУЕТ на find(src_note==36) (src_note перезаписан
+на 80) — паника = валидный красный. НЕ-старый релиз (40) обязателен, иначе
+старый и новый вор совпадают и красной фазы нет.)
 
 - [ ] **Step 5: прогнать — зафиксировать красные**
 
-Run: `cargo test --test sustain_audit -- --nocapture 2>&1 | tail -30`
-Expected: 4 старых/новых audio-тестов (seamless-троица + program_change) — FAIL
-(«killed the tail»); latch-mismatch — FAIL; steal-тест — FAIL (сейчас вор
-берёт самый старый активный, не release). Существующие 38 sustain-тестов —
-зелёные (кроме двух заменённых, которые стали новыми красными).
+Run: `cargo test --test sustain_audit -- --nocapture 2>&1 | tail -40`
+Expected RED (до Task 2): pedal/held/program_change seamless-тесты FAIL на
+своих settle-ассертах («killed a pedal-held voice» / «held key was killed»);
+latch-mismatch FAIL на decay-ассерте; steal-тест — ПАНИКА (find по
+src_note==36 не находит). Зелёные: panic-тест (guard) и
+new_notes_sound_after_patch_switch (guard). Остальные 36 sustain-тестов зелёные.
 
 - [ ] **Step 6: Commit**
 
@@ -276,11 +306,28 @@ git commit -m "test: seamless patch switch contracts (red — old kill semantics
 src_note в `l.latch_held: Vec<u8>`; voice.src_note — u8. Если play_mode — u8
 enum-число, сравнение `== 3` корректно.)
 
-- [ ] **Step 2: ProgramChange arm** — удалить идентичный блок (mod.rs ~1903-1922,
-  от `self.sampler.part_all_notes_off(0);` до `l.root_active = None;`
-  включительно, включая закрывающую скобку `if let Some(l)` — проверить
-  структуру: если `if let Some(l)` оборачивал ТОЛЬКО килл, удалить его целиком;
-  если после килла там ещё логика — оставить обёртку без килла).
+- [ ] **Step 2: ProgramChange arm** — удалить идентичный блок (mod.rs ~1908-1919:
+  от `self.sampler.part_all_notes_off(0);` до `l.root_active = None;` — весь
+  `if let Some(l) = self.parts.get_mut(0) { ... }` оборачивал ТОЛЬКО килл,
+  удалить его целиком) и добавить ТОТ ЖЕ latch-mismatch release после
+  `l.params = params;` / `l.min_note`/`l.max_note` (~1925-1927) — PC делает
+  тот же params-swap, без блока latch→не-latch оставит latch-голоса звенеть
+  вечно (ревью finding #4):
+
+```rust
+                    if let Some(l) = self.parts.get_mut(0) {
+                        if l.params.play_mode as u8 == 3 && params.play_mode as u8 != 3 {
+                            for voice in &mut l.voices {
+                                if voice.active && l.latch_held.contains(&voice.src_note) {
+                                    voice.note_off();
+                                }
+                            }
+                            l.latch_held.clear();
+                        }
+                    }
+```
+
+(params здесь из `preset_params_cache` — тип тот же PatchParams.)
 
 - [ ] **Step 3: вор голосов** — в fallback-ветке (mod.rs:732-738) приоритет
   release-фазных:
@@ -336,7 +383,9 @@ key-off / CC120/123 / паника — прежние механизмы осв�
 release-фазные. Известные компромиссы: DSP-хвост перекрашивается mod-матрицей
 нового патча; педаль-висяк при никогда не отпущенной педали — по вине педали.
 Планы (docs/superpowers/plans/2026-10-29-seamless-patch-switch.md) и аудит
-семантики — в диалоге 2026-10-29.
+семантики — в диалоге 2026-10-29. Компромиссы: mono note_stack и SF2 latch-ноты
+ПЕРЕНОСЯТСЯ через смену патча без чистки (самозаживают: stack чистится на
+pedal-up/CC123; SF2 latch отпускается pedal-up) — задокументировано ревью.
 ```
 
 - [ ] **Step 2: Commit**
