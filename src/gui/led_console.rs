@@ -142,8 +142,9 @@ impl LedConsole {
         }
     }
 
-    /// LED colors for slots 0..=7 (top row). `w_perf`/`w_pat` — first index of
-    /// the visible window: slot i (1..=7) shows item window + i - 1.
+    /// LED colors for slots 0..=7 (top row). `w_perf`/`w_pat`/`w_mute` — first
+    /// index of the visible window: slot i (1..=7) shows item window + i - 1.
+    /// MUTE slots cover all parts via w_mute paging (PAGE pads 28/29).
     /// Slot 0 is the MENU button (white).
     #[allow(clippy::too_many_arguments)] // flat LED snapshot, callers build it inline
     pub fn top_colors(
@@ -151,9 +152,10 @@ impl LedConsole {
         active_perf: Option<usize>,
         filled_perfs: usize,
         current_pattern: usize,
-        mutes: &[bool; 8],
+        mutes: &[bool],
         w_perf: usize,
         w_pat: usize,
+        w_mute: usize,
         seq_target: u8,
     ) -> [[u8; 3]; 8] {
         // Palette uses ONLY hues visually validated on this hardware (see
@@ -194,10 +196,10 @@ impl LedConsole {
             }
             Mode::Mute => {
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
-                    if mutes[i - 1] {
-                        *col = [0x00, 0x00, 0x00]; // muted: OFF
-                    } else {
-                        *col = [0x00, 0xFF, 0x00]; // sounding: green
+                    let idx = w_mute + i - 1;
+                    match mutes.get(idx) {
+                        Some(false) => *col = [0x00, 0xFF, 0x00], // sounding: green
+                        _ => *col = [0x00, 0x00, 0x00], // muted / beyond list: OFF
                     }
                 }
             }
@@ -366,14 +368,14 @@ mod tests {
         let mut c = LedConsole::new();
         let mutes = [false; 8];
         // window 2: slot 1 = perf idx 2 (selected), slot 2 = idx 3 (filled)
-        let home = c.top_colors(Some(2), 5, 0, &mutes, 2, 0, 0);
+        let home = c.top_colors(Some(2), 5, 0, &mutes, 2, 0, 0, 0);
         assert_eq!(home[1], [0xFF, 0x00, 0xFF]); // selected (idx 2)
         assert_eq!(home[2], [0x00, 0x66, 0xFF]); // available (idx 3)
         // slot 4 = idx 5 -> за концом списка (count 5) -> OFF
         assert_eq!(home[4], [0x00, 0x00, 0x00]);
         // pattern window 1: slot 1 = pattern 1 (selected при current=1)
         c.mode = Mode::Pattern;
-        let pat = c.top_colors(None, 0, 1, &mutes, 0, 1, 0);
+        let pat = c.top_colors(None, 0, 1, &mutes, 0, 1, 0, 0);
         assert_eq!(pat[1], [0xFF, 0x00, 0xFF]);
         assert_eq!(pat[2], [0xFF, 0xFF, 0x00]); // pattern mode speaks yellow
     }
@@ -422,14 +424,32 @@ mod tests {
         let mut c = LedConsole::new();
         c.mode = Mode::Menu;
         let mutes = [false; 8];
-        let drums = c.top_colors(None, 0, 0, &mutes, 0, 0, 0);
+        let drums = c.top_colors(None, 0, 0, &mutes, 0, 0, 0, 0);
         assert_eq!(drums[3], [0x00, 0x66, 0xFF], "target=0 (drums): blue");
-        let looper = c.top_colors(None, 0, 0, &mutes, 0, 0, 1);
+        let looper = c.top_colors(None, 0, 0, &mutes, 0, 0, 0, 1);
         assert_eq!(looper[3], [0x00, 0xFF, 0x00], "target=1 (looper): green");
         // остальные пункты меню не изменились
         assert_eq!(drums[0], [0x00, 0x66, 0xFF]); // HOME: blue
         assert_eq!(drums[1], [0xFF, 0xFF, 0x00]); // PATTERN: yellow
         assert_eq!(drums[2], [0x00, 0xFF, 0x00]); // MUTE: green
+    }
+
+    #[test]
+    fn mute_mode_windows_over_all_parts() {
+        let mut c = LedConsole::new();
+        c.mode = Mode::Mute;
+        let mutes: [bool; 16] = std::array::from_fn(|i| i == 7 || i == 14);
+        // window 7: slot 1 = part 7 (muted -> OFF), slot 2 = part 8 (sound -> green)
+        let top = c.top_colors(None, 0, 0, &mutes, 0, 0, 7, 0);
+        assert_eq!(top[1], [0x00, 0x00, 0x00], "muted part 7: OFF");
+        assert_eq!(top[2], [0x00, 0xFF, 0x00], "sounding part 8: green");
+        // window 14 (last page): slot 1 = part 14 (muted -> OFF),
+        // slot 2 = part 15 (< 16 -> green)
+        let top = c.top_colors(None, 0, 0, &mutes, 0, 0, 14, 0);
+        assert_eq!(top[1], [0x00, 0x00, 0x00], "muted part 14: OFF");
+        assert_eq!(top[2], [0x00, 0xFF, 0x00], "part 15: green");
+        // за концом списка -> OFF (окно 14, slot 3 = part 16 — не существует)
+        assert_eq!(top[3], [0x00, 0x00, 0x00]);
     }
 
     #[test]

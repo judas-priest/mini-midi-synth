@@ -784,6 +784,7 @@ pub fn run_gui(
         drum_beat_flash: None,
         perf_window: 1,
         pat_window: 0,
+        mute_window: 0,
         drum_undo_atom: c.drum_undo_atom,
         console: gui::led_console::LedConsole::default(),
         console_rx: Some(c.console_rx),

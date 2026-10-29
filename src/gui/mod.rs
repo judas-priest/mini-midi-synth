@@ -333,6 +333,7 @@ pub struct App {
     pub drum_beat_flash: Option<std::time::Instant>,
     pub perf_window: usize,   // first perf_list idx visible on slots 1..=7
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
+    pub mute_window: usize,   // first part idx visible on MUTE slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // Bank-2 pad console
     pub console: led_console::LedConsole,
@@ -736,19 +737,21 @@ impl eframe::App for App {
                             | crate::synth::looper::LooperState::Overdubbing),
                 )
             };
-            let mut mutes = [false; 8];
-            for (i, part) in self.parts.iter().take(8).enumerate() {
+            let mut mutes = [false; 16];
+            for (i, part) in self.parts.iter().enumerate().take(16) {
                 mutes[i] = part.mute;
             }
             let filled = self.perf_list.len();
             let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
             let page_depth = match self.console.mode() {
-                led_console::Mode::Pattern => self.pat_window, // окна {0,1} — сама глубина
+                led_console::Mode::Pattern => self.pat_window,
+                led_console::Mode::Mute => self.mute_window / 7,
                 _ => self.perf_window / 7,
             };
             let top = self.console.top_colors(self.active_perf_console(), filled,
                                               self.drum_current_pattern as usize, &mutes,
-                                              self.perf_window, self.pat_window, target);
+                                              self.perf_window, self.pat_window,
+                                              self.mute_window, target);
             let bottom = self.console.bottom_colors(playing, recording, page_depth, undo_avail);
             let mut snap = [[0u8; 3]; 16];
             snap[..8].copy_from_slice(&top);
@@ -2002,10 +2005,11 @@ impl App {
                 }
             }
             led_console::Action::ToggleMute(i) => {
-                if let Some(part) = self.parts.get_mut(i) {
-                    let mute = !part.mute;
-                    part.mute = mute;
-                    let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part: i, mute });
+                let part = self.mute_window + i; // i уже 0-based (slot-1 из консоли) // slot -> real part
+                if let Some(p) = self.parts.get_mut(part) {
+                    let mute = !p.mute;
+                    p.mute = mute;
+                    let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part, mute });
                     self.persist_parts_state();
                 }
             }
@@ -2073,6 +2077,11 @@ impl App {
             led_console::Mode::Pattern => {
                 // 8 patterns, window shows 7: max start = 1
                 self.pat_window = (self.pat_window as i32 + delta).clamp(0, 1) as usize;
+            }
+            led_console::Mode::Mute => {
+                let n = self.parts.len();
+                let max_w = n.saturating_sub(7);
+                self.mute_window = (self.mute_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             _ => {}
         }
