@@ -2,6 +2,7 @@
 //! Plan: docs/superpowers/plans/2026-10-29-metronome-init-perf.md
 
 use mini_midi_synth::synth::{ControlEvent, MidiEvent, SynthEngine, BLOCK_SIZE};
+use std::sync::atomic::Ordering;
 
 const SR: f32 = 48_000.0;
 const CLICK_THRESHOLD: f32 = 0.05;
@@ -128,6 +129,7 @@ fn tc6_rec_mid_playback_click_continues() {
 #[test]
 fn tc7_keyboard_rec_note83_click_continues() {
     let mut e = metronome_engine(120.0, true);
+    e.seq_target_atom().store(0, Ordering::Relaxed); // pad transport: drums
     let _ = e.handle_control(ControlEvent::DrumSeqPlay { playing: true });
     let pre = click_events(&mut e, 500);
     e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
@@ -153,6 +155,7 @@ fn tc8_rec_from_stopped_autoplay_clicks_start() {
 #[test]
 fn tc9_double_toggle_click_continues() {
     let mut e = metronome_engine(120.0, true);
+    e.seq_target_atom().store(0, Ordering::Relaxed); // pad transport: drums
     let _ = e.handle_control(ControlEvent::DrumSeqPlay { playing: true });
     let pre = click_events(&mut e, 500);
     e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 }); // rec on
@@ -167,6 +170,7 @@ fn tc9_double_toggle_click_continues() {
 #[test]
 fn tc10_note83_velocity0_does_not_toggle_rec() {
     let mut e = metronome_engine(120.0, true);
+    e.seq_target_atom().store(0, Ordering::Relaxed); // pad transport: drums
     e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 0 });
     assert!(click_events(&mut e, 800).is_empty(),
         "velocity-0 toggled rec / started transport");
