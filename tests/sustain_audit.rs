@@ -402,7 +402,7 @@ fn repeated_cc123_is_idempotent() {
 }
 
 #[test]
-fn program_change_with_empty_patch_cache_cleans_voices() {
+fn out_of_range_program_change_is_seamless() {
     let mut e = SynthEngine::new(SR); // no set_patches: preset_params_cache is empty
     let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
     pedal_down(&mut e);
