@@ -579,3 +579,24 @@ fn dispatch_arp_note_off_releases_dsp_voice_with_transpose_set() {
         "dispatch_arp_note_off did not release the sounding voice"
     );
 }
+
+// ── Sustain-atom coherence on MIDI-seq stop ────────────────────
+
+#[test]
+fn midi_seq_stop_clears_part_sustain_state() {
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    for _ in 0..50 { e.tick(); }
+    assert!(e.parts[0].sustain_pedal > 0.5, "pedal did not engage the part flag");
+    let _ = e.handle_control(ControlEvent::MidiSeqPlay { playing: false });
+    assert!(!e.sustain_atom().load(std::sync::atomic::Ordering::Relaxed),
+        "seq stop left sustain atom ON");
+    assert_eq!(e.parts[0].sustain_pedal, 0.0, "part pedal flag stuck ON after seq stop");
+    assert!(!e.parts[0].sustained_notes.iter().any(|&s| s),
+        "sustained_notes stuck ON after seq stop");
+}

@@ -2308,7 +2308,12 @@ impl SynthEngine {
             }
             ControlEvent::MidiSeqLoad { data } => {
                 // The old file's sounding notes will never see their note-offs
-                // from the new event stream.
+                // from the new event stream. Lift sustain everywhere FIRST:
+                // all_notes_off alone clears only the sampler's pedal state —
+                // the engine atom, part.sustain_pedal and sustained_notes
+                // would stay ON and DSP would keep sustaining after key-offs
+                // until the next CC64 edge (same ordering as the CC120/123 arm).
+                self.set_sustain(0);
                 self.sampler.all_notes_off();
                 for part in &mut self.parts {
                     for voice in &mut part.voices {
@@ -2334,6 +2339,9 @@ impl SynthEngine {
                 self.midi_player.play_atom.store(playing as u8, std::sync::atomic::Ordering::Relaxed);
                 if !playing {
                     self.midi_player.reset_position();
+                    // Lift sustain everywhere first (see MidiSeqLoad): the
+                    // engine atom and part flags must agree with the sampler.
+                    self.set_sustain(0);
                     // All notes off on all engines
                     self.sampler.all_notes_off();
                     for part in &mut self.parts {

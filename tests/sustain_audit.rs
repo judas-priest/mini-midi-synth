@@ -620,3 +620,63 @@ fn rec_on_stopped_transport_auto_plays() {
     assert!(!e.drum_engine.sequencer.recording);
     assert!(e.drum_engine.sequencer.playing, "play persists after rec-off");
 }
+
+// ── Sustain-atom coherence on MIDI-seq stop/load ───────────────
+
+fn empty_seq_data() -> Box<mini_midi_synth::synth::midi_player::MidiSeqData> {
+    Box::new(mini_midi_synth::synth::midi_player::MidiSeqData {
+        ticks_per_beat: 480,
+        total_ticks: 480,
+        events: Vec::new(),
+        track_names: Vec::new(),
+        track_channels: Vec::new(),
+    })
+}
+
+#[test]
+fn midi_seq_stop_lifts_sustain_atom() {
+    let mut e = engine_with_init_patch();
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 20) > SILENCE, "note not held by pedal");
+    let _ = e.handle_control(ControlEvent::MidiSeqPlay { playing: false });
+    assert!(!e.sustain_atom().load(Ordering::Relaxed),
+        "seq stop left sustain atom ON");
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "seq stop left pedal-held note ringing (peak {after})");
+}
+
+#[test]
+fn midi_seq_stop_stops_sustaining_new_notes() {
+    let mut e = engine_with_init_patch();
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let _ = e.handle_control(ControlEvent::MidiSeqPlay { playing: false });
+    // The stop force-lifted the pedal everywhere: a NEW note must not be
+    // held after its key-off (no new CC64 edge arrives in between).
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 62 });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "seq stop left DSP sustaining new notes (peak {after})");
+}
+
+#[test]
+fn midi_seq_load_lifts_sustain_and_stops_sustaining_new_notes() {
+    let mut e = engine_with_init_patch();
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 20) > SILENCE);
+    let _ = e.handle_control(ControlEvent::MidiSeqLoad { data: empty_seq_data() });
+    assert!(!e.sustain_atom().load(Ordering::Relaxed),
+        "seq load left sustain atom ON");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 62 });
+    settle(&mut e);
+    let after = render_peak(&mut e, 200);
+    assert!(after < SILENCE, "seq load left DSP sustaining new notes (peak {after})");
+}
