@@ -318,6 +318,10 @@ pub struct App {
     pub drum_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_rec_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_metronome: bool,
+    /// Previous sequencer step (downbeat-flash edge detection)
+    pub drum_prev_step: u8,
+    /// Instant of the last beat-1 transition (GUI flash)
+    pub drum_beat_flash: Option<std::time::Instant>,
     pub perf_window: usize,   // first perf_list idx visible on slots 1..=7
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -532,6 +536,13 @@ impl eframe::App for App {
         // Sync drum play/rec state from engine (for MIDI-triggered changes)
         self.drum_playing = self.drum_play_atom.load(Ordering::Relaxed) != 0;
         self.drum_recording = self.drum_rec_atom.load(Ordering::Relaxed) != 0;
+        // Beat-1 flash: the step atom shows the NEXT step, so step 0 has just
+        // sounded when the atom transitions 0 -> 1 while playing.
+        let step_now = self.drum_step_atom.load(Ordering::Relaxed);
+        if self.drum_playing && self.drum_prev_step == 0 && step_now == 1 {
+            self.drum_beat_flash = Some(std::time::Instant::now());
+        }
+        self.drum_prev_step = step_now;
 
         // Bank-2 console pads -> state machine -> actions
         let mut acts: Vec<led_console::Action> = Vec::new();

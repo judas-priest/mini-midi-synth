@@ -34,6 +34,18 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqRecord { recording: self.drum_recording });
             }
 
+            // Downbeat flash indicator (lights ~150 ms after beat 1)
+            let flashing = self.drum_beat_flash
+                .map(|t| t.elapsed() < std::time::Duration::from_millis(150))
+                .unwrap_or(false);
+            let (flash_rect, _) =
+                ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+            ui.painter().circle_filled(
+                flash_rect.center(), 5.0,
+                if flashing { egui::Color32::from_rgb(255, 190, 60) }
+                else { egui::Color32::from_gray(45) },
+            );
+
             // Undo / Clear
             if ui.button("Undo").on_hover_text("Undo last edit").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqUndo);
@@ -418,12 +430,19 @@ impl App {
                         painter.rect_filled(fill_rect, 2.0, egui::Color32::from_rgb(r, g, b));
                     }
 
-                    // Current step playhead
+                    // Current step playhead (amber + thicker on the downbeat)
                     if is_current {
+                        let downbeat = step == 0;
+                        let color = if downbeat {
+                            egui::Color32::from_rgb(255, 190, 60)
+                        } else {
+                            egui::Color32::WHITE
+                        };
+                        let width = if downbeat { 3.0 } else { 2.0 };
                         painter.rect_stroke(
                             rect.shrink(0.5),
                             2.0,
-                            egui::Stroke::new(2.0, egui::Color32::WHITE),
+                            egui::Stroke::new(width, color),
                             egui::StrokeKind::Inside,
                         );
                     }

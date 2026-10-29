@@ -778,6 +778,8 @@ pub fn run_gui(
         drum_play_atom: c.drum_play_atom,
         drum_rec_atom: c.drum_rec_atom,
         drum_metronome: c.config.ui.drum_metronome,
+        drum_prev_step: 0,
+        drum_beat_flash: None,
         perf_window: 1,
         pat_window: 0,
         drum_undo_atom: c.drum_undo_atom,
