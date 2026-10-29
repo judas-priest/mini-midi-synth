@@ -35,6 +35,13 @@ const CHOKE_GROUPS: [u8; NUM_DRUM_SLOTS] = [
 ];
 
 const NUM_CHOKE_GROUPS: usize = 2;
+
+/// Metronome click: short decaying sine, synthesized (no samples).
+const CLICK_FREQ_ACCENT: f32 = 1600.0; // Hz, beat 1
+const CLICK_FREQ_BEAT: f32 = 1000.0;   // Hz, beats 2..4
+const CLICK_GAIN_ACCENT: f32 = 0.9;
+const CLICK_GAIN_BEAT: f32 = 0.55;
+const CLICK_LEN_S: f32 = 0.03;         // 30 ms tail
 /// Kit sample note range reachable by remap (SF2 kits place samples here).
 pub const KIT_NOTE_LO: u8 = 30;
 pub const KIT_NOTE_HI: u8 = 55;
@@ -883,6 +890,13 @@ pub struct DrumEngine {
     /// Per-pad velocity override, indexed by incoming note - 36.  0 = Off
     /// (use incoming/master velocity).
     pub pad_vel: [u8; NUM_DRUM_SLOTS],
+    /// Metronome click on every beat (step % 4 == 0) while playing.
+    pub metronome: bool,
+    // Click oscillator state — plain fields only (RT-safe, no alloc/lock).
+    click_phase: f32,
+    click_phase_inc: f32,
+    click_env: f32,
+    click_decay: f32,
     /// Per-note choke group ids for the SF2 path, indexed by (note - 30).
     /// Defaults to the GM layout (CHOKE_GROUPS shifted); replaced per-kit by
     /// the GUI from the kit's sample names.
@@ -926,6 +940,11 @@ impl DrumEngine {
             enabled: true,
             sf2_mode: false,
             fixed_velocity: false,
+            metronome: false,
+            click_phase: 0.0,
+            click_phase_inc: 0.0,
+            click_env: 0.0,
+            click_decay: 0.0,
             remap: core::array::from_fn(|i| DRUM_NOTE_BASE + i as u8),
             pad_vel: [0u8; NUM_DRUM_SLOTS],
             choke_groups: {
@@ -990,6 +1009,7 @@ impl DrumEngine {
         let enabled = self.enabled;
         let sf2_mode = self.sf2_mode;
         let fixed_velocity = self.fixed_velocity;
+        let metronome = self.metronome;
         let remap = self.remap;
         let pad_vel = self.pad_vel;
         let choke_groups = self.choke_groups;
@@ -1004,6 +1024,10 @@ impl DrumEngine {
         self.enabled = enabled;
         self.sf2_mode = sf2_mode;
         self.fixed_velocity = fixed_velocity;
+        self.metronome = metronome;
+        // Click state is transient (<30 ms) and its coefficients are
+        // SR-dependent — drop it rather than preserve stale values.
+        self.click_env = 0.0;
         self.remap = remap;
         self.pad_vel = pad_vel;
         self.choke_groups = choke_groups;
@@ -1140,10 +1164,29 @@ impl DrumEngine {
         if !self.enabled { return ((0.0, 0.0), empty_triggers); }
 
         // Process sequencer
+        let prev_step = self.sequencer.current_step;
         let triggers = self.sequencer.tick(self.sample_rate);
         self.step_atom.store(self.sequencer.current_step, Ordering::Relaxed);
         self.play_atom.store(self.sequencer.playing as u8, Ordering::Relaxed);
         self.rec_atom.store(self.sequencer.recording as u8, Ordering::Relaxed);
+
+        // Metronome: the sequencer has already advanced past the step that
+        // just fired, so `prev_step` is the step that sounded. Fire a click on
+        // every beat boundary (step % 4 == 0), accent on step 0.
+        if self.metronome && self.sequencer.playing
+            && self.sequencer.current_step != prev_step
+        {
+            let fired = prev_step;
+            if fired.is_multiple_of(4) {
+                let accent = fired == 0;
+                self.click_phase = 0.0;
+                self.click_phase_inc = TAU
+                    * if accent { CLICK_FREQ_ACCENT } else { CLICK_FREQ_BEAT }
+                    / self.sample_rate;
+                self.click_env = if accent { CLICK_GAIN_ACCENT } else { CLICK_GAIN_BEAT };
+                self.click_decay = decay_coeff(CLICK_LEN_S, self.sample_rate);
+            }
+        }
 
         let mut sf2_triggers = DrumTriggers { triggers: [(0, 0); NUM_DRUM_SLOTS], count: 0 };
 
@@ -1172,8 +1215,18 @@ impl DrumEngine {
                 out_r += s * (0.5 + pan * 0.5).sqrt();
             }
         }
+        // Metronome click: per-sample decaying sine (both DSP and SF2 modes).
+        let mut click = 0.0_f32;
+        if self.click_env > 0.0 {
+            click = self.click_phase.sin() * self.click_env;
+            self.click_phase += self.click_phase_inc;
+            self.click_phase -= self.click_phase.floor();
+            self.click_env *= self.click_decay;
+            if self.click_env < 0.001 { self.click_env = 0.0; }
+        }
+
         let vol = self.volume * self.volume; // perceptual curve
-        ((out_l * vol, out_r * vol), sf2_triggers)
+        ((out_l * vol + click * vol, out_r * vol + click * vol), sf2_triggers)
     }
 
     #[allow(dead_code)]

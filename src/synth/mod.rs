@@ -214,6 +214,8 @@ pub enum ControlEvent {
     /// GUI sustain toggle (F1): same path as CC64
     /// Drums: force every hit to velocity 127
     DrumSetFixedVelocity { fixed: bool },
+    /// Drums: metronome click on every beat while the sequencer plays
+    DrumSetMetronome { on: bool },
     /// Drums: pad-note -> internal slot table (index = in_note-36, value = slot)
     DrumSetRemap { table: Box<[u8; 16]> },
     /// Drums: per-note choke group ids for the SF2 path, indexed (note-30) (0 = none)
@@ -2170,6 +2172,9 @@ impl SynthEngine {
             }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
                 self.drum_engine.fixed_velocity = fixed;
+            }
+            ControlEvent::DrumSetMetronome { on } => {
+                self.drum_engine.metronome = on;
             }
             ControlEvent::DrumSetRemap { table } => {
                 // The box travels back for freeing on the GUI thread.
