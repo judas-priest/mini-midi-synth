@@ -207,7 +207,10 @@ impl Arpeggiator {
 
     pub fn set_latch(&mut self, latch: bool) {
         self.latch = latch;
-        if !latch && self.latched {
+        if latch {
+            // Keys already held at toggle-on must stay removable by key-off.
+            self.phys_down = self.held_count as usize;
+        } else if self.latched {
             // Turning latch off while frozen: the held set is abandoned.
             self.latched = false;
             self.clear();
