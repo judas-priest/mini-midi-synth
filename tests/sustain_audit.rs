@@ -319,12 +319,15 @@ fn init_performance_exists_and_loads() {
 #[test]
 fn pad_transport_controls_drum_seq() {
     let mut e = engine_with_init_patch();
-    // NOTE: record_hit fires only while recording AND playing (drum.rs:799),
-    // so playback is enabled before recording the kick.
+    // NOTE: record_hit fires only while recording AND playing (drum.rs:799);
+    // rec auto-plays a stopped transport, so playback starts with the record arm.
     // record on (B5)
     e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
     assert_eq!(e.drum_engine.rec_atom().load(Ordering::Relaxed), 1, "B5 did not start recording");
-    // play on (A#5) so record_hit actually captures
+    assert_eq!(e.drum_engine.play_atom().load(Ordering::Relaxed), 1, "B5 did not auto-start playback");
+    // play toggle (A#5): off, then back on so record_hit actually captures
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 82, velocity: 127 });
+    assert_eq!(e.drum_engine.play_atom().load(Ordering::Relaxed), 0, "A#5 did not stop playback");
     e.handle_event(MidiEvent::NoteOn { channel: 9, note: 82, velocity: 127 });
     assert_eq!(e.drum_engine.play_atom().load(Ordering::Relaxed), 1, "A#5 did not start playback");
     // hit a kick while recording (goes through the normal drum path)
@@ -532,4 +535,17 @@ fn drum_record_with_out_of_range_remap_target_does_not_panic() {
     e.handle_event(MidiEvent::NoteOff { channel: 9, note: 36 });
     // must not panic (debug overflow) and must not record a bogus hit
     assert!(render_peak(&mut e, 10) >= 0.0);
+}
+
+#[test]
+fn rec_on_stopped_transport_auto_plays() {
+    let mut e = engine_with_init_patch();
+    assert!(!e.drum_engine.sequencer.playing);
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
+    assert!(e.drum_engine.sequencer.playing, "rec must auto-start play");
+    assert!(e.drum_engine.sequencer.recording);
+    // toggle off while playing: auto-play must NOT fire
+    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
+    assert!(!e.drum_engine.sequencer.recording);
+    assert!(e.drum_engine.sequencer.playing, "play persists after rec-off");
 }

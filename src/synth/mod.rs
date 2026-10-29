@@ -1579,6 +1579,9 @@ impl SynthEngine {
                             83 => {
                                 let rec = !self.drum_engine.sequencer.recording;
                                 self.drum_engine.set_recording(rec);
+                                if rec && !self.drum_engine.sequencer.playing {
+                                    self.drum_engine.set_playing(true);
+                                }
                                 return;
                             }
                             82 => {
@@ -2073,6 +2076,9 @@ impl SynthEngine {
                     self.drum_engine.sequencer.save_snapshot();
                 }
                 self.drum_engine.sequencer.recording = recording;
+                if recording && !self.drum_engine.sequencer.playing {
+                    self.drum_engine.set_playing(true);
+                }
             }
             ControlEvent::DrumSeqClear => {
                 self.drum_engine.sequencer.clear_pattern();
