@@ -1,10 +1,10 @@
 # Console GUI Polish Plan (pad-remap modals global, per-part root-only, static sustain-release)
 
 > anchor-checked: 2026-10-29 against branch `worktree-carried-fixes` @ 492dea2 (5 carried-fix commits on master ccdd519)
-> status: not started
+> status: executed 2026-10-29 (Plan D: #11 + #6 complete earlier; #7 + review follow-ups this pass)
 > Source: docs/TECHDEBT.md items #11, #6, #7.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Each task is executed by a FRESH subagent that receives ONLY this plan document.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking. Each task is executed by a FRESH subagent that receives ONLY this plan document.
 
 **Goal:** (1) Pad-remap dialogs work on every tab, not only Drums (TECHDEBT #11); (2) per-part "root only" mode — the part sounds only the lowest currently-held key, for bass splits (TECHDEBT #6); (3) custom sustain-release returns as static settings: DSP pedal-up release duration + SF2 release-time scale (TECHDEBT #7).
 
@@ -71,7 +71,7 @@ Written BEFORE implementation. RED status noted per case.
 
 ### Task 0: Branch
 
-- [ ] From the worktree:
+- [x] From the worktree:
 ```bash
 cd /home/dima/Projects/mini_midi_synth/.claude/worktrees/carried-fixes
 git status --short   # must be clean (docs/TECHDEBT.md edit belongs to the caller, stash if dirty)
@@ -85,7 +85,7 @@ Expected: `Switched to a new branch 'console-gui-polish'`, based on worktree-car
 
 **Facts:** The full-grid modal is src/gui/drums.rs:87-173 (guarded by `self.show_drum_remap`, Modal id `"drum_remap_dialog"`, drums.rs:99); the single-pad modal is drums.rs:175-230 (guarded by `self.remap_pad`, Modal id `"remap_pad_dialog"`, drums.rs:189). Both currently use `.show(ui.ctx(), ...)`. `draw_drum_sequencer` is called only from mod.rs:1164 (`else if self.show_drums` branch). `update` has `ctx: &egui::Context` (mod.rs:425); the toasts block ends at mod.rs:1145, the CentralPanel starts at mod.rs:1148. The Remap button (drums.rs:81-85) STAYS where it is.
 
-- [ ] Step 1. In src/gui/drums.rs add a new method (place it directly after `draw_drum_sequencer` ends):
+- [x] Step 1. In src/gui/drums.rs add a new method (place it directly after `draw_drum_sequencer` ends):
 ```rust
 impl App {
     /// Pad-remap modals, drawn from the main update loop so pad clicks work
@@ -99,18 +99,18 @@ impl App {
 }
 ```
 Move the two blocks into it exactly as they are (keep the `kit_names`/`kit_notes` locals, `pad_row` closure, Reset/Close handling, `push_drum_remap`/`save_drum_remap`/`push_drum_pad_vel`/`save_drum_pad_vel` calls, the detach-other-pad loop at old drums.rs:218-226, and both `dialog.should_close()` blocks). Delete them from `draw_drum_sequencer`. Note: `egui::Modal::new(...).show(ctx, ...)` is valid — `ui.ctx()` inside update IS this same `ctx`.
-- [ ] Step 2. In src/gui/mod.rs `update`, insert between the toasts block (ends mod.rs:1145) and the `// Central:` comment (mod.rs:1147):
+- [x] Step 2. In src/gui/mod.rs `update`, insert between the toasts block (ends mod.rs:1145) and the `// Central:` comment (mod.rs:1147):
 ```rust
         // Pad remap dialogs — global so pad clicks work on any tab (TECHDEBT #11)
         self.draw_drum_remap_modals(ctx);
 ```
-- [ ] Step 3. Compile + gates:
+- [x] Step 3. Compile + gates:
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test --test drum_remap --test drum_pad_vel
 ```
 Expected: no warnings; both test binaries pass (the config push/save behavior is unchanged).
-- [ ] Step 4. Manual check: `cargo run --release` — on the Synth/FX/MIDI-seq/Looper tabs, click a drawn pad in the bottom panel → single-pad dialog opens and its instrument change takes effect; on the Drums tab the Remap button still opens the full-grid dialog; Close and click-outside dismiss both.
-- [ ] Step 5. Commit:
+- [x] Step 4. Manual check: `cargo run --release` — on the Synth/FX/MIDI-seq/Looper tabs, click a drawn pad in the bottom panel → single-pad dialog opens and its instrument change takes effect; on the Drums tab the Remap button still opens the full-grid dialog; Close and click-outside dismiss both.
+- [x] Step 5. Commit:
 ```bash
 git add src/gui/drums.rs src/gui/mod.rs
 git commit -m "gui: pad remap modals render on every tab (moved to update loop)"
@@ -122,7 +122,7 @@ git commit -m "gui: pad remap modals render on every tab (moved to update loop)"
 
 **Facts:** `Part` fields end at mod.rs:487 (`cached_lfo_amp_base`); `keys_down` is mod.rs:470; `Part::new` initializer block ends at mod.rs:536 (`cached_lfo_amp_base: 1.0,`); `Part::note_on` starts mod.rs:579, `note_off` mod.rs:793. Live dispatch: velocity==0 loop mod.rs:1659-1671, note-on loop mod.rs:1672-1697, `MidiEvent::NoteOff` loop mod.rs:1711-1723. Arp: off mod.rs:2713-2723, on mod.rs:2724-2735. Looper replay mod.rs:2739-2759. MIDI-file `DspLayer0` note-on mod.rs:2672-2677, note-off mod.rs:2693-2697. Cleanup sites that clear `note_stack`/`latch_held`: mod.rs:1765-1768, 1822-1826, 1914-1917, 1984-1987 (SetPartEnabled), 2007-2010 (SetPartMute). `last_velocity` is 0..1 (mod.rs:585).
 
-- [ ] Step 1. Write the failing unit tests in src/synth/tests.rs (append after `dispatch_arp_note_off_releases_dsp_voice_with_transpose_set`, tests.rs:581):
+- [x] Step 1. Write the failing unit tests in src/synth/tests.rs (append after `dispatch_arp_note_off_releases_dsp_voice_with_transpose_set`, tests.rs:581):
 ```rust
 // ── Root-only mode (TECHDEBT #6) ───────────────────────────────
 
@@ -212,12 +212,12 @@ fn root_only_out_of_range_key_does_not_join_held_mask() {
 cargo test --lib root_only 2>&1 | tail -5
 ```
 Expected: compile error on `SetPartRootOnly` / `root_active` / `root_held` — the red.
-- [ ] Step 2. Add the `ControlEvent` variant in src/synth/mod.rs after `SetPartMute` (mod.rs:173):
+- [x] Step 2. Add the `ControlEvent` variant in src/synth/mod.rs after `SetPartMute` (mod.rs:173):
 ```rust
     /// Root-note-only mode (bass split): part sounds only the lowest held key
     SetPartRootOnly { part: usize, on: bool },
 ```
-- [ ] Step 3. Add the decision enum (place right before `pub enum ControlEvent`, mod.rs:170) and Part state. Fields after `keys_down` (mod.rs:470):
+- [x] Step 3. Add the decision enum (place right before `pub enum ControlEvent`, mod.rs:170) and Part state. Fields after `keys_down` (mod.rs:470):
 ```rust
     /// Root-only mode (TECHDEBT #6): gate + per-part lowest-note tracking.
     root_only: bool,
@@ -238,7 +238,7 @@ pub(crate) enum RootDecision {
     Sound { release: Option<u8>, note: u8 },
 }
 ```
-- [ ] Step 4. Add the Part state machines (place after `note_off` ends, ~mod.rs:870):
+- [x] Step 4. Add the Part state machines (place after `note_off` ends, ~mod.rs:870):
 ```rust
     /// Root-only gate, note-on side. Called for EVERY in-range note-on routed
     /// to this part (both engines) via SynthEngine::route_note_on.
@@ -264,7 +264,7 @@ pub(crate) enum RootDecision {
         self.root_active
     }
 ```
-- [ ] Step 5. Add the engine routing helpers (place near `dispatch_arp_note_off`, ~mod.rs:1428):
+- [x] Step 5. Add the engine routing helpers (place near `dispatch_arp_note_off`, ~mod.rs:1428):
 ```rust
     /// Shared part note-on dispatch: range/velocity gate, root-only gate
     /// (TECHDEBT #6), DSP voice or SF2 sampler. The enabled/mute guards stay
@@ -320,14 +320,14 @@ pub(crate) enum RootDecision {
         }
     }
 ```
-- [ ] Step 6. Replace the dispatch-site bodies, preserving each site's own guards and looper `record_event` lines exactly:
+- [x] Step 6. Replace the dispatch-site bodies, preserving each site's own guards and looper `record_event` lines exactly:
   - Live velocity==0 offs (mod.rs:1659-1671): inside the `for (i, part)` loop replace the `transposed`/`sf2_mode` branch with `self.route_note_off(i, note);` (keep the `if !part.enabled { continue; }` guard and the `self.looper.record_event(note, 0, i as u8)` line; the loop must switch to index access without a simultaneous `&mut self.sampler` — write it as `for i in 0..self.parts.len() { if !self.parts[i].enabled { continue; } ... }`).
   - Live note-ons (mod.rs:1672-1697): same conversion, body becomes the two existing guards (`!enabled || mute`), then `self.route_note_on(i, note, velocity);` then the `record_event` line (keep its comment block).
   - `MidiEvent::NoteOff` loop (mod.rs:1711-1723): body becomes `self.route_note_off(i, note);` + the `record_event` line; NO enabled/range guard (matches today: offs go to all parts).
   - Arp off (mod.rs:2713-2723) and arp on (mod.rs:2724-2735): replace each loop body's dispatch with `self.route_note_off(i, off_note);` / `self.route_note_on(i, note, vel);`, keeping the `enabled`/`enabled || mute` guards and the `looper.record_event` lines.
   - Looper replay (mod.rs:2739-2759): replace the `vel > 0` / else dispatch with `self.route_note_on(pi, note, vel);` / `self.route_note_off(pi, note);`, keeping the `if !part.enabled { continue; }` guard.
   - MIDI-file `DspLayer0` (mod.rs:2672-2677 on, 2693-2697 off): replace `part.note_on(note, velocity)` with `self.route_note_on(0, note, velocity)` and `part.note_off(note)` with `self.route_note_off(0, note)` (keep `get_mut(0)`-style guard by testing `self.parts.len() > 0` — or simply call through a `if !self.parts.is_empty()` check).
-- [ ] Step 7. Add the control handler after `SetPartMute`'s (mod.rs:2016):
+- [x] Step 7. Add the control handler after `SetPartMute`'s (mod.rs:2016):
 ```rust
             ControlEvent::SetPartRootOnly { part, on } => {
                 if let Some(l) = self.parts.get_mut(part) {
@@ -339,17 +339,17 @@ pub(crate) enum RootDecision {
                 }
             }
 ```
-- [ ] Step 8. Extend the five cleanup sites (mod.rs:1765-1768, 1822-1826, 1914-1917, 1984-1987, 2007-2010) — append to each block that clears `note_stack`/`latch_held`:
+- [x] Step 8. Extend the five cleanup sites (mod.rs:1765-1768, 1822-1826, 1914-1917, 1984-1987, 2007-2010) — append to each block that clears `note_stack`/`latch_held`:
 ```rust
                     l.root_held = [false; 128]; // (use `part.` where the site uses `part`)
                     l.root_active = None;
 ```
-- [ ] Step 9. Green:
+- [x] Step 9. Green:
 ```bash
 cargo test --lib root_only && cargo test --test sustain_audit
 ```
 Expected: all new `root_only*` tests pass; the full sustain_audit suite passes unchanged.
-- [ ] Step 10. Gates + commit:
+- [x] Step 10. Gates + commit:
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 git add src/synth/ && git commit -m "feat: per-part root-only mode (lowest-note priority) for bass splits"
@@ -361,25 +361,25 @@ git add src/synth/ && git commit -m "feat: per-part root-only mode (lowest-note 
 
 **Facts:** `PartConfig` src/preset.rs:756-781 (serde pattern: `#[serde(default)] pub mute: bool` at 775-776); `init_performance` builds one PartConfig at preset.rs:839-853; GUI `PartState` src/gui/mod.rs:141-164, `new_empty` 166-178; routing strip Mute toggle src/gui/layers.rs:151-155; perf save builds PartConfig at layers.rs:221-232; perf load restores at layers.rs:268-298 and pushes per-part events at 289-298.
 
-- [ ] Step 1. Failing roundtrip test — extend `performance_part_config_roundtrip` in tests/sustain_audit.rs (line 342): add `root_only: true` to `orig`, `assert!(back.root_only);` after the mute assert, extend `old_json` stays as-is (it must still deserialize) and add `assert!(!legacy.root_only);`.
+- [x] Step 1. Failing roundtrip test — extend `performance_part_config_roundtrip` in tests/sustain_audit.rs (line 342): add `root_only: true` to `orig`, `assert!(back.root_only);` after the mute assert, extend `old_json` stays as-is (it must still deserialize) and add `assert!(!legacy.root_only);`.
 ```bash
 cargo test --test sustain_audit performance_part_config 2>&1 | tail -3
 ```
 Expected: compile error (`root_only` field missing) — red.
-- [ ] Step 2. preset.rs — add to `PartConfig` after `vel_max` (line 780):
+- [x] Step 2. preset.rs — add to `PartConfig` after `vel_max` (line 780):
 ```rust
     /// Root-note-only mode (bass split): sounds only the lowest held key.
     #[serde(default)]
     pub root_only: bool,
 ```
 Add `root_only: false,` to the `init_performance` PartConfig literal (preset.rs:839-853).
-- [ ] Step 3. GUI state — `PartState` field after `transpose` (mod.rs:153):
+- [x] Step 3. GUI state — `PartState` field after `transpose` (mod.rs:153):
 ```rust
     /// Root-only (bass split): engine gates this part to the lowest held key
     pub root_only: bool,
 ```
 `new_empty` (mod.rs:170-172): add `root_only: false,` to the initializer line.
-- [ ] Step 4. GUI routing strip — in src/gui/layers.rs after the Mute toggle block (155):
+- [x] Step 4. GUI routing strip — in src/gui/layers.rs after the Mute toggle block (155):
 ```rust
                 let mut root_only = self.parts[part].root_only;
                 if ui.checkbox(&mut root_only, "Root").on_hover_text(
@@ -390,7 +390,7 @@ Add `root_only: false,` to the `init_performance` PartConfig literal (preset.rs:
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part, on: root_only });
                 }
 ```
-- [ ] Step 5. Perf save (layers.rs:224-231): add `root_only: l.root_only,` to the PartConfig literal. Perf load (layers.rs:282 area, after `self.parts[i].mute = part.mute;`):
+- [x] Step 5. Perf save (layers.rs:224-231): add `root_only: l.root_only,` to the PartConfig literal. Perf load (layers.rs:282 area, after `self.parts[i].mute = part.mute;`):
 ```rust
                         self.parts[i].root_only = part.root_only;
 ```
@@ -398,7 +398,7 @@ and in the event-push block (after the `SetPartMute` push, layers.rs:291):
 ```rust
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part: i, on: part.root_only });
 ```
-- [ ] Step 6. Green + gates + commit:
+- [x] Step 6. Green + gates + commit:
 ```bash
 cargo test --test sustain_audit performance_part_config && cargo clippy --all-targets -- -D warnings && cargo test
 git add src/preset.rs src/gui/mod.rs src/gui/layers.rs tests/sustain_audit.rs
@@ -412,7 +412,7 @@ Manual: save a performance with Root on part A1, reload it, play a chord — onl
 
 **Facts:** Restored from commit 9a200a4 (reverted by 59ed413 only together with the fader-coupled experiment). `Envelope::note_off` is src/synth/envelope.rs:154-159; `time_to_coeff` envelope.rs:70; `Voice::note_off` voice.rs:508; `SynthEngine` field `sustain` mod.rs:1102, initializer mod.rs:1360; `set_sustain` mod.rs:1390-1424 — its pedal-up release loop is mod.rs:1407-1411; `ControlEvent::SetSustain { on }` handler mod.rs:2187-2189.
 
-- [ ] Step 1. Failing tests first — append to tests/sustain_audit.rs:
+- [x] Step 1. Failing tests first — append to tests/sustain_audit.rs:
 ```rust
 // ── Static pedal-up release (TECHDEBT #7, restored from 9a200a4) ──
 
@@ -483,7 +483,7 @@ mod tests {
 cargo test --test sustain_audit pedal_rel 2>&1 | tail -3; cargo test --lib note_off_for 2>&1 | tail -3
 ```
 Expected: compile errors (`SetSustainRelease`, `note_off_for` missing) — the red.
-- [ ] Step 2. src/synth/envelope.rs — add after `note_off` (line 159), verbatim from 9a200a4:
+- [x] Step 2. src/synth/envelope.rs — add after `note_off` (line 159), verbatim from 9a200a4:
 ```rust
     /// Note-off with an explicit release duration (seconds), overriding the
     /// configured release rate. Used for the static pedal-up release setting.
@@ -503,7 +503,7 @@ Expected: compile errors (`SetSustainRelease`, `note_off_for` missing) — the r
         self.phase_step_r = 1.0 / (t * self.sample_rate);
     }
 ```
-- [ ] Step 3. src/synth/voice.rs — after `note_off` (508-511):
+- [x] Step 3. src/synth/voice.rs — after `note_off` (508-511):
 ```rust
     /// Release with an explicit duration; amp env only (filter env keeps the
     /// patch's own release so tonal closure stays unchanged).
@@ -511,7 +511,7 @@ Expected: compile errors (`SetSustainRelease`, `note_off_for` missing) — the r
         self.amp_env.note_off_for(seconds);
     }
 ```
-- [ ] Step 4. src/synth/mod.rs — `ControlEvent` variant after `SetSustain` (mod.rs:212):
+- [x] Step 4. src/synth/mod.rs — `ControlEvent` variant after `SetSustain` (mod.rs:212):
 ```rust
     /// Static pedal-up release duration in seconds (None = patch release)
     SetSustainRelease { seconds: Option<f32> },
@@ -540,7 +540,7 @@ Handler after mod.rs:2189:
                 self.sustain_release = seconds;
             }
 ```
-- [ ] Step 5. Merge the override into `set_sustain`'s pedal-up branch (mod.rs:1407-1411). Replace the plain loop with:
+- [x] Step 5. Merge the override into `set_sustain`'s pedal-up branch (mod.rs:1407-1411). Replace the plain loop with:
 ```rust
                 if let Some(secs) = self.sustain_release {
                     // Override: pedal-released voices take `secs` instead of the
@@ -569,12 +569,12 @@ Handler after mod.rs:2189:
                 }
 ```
 (The surrounding latch/`sustained_notes`/`note_stack` cleanup at mod.rs:1398-1420 stays untouched.)
-- [ ] Step 6. Green:
+- [x] Step 6. Green:
 ```bash
 cargo test --test sustain_audit
 ```
 Expected: ALL tests pass, including the two new ones AND the pre-existing `pedal_up_releases_held_notes`, `held_key_survives_pedal_up`, `repedal_articulation_keeps_held_key`, `multi_held_keys_pedal_up_then_individual_offs`, `panic_after_held_pedal_up_kills_all` — the override must not change any off-pedal behavior.
-- [ ] Step 7. Gates + commit:
+- [x] Step 7. Gates + commit:
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 git add src/synth/ tests/sustain_audit.rs
@@ -587,7 +587,7 @@ git commit -m "feat: restore DSP pedal-up release override (SetSustainRelease, f
 
 **Facts:** App struct field `sustain_atom` src/gui/mod.rs:289; global controls bar F1 Sustain block gui/mod.rs:741-749; `send_initial_presets` pushes engine state at gui/mod.rs:1223-1224 (`DrumSetVolume`/`DrumSetFixedVelocity`); `save_global_to_config` gui/mod.rs:1293-1311 (`drum_fixed_velocity` line at 1300); `UiSettings` src/config.rs (field `drum_fixed_velocity` at config.rs:105, `Default` impl at config.rs:161); App construction in `run_gui` src/lib.rs:740-741 (`sustain_atom: c.sustain_atom,` / `show_help: false,`). `SetSf2ReleaseScale` exists but no GUI sender (src/synth/mod.rs:234/2270). The GUI block below is the 9a200a4 GUI (removed in 59ed413) restored at the new anchor, minus the fader experiment.
 
-- [ ] Step 1. src/config.rs — in `UiSettings` after `drum_fixed_velocity` (105):
+- [x] Step 1. src/config.rs — in `UiSettings` after `drum_fixed_velocity` (105):
 ```rust
     /// Static pedal-up release in seconds (None = off, patch release)
     #[serde(default)]
@@ -604,14 +604,14 @@ fn default_sf2_release_scale() -> f32 { 1.0 }
                 sustain_release: None,
                 sf2_release_scale: 1.0,
 ```
-- [ ] Step 2. src/gui/mod.rs — App fields after `sustain_atom` (289):
+- [x] Step 2. src/gui/mod.rs — App fields after `sustain_atom` (289):
 ```rust
     /// Static pedal-up release duration (None = off, patch release)
     pub sustain_release: Option<f32>,
     /// SF2 release-time scale (1.0 = file defaults)
     pub sf2_release_scale: f32,
 ```
-- [ ] Step 3. Global controls bar — after the F1 Sustain button block (mod.rs:747-749), before the `ui.separator()` at 751:
+- [x] Step 3. Global controls bar — after the F1 Sustain button block (mod.rs:747-749), before the `ui.separator()` at 751:
 ```rust
                 // Static pedal-up release (TECHDEBT #7): CC64 value never enters it
                 let sr_on = self.sustain_release.is_some();
@@ -641,7 +641,7 @@ fn default_sf2_release_scale() -> f32 { 1.0 }
                     self.save_global_to_config();
                 }
 ```
-- [ ] Step 4. Persistence — in `save_global_to_config` after the `drum_fixed_velocity` line (mod.rs:1300):
+- [x] Step 4. Persistence — in `save_global_to_config` after the `drum_fixed_velocity` line (mod.rs:1300):
 ```rust
         self.config.ui.sustain_release = self.sustain_release;
         self.config.ui.sf2_release_scale = self.sf2_release_scale;
@@ -651,12 +651,12 @@ In `send_initial_presets` after the `DrumSetFixedVelocity` push (mod.rs:1224):
         let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: self.sustain_release });
         let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale: self.sf2_release_scale });
 ```
-- [ ] Step 5. src/lib.rs `run_gui` — App construction after `sustain_atom: c.sustain_atom,` (740) (both settings live in `UiSettings`):
+- [x] Step 5. src/lib.rs `run_gui` — App construction after `sustain_atom: c.sustain_atom,` (740) (both settings live in `UiSettings`):
 ```rust
         sustain_release: c.config.ui.sustain_release,
         sf2_release_scale: c.config.ui.sf2_release_scale,
 ```
-- [ ] Step 6. Green + gates + commit:
+- [x] Step 6. Green + gates + commit:
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 git add src/config.rs src/gui/mod.rs src/lib.rs
@@ -668,7 +668,7 @@ Manual: toggle SR → pedal-held notes release in ~0.3 s regardless of patch; wi
 
 ### Task 6: Final gates
 
-- [ ] Full gate run from the repo root of the worktree:
+- [x] Full gate run from the repo root of the worktree:
 ```bash
 cd /home/dima/Projects/mini_midi_synth/.claude/worktrees/carried-fixes
 cargo clippy --all-targets -- -D warnings
@@ -677,7 +677,7 @@ cargo test --features rt-assert --test rt_safety
 cargo deny check
 ```
 Expected: all clean. `cargo deny` unaffected (no dependency changes; the pre-existing `warning[yanked]` for clipboard-win stays warn-level).
-- [ ] Update docs/TECHDEBT.md: mark #6, #7, #11 as done (one line each, with the plan reference). Commit:
+- [x] Update docs/TECHDEBT.md: mark #6, #7, #11 as done (one line each, with the plan reference). Commit:
 ```bash
 git add docs/TECHDEBT.md
 git commit -m "docs: techdebt #6/#7/#11 implemented (console-gui-polish)"
