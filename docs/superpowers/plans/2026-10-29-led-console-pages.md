@@ -125,19 +125,26 @@ fn rec_on_stopped_transport_auto_plays() {
 НЕ трогать: sequencer переносится целиком через mem::replace (drum.rs:961,975),
 атом переживает rebuild вместе со снимком.
 
-Accessors: в `impl StepSequencer`:
+Accessors — в `impl StepSequencer`:
 
 ```rust
     pub fn undo_atom(&self) -> Arc<AtomicBool> {
         self.undo_atom.clone()
     }
+    pub fn undo_available(&self) -> bool {
+        self.undo_atom.load(std::sync::atomic::Ordering::Relaxed)
+    }
 ```
 
-в `impl DrumEngine` (рядом с `rec_atom()` ~936, делегирование):
+в `impl DrumEngine` (рядом с `rec_atom()` ~936, делегирование; тест из Step 1
+зовёт `e.undo_available()`):
 
 ```rust
     pub fn undo_atom(&self) -> Arc<AtomicBool> {
         self.sequencer.undo_atom()
+    }
+    pub fn undo_available(&self) -> bool {
+        self.sequencer.undo_available()
     }
 ```
 
@@ -154,8 +161,8 @@ Accessors: в `impl StepSequencer`:
 
 - [ ] **Step 5: прогнать**
 
-Run: `cargo test --lib && cargo test --test drum_remap && cargo clippy --all-targets -- -D warnings`
-Expected: PASS (undo_atom тест зелёный).
+Run: `cargo test --lib && cargo test --test drum_remap && cargo test --test sustain_audit && cargo clippy --all-targets -- -D warnings`
+Expected: PASS (undo_atom тест зелёный; rec auto-play тест зелёный).
 
 - [ ] **Step 6: Commit**
 
@@ -354,8 +361,12 @@ Run: `cargo test --lib led_console` — Expected: COMPILE FAIL (сигнатур
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ```
 
-lib.rs App-литерал (~781): `perf_window: 1, pat_window: 0,
-drum_undo_atom: Arc::new(std::sync::atomic::AtomicBool::new(false)),`.
+lib.rs: `perf_window: 1, pat_window: 0` — в App-литерал (~781);
+`drum_undo_atom` НЕ detached-атом: в init_common рядом с созданием
+`midi_tx_shared` (~209, где engine доступен) — `let drum_undo_atom =
+engine.drum_engine.undo_atom();` — прокинуть через struct CommonInit (поле
+рядом с midi_tx_shared, lib.rs:110/329) → App-литерал берёт `drum_undo_atom:
+c.drum_undo_atom,` (шаблон: как другие drum-атомы попадают в App).
 
 settings.rs (~250, рядом с drum_rec_atom):
 
@@ -418,7 +429,8 @@ Arms в `execute_console_action` — ВАЖНО: консоль возвраща
                 }
             }
             led_console::Action::SelectPattern(i) => {
-                let idx = self.pat_window + i - 1; // slot -> real index
+                // консоль шлёт УЖЕ window-local 0-based (slot-1 из tap())
+                let idx = self.pat_window + i;
                 if idx < 8 {
                     self.drum_current_pattern = idx as u8;
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: idx as u8 });
