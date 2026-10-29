@@ -220,6 +220,8 @@ pub enum ControlEvent {
     LooperSetLayerMute { layer: u8, mute: bool },
     LooperSetSolo { layer: Option<u8> },
     SetSustain { on: bool },
+    /// Static pedal-up release duration in seconds (None = patch release)
+    SetSustainRelease { seconds: Option<f32> },
     AllNotesOff,
     /// GUI sustain toggle (F1): same path as CC64
     /// Drums: force every hit to velocity 127
@@ -879,6 +881,15 @@ impl Part {
         self.update_held_range();
     }
 
+    /// Release all voices playing `note` with an explicit amp-release duration
+    /// (matches by voice.note — the caller builds its needs bitmap by note).
+    /// Used for the static pedal-up release (TECHDEBT #7).
+    fn note_off_for(&mut self, note: u8, seconds: f32) {
+        for voice in &mut self.voices {
+            if voice.active && voice.note == note { voice.note_off_for(seconds); }
+        }
+    }
+
     fn has_active_notes(&self) -> bool {
         self.voices.iter().any(|v| v.active && !v.is_releasing())
     }
@@ -1145,6 +1156,8 @@ pub struct SynthEngine {
     active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64 from pedal/fader or GUI toggle), shared with GUI
     sustain: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Static pedal-up release duration (None = patch release)
+    sustain_release: Option<f32>,
     /// Oscilloscope ring buffer: 256 mono samples shared with GUI via atomics
     scope_buf: std::sync::Arc<ScopeBuffer>,
     scope_write: usize,
@@ -1403,6 +1416,7 @@ impl SynthEngine {
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            sustain_release: None,
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
             scope_write: 0,
             midi_player: midi_player::MidiPlayer::new(),
@@ -1424,6 +1438,11 @@ impl SynthEngine {
 
     pub fn sustain_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
         self.sustain.clone()
+    }
+
+    /// Current SF2 release-time scale (TECHDEBT #7 introspection/tests).
+    pub fn sampler_release_scale(&self) -> f32 {
+        self.sampler.release_scale()
     }
 
     /// Apply sustain pedal state (CC64 from pedal/fader, or GUI toggle).
@@ -1448,11 +1467,30 @@ impl SynthEngine {
                 for &n in &part.latch_held {
                     part.keys_down[n as usize] = false;
                 }
-                for voice in &mut part.voices {
-                    if voice.active && !voice.is_releasing()
-                        && !part.keys_down[voice.src_note as usize]
-                    {
-                        voice.note_off();
+                if let Some(secs) = self.sustain_release {
+                    // Static pedal-up release (TECHDEBT #7): pedal-released
+                    // voices take `secs` instead of the patch release.
+                    // Key-held voices (`keys_down`) are untouched — same
+                    // predicate as the plain path below. Two passes over a
+                    // stack bitmap keep the borrows of `part` disjoint.
+                    let mut needs = [false; 128];
+                    for voice in &part.voices {
+                        if voice.active && !voice.is_releasing()
+                            && !part.keys_down[voice.src_note as usize]
+                        {
+                            needs[voice.note as usize] = true;
+                        }
+                    }
+                    for (note, &held) in needs.iter().enumerate() {
+                        if held { part.note_off_for(note as u8, secs); }
+                    }
+                } else {
+                    for voice in &mut part.voices {
+                        if voice.active && !voice.is_releasing()
+                            && !part.keys_down[voice.src_note as usize]
+                        {
+                            voice.note_off();
+                        }
                     }
                 }
                 part.sustained_notes = [false; 128];
@@ -2295,6 +2333,9 @@ impl SynthEngine {
             }
             ControlEvent::SetSustain { on } => {
                 self.set_sustain(if on { 127 } else { 0 });
+            }
+            ControlEvent::SetSustainRelease { seconds } => {
+                self.sustain_release = seconds;
             }
             ControlEvent::AllNotesOff => {
                 self.set_sustain(0);

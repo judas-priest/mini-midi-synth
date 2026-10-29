@@ -683,3 +683,70 @@ fn midi_seq_load_lifts_sustain_and_stops_sustaining_new_notes() {
     let after = render_peak(&mut e, 200);
     assert!(after < SILENCE, "seq load left DSP sustaining new notes (peak {after})");
 }
+
+// ── Static pedal-up release (TECHDEBT #7, restored from 9a200a4) ──
+
+#[test]
+fn pedal_rel_setting_shortens_pedal_up_tail() {
+    // Static SR 0.03s: pedal-up tail is far below the patch's amp_release
+    // (0.3s on init) — ≈ silent at ~100ms post-release.
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetSustainRelease { seconds: Some(0.03) });
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 20) > SILENCE, "note not held");
+    pedal_up(&mut e);
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..150 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~100ms
+    let peak = render_peak(&mut e, 10);
+    assert!(peak < 0.15, "SR did not shorten the pedal-up tail (peak {peak})");
+}
+
+#[test]
+fn pedal_rel_off_keeps_full_default_tails() {
+    // SR off: pedal-up takes the patch's full amp_release (0.3s on init)
+    // — still audible at ~250ms post-release.
+    let mut e = engine_with_init_patch();
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound to hold");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(render_peak(&mut e, 20) > SILENCE, "note not held");
+    pedal_up(&mut e);
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..375 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~250ms
+    let peak = render_peak(&mut e, 10);
+    assert!(peak > 0.15, "default tail lost with SR off (peak {peak})");
+}
+
+#[test]
+fn pedal_rel_held_keys_keep_patch_release_on_their_own_key_up() {
+    // The override must touch only pedal-released voices: a key-held voice
+    // survives pedal-up and keeps the PATCH release when its key goes up.
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetSustainRelease { seconds: Some(0.03) });
+    pedal_down(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    assert!(render_peak(&mut e, 200) > SILENCE, "no sound");
+    pedal_up(&mut e); // key still held — voice must keep sounding untouched
+    assert!(render_peak(&mut e, 20) > SILENCE, "pedal-up killed a key-held voice");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // patch release 0.3s
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..375 { l.fill(0.0); r.fill(0.0); e.tick_block(&mut l, &mut r); } // ~250ms
+    let peak = render_peak(&mut e, 10);
+    assert!(peak > 0.15, "key-held voice lost its patch release after SR pedal-up (peak {peak})");
+}
+
+#[test]
+fn sf2_release_scale_event_updates_sampler_scale() {
+    // Unit-level: the ControlEvent plumbing reaches SamplerEngine and the
+    // scale persists (it is re-applied on every rustysynth rebuild, which is
+    // where it matters — no SF2 is loaded here, so no audio assertion).
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetSf2ReleaseScale { scale: 2.5 });
+    assert!((e.sampler_release_scale() - 2.5).abs() < 1e-6, "scale did not reach the sampler");
+    let _ = e.handle_control(ControlEvent::SetSf2ReleaseScale { scale: 1.0 });
+    assert!((e.sampler_release_scale() - 1.0).abs() < 1e-6, "scale reset did not stick");
+}

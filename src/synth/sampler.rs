@@ -450,6 +450,9 @@ impl SamplerEngine {
         }
     }
 
+    /// Current release-time scale (persists across rustysynth rebuilds).
+    pub fn release_scale(&self) -> f32 { self.release_scale }
+
     /// Re-send CC64 to the part channels after a rustysynth rebuild.
     fn apply_sustain(&mut self) {
         let on = self.sustain;

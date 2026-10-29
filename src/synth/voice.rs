@@ -510,6 +510,13 @@ impl Voice {
         self.filter_env.note_off();
     }
 
+    /// Release with an explicit duration; amp env only (filter env keeps the
+    /// patch's own release so tonal closure stays unchanged). Used for the
+    /// static pedal-up release setting (TECHDEBT #7).
+    pub fn note_off_for(&mut self, seconds: f32) {
+        self.amp_env.note_off_for(seconds);
+    }
+
     /// Immediate kill (CC120 All Sound Off): voice stops producing sound from
     /// the next tick, no release tail, no allocation. Compare `note_off`,
     /// which only arms the release envelope.

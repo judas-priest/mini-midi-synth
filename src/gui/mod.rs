@@ -289,6 +289,10 @@ pub struct App {
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
     pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Static pedal-up release duration (None = off, patch release)
+    pub sustain_release: Option<f32>,
+    /// SF2 release-time scale (1.0 = file defaults)
+    pub sf2_release_scale: f32,
     /// Show help dialog
     pub show_help: bool,
     /// Global params display values (effects, volume, lfo rate)
@@ -760,6 +764,34 @@ impl eframe::App for App {
                     .fill(if sus { theme::KEY_WHITE_ACTIVE } else { theme::BG_PAD_EMPTY });
                 if ui.add(sus_btn).on_hover_text("Sustain pedal (CC64): holds notes. Click to toggle.").clicked() {
                     let _ = self.ctrl_tx.push(ControlEvent::SetSustain { on: !sus });
+                }
+
+                // Static pedal-up release (TECHDEBT #7): CC64 value never enters it
+                let sr_on = self.sustain_release.is_some();
+                if ui.button("SR").on_hover_text(
+                    "Pedal-up release: held notes release in a fixed time instead of the patch release.").clicked()
+                {
+                    self.sustain_release = if sr_on { None } else { Some(0.3) };
+                    let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: self.sustain_release });
+                    self.save_global_to_config();
+                }
+                if sr_on {
+                    let mut secs = self.sustain_release.unwrap_or(0.3);
+                    if ui.add(egui::Slider::new(&mut secs, 0.05..=8.0)
+                        .fixed_decimals(2).suffix(" s")).changed() {
+                        self.sustain_release = Some(secs);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: Some(secs) });
+                        self.save_global_to_config();
+                    }
+                }
+                ui.label("SF2 rel:");
+                let mut scale = self.sf2_release_scale;
+                if ui.add(egui::DragValue::new(&mut scale).range(0.05..=3.0).speed(0.05).suffix("\u{00d7}"))
+                    .on_hover_text("SF2 release-time scale (1.0 = file defaults)").changed()
+                {
+                    self.sf2_release_scale = scale;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale });
+                    self.save_global_to_config();
                 }
 
                 ui.separator();
@@ -1239,6 +1271,8 @@ impl App {
         // Send drum and part volumes to engine
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+        let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: self.sustain_release });
+        let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale: self.sf2_release_scale });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
         // Restore the internal-kit remap before the initial push (if an SF2 kit is
         // configured, load_sf2_drums below overwrites this with the per-kit table).
@@ -1316,6 +1350,8 @@ impl App {
         self.config.ui.pitch_bend_range = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as u8;
         self.config.ui.drum_volume = self.drum_volume;
         self.config.ui.drum_fixed_velocity = self.drum_fixed_velocity;
+        self.config.ui.sustain_release = self.sustain_release;
+        self.config.ui.sf2_release_scale = self.sf2_release_scale;
         self.config.ui.drum_metronome = self.drum_metronome;
         if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
