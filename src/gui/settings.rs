@@ -217,6 +217,21 @@ impl App {
         // Drop old audio backend (dead stream + old synth engine)
         self._audio_handle = None;
 
+        // Rebuild on the ORIGINAL configured host (PR #9), not the default
+        // host: if the app runs under JACK, default_host() is PipeWire and
+        // the rebuilt stream never runs its callback (dead audio). Same
+        // source of truth as init_common — config.audio.backend, matched
+        // case-insensitively against the available host list.
+        #[cfg(not(target_os = "android"))]
+        let host_id = {
+            let hosts = crate::audio::available_hosts();
+            let idx = hosts
+                .iter()
+                .position(|(_, n)| n.eq_ignore_ascii_case(&self.config.audio.backend))
+                .unwrap_or(0);
+            hosts.get(idx).map(|(id, _)| *id).unwrap_or_else(|| cpal::default_host().id())
+        };
+        #[cfg(target_os = "android")]
         let host_id = cpal::default_host().id();
         let sr = self.sample_rate;
 
