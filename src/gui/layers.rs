@@ -243,6 +243,12 @@ impl App {
                 }
             }
             ui.separator();
+            if ui.button("Reset").on_hover_text("Load the built-in (Init) performance: single part A1 = Init preset, full keyboard, no SF2").clicked()
+                && self.load_performance_by_name("(Init)")
+            {
+                self.show_toast("Reset to (Init)", ToastKind::Success);
+            }
+            ui.separator();
             let mut load_perf: Option<Performance> = None;
             egui::ComboBox::from_id_salt("perf_load")
                 .selected_text(if self.perf_list.is_empty() { "No performances" } else { "Load..." })
