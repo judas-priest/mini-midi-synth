@@ -602,3 +602,18 @@ bottom-panel patterns) → дизайн самодостаточной пане�
 (перезапись); swing секвенсора не распространяется на лупер (петли прямые).
 Связано: #30 (docked-панель лупера — туда мастер-транспорт и тоггл), #21 (размер),
 #18 (реконнект переживает hotplug — уже сделано).
+
+## 33. Слайдеры L/T/D/P в драм-сетке не работают в SF2-режиме — ЗАКРЫТО (UX-fix, 2026-10-30)
+Расследование: слайдеры исправно пушат DrumSetParam, движок применяет их в
+drum_engine.params — но это DSP-only параметры по дизайну. В sf2_mode тик
+секвенсора (drum.rs DrumEngine::tick) не вызывает trigger_slot и не делает
+level/pan-микс, а возвращает хит вызывающему (DrumTriggers) →
+sampler.drum_note_on = обычный MIDI note-on в SF2; ни level, ни tune, ни
+decay, ни pan туда не доходит (drum_note_on принимает только note+velocity).
+Сломано не было никогда — SF2-драмы добавлены позже слайдеров и эти параметры
+не потребляли. Live-пэды в sf2_mode идут тем же путём (synth/mod.rs
+sampler_drums-ветка). Фикс UX: в docked-панели (gui/drums.rs) слайдеры
+серые с тултипом «DSP only, no effect in SF2 mode», когда включён
+SF2 Drums (sf2_drums_enabled + загруженный кит). Тесты: tests/drum_slot_params.rs.
+Если когда-нибудь захочется L/T для SF2 — это per-note tuning/velocity-гейн
+в sampler.drum_note_on, отдельная работа.
