@@ -11,7 +11,11 @@ use super::keyboard::{PAD_BOT_NOTES, PAD_TOP_NOTES};
 use super::theme;
 
 impl App {
-    pub(super) fn draw_drum_sequencer(&mut self, ui: &mut egui::Ui) {
+    /// Drum step-sequencer strip, docked to the window bottom on every tab
+    /// (TECHDEBT #25): transport + pattern selector + step grid.
+    /// Mix (BPM/Swing/Vol/V127/Metro), Remap and kit I/O stay on the Drums
+    /// tab — draw_drum_kit_controls. Remap modals are global (TECHDEBT #11).
+    pub(super) fn draw_drum_seq_docked(&mut self, ui: &mut egui::Ui) {
         let current_step = self.drum_step_atom.load(Ordering::Relaxed);
         let pat_idx = self.drum_current_pattern as usize;
 
@@ -53,54 +57,7 @@ impl App {
             if ui.button("Clear").on_hover_text("Clear all steps").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
             }
-
-            ui.separator();
-
-            // BPM
-            ui.label("BPM:");
-            if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_bpm });
-                if self.looper_sync_bpm {
-                    self.looper_bpm = self.drum_bpm;
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.drum_bpm });
-                }
-            }
-
-            ui.separator();
-
-            // Swing + Vol
-            ui.label("Swing:");
-            if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).fixed_decimals(2)).on_hover_text("Swing amount").changed() {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqSwing { swing: self.drum_swing });
-            }
-
-            ui.separator();
-            ui.label("Vol:");
-            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=2.0).fixed_decimals(2)).on_hover_text("Master drum volume").changed() {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
-            }
-
-            ui.separator();
-            if ui.checkbox(&mut self.drum_fixed_velocity, "V127")
-                .on_hover_text("Fixed velocity: every hit triggers at max (127). For controllers without velocity.").changed()
-            {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
-                self.save_global_to_config();
-            }
-            if ui.checkbox(&mut self.drum_metronome, "Metro")
-                .on_hover_text("Metronome: click on every beat while the sequencer plays (accent on beat 1)").changed()
-            {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
-                self.save_global_to_config();
-            }
         });
-
-        // Pad remap: incoming pad note -> internal slot (modal, off the main screen)
-        if ui.selectable_label(self.show_drum_remap, "Remap")
-            .on_hover_text("Pad note -> drum sound mapping").clicked()
-        {
-            self.show_drum_remap = !self.show_drum_remap;
-        }
 
         // Pattern selector + length
         ui.horizontal(|ui| {
@@ -119,107 +76,6 @@ impl App {
             if ui.add(egui::DragValue::new(&mut length).range(1..=16).speed(0.2)).changed() {
                 self.drum_patterns[pat_idx].length = length as u8;
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqLength { length: length as u8 });
-            }
-        });
-
-        // Save / Load drum kit
-        ui.horizontal(|ui| {
-            ui.label("Kit:");
-            ui.add(egui::TextEdit::singleline(&mut self.drum_kit_name).desired_width(120.0).hint_text("name"));
-            if ui.button("Save").on_hover_text("Save drum kit").clicked() && !self.drum_kit_name.trim().is_empty() {
-                let kit = DrumKit {
-                    name: self.drum_kit_name.trim().to_string(),
-                    patterns: self.drum_patterns.to_vec(),
-                    params: self.drum_params.to_vec(),
-                    bpm: self.drum_bpm,
-                    swing: self.drum_swing,
-                    volume: self.drum_volume,
-                };
-                match preset::save_drum_kit(&kit) {
-                    Ok(_path) => {
-                        self.show_toast("Kit saved", ToastKind::Success);
-                        self.drum_kit_list = preset::list_drum_kits();
-                    }
-                    Err(e) => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
-                }
-            }
-            ui.separator();
-            let mut load_kit: Option<std::path::PathBuf> = None;
-            egui::ComboBox::from_id_salt("drum_kit_load")
-                .selected_text(if self.drum_kit_list.is_empty() { "No kits" } else { "Load..." })
-                .width(140.0)
-                .show_ui(ui, |ui| {
-                    for (name, path) in &self.drum_kit_list {
-                        if ui.selectable_label(false, name).clicked() {
-                            load_kit = Some(path.clone());
-                        }
-                    }
-                });
-            if let Some(path) = load_kit {
-                match preset::load_drum_kit(&path) {
-                    Ok(kit) => {
-                        self.drum_kit_name = kit.name.clone();
-                        let mut patterns = [DrumPattern::default(); 8];
-                        let pat_len = kit.patterns.len().min(8);
-                        patterns[..pat_len].copy_from_slice(&kit.patterns[..pat_len]);
-                        let mut params = [DrumSlotParams::default(); NUM_DRUM_SLOTS];
-                        let par_len = kit.params.len().min(NUM_DRUM_SLOTS);
-                        params[..par_len].copy_from_slice(&kit.params[..par_len]);
-                        self.drum_patterns = patterns;
-                        self.drum_params = params;
-                        self.drum_bpm = kit.bpm;
-                        self.drum_swing = kit.swing;
-                        self.drum_volume = kit.volume;
-                        self.show_toast(format!("Kit loaded: {}", kit.name), ToastKind::Success);
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
-                            patterns: Box::new(patterns),
-                            params: Box::new(params),
-                            bpm: kit.bpm,
-                            swing: kit.swing,
-                            volume: kit.volume,
-                        });
-                        if self.looper_sync_bpm {
-                            self.looper_bpm = kit.bpm;
-                            let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: kit.bpm });
-                        }
-                    }
-                    Err(e) => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
-                }
-            }
-        });
-
-        // Import MIDI drums
-        ui.horizontal(|ui| {
-            ui.label("MIDI:");
-            ui.add(egui::TextEdit::singleline(&mut self.drum_midi_import_path)
-                .desired_width(240.0).hint_text("path to .mid file"));
-            if ui.button("Import").on_hover_text("Import from MIDI file").clicked() && !self.drum_midi_import_path.trim().is_empty() {
-                let path = std::path::PathBuf::from(self.drum_midi_import_path.trim());
-                match preset::import_midi_drums(&path) {
-                    Ok((patterns_vec, bpm)) => {
-                        let mut patterns = [DrumPattern::default(); 8];
-                        let pvec_len = patterns_vec.len().min(8);
-                        patterns[..pvec_len].copy_from_slice(&patterns_vec[..pvec_len]);
-                        self.drum_patterns = patterns;
-                        self.drum_bpm = bpm;
-                        self.show_toast(format!(
-                            "Imported {} bar(s) @ {:.0} BPM",
-                            patterns_vec.len().min(8), bpm,
-                        ), ToastKind::Success);
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
-                            patterns: Box::new(patterns),
-                            params: Box::new(self.drum_params),
-                            bpm,
-                            swing: self.drum_swing,
-                            volume: self.drum_volume,
-                        });
-                        if self.looper_sync_bpm {
-                            self.looper_bpm = bpm;
-                            let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm });
-                        }
-                    }
-                    Err(e) => { self.show_toast(format!("Import error: {e}"), ToastKind::Error); }
-                }
             }
         });
 
@@ -374,6 +230,164 @@ impl App {
                 });
             });
         }
+    }
+
+    /// Drums-tab-only controls (TECHDEBT #25): mix row (BPM/Swing/Vol/V127/
+    /// Metro), pad-remap toggle, kit save/load, MIDI import. The grid and
+    /// transport live in the docked bottom panel (draw_drum_seq_docked).
+    pub(super) fn draw_drum_kit_controls(&mut self, ui: &mut egui::Ui) {
+        // Mix row
+        ui.horizontal(|ui| {
+            ui.separator();
+
+            // BPM
+            ui.label("BPM:");
+            if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_bpm });
+                if self.looper_sync_bpm {
+                    self.looper_bpm = self.drum_bpm;
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.drum_bpm });
+                }
+            }
+
+            ui.separator();
+
+            // Swing + Vol
+            ui.label("Swing:");
+            if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).fixed_decimals(2)).on_hover_text("Swing amount").changed() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqSwing { swing: self.drum_swing });
+            }
+
+            ui.separator();
+            ui.label("Vol:");
+            if ui.add(egui::Slider::new(&mut self.drum_volume, 0.0..=2.0).fixed_decimals(2)).on_hover_text("Master drum volume").changed() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
+            }
+
+            ui.separator();
+            if ui.checkbox(&mut self.drum_fixed_velocity, "V127")
+                .on_hover_text("Fixed velocity: every hit triggers at max (127). For controllers without velocity.").changed()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+                self.save_global_to_config();
+            }
+            if ui.checkbox(&mut self.drum_metronome, "Metro")
+                .on_hover_text("Metronome: click on every beat while the sequencer plays (accent on beat 1)").changed()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
+                self.save_global_to_config();
+            }
+        });
+
+        // Pad remap: incoming pad note -> internal slot (modal, off the main screen)
+        if ui.selectable_label(self.show_drum_remap, "Remap")
+            .on_hover_text("Pad note -> drum sound mapping").clicked()
+        {
+            self.show_drum_remap = !self.show_drum_remap;
+        }
+
+        ui.add_space(theme::SP_SM);
+
+        // Save / Load drum kit
+        ui.horizontal(|ui| {
+            ui.label("Kit:");
+            ui.add(egui::TextEdit::singleline(&mut self.drum_kit_name).desired_width(120.0).hint_text("name"));
+            if ui.button("Save").on_hover_text("Save drum kit").clicked() && !self.drum_kit_name.trim().is_empty() {
+                let kit = DrumKit {
+                    name: self.drum_kit_name.trim().to_string(),
+                    patterns: self.drum_patterns.to_vec(),
+                    params: self.drum_params.to_vec(),
+                    bpm: self.drum_bpm,
+                    swing: self.drum_swing,
+                    volume: self.drum_volume,
+                };
+                match preset::save_drum_kit(&kit) {
+                    Ok(_path) => {
+                        self.show_toast("Kit saved", ToastKind::Success);
+                        self.drum_kit_list = preset::list_drum_kits();
+                    }
+                    Err(e) => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
+                }
+            }
+            ui.separator();
+            let mut load_kit: Option<std::path::PathBuf> = None;
+            egui::ComboBox::from_id_salt("drum_kit_load")
+                .selected_text(if self.drum_kit_list.is_empty() { "No kits" } else { "Load..." })
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for (name, path) in &self.drum_kit_list {
+                        if ui.selectable_label(false, name).clicked() {
+                            load_kit = Some(path.clone());
+                        }
+                    }
+                });
+            if let Some(path) = load_kit {
+                match preset::load_drum_kit(&path) {
+                    Ok(kit) => {
+                        self.drum_kit_name = kit.name.clone();
+                        let mut patterns = [DrumPattern::default(); 8];
+                        let pat_len = kit.patterns.len().min(8);
+                        patterns[..pat_len].copy_from_slice(&kit.patterns[..pat_len]);
+                        let mut params = [DrumSlotParams::default(); NUM_DRUM_SLOTS];
+                        let par_len = kit.params.len().min(NUM_DRUM_SLOTS);
+                        params[..par_len].copy_from_slice(&kit.params[..par_len]);
+                        self.drum_patterns = patterns;
+                        self.drum_params = params;
+                        self.drum_bpm = kit.bpm;
+                        self.drum_swing = kit.swing;
+                        self.drum_volume = kit.volume;
+                        self.show_toast(format!("Kit loaded: {}", kit.name), ToastKind::Success);
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
+                            patterns: Box::new(patterns),
+                            params: Box::new(params),
+                            bpm: kit.bpm,
+                            swing: kit.swing,
+                            volume: kit.volume,
+                        });
+                        if self.looper_sync_bpm {
+                            self.looper_bpm = kit.bpm;
+                            let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: kit.bpm });
+                        }
+                    }
+                    Err(e) => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
+                }
+            }
+        });
+
+        // Import MIDI drums
+        ui.horizontal(|ui| {
+            ui.label("MIDI:");
+            ui.add(egui::TextEdit::singleline(&mut self.drum_midi_import_path)
+                .desired_width(240.0).hint_text("path to .mid file"));
+            if ui.button("Import").on_hover_text("Import from MIDI file").clicked() && !self.drum_midi_import_path.trim().is_empty() {
+                let path = std::path::PathBuf::from(self.drum_midi_import_path.trim());
+                match preset::import_midi_drums(&path) {
+                    Ok((patterns_vec, bpm)) => {
+                        let mut patterns = [DrumPattern::default(); 8];
+                        let pvec_len = patterns_vec.len().min(8);
+                        patterns[..pvec_len].copy_from_slice(&patterns_vec[..pvec_len]);
+                        self.drum_patterns = patterns;
+                        self.drum_bpm = bpm;
+                        self.show_toast(format!(
+                            "Imported {} bar(s) @ {:.0} BPM",
+                            patterns_vec.len().min(8), bpm,
+                        ), ToastKind::Success);
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
+                            patterns: Box::new(patterns),
+                            params: Box::new(self.drum_params),
+                            bpm,
+                            swing: self.drum_swing,
+                            volume: self.drum_volume,
+                        });
+                        if self.looper_sync_bpm {
+                            self.looper_bpm = bpm;
+                            let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm });
+                        }
+                    }
+                    Err(e) => { self.show_toast(format!("Import error: {e}"), ToastKind::Error); }
+                }
+            }
+        });
     }
 
     /// Pad-remap modals, drawn from the main update loop so pad clicks work
