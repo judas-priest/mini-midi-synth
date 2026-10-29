@@ -201,6 +201,12 @@ pub struct SamplerEngine {
     pub drum_volume: f32,
     /// Last GM program sent per MIDI channel for the sequencer (255 = never sent).
     seq_channel_program: [u8; 16],
+    /// Channels whose GM program the MIDI-file sequencer currently owns
+    /// (claimed by `seq_program_set`, released by `seq_channels_release`).
+    /// A rustysynth rebuild must NOT restore part programs onto these — the
+    /// sequencer re-asserts its own program on the next note-on because
+    /// `seq_channel_program` resets to 255 on rebuild.
+    seq_channel_used: [bool; 16],
     /// Sample start offset in samples — skip this many samples after note-on
     /// to compensate for slow SF2 attack envelopes.
     sample_offset: usize,
@@ -226,6 +232,7 @@ impl SamplerEngine {
             sample_rate: sample_rate as i32,
             drum_volume: 1.0,
             seq_channel_program: [255; 16], // 255 = not yet initialised
+            seq_channel_used: [false; 16],
             sample_offset: 0,
             sustain: false,
             release_scale: 1.0,
@@ -461,16 +468,19 @@ impl SamplerEngine {
     }
 
     /// MIDI sequencer: set GM program for a channel of the keys synth.
-    /// Skips the MIDI message if the program is already set (avoids per-note overhead).
+    /// Skips the MIDI message if the program is already set (avoids per-note
+    /// overhead). Marks the channel as seq-owned until `seq_channels_release`
+    /// so a rebuild's part-restore skips it.
     pub fn seq_program_set(&mut self, channel: u8, program: u8) {
         let ch = channel as usize;
-        if ch < 16 && self.seq_channel_program[ch] == program {
-            return; // already set, no-op
-        }
-        self.keys.midi(channel as i32, 0xC0, program as i32, 0);
         if ch < 16 {
+            self.seq_channel_used[ch] = true;
+            if self.seq_channel_program[ch] == program {
+                return; // already set, no-op
+            }
             self.seq_channel_program[ch] = program;
         }
+        self.keys.midi(channel as i32, 0xC0, program as i32, 0);
     }
 
     pub fn pitch_bend(&mut self, part: usize, value: f32) {
@@ -523,5 +533,32 @@ impl SamplerEngine {
         let (dl, dr) = self.drums.tick(bs);
         let dv = self.drum_volume * self.drum_volume; // perceptual curve
         (kl + dl * dv, kr + dr * dv)
+    }
+}
+
+// ── Program-cache ownership tests (no .sf2: keys.synth is None, every
+//    keys.midi send is a no-op; the arrays below ARE the contract) ──
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::synth::{ControlEvent, SynthEngine};
+
+    #[test]
+    fn seq_program_set_marks_channel_and_leaves_part_cache() {
+        let mut s = SamplerEngine::new(48000.0);
+        s.set_part_program(0, 5, 0);
+        assert_eq!(s.part_program[0], 5);
+        s.seq_program_set(0, 40);
+        assert_eq!(s.seq_channel_program[0], 40, "seq cache not updated");
+        assert!(s.seq_channel_used[0], "seq channel 0 not marked as used");
+        assert_eq!(s.part_program[0], 5, "seq program overwrote the part cache");
+        // dedup: an identical program must not re-send / change anything
+        s.seq_program_set(0, 40);
+        assert_eq!(s.seq_channel_program[0], 40);
+        // out-of-range channel: no cache write, no panic
+        s.seq_program_set(16, 7);
+        assert!(s.seq_channel_used.iter().skip(1).all(|&u| !u),
+            "out-of-range channel polluted the used mask");
     }
 }
