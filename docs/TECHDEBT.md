@@ -442,3 +442,8 @@ SidePanel::right("gm") .resizable(true) .exact_width/.width_range: SidePanel
 резервирует место, CentralPanel автоматически сжимается. Гуглить: «egui side
 panel resizable central panel layout», egui docs SidePanel vs Window, порядок
 создания панелей (SidePanel должен создаваться ДО CentralPanel).
+
+## 27. Нормальное имя приложения в title окна
+Сейчас в заголовке окна дефолт eframe/egui. Поставить человеческое название
+("Mini MIDI Synth") через NativeOptions.viewport (ViewportBuilder::with_title)
+в run_gui (lib.rs). Мелочь, one-liner.
