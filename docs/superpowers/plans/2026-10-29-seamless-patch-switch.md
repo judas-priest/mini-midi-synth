@@ -173,8 +173,15 @@ fn latch_mismatch_releases_latch_voices() {
     assert!(render_peak(&mut e, 4) > SILENCE, "latch must hold the chord");
     // switch to non-latch patch: latch voices released
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &second_patch()));
+    // release tail length depends on the new patch's release — assert DECAY,
+    // not absolute silence (robust against long-release factory patches)
+    let right_after = render_peak(&mut e, 20);
+    assert!(right_after > SILENCE, "release tail should still be decaying");
     settle(&mut e);
-    assert!(render_peak(&mut e, 4) < SILENCE, "latch voices must release on latch-mismatch switch");
+    settle(&mut e);
+    assert!(render_peak(&mut e, 20) < right_after / 10.0,
+        "latch voices must release on latch-mismatch switch (peak {} -> {})",
+        right_after, render_peak(&mut e, 20));
 }
 ```
 
