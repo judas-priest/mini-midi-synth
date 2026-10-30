@@ -247,7 +247,7 @@ borrow'ов, после — rt-assert прогон); ui_layout_contract.rs — �
 mod.rs видят приватное, родитель — нет). После S0; после S2/S3, чтобы код не
 двигать дважды.
 
-**S5. Предпосылки #32 (looper/transport).**
+**S5. Предпосылки #32 (looper/transport). — ВЫПОЛНЕНО 2026-10-30 (plan docs/superpowers/plans/2026-10-30-refactor-s5-clock-sync.md).**
 Looper BPM задаётся только через `LooperSetBpm` (mod.rs:2362), тогда как
 arp/LFO/pitch_seq получают BPM секвенсора каждый блок (mod.rs:2714-2715,
 источник — `drum_engine.sequencer.bpm`, писатели только GUI: DrumSeqBpm,
