@@ -22,7 +22,7 @@
 
 ## Negative Matrix
 
-- **Пиксельная разница после унификации** (240→300 path, 120→200 GM combo, DragValue 60→80) — намеренная стандартизация, задокументирована. Остальные замены = значение 1:1.
+- **Пиксельная разница после унификации** (240→300 path, 120→200 GM combo, 60→80 velocity DragValue, 70→80 arp-mode combo) — намеренная стандартизация, задокументирована. Остальные замены = значение 1:1.
 - **Дефолт item_spacing.y = 5.0 и Margin::same(6)** — офф-грид, но load-bearing (глобальный стиль/10 карточек): НЕ трогаем (менять = переверстка всего), выносим в токены APP_ITEM_SPACING/`CARD_MARGIN` с текущими значениями.
 - **Драм-грид item_spacing 1.0 и pad_gap 3.0** — намеренная пиксельная плотность: токены GRID_TIGHT/PAD_GAP с теми же значениями.
 - **Android-стиль item_spacing 10×8** — отдельная платформенная ветка: токен ANDROID_ITEM_SPACING, значение не меняется.
@@ -74,7 +74,7 @@ pub const PROGRESS_W_SM: f32 = 80.0;
 pub const PROGRESS_W_MD: f32 = 160.0;
 pub const MODAL_W_SM: f32 = 300.0;
 pub const MODAL_W_MD: f32 = 360.0;
-pub const MODAL_W_LG: f32 = 700.0;
+pub const MODAL_W_LG: f32 = 900.0;   // pad remap modal (1:1)
 pub const LIST_MAX_H: f32 = 420.0;
 pub const POPUP_LIST_MAX_H: f32 = 300.0;
 
@@ -117,7 +117,7 @@ pub const DOCK_H_MAX: f32 = 760.0;
 - [ ] **Step 1: item_spacing / Grid::spacing / Margin / corner_radius → токены:**
   - mod.rs:479 → `ANDROID_ITEM_SPACING`; mod.rs:496 → `APP_ITEM_SPACING`; mod.rs:1240 → `.x = theme::SP_SM` (4.0); mod.rs:495 `slider_width(250.0)` → `slider_width(theme::SLIDER_PRIMARY)`.
   - drums.rs:164 → `GRID_TIGHT` (vec2(GRID_TIGHT, GRID_TIGHT)).
-  - Grid::new spacing: macros.rs:21/midi_seq.rs:138 → `GRID_SP_LIST`; drums.rs:455 → `[12.0, 6.0]` = `GRID_SP_FORM`; fx_chain.rs:42 → `GRID_SP_FX`; settings.rs:138,158 → `GRID_SP_HELP`; settings.rs:599,672 → `GRID_SP_FORM`.
+  - Grid::new spacing: macros.rs:21/midi_seq.rs:138 → `GRID_SP_LIST`; drums.rs:455 → ОСТАВИТЬ литералом `[8.0, 6.0]` (GRID_SP_FORM был бы 12 — неверная замена); fx_chain.rs:42 → `GRID_SP_FX`; settings.rs:138,158 → `GRID_SP_HELP`; settings.rs:599,672 → `GRID_SP_FORM`.
   - params.rs ×10 `Margin::same(6)`+`corner_radius(4.0)` → `Margin::same(theme::CARD_MARGIN as i8)`+`corner_radius(theme::CARD_RADIUS)`; mod.rs:1134-1135 toast → `corner_radius(theme::CARD_RADIUS)`, `Margin::symmetric(TOAST_MARGIN.0, TOAST_MARGIN.1)`.
   - settings.rs:38/111 `gap=3.0` → `theme::PAD_GAP`.
 - [ ] **Step 2: TextEdit/ComboBox/DragValue/ProgressBar/модали → токены:**
@@ -129,17 +129,17 @@ pub const DOCK_H_MAX: f32 = 760.0;
   - drums.rs:448 → MODAL_W_LG; drums.rs:538 → MODAL_W_SM; mod.rs:1232 → MODAL_W_MD; layers.rs:175 → оставить 280.0 (legacy `remove-part modal`) — токен `MODAL_W_280` не заводим, оставить литерал с комментарием; settings.rs:98 → PAD_PERF_W (140→80?? НЕТ — settings.rs:98 это popup 140 — оставить литералом).
   - midi_seq.rs:234 → POPUP_LIST_MAX_H; mod.rs:1258 → LIST_MAX_H.
 - [ ] **Step 3: Canvas-геометрия → токены (значения 1:1):**
-  - drums.rs:144-146 → DRUM_CELL_W/H, DRUM_LABEL_W; drums.rs:60-62 → BEAT_LED.
+  - drums.rs:144-146 → DRUM_CELL_W/H, DRUM_LABEL_W; drums.rs:60 → BEAT_LED (vec2 14×14; radius 5.0 на :62 — без токена).
   - drums.rs:661-666 → PITCH_STEP_MIN/MAX, PITCH_BAR_H.
   - drums.rs:1088-1089 → TIMELINE_W_MAX/H.
-  - keyboard.rs:65-67,61-62 → KEY_W_MIN/MAX, KEY_H_MIN, PAD_SIZE_MIN/MAX, PAD_GAP.
+  - keyboard.rs:60-66 → PAD_GAP(60), PAD_SIZE clamp(61), KEY_W clamp(65), KEY_H(66); строка 62 (margin 12.0) — без токена.
   - settings.rs:36-38 → PAD_PERF_W/H, PAD_GAP.
   - layers.rs:113-114 → PART_LIST_RESERVE; layers.rs:513-514 → ZONE_MAP_W_MAX/H.
   - params.rs:89-90 → FILTER_RESP_W/H; macros.rs:133 → XY_PAD_SIZE; mod.rs:1024-1025 → SCOPE_W/H.
   - mod.rs:1079-1080 → DOCK_DEFAULT_H/H_MIN/H_MAX.
 - [ ] **Step 3b: НЕ трогать:** settings.rs font 11.0 ×3 и macros.rs 11.0 (токен FS_OVERLAY заводить не будем — мелочь); midi_seq.rs:142 size(13.0); панели header/global_controls (auto-sized); все 90/110/115/140/160 combo widths (legacy); модальные 280/140.
 
-- [ ] **Step 4: Гейты** `cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release`.
+- [ ] **Step 4: Гейты** `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety && cargo build --release`.
 
 - [ ] **Step 5: Commit** `git commit -m "refactor: gui geometry through theme tokens (values 1:1, unify path/name/GM-combo/velocity widths)"`.
 
@@ -162,6 +162,7 @@ pub const DOCK_H_MAX: f32 = 760.0;
 ## Test plan
 - [x] cargo clippy -D warnings, cargo test (29 suites), rt_safety
 - [ ] Ручной осмотр: Layers/Drums/docked-панель — ничего не уехало
+- id_salt на 7 ScrollArea сбрасывает их запомненный скролл один раз — не поломка
 EOF
 )"`.
-- [ ] **Step 3: Ручной чеклист (юзер):** визуальный осмотр — Layers, Drums, docked-панель, настройки: отступы ровные, ничего не уехало; path/GM-поля чуть шире (стандартизация).
+- [ ] **Step 3: Ручной чеклист (юзер):** визуальный осмотр — Layers, Drums, docked-панель, настройки: отступы ровные, ничего не уехало; path/GM-поля чуть шире; arp-mode combo 70→80; velocity DragValue 60→80 (стандартизация).
