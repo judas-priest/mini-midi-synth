@@ -371,11 +371,10 @@ fn sr_change_mid_render_does_not_allocate() {
     });
 }
 
-/// KNOWN RED (audit S1): DrumEngine::set_sample_rate does
-/// `*self = Self::new(sr)` (drum.rs:1054-1090), allocating the 3 Arc atoms
-/// (drum.rs:1009-1011) plus voice Vecs inside the callback.
+/// DrumEngine::set_sample_rate updates SR-dependent fields explicitly
+/// (audit S1): plain-Copy voice rebuilds, click-state reset, choke-holder
+/// reset — no Arc allocations, no `*self = Self::new` dance.
 #[test]
-#[ignore = "KNOWN RED (audit S1): drum set_sample_rate rebuilds via Self::new (3 Arc allocs, drum.rs:1009-1011)"]
 fn drum_set_sample_rate_is_allocation_free() {
     let mut engine = SynthEngine::new(SR);
     assert_no_alloc(|| engine.drum_engine.set_sample_rate(96_000.0));

@@ -653,6 +653,18 @@ impl DrumVoice {
         }
     }
 
+    fn set_sample_rate(&mut self, sr: f32) {
+        // Voice structs are plain Copy — rebuild is a stack assignment, no heap.
+        match self {
+            Self::Kick(v) => *v = KickVoice::new(sr),
+            Self::Click(v) => *v = ClickVoice::new(sr),
+            Self::Snare(v) => *v = SnareVoice::new(sr),
+            Self::Clap(v) => *v = ClapVoice::new(sr),
+            Self::Tom(v) => *v = TomVoice::new(sr),
+            Self::Metal(v) => *v = MetalVoice::new(sr),
+        }
+    }
+
     fn kill_fade(&mut self, fade_samples: f32) {
         match self {
             Self::Kick(v) => v.kill(fade_samples),
@@ -1052,40 +1064,23 @@ impl DrumEngine {
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        // Preserve everything user-facing: StepSequencer timing takes sample_rate
-        // as a parameter (no stored sr), voice coefficients are the only thing
-        // that must be rebuilt. Stale choke holders are reset (panic-path rule).
-        let step = self.step_atom.clone();
-        let play = self.play_atom.clone();
-        let rec = self.rec_atom.clone();
-        let params = self.params;
-        let sequencer = std::mem::replace(&mut self.sequencer, StepSequencer::new());
-        let volume = self.volume;
-        let enabled = self.enabled;
-        let sf2_mode = self.sf2_mode;
-        let fixed_velocity = self.fixed_velocity;
-        let metronome = self.metronome;
-        let remap = self.remap;
-        let pad_vel = self.pad_vel;
-        let choke_groups = self.choke_groups;
+        // Called from the audio callback on JACK rate change — must be
+        // allocation-free. Explicit updates only: no `*self = Self::new`
+        // dance (it allocated 5 Arcs and silently reset any field the
+        // save/restore list forgot). User state (params, sequencer, atoms,
+        // remap, pad_vel, choke_groups, volume/enabled/sf2_mode/
+        // fixed_velocity/metronome) is not touched at all.
         self.sample_rate = sample_rate;
-        *self = Self::new(sample_rate);
-        self.step_atom = step;
-        self.play_atom = play;
-        self.rec_atom = rec;
-        self.params = params;
-        self.sequencer = sequencer;
-        self.volume = volume;
-        self.enabled = enabled;
-        self.sf2_mode = sf2_mode;
-        self.fixed_velocity = fixed_velocity;
-        self.metronome = metronome;
-        // Click state is transient (<30 ms) and its coefficients are
-        // SR-dependent — drop it rather than preserve stale values.
+        for voice in &mut self.voices {
+            // Plain Copy-struct rebuild: fresh, inactive voice at the new SR.
+            voice.set_sample_rate(sample_rate);
+        }
+        // Click state is transient (<30 ms) and SR-dependent — drop it.
+        self.click_phase = 0.0;
+        self.click_phase_inc = 0.0;
         self.click_env = 0.0;
-        self.remap = remap;
-        self.pad_vel = pad_vel;
-        self.choke_groups = choke_groups;
+        self.click_decay = 0.0;
+        // Stale choke holders are reset (panic-path rule, was part of the dance).
         self.group_last_note = [0u8; NUM_CHOKE_GROUPS];
     }
 
