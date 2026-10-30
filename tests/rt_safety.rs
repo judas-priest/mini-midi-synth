@@ -342,23 +342,24 @@ fn tick_block_with_lfo_deform_does_not_allocate() {
     });
 }
 
-/// KNOWN RED (REFACTOR_AUDIT S1): set_sample_rate runs in the audio callback
-/// (audio.rs:199-205 reacts to the jack_sr atom) but reallocates 30+ FX
-/// (reverb.rs:298-300 `*self = Self::new` + vec! delay lines, chorus.rs:73,
-/// spring_reverb.rs:82-85) and re-runs the drum save/restore dance
-/// (drum.rs:1054-1090). Un-ignore after the S1 fix makes it allocation-free.
+/// set_sample_rate runs in the audio callback (audio.rs:199-205 reacts to the
+/// jack_sr atom) — after the S1 fix the whole chain resizes preallocated
+/// buffers in place: zero alloc/free. Duplicate call is covered too
+/// (audio.rs gates on `new_sr != synth_sr`, but the method itself must stay
+/// harmless when invoked twice at the same rate).
 #[test]
-#[ignore = "KNOWN RED (audit S1): set_sample_rate reallocates FX in the callback"]
 fn set_sample_rate_is_allocation_free() {
     let mut engine = SynthEngine::new(SR);
-    assert_no_alloc(|| engine.set_sample_rate(96_000.0));
+    assert_no_alloc(|| {
+        engine.set_sample_rate(96_000.0);
+        engine.set_sample_rate(96_000.0); // duplicate call must also be free
+    });
 }
 
 /// JACK mid-callback scenario (audit S1 TC-C): a note is held, one block was
 /// rendered, then JACK reports a new rate and the callback applies it before
-/// the next block. KNOWN RED until S1 lands.
+/// the next block. Green since the S1 fix (in-place SR updates everywhere).
 #[test]
-#[ignore = "KNOWN RED (audit S1): mid-render SR change reallocates FX/voices"]
 fn sr_change_mid_render_does_not_allocate() {
     let mut engine = SynthEngine::new(SR);
     engine.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
