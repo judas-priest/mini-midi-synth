@@ -110,3 +110,35 @@ fn switching_between_wavetable_patches_does_not_free_in_rt() {
     });
     drop(spent);
 }
+
+#[test]
+fn wavetable_note_on_does_not_allocate() {
+    // Built-in wavetable bank: every note-on used to rebuild the 8x256 table
+    // (take_buf + Arc::new + 13312 sin()) and drop an empty placeholder Arc
+    // from reset(). The OnceLock cache plus warmup must make the whole
+    // note-on path allocation-free. Plan: docs/superpowers/plans/2026-10-30-refactor-qw-batch.md
+    let mut patch = preset::load_all_patches()
+        .into_iter()
+        .find(|p| p.name.eq_ignore_ascii_case("init"))
+        .expect("init preset exists");
+    patch.params.insert("osc_type".into(), 27.0); // OscType::Wavetable, built-in bank
+    patch.wavetable_data = None;                  // custom .wt path is already Arc-shared
+
+    let mut engine = SynthEngine::new(SR);
+    let spent = engine.handle_control(ControlEvent::load_patch_from(0, &patch));
+    drop(spent);
+    let _ = engine.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+
+    // init_common does this before the audio stream exists; the test mirrors it
+    // so the guard below measures the note-on path, not the lazy build.
+    mini_midi_synth::synth::oscillator::warmup_builtin_wavetable();
+
+    let mut l = [0.0f32; BLOCK_SIZE];
+    let mut r = [0.0f32; BLOCK_SIZE];
+    assert_no_alloc(|| {
+        engine.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+        for _ in 0..8 { engine.tick_block(&mut l, &mut r); }
+        engine.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+        for _ in 0..8 { engine.tick_block(&mut l, &mut r); }
+    });
+}

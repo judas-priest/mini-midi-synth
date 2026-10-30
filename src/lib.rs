@@ -143,6 +143,11 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     let config = Config::load();
     let patches = preset::load_all_patches();
 
+    // Warm static DSP tables BEFORE the audio stream exists: both are lazily
+    // built otherwise and the first build would land in the audio callback
+    // (wavetable bank on the first note-on, LFO sine LUT on the first tick).
+    synth::oscillator::warmup_builtin_wavetable();
+
     #[cfg(not(target_os = "android"))]
     let available_hosts = audio::available_hosts();
 
