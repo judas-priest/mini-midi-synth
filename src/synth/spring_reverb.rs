@@ -6,6 +6,11 @@ use std::f32::consts::PI;
 const MAX_DELAY: usize = 8192;
 const NUM_ALLPASS: usize = 8;
 
+/// Ceiling sample rate the allpass buffers are sized for at construction.
+/// audio.rs negotiates at most 192 kHz, so set_sample_rate never needs to
+/// grow a buffer — resize would be a heap realloc in the callback.
+const SR_CAP: f32 = 192_000.0;
+
 struct AllpassFilter {
     buffer: Vec<f32>,
     pos: usize,
@@ -13,13 +18,15 @@ struct AllpassFilter {
 }
 
 impl AllpassFilter {
-    fn new(len: usize) -> Self {
-        Self { buffer: vec![0.0; len.max(1)], pos: 0, len: len.max(1) }
+    fn new(cap: usize, len: usize) -> Self {
+        let len = len.max(1).min(cap.max(1));
+        Self { buffer: vec![0.0; cap.max(1)], pos: 0, len }
     }
 
+    /// RT-safe resize: clamps to the preallocated capacity and zeroes the
+    /// buffer. Never reallocates (buffers are sized for SR_CAP at construction).
     fn set_len(&mut self, new_len: usize) {
-        let new_len = new_len.max(1);
-        self.buffer.resize(new_len, 0.0);
+        let new_len = new_len.max(1).min(self.buffer.len());
         self.buffer.fill(0.0);
         self.len = new_len;
         self.pos = 0;
@@ -69,20 +76,28 @@ impl SpringReverb {
             er_delays: [113, 337, 557, 773],
             fb_l: 0.0, fb_r: 0.0,
         };
-        // Initialize allpass filters with prime-number delays for dispersion
+        // Initialize allpass filters with prime-number delays for dispersion.
+        // Buffers are sized once for SR_CAP; set_sample_rate only rescales
+        // the active length inside that capacity.
         let ap_delays = [139, 193, 263, 349, 421, 509, 601, 701];
         for &d in &ap_delays {
             let scaled = (d as f32 * sample_rate / 48000.0) as usize;
-            s.allpasses_l.push(AllpassFilter::new(scaled));
-            s.allpasses_r.push(AllpassFilter::new(scaled));
+            let cap = (d as f32 * SR_CAP / 48000.0) as usize;
+            s.allpasses_l.push(AllpassFilter::new(cap, scaled));
+            s.allpasses_r.push(AllpassFilter::new(cap, scaled));
         }
         s
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
+        debug_assert!(
+            sr <= SR_CAP + 0.5,
+            "SR above SR_CAP would clamp allpass lengths (buffers sized once for SR_CAP)"
+        );
         self.sample_rate = sr;
-        self.delay_l = vec![0.0; MAX_DELAY];
-        self.delay_r = vec![0.0; MAX_DELAY];
+        // MAX_DELAY is SR-independent — zero in place, no realloc (RT-safe).
+        self.delay_l.fill(0.0);
+        self.delay_r.fill(0.0);
         self.delay_pos = 0;
         self.damp_l = 0.0; self.damp_r = 0.0;
         self.fb_l = 0.0; self.fb_r = 0.0;
