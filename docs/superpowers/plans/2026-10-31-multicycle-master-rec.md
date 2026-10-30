@@ -146,6 +146,8 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
 
   (старый комментарий про accepted effects 1/2 — заменить: off-мусор исчезает благодаря фильтру Step 3; split overlap активных нот двух частей — looper.active_notes один слот на ноту, оверрайд остаётся accepted.)
 
+- [ ] **Step 2b: Arp-путь — тот же гейт.** В `tick_block` arp-генерация (~3175-3180): `self.route_note_on(i, note, vel); self.record_for_looper(note, vel, i as u8);` → заменить на гейт `if self.route_note_on(i, note, vel) { self.record_for_looper(note, vel, i as u8); }` (и для off-ветки arp: off-запись остаётся — looper-фильтр сам отсечёт чужих).
+
 - [ ] **Step 3: looper.record_event — фильтр offs.** После гейтов state/len/note добавить:
 
 ```rust
