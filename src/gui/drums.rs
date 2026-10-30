@@ -21,6 +21,45 @@ impl App {
 
 
 
+        // ── Master transport (#32): drums + looper together ──────────────
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Master").strong().small());
+            let lstate = crate::synth::looper::LooperState::from_u8(
+                self.looper_atoms.state.load(std::sync::atomic::Ordering::Relaxed));
+            let looper_active = matches!(lstate,
+                crate::synth::looper::LooperState::Playing
+                | crate::synth::looper::LooperState::Overdubbing
+                | crate::synth::looper::LooperState::Recording);
+            let any_playing = self.drum_playing || looper_active;
+            if ui.selectable_label(any_playing, "\u{25B6} Play")
+                .on_hover_text("Master play: drums + looper together").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::MasterPlay);
+            }
+            let rec = self.drum_recording
+                || matches!(lstate,
+                    crate::synth::looper::LooperState::Recording
+                    | crate::synth::looper::LooperState::Overdubbing);
+            if ui.selectable_label(rec, "\u{25CF} Rec")
+                .on_hover_text("Master record: arm drums pattern + looper (all parts)").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
+            }
+            if ui.button("\u{25A0} Stop").on_hover_text("Master stop: stop both, drain notes").clicked() {
+                let _ = self.ctrl_tx.push(ControlEvent::MasterStop);
+            }
+            ui.separator();
+            // engine status dots
+            ui.colored_label(
+                if self.drum_playing { egui::Color32::from_rgb(40, 200, 80) } else { egui::Color32::GRAY },
+                "\u{25CF} drums",
+            );
+            ui.colored_label(
+                if looper_active { egui::Color32::from_rgb(40, 200, 80) } else { egui::Color32::GRAY },
+                "\u{25CF} looper",
+            );
+        });
+
         // Transport controls — same layout as looper
         ui.horizontal(|ui| {
             // Play/Stop
