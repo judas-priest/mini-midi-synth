@@ -1,7 +1,11 @@
 //! Part management with Split A/B zones.
 //!
-//! Zone A = Parts 0-3 (always active)
-//! Zone B = Parts 4-7 (activated by Split checkbox)
+//! Zone A = Parts 0-7 (always active)
+//! Zone B = Parts 8-15 (activated by Split checkbox)
+//!
+//! All enabled parts are shown as ROWS (one row per part, all fields inline):
+//! label, engine toggle (DSP/SF2), instrument select, Mute, Root, key range,
+//! Pan, Tr, Vel, Volume, Remove. Visual spec: docs/mockup_layers2.html.
 //!
 //! When Split is OFF: Zone A parts play full range 0-127
 //! When Split is ON:
@@ -21,24 +25,10 @@ const ZONE_A: std::ops::Range<usize> = 0..PARTS_PER_ZONE;
 const ZONE_B: std::ops::Range<usize> = PARTS_PER_ZONE..PARTS_PER_ZONE * 2;
 
 impl App {
-    pub(super) fn draw_part_tabs(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn draw_part_rows(&mut self, ui: &mut egui::Ui) {
+        // ── Split row (top): toggle + point + view tabs ──────────────────
+        let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
         ui.horizontal(|ui| {
-            // ── Zone A part tabs ─────────────────────────────────────────
-            for i in ZONE_A {
-                if !self.parts[i].enabled { continue; }
-                self.draw_part_tab(ui, i);
-            }
-
-            // Add to Zone A
-            let a_count = ZONE_A.filter(|&i| self.parts[i].enabled).count();
-            if a_count < PARTS_PER_ZONE && ui.small_button("+ A").on_hover_text("Add part to Zone A").clicked() {
-                self.add_part_to_zone(false);
-            }
-
-            // ── Split separator + Zone B ─────────────────────────────────
-            ui.separator();
-
-            let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
             let mut split = split_on;
             if ui.checkbox(&mut split, "Split").on_hover_text("Enable keyboard split").changed() {
                 if split {
@@ -73,17 +63,18 @@ impl App {
             }
 
             if split_on {
-                for i in ZONE_B {
-                    if !self.parts[i].enabled { continue; }
-                    self.draw_part_tab(ui, i);
-                }
-                let b_count = ZONE_B.filter(|&i| self.parts[i].enabled).count();
-                if b_count < PARTS_PER_ZONE && ui.small_button("+ B").on_hover_text("Add part to Zone B").clicked() {
-                    self.add_part_to_zone(true);
+                ui.label("Split point:");
+                let sp_name = note_name(self.split_point);
+                if ui.add(egui::Slider::new(&mut self.split_point, 0..=127)
+                    .suffix(format!(" ({sp_name})")))
+                    .on_hover_text("Keyboard split note (zone B starts here)")
+                    .changed()
+                {
+                    self.apply_split_ranges();
                 }
             }
 
-            // ── Other tabs ───────────────────────────────────────────────
+            // ── View tabs (Drums / MIDI Seq / FX Chain / Pads) ───────────
             ui.separator();
             if ui.selectable_label(self.show_drums && !self.show_midi_seq, "Drums").on_hover_text("Drum sequencer").clicked() {
                 self.show_drums = true; self.show_looper = false;
@@ -105,7 +96,56 @@ impl App {
             }
         });
 
-        // ── Middle-click removal confirmation ────────────────────────────
+        // ── Part rows (two zones) ────────────────────────────────────────
+        let max_h = (ui.available_height() * 0.55).max(120.0);
+        egui::ScrollArea::vertical().auto_shrink(false).max_height(max_h).show(ui, |ui| {
+            let sp = self.split_point;
+
+            // ── Zone A ───────────────────────────────────────────────────
+            let a_header = if split_on {
+                format!("◀ Левая рука (A) — 0..{}", sp.saturating_sub(1))
+            } else {
+                "◀ Левая рука (A)".to_string()
+            };
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(a_header).weak().small());
+            });
+            for i in ZONE_A {
+                if !self.parts[i].enabled { continue; }
+                self.draw_part_row(ui, i);
+            }
+            let a_count = ZONE_A.filter(|&i| self.parts[i].enabled).count();
+            if a_count < PARTS_PER_ZONE
+                && ui.small_button("+ Добавить парт").on_hover_text("Add part to Zone A").clicked()
+            {
+                self.add_part_to_zone(false);
+            }
+
+            // ── Zone B (visible only when split enabled) ─────────────────
+            if split_on {
+                ui.add_space(theme::SP_XS);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("▶ Правая рука (B) — {sp}..127")).weak().small());
+                });
+                for i in ZONE_B {
+                    if !self.parts[i].enabled { continue; }
+                    self.draw_part_row(ui, i);
+                }
+                let b_count = ZONE_B.filter(|&i| self.parts[i].enabled).count();
+                if b_count < PARTS_PER_ZONE
+                    && ui.small_button("+ Добавить парт").on_hover_text("Add part to Zone B").clicked()
+                {
+                    self.add_part_to_zone(true);
+                }
+            }
+        });
+
+        // ── Keyboard zone map ────────────────────────────────────────────
+        if !self.show_drums && !self.show_midi_seq && !self.show_fx_chain {
+            draw_key_zone_map(ui, &self.parts, self.active_part);
+        }
+
+        // ── Middle-click / ✕ removal confirmation ────────────────────────
         if let Some(p) = self.pending_remove_part {
             let zone = if p < PARTS_PER_ZONE { "A" } else { "B" };
             let num = (p % PARTS_PER_ZONE) + 1;
@@ -127,99 +167,6 @@ impl App {
             if dialog.should_close() {
                 self.pending_remove_part = None;
             }
-        }
-
-        // ── Split point slider ───────────────────────────────────────────
-        let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
-        if split_on {
-            ui.horizontal(|ui| {
-                ui.label("Split point:");
-                let sp_name = note_name(self.split_point);
-                if ui.add(egui::Slider::new(&mut self.split_point, 0..=127).text(sp_name)).on_hover_text("Keyboard split note").changed() {
-                    self.apply_split_ranges();
-                }
-            });
-        }
-
-        // ── Per-part routing strip ───────────────────────────────────────
-        let part = self.active_part;
-        if !self.show_drums && !self.show_midi_seq && !self.show_fx_chain
-            && self.parts.get(part).map(|l| l.enabled).unwrap_or(false)
-        {
-            let zone_label = if part < 4 { "A" } else { "B" };
-            ui.horizontal(|ui| {
-                ui.strong(format!("Part {}{}: ", zone_label, (part % 4) + 1));
-
-                let mut muted = self.parts[part].mute;
-                if ui.toggle_value(&mut muted, "Mute").on_hover_text("Mute this part").changed() {
-                    self.parts[part].mute = muted;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute: muted });
-                    self.persist_parts_state();
-                }
-
-                let mut root_only = self.parts[part].root_only;
-                if ui.checkbox(&mut root_only, "Root").on_hover_text(
-                    "Root-only (bass split): this part sounds only the lowest held key")
-                    .changed()
-                {
-                    self.parts[part].root_only = root_only;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part, on: root_only });
-                    self.persist_parts_state();
-                }
-
-                ui.label("Vol:");
-                let mut vol = self.parts[part].volume;
-                let vol_r = ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
-                    .on_hover_text("Double-click to reset");
-                if vol_r.double_clicked() { vol = 0.8; }
-                if vol_r.changed() || vol_r.double_clicked() {
-                    self.parts[part].volume = vol;
-                    self.send_part_volume(part);
-                }
-
-                ui.label("Pan:");
-                let mut pan = self.parts[part].pan;
-                let pan_r = ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).fixed_decimals(2))
-                    .on_hover_text("Double-click to reset");
-                if pan_r.double_clicked() { pan = 0.0; }
-                if pan_r.changed() || pan_r.double_clicked() {
-                    self.parts[part].pan = pan;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
-                }
-
-                ui.label("Tr:");
-                let mut tr = self.parts[part].transpose as i32;
-                let tr_r = ui.add(egui::Slider::new(&mut tr, -24..=24).suffix(" st"))
-                    .on_hover_text("Transpose in semitones. Double-click to reset");
-                if tr_r.double_clicked() { tr = 0; }
-                if tr_r.changed() || tr_r.double_clicked() {
-                    self.parts[part].transpose = tr as i8;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: tr as i8 });
-                }
-
-                ui.label("Vel:");
-                let mut vmin = self.parts[part].vel_min as i32;
-                let mut vmax = self.parts[part].vel_max as i32;
-                let c1 = ui.add(egui::DragValue::new(&mut vmin).range(1..=127).speed(1)).changed();
-                ui.label("-");
-                let c2 = ui.add(egui::DragValue::new(&mut vmax).range(1..=127).speed(1)).changed();
-                let vel_changed = c1 || c2;
-                if vel_changed {
-                    let vmin = (vmin as u8).max(1);
-                    let vmax = (vmax as u8).max(vmin);
-                    self.parts[part].vel_min = vmin;
-                    self.parts[part].vel_max = vmax;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange { part, vel_min: vmin, vel_max: vmax });
-                }
-
-                // Remove: not for first part of each zone
-                let is_zone_first = part.is_multiple_of(PARTS_PER_ZONE);
-                if !is_zone_first && ui.small_button("Remove").on_hover_text("Remove this part").clicked() {
-                    self.remove_part(part);
-                }
-            });
-
-            draw_key_zone_map(ui, &self.parts, self.active_part);
         }
 
         // ── Performance save/load ────────────────────────────────────────
@@ -323,31 +270,168 @@ impl App {
         });
     }
 
-    fn draw_part_tab(&mut self, ui: &mut egui::Ui, i: usize) {
+    /// One row = all fields of a part (mockup_layers2.html).
+    fn draw_part_row(&mut self, ui: &mut egui::Ui, i: usize) {
         let is_active = i == self.active_part
             && !self.show_drums && !self.show_looper
             && !self.show_midi_seq && !self.show_fx_chain;
         let zone = if i < PARTS_PER_ZONE { "A" } else { "B" };
         let num = (i % PARTS_PER_ZONE) + 1;
-        let muted = self.parts[i].mute;
-        let label = if muted {
-            format!("[{zone}{num} M]")
-        } else {
-            format!("[{zone}{num}]")
-        };
-        let color = if muted { egui::Color32::GRAY } else { egui::Color32::WHITE };
-        let tab = ui.add(egui::Button::new(egui::RichText::new(&label).color(color)).selected(is_active))
-            .on_hover_text(format!("Switch to part {zone}{num} (middle-click: remove)"));
-        if tab.clicked() {
-            self.set_active_part(i);
-            self.show_drums = false; self.show_looper = false;
-            self.show_midi_seq = false; self.show_fx_chain = false;
-            self.seq_target_atom.store(1, Ordering::Relaxed);
-        }
-        // Middle-click: remove with confirmation
-        if tab.middle_clicked() && !i.is_multiple_of(PARTS_PER_ZONE) {
-            self.pending_remove_part = Some(i);
-        }
+
+        ui.horizontal(|ui| {
+            // Part label — click to select the part for the params editor below
+            let label = format!("{zone}{num}");
+            let muted = self.parts[i].mute;
+            let label_text = if muted {
+                egui::RichText::new(label).strong().color(egui::Color32::GRAY)
+            } else {
+                egui::RichText::new(label).strong()
+            };
+            if ui.selectable_label(is_active, label_text)
+                .on_hover_text(format!("Select part {zone}{num} for editing (M = muted)"))
+                .clicked()
+            {
+                self.set_active_part(i);
+                self.show_drums = false; self.show_looper = false;
+                self.show_midi_seq = false; self.show_fx_chain = false;
+                self.seq_target_atom.store(1, Ordering::Relaxed);
+            }
+
+            // Engine toggle (DSP/SF2)
+            let sf2 = self.parts[i].sf2_mode;
+            let eng_label = if sf2 { "SF2" } else { "DSP" };
+            if ui.small_button(eng_label).on_hover_text(
+                if sf2 { "Switch to DSP engine" } else { "Switch to SF2 engine" }
+            ).clicked() {
+                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                self.parts[i].sf2_mode = !sf2;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: !sf2 });
+            }
+
+            // Instrument select
+            if sf2 {
+                if self.sf2_keys_soundfont.is_some() {
+                    use crate::synth::sampler::GM_PROGRAM_NAMES;
+                    let mut prog = self.parts[i].sf2_program;
+                    let cur_name = GM_PROGRAM_NAMES.get(prog as usize).copied().unwrap_or("?");
+                    let inst = egui::ComboBox::from_id_salt(format!("inst_sf2_{i}"))
+                        .width(170.0)
+                        .selected_text(format!("prog {prog}: {cur_name}"))
+                        .show_ui(ui, |ui| {
+                            for (p, name) in GM_PROGRAM_NAMES.iter().enumerate() {
+                                ui.selectable_value(&mut prog, p as u8, format!("prog {p}: {name}"));
+                            }
+                        });
+                    if inst.response.changed() {
+                        self.parts[i].sf2_program = prog;
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                            part: i, program: prog, bank: 0 });
+                    }
+                } else {
+                    ui.label(egui::RichText::new("---").weak())
+                        .on_hover_text("No SoundFont loaded (load one in Settings)");
+                }
+            } else {
+                // DSP patch select. Copy patch names into locals first:
+                // self.patches (immutable) + self.parts (mutable) don't overlap.
+                let patch_names: Vec<String> =
+                    self.patches.iter().map(|p| p.name.clone()).collect();
+                let cur_idx = self.parts[i].patch_idx;
+                let cur = patch_names.get(cur_idx).cloned().unwrap_or_else(|| "---".into());
+                let mut new_idx = cur_idx;
+                egui::ComboBox::from_id_salt(format!("inst_dsp_{i}"))
+                    .width(170.0)
+                    .selected_text(&cur)
+                    .show_ui(ui, |ui| {
+                        for (pi, name) in patch_names.iter().enumerate() {
+                            ui.selectable_value(&mut new_idx, pi, name);
+                        }
+                    });
+                if new_idx != cur_idx {
+                    let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                    self.parts[i].patch_idx = new_idx;
+                    self.load_edited_params(i);
+                    self.send_edited_params(i);
+                    self.save_config();
+                }
+            }
+
+            // Mute / Root
+            let mut m = self.parts[i].mute;
+            if ui.checkbox(&mut m, "M").on_hover_text("Mute this part").changed() {
+                self.parts[i].mute = m;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: m });
+                self.persist_parts_state();
+            }
+            let mut r = self.parts[i].root_only;
+            if ui.checkbox(&mut r, "R").on_hover_text(
+                "Root-only (bass split): this part sounds only the lowest held key")
+                .changed()
+            {
+                self.parts[i].root_only = r;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part: i, on: r });
+                self.persist_parts_state();
+            }
+
+            // Key range (derived from split — display only)
+            ui.label(egui::RichText::new(format!(
+                "{}–{}", note_name(self.parts[i].min_note), note_name(self.parts[i].max_note)))
+                .small().weak())
+                .on_hover_text("Key range");
+
+            // Pan
+            ui.label("Pan:");
+            let mut pan = self.parts[i].pan;
+            let pan_r = ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).fixed_decimals(2))
+                .on_hover_text("Double-click to reset");
+            if pan_r.double_clicked() { pan = 0.0; }
+            if pan_r.changed() || pan_r.double_clicked() {
+                self.parts[i].pan = pan;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
+            }
+
+            // Tr
+            ui.label("Tr:");
+            let mut tr = self.parts[i].transpose as i32;
+            let tr_r = ui.add(egui::Slider::new(&mut tr, -24..=24).suffix(" st"))
+                .on_hover_text("Transpose in semitones. Double-click to reset");
+            if tr_r.double_clicked() { tr = 0; }
+            if tr_r.changed() || tr_r.double_clicked() {
+                self.parts[i].transpose = tr as i8;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
+            }
+
+            // Vel
+            ui.label("Vel:");
+            let mut vmin = self.parts[i].vel_min as i32;
+            let mut vmax = self.parts[i].vel_max as i32;
+            let c1 = ui.add(egui::DragValue::new(&mut vmin).range(1..=127).speed(1)).changed();
+            ui.label("-");
+            let c2 = ui.add(egui::DragValue::new(&mut vmax).range(1..=127).speed(1)).changed();
+            if c1 || c2 {
+                let vmin = (vmin as u8).max(1);
+                let vmax = (vmax as u8).max(vmin);
+                self.parts[i].vel_min = vmin;
+                self.parts[i].vel_max = vmax;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange { part: i, vel_min: vmin, vel_max: vmax });
+            }
+
+            // Volume
+            let mut vol = self.parts[i].volume;
+            let vol_r = ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
+                .on_hover_text("Double-click to reset");
+            if vol_r.double_clicked() { vol = 0.8; }
+            if vol_r.changed() || vol_r.double_clicked() {
+                self.parts[i].volume = vol;
+                self.send_part_volume(i);
+            }
+
+            // Remove (never for the first part of a zone)
+            let is_zone_first = i.is_multiple_of(PARTS_PER_ZONE);
+            if !is_zone_first && ui.small_button("✕").on_hover_text("Remove this part").clicked() {
+                self.pending_remove_part = Some(i);
+            }
+        });
     }
 
     fn add_part_to_zone(&mut self, zone_b: bool) {
