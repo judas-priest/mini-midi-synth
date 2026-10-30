@@ -26,7 +26,10 @@ const ZONE_B: std::ops::Range<usize> = PARTS_PER_ZONE..PARTS_PER_ZONE * 2;
 
 impl App {
     pub(super) fn draw_part_rows(&mut self, ui: &mut egui::Ui) {
-        // ── Split row (top): toggle + point + view tabs ──────────────────
+        // ── Performance save/load (above Split) ──────────────────────────
+        self.draw_perf_row(ui);
+
+        // ── Split row: toggle + point + view tabs ────────────────────────
         let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
         ui.horizontal(|ui| {
             let mut split = split_on;
@@ -95,9 +98,6 @@ impl App {
                 self.show_pad_perf = !self.show_pad_perf;
             }
         });
-
-        // ── Performance save/load (above part rows) ──────────────────────
-        self.draw_perf_row(ui);
 
         // ── Part rows (two zones) ────────────────────────────────────────
         let max_h = (ui.available_height() * 0.55).max(120.0);
@@ -183,7 +183,6 @@ impl App {
 
     /// Performance save/load row (shown above part rows).
     fn draw_perf_row(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(theme::SP_XS);
         ui.horizontal(|ui| {
             ui.label("Perf:");
             ui.add(egui::TextEdit::singleline(&mut self.perf_name)
