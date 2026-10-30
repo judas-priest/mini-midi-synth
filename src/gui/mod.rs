@@ -1336,7 +1336,7 @@ impl eframe::App for App {
         // Central: part tabs + parameters / drum sequencer
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(theme::SP_SM);
-            self.draw_part_tabs(ui);
+            self.draw_part_rows(ui);
             ui.add_space(theme::SP_SM);
             ui.separator();
             ui.add_space(theme::SP_MD);
