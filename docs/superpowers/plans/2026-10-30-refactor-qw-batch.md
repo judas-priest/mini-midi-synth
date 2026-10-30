@@ -4,7 +4,7 @@ anchor-checked: 2026-10-30 (все якоря сняты чтением кода
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Каждый таск исполняется СВЕЖИМ субагентом, получающим только этот документ.
 
-**Goal:** Закрыть пять quick wins из REFACTOR_AUDIT.md:
+**Goal:** Закрыть шесть quick wins из REFACTOR_AUDIT.md:
 - **QW1** — wavetable-аллокация на каждом note-on (8 KB heap + Arc + 13 312 `sin()` + dealloc) → общий `OnceLock<Arc<Vec<f32>>>` кэш built-in таблицы + безусловный прогрев в `init_common` + rt-assert тест note-on с Wavetable-патчем.
 - **QW2** — LFO sine LUT (8 KB `Box<[f32; 2048]>`) лениво строится на аудиопотоке → безусловный прогрев в `init_common` до создания стрима.
 - **QW3** — `MidiSeqLoad` / `MidiSeqPlay`-stop / `AllNotesOff` не чистят `root_held`/`root_active` → ghost-rekey на root_only-патче; хелпер `Part::drain_notes` закрывает пробел и дедуплицирует 7 cleanup-сайтов.
