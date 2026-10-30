@@ -710,3 +710,209 @@ mod restore_tests {
     }
 
 }
+
+#[cfg(test)]
+mod timing_tests {
+    use super::*;
+
+    const SR: f32 = 48_000.0;
+
+    /// Local copy: `snap` lives in the sibling `restore_tests` module and is
+    /// not visible from here (looper.rs:593-595).
+    fn snap(tick: u32, note: u8, vel: u8) -> LooperEventSnapshot {
+        LooperEventSnapshot { tick, note, velocity: vel, layer_id: 0, part_id: 0 }
+    }
+
+    /// Looper with an established loop length (bars x 4 beats), in Recording.
+    fn loop_of(bpm: f32, bars: u8) -> MidiLooper {
+        let mut l = MidiLooper::new(SR);
+        l.bpm = bpm;
+        l.bars = bars;
+        l.start_record(); // Idle -> Recording, loop_length_ticks established
+        l
+    }
+
+    #[test]
+    fn quantize_grids_round_to_nearest() {
+        // 120 BPM @ 48k: beat = 24000 samples; quarter 24000, eighth 12000, 16th 6000
+        let mut l = MidiLooper::new(SR);
+        l.bpm = 120.0;
+        l.quantize = Quantize::Eighth;
+        assert_eq!(l.quantize_tick(1000), 0, "far below half-grid -> snaps to 0");
+        assert_eq!(l.quantize_tick(5000), 0);
+        assert_eq!(l.quantize_tick(7000), 12000, "past half-grid -> snaps up");
+        l.quantize = Quantize::Sixteenth;
+        assert_eq!(l.quantize_tick(4000), 6000);
+        l.quantize = Quantize::Quarter;
+        assert_eq!(l.quantize_tick(20000), 24000);
+        l.quantize = Quantize::Off;
+        assert_eq!(l.quantize_tick(12345), 12345, "Off passes through");
+    }
+
+    #[test]
+    fn quantize_wraps_into_loop_length() {
+        // 120 BPM, 1 bar = 96000 ticks; quarter grid 24000.
+        // tick 95000: nearest = ((95000+12000)/24000)*24000 = 96000 -> % len -> 0
+        let mut l = loop_of(120.0, 1);
+        assert_eq!(l.loop_length_ticks, 96_000);
+        l.quantize = Quantize::Quarter;
+        assert_eq!(l.quantize_tick(95_000), 0);
+    }
+
+    #[test]
+    fn degenerate_grid_passes_tick_through() {
+        // grid == 0 (absurd bpm) must not divide by zero (looper.rs:219)
+        let mut l = MidiLooper::new(SR);
+        l.bpm = 4_000_000.0; // beat_samples = 0.72 -> grid 0
+        l.quantize = Quantize::Sixteenth;
+        assert_eq!(l.quantize_tick(777), 777);
+    }
+
+    #[test]
+    fn record_event_inserts_sorted_and_shifts_cursor() {
+        let mut l = loop_of(120.0, 1);
+        l.state = LooperState::Recording;
+        l.playback_tick = 24_000;
+        l.playback_cursor = 1;
+        l.record_event(60, 127, 0); // tick 24000 (quantize Off)
+        l.record_event(62, 127, 0); // same tick -> inserted before (stable partition_point)
+        l.playback_tick = 12_000;
+        l.playback_cursor = 2;
+        l.record_event(55, 100, 0); // earlier tick -> inserted at 0
+        assert_eq!(l.len(), 3);
+        assert_eq!(l.events[0].tick, 12_000);
+        assert_eq!(l.events[1].tick, 24_000);
+        assert_eq!(l.events[2].tick, 24_000);
+        assert_eq!(l.playback_cursor, 3, "insertion before the cursor shifts it right");
+    }
+
+    #[test]
+    fn record_event_caps_at_max_events() {
+        let mut l = loop_of(120.0, 1);
+        l.state = LooperState::Overdubbing;
+        for i in 0..MAX_LOOP_EVENTS + 10 {
+            l.playback_tick = (i as u32) % l.loop_length_ticks;
+            l.record_event(60, 100, 0);
+        }
+        assert_eq!(l.len() as usize, MAX_LOOP_EVENTS, "excess events must be dropped");
+    }
+
+    #[test]
+    fn playback_fires_events_at_exact_ticks_and_wraps() {
+        let mut l = MidiLooper::new(SR);
+        l.restore(&[snap(10, 60, 127), snap(10, 64, 127), snap(20, 60, 0)], 100);
+        l.toggle_play(); // Playing from tick 0
+        let quiet = l.tick(); // playback_tick 0: no events at 0
+        assert_eq!(quiet[0], (0, 0, 255), "sentinel triple = no event");
+        for _ in 1..10 { let _ = l.tick(); }
+        let ev = l.tick(); // playback_tick == 10: BOTH events fire
+        assert_eq!(ev[0], (60, 127, 0));
+        assert_eq!(ev[1], (64, 127, 0));
+        for _ in 11..20 { let _ = l.tick(); }
+        let off = l.tick(); // playback_tick == 20
+        assert_eq!(off[0], (60, 0, 0));
+        // note 64 still active -> forced note-off at wrap (tick 99 -> len 100)
+        for _ in 21..99 { let _ = l.tick(); }
+        let wrap = l.tick();
+        assert_eq!(wrap[0], (64, 0, 0), "wrap must force note-off for held notes");
+        let restart = l.tick(); // playback_tick wrapped to 0
+        assert_eq!(restart[0], (0, 0, 255), "no events at tick 0");
+    }
+
+    #[test]
+    fn stop_drains_active_note_offs_on_next_tick() {
+        let mut l = MidiLooper::new(SR);
+        l.restore(&[snap(0, 60, 127)], 1000);
+        l.toggle_play();
+        let _ = l.tick(); // fires note-on; active_notes[60] = 0
+        l.toggle_play();  // Playing -> stop(): needs_note_offs = true
+        let drained = l.tick(); // Idle branch drains pending offs
+        assert_eq!(drained[0], (60, 0, 0));
+        let again = l.tick();
+        assert_eq!(again[0], (0, 0, 255), "drain happens exactly once");
+    }
+
+    #[test]
+    fn overdub_layers_and_undo_removes_only_top_layer() {
+        let mut l = MidiLooper::new(SR);
+        l.restore(&[snap(0, 60, 127), snap(10, 60, 0)], 1000); // base layer 0
+        l.toggle_play();
+        l.start_record(); // Playing -> Overdubbing, layer 1
+        assert_eq!(l.current_layer, 1);
+        l.playback_tick = 5;
+        l.record_event(64, 100, 0); // layer 1
+        l.stop_record();
+        l.undo(); // removes exactly layer 1
+        assert_eq!(l.len(), 2, "base layer must survive");
+        assert_eq!(l.current_layer, 0);
+        let notes: Vec<u8> = (0..l.len() as usize).map(|i| l.events[i].note).collect();
+        assert_eq!(notes, vec![60, 60]);
+        l.undo(); // layer 0: no-op
+        assert_eq!(l.len(), 2);
+        assert_eq!(l.current_layer, 0);
+    }
+
+    #[test]
+    fn undo_mid_pass_repartitions_cursor() {
+        // Undo while playing, PAST the removed event's tick: the cursor must
+        // be recomputed (partition_point, looper.rs:304-305) so the removed
+        // layer never fires again and the remaining base layer still plays.
+        // NOTE: restore() leaves Idle; start_record() from Idle would WIPE the
+        // loop — toggle_play() first (Idle -> Playing from tick 0,
+        // looper.rs:273-277).
+        // Pins current behavior: record_event at playback_tick 1500 does NOT
+        // fire the event in this pass — the cursor-adjust condition
+        // (pos <= playback_cursor, looper.rs:451) is false because the cursor
+        // (0) sits behind the insertion point (2), so tick() keeps scanning
+        // from tick 100/150 events. undo()'s partition_point is what actually
+        // repartitions the cursor past the removed event.
+        let mut l = MidiLooper::new(SR);
+        // Base layer 0: note 60 on/off early, note 72 AFTER the layer-1
+        // event that will be undone — its firing proves the repartition.
+        l.restore(&[snap(100, 60, 127), snap(150, 60, 0), snap(2000, 72, 100)], 3000);
+        l.toggle_play();               // Idle -> Playing from tick 0
+        l.start_record();              // Playing -> Overdubbing, layer 1
+        l.playback_tick = 1500;
+        l.record_event(70, 100, 0);    // layer 1 @ tick 1500 (quantize Off)
+        l.stop_record();               // -> Playing
+        for _ in 0..20 { let _ = l.tick(); } // playback_tick 1520; cursor still 0
+        l.undo();                      // removes (1500, note 70), recomputes cursor
+        assert_eq!(l.len(), 3);
+        assert_eq!(l.current_layer, 0);
+        // partition_point over [100,150,2000] at playback_tick 1520 -> 2
+        assert_eq!(l.playback_cursor, 2, "cursor repartitioned past the removed event");
+        // Finish the pass: 3000 - 1520 = 1480 ticks; note 72 @2000 must fire.
+        let mut fired_72 = 0;
+        for _ in 0..1480 {
+            for &(n, v, p) in &l.tick() {
+                if p == 255 { break; }
+                if n == 72 && v > 0 { fired_72 += 1; }
+            }
+        }
+        assert_eq!(fired_72, 1, "base-layer event after the undo point still fires this pass");
+        let mut fired_70 = 0;
+        let mut fired_60 = 0;
+        for _ in 0..3000 {             // full second pass
+            for &(n, v, p) in &l.tick() {
+                if p == 255 { break; }
+                if v == 0 { continue; } // note-offs carry note numbers too — count attacks only
+                match n { 70 => fired_70 += 1, 60 => fired_60 += 1, _ => {} }
+            }
+        }
+        assert_eq!(fired_70, 0, "removed layer must not fire");
+        assert_eq!(fired_60, 1, "base layer fires once per pass (positive control)");
+    }
+
+    #[test]
+    fn first_pass_recording_switches_to_overdub_at_loop_end() {
+        let mut l = loop_of(120.0, 1); // loop 96000
+        l.record_event(60, 127, 0);
+        for _ in 0..95_999 { let _ = l.tick(); }
+        assert_eq!(l.state, LooperState::Recording, "first pass does not play back");
+        let _ = l.tick(); // playback_tick reaches loop_length -> switch
+        assert_eq!(l.state, LooperState::Overdubbing);
+        assert_eq!(l.current_layer, 1);
+        assert_eq!(l.playback_tick, 0, "position resets for the overdub pass");
+        assert_eq!(l.loop_length_ticks, 96_000, "loop length survives the switch");
+    }
+}
