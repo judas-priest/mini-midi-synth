@@ -270,6 +270,7 @@ impl App {
         self.seq_target_atom = engine.seq_target_atom();
         self.active_part_atom = engine.active_part_atom();
         self.sustain_atom = engine.sustain_atom();
+        self.master_rec_pending = engine.master_rec_pending_atom();
         self.pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
         self.scope_buf = engine.scope_buffer();
         self.midi_seq_play_atom = engine.midi_player_play_atom();

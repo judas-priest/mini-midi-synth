@@ -841,7 +841,15 @@ impl App {
                 LooperState::Playing => "Play",
                 LooperState::Overdubbing => "OVR",
             };
-            ui.colored_label(status_color, state_label);
+            // Quantized master recording (#30): capture armed, waiting for the
+            // sequencer bar boundary — show "ARMED" instead of the state.
+            let armed = self
+                .master_rec_pending
+                .load(std::sync::atomic::Ordering::Relaxed);
+            ui.colored_label(
+                if armed { egui::Color32::YELLOW } else { status_color },
+                if armed { "ARMED" } else { state_label },
+            );
             if event_count > 0 {
                 ui.label(egui::RichText::new(format!("{event_count}ev L{layer_count}")).small().weak());
             }

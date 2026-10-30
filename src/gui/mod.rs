@@ -291,6 +291,9 @@ pub struct App {
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
     pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Master recording armed (waiting for the sequencer bar boundary) —
+    /// looper state label shows "ARMED"
+    pub master_rec_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Static pedal-up release duration (None = off, patch release)
     pub sustain_release: Option<f32>,
     /// SF2 release-time scale (1.0 = file defaults)
