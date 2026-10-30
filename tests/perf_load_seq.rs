@@ -38,7 +38,7 @@ fn legacy_8_part_performance_migrates_zone_b_to_8_12() {
         category: String::new(),
         split_point: None,
         parts: (0..8)
-            .map(|i| part(&format!("P{i}"), i < 4 || i >= 6))
+            .map(|i| part(&format!("P{i}"), !(4..6).contains(&i)))
             .collect(),
     };
     let dir = tempfile::tempdir().unwrap();
