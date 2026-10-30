@@ -1914,6 +1914,12 @@ impl SynthEngine {
                                 }
                             }
                         }
+                        // Drum hits into the looper too (#32): tagged with a
+                        // drum marker (part 254) — replay triggers the drum
+                        // engine, not a part. In Source=Part mode the
+                        // record_for_looper filter drops them (254 != active
+                        // part), so drums are captured in Mix mode only.
+                        self.record_for_looper(note, velocity, 254);
                         if sampler_drums {
                             let choke = self.drum_engine.sf2_choke_take(note);
                             if choke != 0 { self.sampler.drum_note_off(choke); }
@@ -3054,6 +3060,20 @@ impl SynthEngine {
             let looper_events = self.looper.tick();
             for &(note, vel, part_id) in &looper_events {
                 if note == 0 && vel == 0 && part_id == 255 { break; }
+                if part_id == 254 {
+                    // Drum event: trigger the drum engine (SF2 choke + sampler,
+                    // или DSP), never a part — mirror of the live pad path.
+                    if vel > 0 {
+                        if self.drum_engine.sf2_mode {
+                            let choke = self.drum_engine.sf2_choke_take(note);
+                            if choke != 0 { self.sampler.drum_note_off(choke); }
+                            self.sampler.drum_note_on(note, vel);
+                        } else {
+                            self.drum_engine.note_on(note, vel);
+                        }
+                    }
+                    continue;
+                }
                 let pi = part_id as usize;
                 if self.parts.get(pi).map(|p| !p.enabled).unwrap_or(true) { continue; }
                 if self.parts[pi].root_only {

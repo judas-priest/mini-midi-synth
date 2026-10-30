@@ -109,7 +109,9 @@ impl App {
         });
 
         // ── Part rows (two zones) ────────────────────────────────────────
-        let max_h = (ui.available_height() * 0.55).max(120.0);
+        // Вся доступная высота минус карта зон — раньше 0.55 от остатка резал
+        // строки партов посередине и оставлял дыру над docked-панелью.
+        let max_h = (ui.available_height() - 36.0).max(120.0);
         egui::ScrollArea::vertical()
             .id_salt("layers_parts_scroll")
             .auto_shrink(false)
