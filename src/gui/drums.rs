@@ -45,7 +45,7 @@ impl App {
             {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
             }
-            if ui.button("\u{23F9} Stop").on_hover_text("Master stop: stop both, drain notes").clicked() {
+            if ui.button("Stop").on_hover_text("Master stop: stop both, drain notes").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterStop);
             }
             ui.separator();
