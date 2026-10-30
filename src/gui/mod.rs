@@ -671,13 +671,16 @@ impl eframe::App for App {
                     Err(e) => log::warn!("[console] companion try_wait: {e}"),
                 }
             }
-            // Spawn only when nothing connected (a live foreign companion means
-            // led_socket connects and we must not churn-spawn every 5s).
+            // Spawn only when nothing connected AND a connect attempt already
+            // failed (a live foreign companion serves the socket within the
+            // 2s retry window — spawning earlier creates a duplicate that
+            // fights the foreign one over BLE).
             let backoff_ok = self.led_spawn_backoff
                 .map(|t| t.elapsed() > std::time::Duration::from_secs(5))
                 .unwrap_or(true);
             if self.led_child.is_none()
                 && self.led_socket.is_none()
+                && self.led_socket_failed_at.is_some()
                 && backoff_ok
             {
                 let path = crate::config::expand_home(&self.config.ui.led_companion_cmd);
