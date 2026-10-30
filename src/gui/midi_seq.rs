@@ -65,7 +65,7 @@ impl App {
             // Playback progress bar
             let pos = self.midi_seq_pos_atom.load(Ordering::Relaxed);
             let frac = pos as f32 / 1000.0;
-            ui.add(egui::ProgressBar::new(frac).desired_width(160.0).show_percentage());
+            ui.add(egui::ProgressBar::new(frac).desired_width(theme::PROGRESS_W_MD).show_percentage());
         });
 
         ui.add_space(theme::SP_SM);
@@ -84,7 +84,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label("MIDI file:");
             let te = egui::TextEdit::singleline(&mut self.midi_seq_path)
-                .desired_width(300.0)
+                .desired_width(theme::TEXT_W_PATH)
                 .hint_text("/path/to/file.mid");
             let resp = ui.add(te);
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -135,7 +135,7 @@ impl App {
             egui::Grid::new("midi_seq_tracks")
                 .num_columns(6)
                 .striped(true)
-                .spacing([8.0, 4.0])
+                .spacing(theme::GRID_SP_LIST)
                 .show(ui, |ui| {
                     // Column headers
                     ui.label(egui::RichText::new("#").strong());
@@ -197,7 +197,7 @@ impl App {
                             };
                             egui::ComboBox::from_id_salt(format!("mst_{i}"))
                                 .selected_text(instr_type_name(track.instrument))
-                                .width(110.0)
+                                .width(110.0) // legacy width
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(
                                         &mut track.instrument,
@@ -228,10 +228,10 @@ impl App {
                             let prev_prog = *program;
                             egui::ComboBox::from_id_salt(format!("msp_{i}"))
                                 .selected_text(format!("{}: {}", program, prog_name))
-                                .width(200.0)
+                                .width(theme::COMBO_W_LG)
                                 .show_ui(ui, |ui| {
                                     egui::ScrollArea::vertical()
-                                        .max_height(300.0)
+                                        .max_height(theme::POPUP_LIST_MAX_H)
                                         .show(ui, |ui| {
                                             for (p, name) in GM_PROGRAM_NAMES.iter().enumerate() {
                                                 ui.selectable_value(

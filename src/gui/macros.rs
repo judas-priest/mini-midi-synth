@@ -18,7 +18,7 @@ impl App {
         // 8 macros in a 4×2 grid
         egui::Grid::new(format!("macros_{part}"))
             .num_columns(4)
-            .spacing([8.0, 4.0])
+            .spacing(theme::GRID_SP_LIST)
             .show(ui, |ui| {
                 for i in 0..8 {
                     let val = self.parts[part].macro_vals[i];
@@ -31,7 +31,7 @@ impl App {
                         let mut name_edit = name.clone();
                         let resp = ui.add(
                             egui::TextEdit::singleline(&mut name_edit)
-                                .desired_width(80.0)
+                                .desired_width(theme::TEXT_W_NAME) // unify 80→120
                                 .font(egui::TextStyle::Small)
                                 .hint_text(format!("Macro {}", i + 1))
                         );
@@ -92,7 +92,7 @@ impl App {
             ui.label("X:");
             egui::ComboBox::from_id_salt(format!("xy_x_{part}"))
                 .selected_text(macro_labels[self.parts[part].xy_macro_x].as_str())
-                .width(90.0)
+                .width(90.0) // legacy width
                 .show_ui(ui, |ui| {
                     for (i, label) in macro_labels.iter().enumerate() {
                         ui.selectable_value(
@@ -107,7 +107,7 @@ impl App {
             ui.label("Y:");
             egui::ComboBox::from_id_salt(format!("xy_y_{part}"))
                 .selected_text(macro_labels[self.parts[part].xy_macro_y].as_str())
-                .width(90.0)
+                .width(90.0) // legacy width
                 .show_ui(ui, |ui| {
                     for (i, label) in macro_labels.iter().enumerate() {
                         ui.selectable_value(
@@ -130,7 +130,7 @@ impl App {
         let y_name = &macro_labels[yi];
 
         // Pad area
-        let size = egui::vec2(200.0, 200.0);
+        let size = egui::vec2(theme::XY_PAD_SIZE, theme::XY_PAD_SIZE);
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         response.clone().on_hover_text("Drag to control two macros");
         let painter = ui.painter_at(rect);

@@ -57,9 +57,9 @@ impl App {
                 .map(|t| t.elapsed() < std::time::Duration::from_millis(150))
                 .unwrap_or(false);
             let (flash_rect, _) =
-                ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                ui.allocate_exact_size(egui::vec2(theme::BEAT_LED, theme::BEAT_LED), egui::Sense::hover());
             ui.painter().circle_filled(
-                flash_rect.center(), 5.0,
+                flash_rect.center(), 5.0, // legacy radius
                 if flashing { egui::Color32::from_rgb(255, 190, 60) }
                 else { egui::Color32::from_gray(45) },
             );
@@ -141,9 +141,9 @@ impl App {
         ui.add_space(theme::SP_SM);
 
         // Step grid
-        let cell_w = 28.0;
-        let cell_h = 22.0;
-        let label_width = 80.0;
+        let cell_w = theme::DRUM_CELL_W;
+        let cell_h = theme::DRUM_CELL_H;
+        let label_width = theme::DRUM_LABEL_W;
         let pattern_length = self.drum_patterns[pat_idx].length as usize;
 
         // Colors per instrument type
@@ -161,7 +161,7 @@ impl App {
 
                 // Step buttons
                 let spacing = ui.spacing().item_spacing;
-                ui.spacing_mut().item_spacing = egui::vec2(1.0, 1.0);
+                ui.spacing_mut().item_spacing = egui::vec2(theme::GRID_TIGHT, theme::GRID_TIGHT);
 
                 for step in 0..pattern_length {
                     let vel = self.drum_patterns[pat_idx].steps[slot][step].velocity;
@@ -338,7 +338,7 @@ impl App {
         // Save / Load drum kit
         ui.horizontal(|ui| {
             ui.label("Kit:");
-            ui.add(egui::TextEdit::singleline(&mut self.drum_kit_name).desired_width(120.0).hint_text("name"));
+            ui.add(egui::TextEdit::singleline(&mut self.drum_kit_name).desired_width(theme::TEXT_W_NAME).hint_text("name"));
             if ui.button("Save").on_hover_text("Save drum kit").clicked() && !self.drum_kit_name.trim().is_empty() {
                 let kit = DrumKit {
                     name: self.drum_kit_name.trim().to_string(),
@@ -401,7 +401,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label("MIDI:");
             ui.add(egui::TextEdit::singleline(&mut self.drum_midi_import_path)
-                .desired_width(240.0).hint_text("path to .mid file"));
+                .desired_width(theme::TEXT_W_PATH).hint_text("path to .mid file"));
             if ui.button("Import").on_hover_text("Import from MIDI file").clicked() && !self.drum_midi_import_path.trim().is_empty() {
                 let path = std::path::PathBuf::from(self.drum_midi_import_path.trim());
                 match preset::import_midi_drums(&path) {
@@ -445,14 +445,14 @@ impl App {
                 } else { format!("note {}", v) }
             };
             let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ctx, |ui| {
-                ui.set_width(900.0);
+                ui.set_width(theme::MODAL_W_LG);
                 ui.strong("Pad Remap");
                 ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
                 ui.add_space(theme::SP_MD);
                 let mut new_remap = self.drum_remap;
                 let mut new_vels = self.drum_pad_vel;
                 let mut pad_row = |ui: &mut egui::Ui, pads: std::ops::Range<usize>, id: &str| {
-                    egui::Grid::new(id).num_columns(8).spacing([8.0, 6.0]).show(ui, |ui| {
+                    egui::Grid::new(id).num_columns(8).spacing([8.0, 6.0]).show(ui, |ui| { // legacy grid spacing
                         for p in pads {
                             let note = if p < 8 { PAD_TOP_NOTES[p] } else { PAD_BOT_NOTES[p - 8] };
                             let slot = &mut new_remap[(note - 36) as usize];
@@ -460,7 +460,7 @@ impl App {
                             ui.vertical_centered(|ui| {
                                 ui.label(format!("{}", p + 1));
                                 egui::ComboBox::from_id_salt(p)
-                                    .width(120.0)
+                                    .width(theme::COMBO_W_LG) // unify with GM-remap combo (120→200)
                                     .selected_text(sel)
                                     .show_ui(ui, |ui| {
                                         for (n, name) in kit_notes.iter() {
@@ -468,7 +468,7 @@ impl App {
                                         }
                                     });
                                 let mut vel = new_vels[(note - 36) as usize];
-                                ui.add_sized([60.0, 0.0], egui::DragValue::new(&mut vel)
+                                ui.add_sized([theme::DRAG_W_MD, 0.0], egui::DragValue::new(&mut vel)
                                     .range(0..=127)
                                     .custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{}", v as i32) }));
                                 new_vels[(note - 36) as usize] = vel;
@@ -535,12 +535,12 @@ impl App {
                 kit_names[(sel - 30) as usize].clone()
             } else { format!("note {}", sel) };
             let dialog = egui::Modal::new(egui::Id::new("remap_pad_dialog")).show(ctx, |ui| {
-                ui.set_width(300.0);
+                ui.set_width(theme::MODAL_W_SM);
                 ui.strong(format!("Pad {}", p + 1));
                 ui.label("Instrument:");
                 ui.add_space(theme::SP_MD);
                 egui::ComboBox::from_id_salt("remap_instrument")
-                    .width(200.0)
+                    .width(theme::COMBO_W_LG)
                     .selected_text(sel_name)
                     .show_ui(ui, |ui| {
                         for (n, name) in kit_notes.iter() {
@@ -550,7 +550,7 @@ impl App {
                 ui.add_space(theme::SP_MD);
                 ui.label("Velocity (Off = dynamic):");
                 let mut vel = self.drum_pad_vel[idx];
-                ui.add_sized([80.0, 0.0], egui::DragValue::new(&mut vel)
+                ui.add_sized([theme::DRAG_W_MD, 0.0], egui::DragValue::new(&mut vel)
                     .range(0..=127)
                     .custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{}", v as i32) }));
                 if vel != self.drum_pad_vel[idx] {
@@ -603,7 +603,7 @@ impl App {
                     let rate_name = rate.name();
                     egui::ComboBox::from_id_salt(format!("seq_rate_{part}"))
                         .selected_text(rate_name)
-                        .width(50.0)
+                        .width(theme::COMBO_W_2CH)
                         .show_ui(ui, |ui| {
                             for i in 0..6u8 {
                                 let r = StepRate::from_index(i);
@@ -618,7 +618,7 @@ impl App {
                     let scale = ScaleType::from_index(self.pitch_seq_scale[part]);
                     egui::ComboBox::from_id_salt(format!("seq_scale_{part}"))
                         .selected_text(scale.name())
-                        .width(80.0)
+                        .width(theme::COMBO_W_SM)
                         .show_ui(ui, |ui| {
                             for i in 0..7u8 {
                                 let s = ScaleType::from_index(i);
@@ -658,8 +658,8 @@ impl App {
 
                 // Step grid: pitch bars + gate toggles
                 let avail_w = ui.available_width();
-                let step_w = (avail_w / length as f32).clamp(20.0, 40.0);
-                let bar_h = 80.0;
+                let step_w = (avail_w / length as f32).clamp(theme::PITCH_STEP_MIN, theme::PITCH_STEP_MAX);
+                let bar_h = theme::PITCH_BAR_H;
 
                 // Pitch bars
                 let (rect, response) = ui.allocate_exact_size(
@@ -854,7 +854,7 @@ impl App {
                 ui.label(egui::RichText::new(format!("{event_count}ev L{layer_count}")).small().weak());
             }
             if state != LooperState::Idle {
-                ui.add(egui::ProgressBar::new(position as f32 / 255.0).desired_width(80.0));
+                ui.add(egui::ProgressBar::new(position as f32 / 255.0).desired_width(theme::PROGRESS_W_SM));
             }
         });
 
@@ -920,7 +920,7 @@ impl App {
                 let selected = format!("{rec_indicator}: {zone}{num} {part_name}");
                 egui::ComboBox::from_id_salt("looper_rec_part")
                     .selected_text(egui::RichText::new(&selected).color(rec_text_color))
-                    .width(160.0)
+                    .width(160.0) // legacy width
                     .show_ui(ui, |ui| {
                         for i in 0..self.parts.len() {
                             if !self.parts[i].enabled { continue; }
@@ -1085,8 +1085,8 @@ impl App {
             (display.events.clone(), display.current_layer)
         };
 
-        let total_w = ui.available_width().min(600.0);
-        let height = 40.0;
+        let total_w = ui.available_width().min(theme::TIMELINE_W_MAX);
+        let height = theme::TIMELINE_H;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(total_w, height), egui::Sense::hover());
         let painter = ui.painter_at(rect);
 

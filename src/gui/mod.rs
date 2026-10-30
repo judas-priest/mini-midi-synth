@@ -476,7 +476,7 @@ impl eframe::App for App {
         ctx.style_mut(|style| {
             style.spacing.interact_size = egui::vec2(48.0, 36.0); // Material Design min touch target
             style.spacing.button_padding = egui::vec2(12.0, 8.0);
-            style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+            style.spacing.item_spacing = theme::ANDROID_ITEM_SPACING;
         });
 
         // Increase base font size and spacing
@@ -492,8 +492,8 @@ impl eframe::App for App {
                     font_id.size = size;
                 }
             }
-            style.spacing.slider_width = 250.0;
-            style.spacing.item_spacing = egui::vec2(8.0, 5.0);
+            style.spacing.slider_width = theme::SLIDER_PRIMARY;
+            style.spacing.item_spacing = theme::APP_ITEM_SPACING;
         });
 
         let has_active_notes = (0..128u8)
@@ -1021,8 +1021,8 @@ impl eframe::App for App {
 
                 // Oscilloscope
                 let scope_data = self.scope_buf.read();
-                let scope_w = 150.0_f32;
-                let scope_h = 40.0_f32;
+                let scope_w = theme::SCOPE_W;
+                let scope_h = theme::SCOPE_H;
                 let (resp, painter) = ui.allocate_painter(
                     egui::vec2(scope_w, scope_h),
                     egui::Sense::hover(),
@@ -1076,8 +1076,8 @@ impl eframe::App for App {
         // а ScrollArea без явных id_salt даёт коллизии ID.
         egui::TopBottomPanel::bottom("drum_seq_panel")
             .resizable(true)
-            .default_height(500.0)
-            .height_range(200.0..=760.0)
+            .default_height(theme::DOCK_DEFAULT_H)
+            .height_range(theme::DOCK_H_MIN..=theme::DOCK_H_MAX)
             .show(ctx, |ui| {
                 ui.columns(2, |cols| {
                     // ScrollArea::both: вертикальный скролл НЕ режет контент по
@@ -1131,8 +1131,8 @@ impl eframe::App for App {
                 .show(ctx, |ui| {
                     egui::Frame::default()
                         .fill(color)
-                        .corner_radius(4.0)
-                        .inner_margin(egui::Margin::symmetric(12, 6))
+                        .corner_radius(theme::CARD_RADIUS)
+                        .inner_margin(egui::Margin::symmetric(theme::TOAST_MARGIN.0, theme::TOAST_MARGIN.1))
                         .show(ui, |ui| {
                             ui.label(egui::RichText::new(&toast.message).color(egui::Color32::WHITE).strong());
                         });
@@ -1229,7 +1229,7 @@ impl App {
         let mut toggled_cat: Option<String> = None;
 
         let modal = egui::Modal::new(egui::Id::new("inst_browser")).show(ctx, |ui| {
-            ui.set_width(360.0);
+            ui.set_width(theme::MODAL_W_MD);
             ui.strong(if is_sf2 {
                 format!("GM Instrument — Part {layer_label}")
             } else {
@@ -1237,7 +1237,7 @@ impl App {
             });
             ui.add_space(theme::SP_XS);
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.spacing_mut().item_spacing.x = theme::SP_SM;
                 let w = ui.available_width();
                 let r = ui.add(egui::TextEdit::singleline(&mut self.preset_search)
                     .hint_text("\u{1F50D} Search...")
@@ -1255,7 +1255,7 @@ impl App {
             let searching = !query.is_empty();
 
             egui::ScrollArea::vertical().auto_shrink(false)
-                .max_height(420.0)
+                .max_height(theme::LIST_MAX_H)
                 .show(ui, |ui| {
                     if is_sf2 {
                         // ── GM categories (перенос mod.rs:1141-1205: клик пишет

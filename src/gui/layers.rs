@@ -111,7 +111,7 @@ impl App {
         // ── Part rows (two zones) ────────────────────────────────────────
         // Вся доступная высота минус карта зон — раньше 0.55 от остатка резал
         // строки партов посередине и оставлял дыру над docked-панелью.
-        let max_h = (ui.available_height() - 36.0).max(120.0);
+        let max_h = (ui.available_height() - theme::PART_LIST_RESERVE).max(120.0);
         egui::ScrollArea::vertical()
             .id_salt("layers_parts_scroll")
             .auto_shrink(false)
@@ -172,7 +172,7 @@ impl App {
             let zone = if p < PARTS_PER_ZONE { "A" } else { "B" };
             let num = (p % PARTS_PER_ZONE) + 1;
             let dialog = egui::Modal::new(egui::Id::new("remove_part_dialog")).show(ui.ctx(), |ui| {
-                ui.set_width(280.0);
+                ui.set_width(280.0); // legacy width
                 ui.strong(format!("Remove part {zone}{num}?"));
                 ui.label("Its preset edits will be lost.");
                 ui.add_space(theme::SP_MD);
@@ -197,7 +197,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label("Perf:");
             ui.add(egui::TextEdit::singleline(&mut self.perf_name)
-                .desired_width(110.0).hint_text("name"));
+                .desired_width(theme::TEXT_W_NAME).hint_text("name")); // unify 110→120
             if ui.button("Save").on_hover_text("Save performance").clicked() && !self.perf_name.trim().is_empty() {
                 let parts: Vec<PartConfig> = self.parts.iter().map(|l| {
                     let patch_name = self.patches.get(l.patch_idx)
@@ -234,7 +234,7 @@ impl App {
             let mut load_perf: Option<Performance> = None;
             egui::ComboBox::from_id_salt("perf_load")
                 .selected_text(if self.perf_list.is_empty() { "No performances" } else { "Load..." })
-                .width(120.0)
+                .width(theme::COMBO_W_MD)
                 .show_ui(ui, |ui| {
                     for (name, path) in &self.perf_list {
                         if ui.selectable_label(false, name).clicked() {
@@ -345,7 +345,7 @@ impl App {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
                     let prog = self.parts[i].sf2_program;
                     let cur_name = GM_PROGRAM_NAMES.get(prog as usize).copied().unwrap_or("?");
-                    if ui.add_sized([170.0, 0.0], egui::Button::new(cur_name))
+                    if ui.add_sized([theme::BUTTON_W_NAME, 0.0], egui::Button::new(cur_name))
                         .on_hover_text(format!("GM program {prog} — open instrument browser (search + categories)")).clicked()
                     {
                         self.preset_search.clear();
@@ -362,7 +362,7 @@ impl App {
                     self.patches.iter().map(|p| p.name.clone()).collect();
                 let cur_idx = self.parts[i].patch_idx;
                 let cur = patch_names.get(cur_idx).cloned().unwrap_or_else(|| "---".into());
-                if ui.add_sized([170.0, 0.0], egui::Button::new(&cur))
+                if ui.add_sized([theme::BUTTON_W_NAME, 0.0], egui::Button::new(&cur))
                     .on_hover_text("Open patch browser (search + categories)").clicked()
                 {
                     self.preset_search.clear();
@@ -510,8 +510,8 @@ impl App {
 
 fn draw_key_zone_map(ui: &mut egui::Ui, parts: &[super::PartState], active: usize) {
     let colors = theme::PART_COLORS;
-    let total_w = ui.available_width().min(500.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(total_w, 8.0), egui::Sense::hover());
+    let total_w = ui.available_width().min(theme::ZONE_MAP_W_MAX);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(total_w, theme::ZONE_MAP_H), egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 0.0, theme::BG_PANEL);
     for (i, part) in parts.iter().enumerate() {
