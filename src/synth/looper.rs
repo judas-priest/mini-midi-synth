@@ -589,7 +589,7 @@ impl MidiLooper {
         let pos = if self.loop_length_ticks > 0 {
             (self.playback_tick as f64 / self.loop_length_ticks as f64 * 255.0) as u8
         } else { 0 };
-        let next = (self.state.to_u8(), pos as u16, self.len as u16, self.current_layer + 1);
+        let next = (self.state.to_u8(), pos as u16, self.len, self.current_layer + 1);
         if next.0 != self.atom_cache.0 {
             self.atoms.state.store(next.0, Ordering::Relaxed);
             self.atom_cache.0 = next.0;
