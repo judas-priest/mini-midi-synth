@@ -566,6 +566,7 @@ fn tc15_record_at_new_bpm_quantizes_to_new_grid() {
     let _ = e.handle_control(ControlEvent::LooperRecord); // overdub
     // Advance to the middle of the (now halved) loop, then record a note.
     for _ in 0..(BLOCK_SIZE * 30) { block(&mut e); }
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
     let _ = e.handle_control(ControlEvent::LooperStopRecord);
     // samples_per_beat @240bpm = 12_000; quantize Quarter grid == beat == 12_000.
@@ -671,10 +672,10 @@ mod tests {
         // TC17: pre-S5 config files carry the removed key; serde must ignore it.
         let json = r#"{
             "audio": { "backend": "JACK", "sample_rate": 48000, "buffer_size": 256 },
-            "midi": {},
-            "ui": { "looper_sync_bpm": false }
+            "midi": { "port_name": null },
+            "ui": { "window_width": 1280.0, "window_height": 800.0, "last_preset": null, "looper_sync_bpm": false }
         }"#;
-        let cfg: Config = serde::from_str(json).expect("legacy config must parse");
+        let cfg: Config = serde_json::from_str(json).expect("legacy config must parse");
         assert_eq!(cfg.audio.sample_rate, 48000);
     }
 }
