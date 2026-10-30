@@ -153,8 +153,8 @@ pub const DOCK_H_MAX: f32 = 760.0;
 
 ### Task 4: PR
 
-- [ ] **Step 1:** `git push -u origin ui-standardization`.
-- [ ] **Step 2:** `gh pr create --title "UI standardization: theme tokens, widget width unification, ScrollArea hygiene" --body "$(cat <<'EOF'
+- [x] **Step 1:** `git push -u origin ui-standardization`.
+- [x] **Step 2:** `gh pr create --title "UI standardization: theme tokens, widget width unification, ScrollArea hygiene" --body "$(cat <<'EOF'
 ## Summary
 - Вся геометрия GUI через токены theme.rs (spacing 4px grid, ширины виджетов, canvas-геометрия 1:1)
 - Унификация однотипных виджетов: path 240/300→300, GM combo 120/200→200, velocity DragValue 60/80→80, слайдер-дефолт → SLIDER_PRIMARY
