@@ -348,6 +348,40 @@ impl MidiLooper {
         self.loop_length_ticks
     }
 
+    /// Multi-cycle quantized capture close (#32): во время захвата лупер
+    /// оборачивался каждый цикл — layer_id = номер круга, тики события
+    /// локальные (0..cycle). Сдвинуть события круга k на k*cycle (глобальные
+    /// тики) и перегруппировать массив по слоям: внутри слоя тики были
+    /// отсортированной подпоследовательностью, поэтому порядок «слой, затем
+    /// тик» == порядок по новому тику — инвариант sorted-by-tick (вставка,
+    /// partition_point курсора) сохраняется. RT-safe: индексы фиксированы,
+    /// обмен на месте, без аллокаций.
+    pub fn relocate_layers(&mut self, cycle_ticks: u32) {
+        if cycle_ticks == 0 || self.len == 0 { return; }
+        let n = self.len as usize;
+        let mut max_layer = 0usize;
+        for e in &mut self.events[..n] {
+            e.tick += (e.layer_id as u32) * cycle_ticks;
+            let l = e.layer_id as usize;
+            if l > max_layer { max_layer = l; }
+        }
+        // Отбор по слою: стабилен внутри слоя, O(n * круги), один раз на close.
+        let mut write = 0usize;
+        for layer in 0..=max_layer {
+            let mut read = write;
+            while read < n {
+                if self.events[read].layer_id == layer as u8 {
+                    self.events.swap(write, read);
+                    write += 1;
+                }
+                read += 1;
+            }
+        }
+        self.playback_cursor = self.events[..n]
+            .partition_point(|e| e.tick < self.playback_tick);
+        self.update_display();
+    }
+
     /// Drift correction (Mobius-style): jump playback to the loop start so
     /// the loop stays phase-locked to the sequencer grid.
     pub fn seek_start(&mut self) {
@@ -544,6 +578,18 @@ impl MidiLooper {
         }
         if self.len >= MAX_LOOP_EVENTS as u16 { return; }
         if note >= 128 { return; }
+
+        // Multitrack hygiene: off принадлежит части, ДЕРЖАЩЕЙ ноту (engine
+        // broadcasts offs всем частям — иначе 15 мусорных off-событий на ноту).
+        // On трекает держателя; на записанном off слот чистится (иначе wrap
+        // Overdubbing выпустит forced-off по несуществующей ноте). Replay-путь
+        // управляет своими слотами на fire-time независимо.
+        if velocity == 0 {
+            if self.active_notes[note as usize] != part { return; }
+            self.active_notes[note as usize] = 255;
+        } else {
+            self.active_notes[note as usize] = part;
+        }
 
         let raw_tick = self.playback_tick;
         let tick = self.quantize_tick(raw_tick);

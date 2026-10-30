@@ -1221,6 +1221,10 @@ pub struct SynthEngine {
     /// Cycle length (ticks) of the last quantized capture — drift-correction
     /// applies when the loop length still equals it.
     looper_cycle_ticks: u32,
+    /// Досрочное закрытие мультицикл-захвата (закрытие на следующей границе).
+    looper_finish_pending: bool,
+    /// Целых циклов паттерна, записанных квантованным захватом.
+    looper_rec_cycles: u32,
     /// GUI mirror of arm_pending (shows "ARMED" in the looper state label).
     master_rec_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Active part index (0-7), shared with GUI for looper part recording
@@ -1493,6 +1497,8 @@ impl SynthEngine {
             looper_capture_quantized: false,
             looper_prev_step: 0,
             looper_cycle_ticks: 0,
+            looper_finish_pending: false,
+            looper_rec_cycles: 0,
             master_rec_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             looper_source_mix: true,
@@ -1606,13 +1612,16 @@ impl SynthEngine {
     /// Shared part note-on dispatch: range/velocity gate, root-only gate
     /// (TECHDEBT #6), DSP voice or SF2 sampler. The enabled/mute guards stay
     /// at the call sites, which intentionally differ (offs skip mute).
-    fn route_note_on(&mut self, i: usize, raw: u8, velocity: u8) {
+    /// Returns true only if the note actually SOUNDED in this part — the
+    /// looper multitrack records just sounding parts (replay honours each
+    /// part's range/transpose), callers that don't record ignore the result.
+    fn route_note_on(&mut self, i: usize, raw: u8, velocity: u8) -> bool {
         let (sf2_mode, transpose, lo, hi, vmin, vmax) = {
             let p = &self.parts[i];
             (p.sf2_mode, p.transpose, p.min_note, p.max_note, p.vel_min, p.vel_max)
         };
-        if raw < lo || raw > hi || velocity < vmin || velocity > vmax { return; }
-        let RootDecision::Sound { release, note } = self.parts[i].root_on(raw) else { return };
+        if raw < lo || raw > hi || velocity < vmin || velocity > vmax { return false; }
+        let RootDecision::Sound { release, note } = self.parts[i].root_on(raw) else { return false };
         let tr = |n: u8| (n as i16 + transpose as i16).clamp(0, 127) as u8;
         if sf2_mode {
             if let Some(old) = release { self.sampler.note_off(i, tr(old)); }
@@ -1629,6 +1638,7 @@ impl SynthEngine {
             }
             self.parts[i].note_on(note, velocity);
         }
+        true
     }
 
     /// Shared part note-off dispatch with root-only re-keying. Offs skip the
@@ -1726,6 +1736,8 @@ impl SynthEngine {
     pub fn master_stop(&mut self) {
         self.looper_arm_pending = false;
         self.looper_capture_quantized = false;
+        self.looper_finish_pending = false;
+        self.looper_rec_cycles = 0;
         self.master_rec_pending.store(false, std::sync::atomic::Ordering::Relaxed);
         self.drum_engine.set_playing(false);
         self.drum_engine.sequencer.reset();
@@ -1759,19 +1771,19 @@ impl SynthEngine {
 
     /// Master transport: toggle record arm. Quantized path: drums playing,
     /// pattern >= 2 steps, looper Idle -> capture starts at the NEXT pattern
-    /// boundary, петля = РОВНО 1 цикл паттерна, закрывается сама на его конце
-    /// (нажатие в процессе игнорируется). Everything else (stopped sequencer,
-    /// Steps=1, overdub from Playing, disarming) — прежнее немедленное
-    /// поведение (Bars свободного режима не трогаются).
+    /// boundary; второй Rec закрывает на следующей границе — петля = РОВНО
+    /// N целых циклов паттерна (сколько сыграл). Everything else (stopped
+    /// sequencer, Steps=1, overdub from Playing, disarming) — прежнее
+    /// немедленное поведение (Bars свободного режима не трогаются).
     pub fn master_toggle_record(&mut self) {
         let looper_rec = matches!(
             self.looper.state,
             crate::synth::looper::LooperState::Recording
                 | crate::synth::looper::LooperState::Overdubbing
         );
-        // Квантованный захват сам закрывается на конце цикла паттерна —
-        // нажатие в процессе не нужно; игнорируем (не срываем запись)
+        // Мультицикл-захват: второе нажатие = закрыть на следующей границе
         if looper_rec && self.looper_capture_quantized {
+            self.looper_finish_pending = true;
             return;
         }
         // Снять арм (toggle-семантика ожидания границы)
@@ -2026,20 +2038,17 @@ impl SynthEngine {
                 } else {
                     for i in 0..self.parts.len() {
                         if !self.parts[i].enabled || self.parts[i].mute { continue; }
-                        self.route_note_on(i, note, velocity);
-                        // Whole-performance recording: tag the event with the
-                        // part that actually sounds it (looper replay routes
-                        // per part id).
-                        //
-                        // Accepted effects: (1) the matching off events below
-                        // are also recorded for parts that never sounded the
-                        // note (off loops don't range-check) — replayed offs
-                        // are harmless no-ops but consume looper event slots;
-                        // (2) split overlap (two parts covering the same note)
-                        // overwrites looper's single active_notes[note] slot —
-                        // the forced off at loop wrap releases only the last
-                        // part.
-                        self.record_for_looper(note, velocity, i as u8);
+                        let sounded = self.route_note_on(i, note, velocity);
+                        if sounded {
+                            // Записывается ТОЛЬКО реально звучащая часть:
+                            // реплей honoured range/transpose каждого парта.
+                            // Off-мусор (offs для частей, не звучавших ноту)
+                            // отсекается фильтром active_notes в
+                            // looper.record_event; split overlap активных нот
+                            // двух частей — оверрайд одиночного слота
+                            // active_notes остаётся accepted.
+                            self.record_for_looper(note, velocity, i as u8);
+                        }
                     }
                 }
             }
@@ -2844,9 +2853,10 @@ impl SynthEngine {
         self.looper.sync_clock(seq_bpm, beats_per_bar);
 
         // Quantized master recording: pattern boundary = sequencer wrapped to
-        // step 0 (edge-detected). Arm -> start capture (петля = РОВНО 1 цикл
-        // паттерна — размеры лупера и секвенсора совпадают); на следующей
-        // границе захват сам закрывается (снять запись сетки).
+        // step 0 (edge-detected). Arm -> start capture (петля = 1 цикл
+        // паттерна — размеры лупера и секвенсора совпадают); каждая граница
+        // считает целый цикл, второй Rec закрывает на СЛЕДУЮЩЕЙ границе —
+        // петля = РОВНО N целых циклов.
         let step = self.drum_engine.sequencer.current_step;
         let prev = self.looper_prev_step;
         self.looper_prev_step = step;
@@ -2857,7 +2867,10 @@ impl SynthEngine {
                     | crate::synth::looper::LooperState::Overdubbing
                     | crate::synth::looper::LooperState::Playing
             );
-        if self.looper_arm_pending || quantized_looping {
+        if self.looper_arm_pending
+            || self.looper_finish_pending
+            || quantized_looping
+        {
             let playing = self.drum_engine.sequencer.playing;
             let lstate = self.looper.state;
             // Квантованный захват может УЖЕ самообернуться в Overdubbing
@@ -2872,7 +2885,7 @@ impl SynthEngine {
                 self.looper_arm_pending = false;
                 self.master_rec_pending.store(false, std::sync::atomic::Ordering::Relaxed);
                 self.looper.toggle_record(); // Idle -> Recording (length = bars * bar)
-                // Перекроить петлю под длину паттерна: sizes match, Bars не важны
+                // Перекроить петлю: cycle = длина паттерна (базовая единица)
                 let pat = self.drum_engine.sequencer.current_pattern as usize;
                 let pattern_len = self.drum_engine.sequencer.patterns[pat].length.max(1);
                 let bpm = self.drum_engine.sequencer.bpm.max(1.0);
@@ -2880,17 +2893,39 @@ impl SynthEngine {
                 let cycle = (pattern_len as f64 * samples_per_step) as u32;
                 self.looper.set_loop_len_ticks(cycle);
                 self.looper_cycle_ticks = cycle;
+                self.looper_rec_cycles = 0;
             } else if boundary && capturing {
-                // Конец цикла паттерна — закрыть захват (1 цикл = 1 петля)
-                self.drum_engine.set_recording(false); // сетка тоже разармирована
-                self.looper.toggle_record(); // Recording/Overdubbing -> Playing
-                // петля начата с границы — позиция уже 0, drift correction не нужен
-            } else if boundary && lstate == crate::synth::looper::LooperState::Playing {
-                // Drift correction (Mobius-style): каждый круг выравнивает
-                // петлю в ноль — расхождение с сеткой накапливаться не может
+                if self.looper_finish_pending {
+                    // Закрыть: петля = сыгранные целые циклы. cycles = полных
+                    // циклов ДО этой границы; закрывающая граница завершает
+                    // ещё один → total = cycles + 1 (иначе петля короче игры).
+                    let total = self.looper_rec_cycles.saturating_add(1);
+                    // РЕЛОКАЦИЯ: во время захвата лупер оборачивался каждый
+                    // цикл (layer_id = номер круга, тики локальные 0..cycle).
+                    // Сдвинуть события круга k на k*cycle — глобальные тики.
+                    self.looper.relocate_layers(self.looper_cycle_ticks);
+                    self.looper.set_loop_len_ticks(
+                        total.saturating_mul(self.looper_cycle_ticks));
+                    self.looper_finish_pending = false;
+                    self.looper_rec_cycles = 0;
+                    self.drum_engine.set_recording(false); // сетка тоже разармирована
+                    self.looper.toggle_record(); // Recording/Overdubbing -> Playing
+                } else {
+                    self.looper_rec_cycles += 1;
+                }
+            } else if boundary
+                && lstate == crate::synth::looper::LooperState::Playing
+                && self.looper.loop_len_ticks() == self.looper_cycle_ticks
+            {
+                // Drift correction (Mobius-style): только для петли = 1 цикл —
+                // каждый круг выравнивает петлю в ноль. Для N>1-цикловых петель
+                // seek убивал бы вторую половину (длина != cycle) — не трогаем.
                 self.looper.seek_start();
             } else if !playing && capturing {
-                // tc9 fallback: часы умерли посреди записи — закрыть сейчас
+                // fallback: часы умерли посреди записи — закрыть сейчас
+                // (нечётный кусок; длину петли не перекраиваем)
+                self.looper_finish_pending = false;
+                self.looper_rec_cycles = 0;
                 self.drum_engine.set_recording(false);
                 self.looper.toggle_record();
             }
@@ -3175,8 +3210,10 @@ impl SynthEngine {
                 if let Some((note, vel)) = arp_on {
                     for i in 0..self.parts.len() {
                         if !self.parts[i].enabled || self.parts[i].mute { continue; }
-                        self.route_note_on(i, note, vel);
-                        self.record_for_looper(note, vel, i as u8);
+                        // Мультитрек: писать только реально звучащую часть
+                        if self.route_note_on(i, note, vel) {
+                            self.record_for_looper(note, vel, i as u8);
+                        }
                     }
                 }
             }
