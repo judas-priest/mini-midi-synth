@@ -354,6 +354,23 @@ fn set_sample_rate_is_allocation_free() {
     assert_no_alloc(|| engine.set_sample_rate(96_000.0));
 }
 
+/// JACK mid-callback scenario (audit S1 TC-C): a note is held, one block was
+/// rendered, then JACK reports a new rate and the callback applies it before
+/// the next block. KNOWN RED until S1 lands.
+#[test]
+#[ignore = "KNOWN RED (audit S1): mid-render SR change reallocates FX/voices"]
+fn sr_change_mid_render_does_not_allocate() {
+    let mut engine = SynthEngine::new(SR);
+    engine.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    let mut l = [0.0f32; BLOCK_SIZE];
+    let mut r = [0.0f32; BLOCK_SIZE];
+    engine.tick_block(&mut l, &mut r);
+    assert_no_alloc(|| {
+        engine.set_sample_rate(96_000.0);
+        engine.tick_block(&mut l, &mut r);
+    });
+}
+
 /// KNOWN RED (audit S1): DrumEngine::set_sample_rate does
 /// `*self = Self::new(sr)` (drum.rs:1054-1090), allocating the 3 Arc atoms
 /// (drum.rs:1009-1011) plus voice Vecs inside the callback.
