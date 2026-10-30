@@ -99,16 +99,17 @@ mod wheel -> вибрато (на большинстве SF2). Проблемы 
 Обе модалки вынесены в `gui/mod.rs::update` (рисуются на любой вкладке, ctx
 корневой). План: docs/superpowers/plans/2026-10-29-console-gui-polish.md Task 1.
 
-## 12. set_sample_rate аллоцирует в аудио-колбэке (rt-assert abort под JACK)
-- При старте под JACK/PipeWire stream отдаёт 48000 после старта → колбэк
-  вызывает `synth.set_sample_rate()` → `Part/Voice::set_sample_rate`
-  аллоцирует (RawVec). В debug-сборках с `rt-assert` это мгновенный abort
-  ("memory allocation of N bytes failed"), в release — скрытая RT-наррушение.
-  Воспроизводится каждый запуск, если запрошенный SR != SR устройства.
-- Фикс: не применять SR в колбэке — как в ветке disconnect: atomic + полная
-  пересборка потока вне колбэка (set_sample_rate в audio.rs:148 безопасен),
-  либо сделать Voice::set_sample_rate аллокационно-чистым (перевыделять в
-  trash/на control-потоке).
+## 12. set_sample_rate аллоцирует в аудио-колбэке (rt-assert abort под JACK) — РЕАЛИЗОВАНО (2026-10-30, S1)
+Вся цепочка `set_sample_rate` из колбэка (audio.rs:199-205) стала allocation-free:
+FX ресайзят preallocated-буферы в capacity (SR_CAP=192 kHz), drum/voice обновляют
+SR-поля явно, без `*self = Self::new`. Планы: docs/superpowers/plans/2026-10-30-refactor-s1-rt-safe-sr.md.
+Принятое исключение: пересборка SF2-сэмплера в колбэке (sampler.rs:310-322, Displaced → trash) — отдельный TECHDEBT.
+
+История (до фикса): при старте под JACK/PipeWire stream отдаёт 48000 после старта → колбэк
+вызывает `synth.set_sample_rate()` → `Part/Voice::set_sample_rate`
+аллоцирует (RawVec). В debug-сборках с `rt-assert` это мгновенный abort
+("memory allocation of N bytes failed"), в release — скрытое RT-нарушение.
+Воспроизводится каждый запуск, если запрошенный SR != SR устройства.
 
 USB-конфиг (2026-10-28, проверено эмпирически): конфиг-протокол (00 59-фреймы)
 по USB НЕ существует. Порты: Private (hw:2,0,0) = OTA/identity — на handshake
