@@ -241,6 +241,12 @@ pub enum ControlEvent {
     /// recorded, each event tagged with its own part id), false = Part
     /// (only the active part). Live transport state — not persisted.
     LooperSetSource { mix: bool },
+    /// Master transport (#32): toggle play drums + looper together
+    MasterPlay,
+    /// Master transport: stop drums + looper (drain note-offs)
+    MasterStop,
+    /// Master transport: arm/disarm recording on drums + looper
+    MasterRecord,
     SetSustain { on: bool },
     /// Static pedal-up release duration in seconds (None = patch release)
     SetSustainRelease { seconds: Option<f32> },
@@ -1200,7 +1206,8 @@ pub struct SynthEngine {
     program_change: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     global_params: GlobalParams,
     pickup_states: [PickupState; 128],
-    /// 0 = SEQ buttons target drums, 1 = SEQ buttons target looper
+    /// 0 = SEQ buttons target drums, 1 = SEQ buttons target looper,
+    /// 2 = master (drums + looper together, default)
     seq_target: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Active part index (0-7), shared with GUI for looper part recording
     active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
@@ -1467,7 +1474,7 @@ impl SynthEngine {
             feedback_tx: None, trash: None, program_change: None,
             global_params: GlobalParams::default(),
             pickup_states: [PickupState::default(); 128],
-            seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
+            seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(2)), // default: master (drums + looper together)
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             looper_source_mix: true,
             sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1682,6 +1689,80 @@ impl SynthEngine {
         self.looper.record_event(note, velocity, part);
     }
 
+    /// Master transport (#32): start both transports (drums + looper).
+    fn master_start(&mut self) {
+        self.drum_engine.set_playing(true);
+        if matches!(self.looper.state, crate::synth::looper::LooperState::Idle) {
+            self.looper.toggle_play();
+        }
+    }
+
+    /// Master transport: stop both; a recording looper finishes its layer
+    /// first, then stops (stop() flags needs_note_offs; actual note-offs
+    /// drain on the next looper tick, как и в ручном Stop).
+    pub fn master_stop(&mut self) {
+        self.drum_engine.set_playing(false);
+        self.drum_engine.sequencer.reset();
+        match self.looper.state {
+            crate::synth::looper::LooperState::Recording
+            | crate::synth::looper::LooperState::Overdubbing => {
+                self.looper.toggle_record();
+                self.looper.toggle_play();
+            }
+            crate::synth::looper::LooperState::Playing => self.looper.toggle_play(),
+            _ => {}
+        }
+    }
+
+    /// Master transport: toggle play — if anything plays, stop everything;
+    /// otherwise start everything.
+    pub fn master_toggle_play(&mut self) {
+        let any = self.drum_engine.sequencer.playing
+            || matches!(
+                self.looper.state,
+                crate::synth::looper::LooperState::Playing
+                    | crate::synth::looper::LooperState::Overdubbing
+                    | crate::synth::looper::LooperState::Recording
+            );
+        if any {
+            self.master_stop();
+        } else {
+            self.master_start();
+        }
+    }
+
+    /// Master transport: toggle record arm on both (drums auto-play, looper
+    /// Idle→Recording / Playing→Overdubbing).
+    pub fn master_toggle_record(&mut self) {
+        let rec = self.drum_engine.sequencer.recording
+            || matches!(
+                self.looper.state,
+                crate::synth::looper::LooperState::Recording
+                    | crate::synth::looper::LooperState::Overdubbing
+            );
+        if rec {
+            self.drum_engine.set_recording(false);
+            if matches!(
+                self.looper.state,
+                crate::synth::looper::LooperState::Recording
+                    | crate::synth::looper::LooperState::Overdubbing
+            ) {
+                self.looper.toggle_record();
+            }
+        } else {
+            self.drum_engine.set_recording(true);
+            if !self.drum_engine.sequencer.playing {
+                self.drum_engine.set_playing(true);
+            }
+            if matches!(
+                self.looper.state,
+                crate::synth::looper::LooperState::Idle | crate::synth::looper::LooperState::Playing
+            ) {
+                self.looper.toggle_record();
+            }
+        }
+    }
+
     pub fn pitch_seq_step_atoms(&self) -> Vec<std::sync::Arc<std::sync::atomic::AtomicU8>> {
         self.parts.iter().map(|l| l.pitch_seq.step_atom()).collect()
     }
@@ -1793,9 +1874,12 @@ impl SynthEngine {
                         let playing = !self.drum_engine.sequencer.playing;
                         self.drum_engine.set_playing(playing);
                         if !playing { self.drum_engine.sequencer.reset(); }
-                    } else {
+                    } else if target == 1 {
                         // Looper mode
                         self.looper.toggle_play();
+                    } else {
+                        // Master mode (#32): both together
+                        self.master_toggle_play();
                     }
                     return;
                 }
@@ -1809,21 +1893,28 @@ impl SynthEngine {
                         if rec && !self.drum_engine.sequencer.playing {
                             self.drum_engine.set_playing(true);
                         }
-                    } else {
+                    } else if target == 1 {
                         self.looper.toggle_record();
+                    } else {
+                        self.master_toggle_record();
                     }
                     return;
                 }
                 // Pad 26 (note 81, ch9): stop — outside the drum-note gate so
                 // it works at seq_target=1 (looper) too.
                 if channel == 9 && velocity > 0 && note == 81 {
-                    if self.seq_target.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+                    let target = self.seq_target.load(std::sync::atomic::Ordering::Relaxed);
+                    if target == 0 {
                         self.drum_engine.set_playing(false);
                         self.drum_engine.sequencer.reset();
-                    } else if matches!(self.looper.state,
-                                       crate::synth::looper::LooperState::Playing
-                                       | crate::synth::looper::LooperState::Overdubbing) {
-                        self.looper.toggle_play();
+                    } else if target == 1 {
+                        if matches!(self.looper.state,
+                                    crate::synth::looper::LooperState::Playing
+                                    | crate::synth::looper::LooperState::Overdubbing) {
+                            self.looper.toggle_play();
+                        }
+                    } else {
+                        self.master_stop();
                     }
                     return;
                 }
@@ -2393,6 +2484,15 @@ impl SynthEngine {
             }
             ControlEvent::LooperSetSource { mix } => {
                 self.looper_source_mix = mix;
+            }
+            ControlEvent::MasterPlay => {
+                self.master_toggle_play();
+            }
+            ControlEvent::MasterStop => {
+                self.master_stop();
+            }
+            ControlEvent::MasterRecord => {
+                self.master_toggle_record();
             }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
                 self.drum_engine.fixed_velocity = fixed;
