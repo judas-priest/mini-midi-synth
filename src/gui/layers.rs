@@ -32,18 +32,18 @@ impl App {
         // ── Split row: toggle + point + view tabs ────────────────────────
         let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
         ui.horizontal(|ui| {
-            let mut split = split_on;
-            if ui.checkbox(&mut split, "Split").on_hover_text("Enable keyboard split").changed() {
-                if split {
-                    // Enable the first free B slot
-                    if let Some(i) = ZONE_B.into_iter().find(|&i| !self.parts[i].enabled) {
-                        self.parts[i].enabled = true;
-                        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: true });
-                        self.send_edited_params(i);
-                        self.send_part_volume(i);
-                    }
-                    self.apply_split_ranges();
-                } else {
+            let split_clicked = if split_on {
+                // Split active: show as an on-toggle with explicit remove hint
+                ui.small_button("Split: вкл ✕")
+                    .on_hover_text("Выключить сплит: убрать правую руку (зона B)")
+                    .clicked()
+            } else {
+                ui.button("+ Правая рука (Split)")
+                    .on_hover_text("Добавить правую руку: зона B, клавиатура делится по Split point")
+                    .clicked()
+            };
+            if split_clicked {
+                if split_on {
                     // Disable all Zone B parts, restore Zone A to full range
                     for i in ZONE_B {
                         if self.parts[i].enabled {
@@ -62,6 +62,15 @@ impl App {
                     if self.active_part >= PARTS_PER_ZONE {
                         self.set_active_part(0);
                     }
+                } else {
+                    // Enable the first free B slot
+                    if let Some(i) = ZONE_B.into_iter().find(|&i| !self.parts[i].enabled) {
+                        self.parts[i].enabled = true;
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: true });
+                        self.send_edited_params(i);
+                        self.send_part_volume(i);
+                    }
+                    self.apply_split_ranges();
                 }
             }
 
