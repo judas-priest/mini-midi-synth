@@ -910,7 +910,7 @@ impl eframe::App for App {
                         .fixed_decimals(2).suffix(" s")).changed() {
                         self.sustain_release = Some(secs);
                         let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: Some(secs) });
-                        self.save_global_to_config();
+                        self.global_dirty = true;
                     }
                 }
                 ui.label("SF2 rel:");
@@ -920,7 +920,7 @@ impl eframe::App for App {
                 {
                     self.sf2_release_scale = scale;
                     let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale });
-                    self.save_global_to_config();
+                    self.global_dirty = true;
                 }
 
                 ui.separator();
