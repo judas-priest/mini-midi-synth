@@ -42,7 +42,7 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
 **Files:**
 - Modify: `src/synth/mod.rs` (поля ~1213; master_toggle_record диспетчер ~1766; master_stop ~1722; tick_block квантованный блок ~2850)
 
-- [ ] **Step 1: Поля.** Добавить (рядом с `looper_capture_quantized`):
+- [x] **Step 1: Поля.** Добавить (рядом с `looper_capture_quantized`):
 
 ```rust
     /// Досрочное закрытие мультицикл-захвата (закрытие на следующей границе).
@@ -53,7 +53,7 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
 
 Конструктор: `false`/`0`. В `master_stop`: `self.looper_finish_pending = false; self.looper_rec_cycles = 0;`.
 
-- [ ] **Step 2: Диспетчер.** Заменить «игнорируем» ветку:
+- [x] **Step 2: Диспетчер.** Заменить «игнорируем» ветку:
 
 ```rust
         // Мультицикл-захват: второе нажатие = закрыть на следующей границе
@@ -63,7 +63,7 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
         }
 ```
 
-- [ ] **Step 3: tick_block — счёт циклов и закрытие.** Текущий квантованный блок (arm branch / `boundary && capturing` branch / fallback) заменить на:
+- [x] **Step 3: tick_block — счёт циклов и закрытие.** Текущий квантованный блок (arm branch / `boundary && capturing` branch / fallback) заменить на:
 
 ```rust
             if boundary && self.looper_arm_pending {
@@ -122,7 +122,7 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
 
   (`looper_cycle_ticks` устанавливается при старте захвата; для N>1 петель drift не корректируется — длины целотактные, дрейф минимален; отдельный пункт при необходимости.)
 
-- [ ] **Step 4: Гейты (старые tc2/tc3 master_rec_sync упадут — Task 2 переписывает).**
+- [x] **Step 4: Гейты (старые tc2/tc3 master_rec_sync упадут — Task 2 переписывает).**
 
 - **Arp-мультитрек (ревью Important #4)** — Task 1b покрывает: arp-путь (mod.rs ~3175-3180) гейтится так же `if route_note_on(..) { record_for_looper(..) }`.
 
@@ -132,9 +132,9 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
 - Modify: `src/synth/mod.rs` (route_note_on ~1609; диспетчер note-on ~2027-2043)
 - Modify: `src/synth/looper.rs` (record_event ~541)
 
-- [ ] **Step 1: route_note_on -> bool.** Сигнатура `fn route_note_on(&mut self, i: usize, raw: u8, velocity: u8) -> bool`; ранние выходы `return false` (диапазон/velocity/root-mute), после фактического триггера (обе ветки sf2/DSP) `true`. Прочие вызывающие (arp, looper replay root_only) — игнорируют возвращаемое значение (`let _ =` не нужен, bool можно игнорить без warning только в let — вернуть и не использовать = ок, Rust не ругается на неиспользуемый результат обычной функции).
+- [x] **Step 1: route_note_on -> bool.** Сигнатура `fn route_note_on(&mut self, i: usize, raw: u8, velocity: u8) -> bool`; ранние выходы `return false` (диапазон/velocity/root-mute), после фактического триггера (обе ветки sf2/DSP) `true`. Прочие вызывающие (arp, looper replay root_only) — игнорируют возвращаемое значение (`let _ =` не нужен, bool можно игнорить без warning только в let — вернуть и не использовать = ок, Rust не ругается на неиспользуемый результат обычной функции).
 
-- [ ] **Step 2: Диспетчер note-on.** В цикле `for i in 0..self.parts.len()` заменить:
+- [x] **Step 2: Диспетчер note-on.** В цикле `for i in 0..self.parts.len()` заменить:
 
 ```rust
                     for i in 0..self.parts.len() {
@@ -150,9 +150,9 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
 
   (старый комментарий про accepted effects 1/2 — заменить: off-мусор исчезает благодаря фильтру Step 3; split overlap активных нот двух частей — looper.active_notes один слот на ноту, оверрайд остаётся accepted.)
 
-- [ ] **Step 2b: Arp-путь — тот же гейт.** В `tick_block` arp-генерация (~3175-3180): `self.route_note_on(i, note, vel); self.record_for_looper(note, vel, i as u8);` → заменить на гейт `if self.route_note_on(i, note, vel) { self.record_for_looper(note, vel, i as u8); }` (и для off-ветки arp: off-запись остаётся — looper-фильтр сам отсечёт чужих).
+- [x] **Step 2b: Arp-путь — тот же гейт.** В `tick_block` arp-генерация (~3175-3180): `self.route_note_on(i, note, vel); self.record_for_looper(note, vel, i as u8);` → заменить на гейт `if self.route_note_on(i, note, vel) { self.record_for_looper(note, vel, i as u8); }` (и для off-ветки arp: off-запись остаётся — looper-фильтр сам отсечёт чужих).
 
-- [ ] **Step 3: looper.record_event — фильтр offs.** После гейтов state/len/note добавить:
+- [x] **Step 3: looper.record_event — фильтр offs.** После гейтов state/len/note добавить:
 
 ```rust
         // Multitrack hygiene: off принадлежит части, ДЕРЖАЩЕЙ ноту (engine
@@ -169,7 +169,7 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
 
   (перед формированием event; слот чистится на записанном off — ревью Minor #6: иначе wrap Overdubbing выпускает forced-off по несуществующей ноте. Replay-путь manages свои слоты на fire-time независимо.)
 
-- [ ] **Step 4: Гейты**
+- [x] **Step 4: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test 2>&1 | tail -3
@@ -180,7 +180,7 @@ cargo clippy --all-targets -- -D warnings && cargo test 2>&1 | tail -3
 **Files:**
 - Modify: `tests/master_rec_sync.rs`
 
-- [ ] **Step 1:** tc1/tc8 ОСТАВИТЬ (валидны); удалить `tc3_loop_is_one_pattern_cycle` и старый tc2; добавить tc2/tc3/tc9:
+- [x] **Step 1:** tc1/tc8 ОСТАВИТЬ (валидны); удалить `tc3_loop_is_one_pattern_cycle` и старый tc2; добавить tc2/tc3/tc9:
 
 ```rust
 #[test]
@@ -279,7 +279,7 @@ fn tc9_multitrack_records_only_sounding_parts() {
 
   (MidiEvent в use провернуть; tc5/tc4 не трогать; tc2 Multi-cycle note 67 играет В закрывающем цикле — position > 0.4 валиден для 2-цикловой петли.)
 
-- [ ] **Step 3: Гейты + Commit**
+- [x] **Step 3: Гейты + Commit**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety && cargo build --release
@@ -289,8 +289,8 @@ git commit -m "feat: multi-cycle quantized capture — close at boundary, loop =
 
 ### Task 3: TECHDEBT + финал
 
-- [ ] **Step 1:** В #32 после Phase sync-заметки: «Multi-cycle (2026-10-31): захват длится до второго Rec (диагноз: авто-закрытие после 1 цикла + игнор нажатия = «не пишет»); закрытие на границе, петля = N целых циклов; Rec после закрытия = overdub».
+- [x] **Step 1:** В #32 после Phase sync-заметки: «Multi-cycle (2026-10-31): захват длится до второго Rec (диагноз: авто-закрытие после 1 цикла + игнор нажатия = «не пишет»); закрытие на границе, петля = N целых циклов; Rec после закрытия = overdub».
 
-- [ ] **Step 2:** Полные гейты, `cargo build --release` (рестарт — главная сессия), commit docs.
+- [x] **Step 2:** Полные гейты, `cargo build --release` (рестарт — главная сессия), commit docs.
 
-- [ ] **Step 3: Ручной чеклист (юзер):** Play → Rec → играй сколько надо (ноты+ударка в кубики) → Rec ещё раз → после границы петля = сколько сыграл; Rec после закрытия = overdub.
+- [ ] **Step 3: Ручной чеклист (юзер):** Play → Rec → играй сколько надо (ноты+ударка в кубики) → Rec ещё раз → после границы петля = сколько сыграл; Rec после закрытия = overdub. *(выполняет юзер после рестарта приложения)*
