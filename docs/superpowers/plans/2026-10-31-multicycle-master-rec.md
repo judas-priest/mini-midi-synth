@@ -31,9 +31,9 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
 - **finish_pending стоит, drums умерли** → fallback `!playing && capturing` закрывает немедленно, длина = фактические тики (set_loop_len_ticks не зовём — нечётный кусок; редкий аварийный путь). Покрыт существующим tc9-подобным поведением, не тестируем отдельно.
 - **cycles == 0 при закрытии** (второй Rec в том же шаге, что и старт — границ не было) → невозможно: закрытие происходит ТОЛЬКО на границе, и первый пересчёт границы увеличивает cycles до 1 до проверки. N/A.
 - **BPM изменился посреди захвата** — sync_clock/regrid лупера рескейлит length; cycle_ticks устаревает → закрытие поставит cycles*старый_cycle. Мид-BPM-смена в живой записи — редкий сценарий; принять (задокументировано), не чинить.
-- **Overdub длиннее цикла** — overdub квантованный закрывается на границе как раньше (существующее поведение), не меняется. N/A.
+- **Overdub после закрытия** — следующий MasterRecord идёт через ARM-ветку, can_quant=false (лупер не Idle) → free-путь: немедленный Overdubbing, закрытие следующим Rec немедленное (не на границе). Документировано (TC-D уточнён 2026-10-31 ревью).
 - **RT-safety** — только bool/u32 поля. Гейт rt_safety.
-- **event_count/слои** — offs от всех частей (16 off-событий на ноту) — известный косметический мусор дисплея; список слоёв и таймлайн их скрывают (velocity==0). Отдельный QW-пункт, не здесь.
+- **event_count/слои** — offs-мусор (16 на ноту) устраняется фильтром active_notes (Task 1b Step 3, ревью Minor #6: слот чистится на записанном off — wrap-Overdubbing не выпустит forced-off по несущейся ноте).
 
 ---
 
@@ -79,15 +79,19 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
                 self.looper.set_loop_len_ticks(self.looper_cycle_ticks);
                 self.looper_rec_cycles = 1;
             } else if boundary && capturing {
-                self.looper_rec_cycles += 1;
                 if self.looper_finish_pending {
-                    // Закрыть: петля = РОВНО записанные целые циклы
+                    // Закрыть: петля = сыгранные целые циклы. cycles = полных
+                    // циклов ДО этой границы; закрывающая граница завершает
+                    // ещё один → total = cycles + 1 (иначе петля короче игры).
+                    let total = self.looper_rec_cycles.saturating_add(1);
                     self.looper.set_loop_len_ticks(
-                        self.looper_rec_cycles.saturating_mul(self.looper_cycle_ticks));
+                        total.saturating_mul(self.looper_cycle_ticks));
                     self.looper_finish_pending = false;
                     self.looper_rec_cycles = 0;
                     self.drum_engine.set_recording(false); // сетка тоже разармирована
                     self.looper.toggle_record(); // Recording/Overdubbing -> Playing
+                } else {
+                    self.looper_rec_cycles += 1;
                 }
             } else if !playing && capturing {
                 // fallback: часы умерли посреди записи — закрыть сейчас
@@ -98,9 +102,25 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
             }
 ```
 
-  Гейт блока сверху расширить на finish_pending: `if self.looper_arm_pending || self.looper_finish_pending || quantized_looping { ... }` (quantized_looping — как сейчас, с Playing для drift correction; drift-correction ветка `boundary && lstate == Playing { seek_start() }` остаётся без изменений). Проверить, что ветки в порядке: arm → capturing-close → drift(seek, только Playing) → fallback.
+  Гейт блока сверху расширить на finish_pending: `if self.looper_arm_pending || self.looper_finish_pending || quantized_looping { ... }` (quantized_looping — как сейчас, с Playing для drift correction; drift-correction ветка остаётся, но ДОБАВИТЬ guard длины — см. ниже). Порядок веток: arm → capturing-close → drift(seek) → fallback.
+
+  **Drift-seek только для одноцикловых петель (ревью Critical #3):** `capture_quantized` не сбрасывается на закрытии → гейт пускает Playing всегда; seek_start() на каждой границе убивал бы петли длиннее цикла (вторая половина не играла бы никогда). Guard:
+
+```rust
+            } else if boundary
+                && lstate == crate::synth::looper::LooperState::Playing
+                && self.looper.loop_len_ticks() == self.looper_cycle_ticks
+            {
+                // Drift correction (Mobius-style): только для петли = 1 цикл
+                self.looper.seek_start();
+            }
+```
+
+  (`looper_cycle_ticks` устанавливается при старте захвата; для N>1 петель drift не корректируется — длины целотактные, дрейф минимален; отдельный пункт при необходимости.)
 
 - [ ] **Step 4: Гейты (старые tc2/tc3 master_rec_sync упадут — Task 2 переписывает).**
+
+- **Arp-мультитрек (ревью Important #4)** — Task 1b покрывает: arp-путь (mod.rs ~3175-3180) гейтится так же `if route_note_on(..) { record_for_looper(..) }`.
 
 ### Task 1b: Мультитрек — запись только звучащих частей
 
@@ -131,11 +151,14 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
 ```rust
         // Multitrack hygiene: off принадлежит части, ДЕРЖАЩЕЙ ноту (engine
         // broadcasts offs всем частям — иначе 15 мусорных off-событий на ноту).
-        // On трекает держателя (нужно и forced-off на wrap).
+        // On трекает держателя; на записанном off слот чистится (иначе wrap
+        // Overdubbing выпустит forced-off по несуществующей ноте).
         if velocity == 0 {
             if self.active_notes[note as usize] != part { return; }
+            self.active_notes[note as usize] = 255;
+        } else {
+            self.active_notes[note as usize] = part;
         }
-        self.active_notes[note as usize] = part;
 ```
 
   (перед формированием event; на off НЕ чистим слот здесь — чистит replay/wrap путь как раньше; двойной off на ту же часть — второй запишется как off без держателя... для чистоты: после записи off-события 清ить нельзя (replay зависит) — ОСТАВИТЬ как в сниппете: фильтр только на входе, слот перезаписывается следующим on. Второй одинаковый off = безвредный no-op при реплее.)
@@ -151,7 +174,7 @@ cargo clippy --all-targets -- -D warnings && cargo test 2>&1 | tail -3
 **Files:**
 - Modify: `tests/master_rec_sync.rs`
 
-- [ ] **Step 1:** Заменить tc2/tc3 на:
+- [ ] **Step 1:** tc1/tc8 ОСТАВИТЬ (валидны); удалить `tc3_loop_is_one_pattern_cycle` и старый tc2; добавить tc2/tc3/tc9:
 
 ```rust
 #[test]
@@ -160,25 +183,34 @@ fn tc2_multi_cycle_capture() {
     let _ = e.handle_control(ControlEvent::MasterPlay);
     run(&mut e, steps(3));
     let _ = e.handle_control(ControlEvent::MasterRecord); // arm
-    run(&mut e, steps(13)); // до границы: старт (цикл 1 начался)
+    run(&mut e, steps(13)); // до границы: старт (играется цикл 1)
     assert!(matches!(e.looper.state, LooperState::Recording));
     // цикл 1: нота 60
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
     let _ = e.handle_control(ControlEvent::MasterRecord); // попросили закрыть
-    run(&mut e, steps(8)); // пол-цикла
-    // цикл 2: нота 67
+    // цикл 2 (закрывающий): нота 67 в ПОСЛЕДНЕЙ трети петли
+    run(&mut e, steps(10));
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 67, velocity: 100 });
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 67 });
-    run(&mut e, steps(8)); // граница: закрылось
+    run(&mut e, steps(6)); // граница: закрылось
     assert!(matches!(e.looper.state, LooperState::Playing), "closed at the boundary");
     // Петля = ровно 2 цикла
     assert!(
         (e.looper.loop_len_ticks() as i64 - 2 * 96000).abs() <= 64,
         "loop = 2 cycles: got {}", e.looper.loop_len_ticks()
     );
-    // Обе ноты записаны (on+off на каждую: >= 4 событий)
-    assert!(e.looper.len() >= 4, "notes from both cycles must be captured");
+    assert!(e.looper.len() >= 4, "notes from both cycles captured");
+    // TC-B: нота цикла 2 живёт во второй половине петли
+    {
+        let disp = e.looper.display();
+        let disp = disp.lock().unwrap();
+        let second_half = disp.events.iter()
+            .filter(|ev| ev.velocity > 0 && ev.position > 0.4)
+            .count();
+        assert!(second_half >= 2, "cycle-2 notes live in the second half");
+        let _ = disp; // держим guard до конца блока
+    }
 }
 
 #[test]
@@ -188,43 +220,25 @@ fn tc3_no_autoclose_without_second_press() {
     run(&mut e, steps(3));
     let _ = e.handle_control(ControlEvent::MasterRecord);
     run(&mut e, steps(13)); // старт
-    run(&mut e, steps(16) * 3); // 3 цикла игры
+    run(&mut e, steps(16) * 3); // 3 цикла без нажатий
     assert!(
         matches!(e.looper.state, LooperState::Recording | LooperState::Overdubbing),
         "no second press = still capturing"
     );
     let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть
-    run(&mut e, steps(16)); // следующая граница
+    run(&mut e, steps(16)); // закрывающая граница
     assert!(matches!(e.looper.state, LooperState::Playing));
+    // 4 цикла сыграно (стартовый + 3): total = cycles+1
     assert!(
         (e.looper.loop_len_ticks() as i64 - 4 * 96000).abs() <= 64,
         "4 cycles captured: got {}", e.looper.loop_len_ticks()
     );
 }
-```
 
-  ВАЖНО: `MidiEvent` уже в use-строке файла (проверить; если нет — добавить). tc1/tc4/tc5/tc8/tc3_loop_is_one_pattern_cycle(удалён)/старый tc2 — удалить/заменить; tc5 (MasterStop) оставить как есть. Названия: tc2_multi_cycle_capture, tc3_no_autoclose_without_second_press.
-
-- [ ] **Step 2: Позиции внутри петли (TC-B) + мультитрек (TC-H/I).** Внутри tc2 после закрытия добавить проверку через display:
-
-```rust
-    {
-        let disp = e.looper.display();
-        let disp = disp.lock().unwrap();
-        let second_cycle: Vec<_> = disp.events.iter()
-            .filter(|ev| ev.velocity > 0 && ev.position > 0.4)
-            .collect();
-        assert!(!second_cycle.is_empty(), "cycle-2 notes live in the second half");
-    }
-```
-
-  Новый тест-файл не нужен — TC-H/I в `tests/master_rec_sync.rs`:
-
-```rust
 #[test]
 fn tc9_multitrack_records_only_sounding_parts() {
     let mut e = engine();
-    // Сплит: part 0 = 0..59 (DSP, transpose +12), part 1 = 60..127 (DSP)
+    // Сплит: part 0 = 0..59 (transpose +12), part 1 = 60..127
     let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 1, enabled: true });
     let _ = e.handle_control(ControlEvent::SetPartRange { part: 0, min_note: 0, max_note: 59 });
     let _ = e.handle_control(ControlEvent::SetPartRange { part: 1, min_note: 60, max_note: 127 });
@@ -241,7 +255,6 @@ fn tc9_multitrack_records_only_sounding_parts() {
         e.handle_event(MidiEvent::NoteOff { channel: 0, note: n });
     }
     run(&mut e, 94);
-    // Перф-мультитрек: обе части в display с правильными тегами (on-события)
     {
         let disp = e.looper.display();
         let disp = disp.lock().unwrap();
@@ -249,7 +262,6 @@ fn tc9_multitrack_records_only_sounding_parts() {
         assert!(ons.iter().any(|ev| ev.note == 40 && ev.part_id == 0), "40 -> part 0");
         assert!(ons.iter().any(|ev| ev.note == 72 && ev.part_id == 1), "72 -> part 1");
         assert!(!ons.iter().any(|ev| ev.note == 40 && ev.part_id == 1), "40 must NOT tag part 1");
-        // Off-гигиена: ровно 2 offs (по одному на часть-держателя)
         let offs = disp.events.iter().filter(|ev| ev.velocity == 0).count();
         assert!(offs <= 4, "no 15-per-note garbage offs: got {offs}");
     }
@@ -259,9 +271,7 @@ fn tc9_multitrack_records_only_sounding_parts() {
 }
 ```
 
-  Проверить имена событий в плане по факту: `SetPartRange`/`SetPartTranspose`/`SetPartEnabled` существуют (есть в ControlEvent; SetPartRange имя уточнить grep-ом — если называется иначе, использовать фактическое).
-
-  ВАЖНО tc2/tc9 note-off порядок: offs для всех частей шлются движком, но looper-фильтр держит только держателя.
+  (MidiEvent в use провернуть; tc5/tc4 не трогать; tc2 Multi-cycle note 67 играет В закрывающем цикле — position > 0.4 валиден для 2-цикловой петли.)
 
 - [ ] **Step 3: Гейты + Commit**
 
