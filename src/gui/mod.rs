@@ -1082,26 +1082,25 @@ impl eframe::App for App {
         // panels in registration order (first bottom panel = the bottom-most
         // strip), so registering AFTER keyboard_panel puts this ABOVE the
         // keyboard/pads strip, and registering BEFORE CentralPanel makes the
-        // main field reflow instead of being overlapped.
+        // main field reflow instead of being overlapped. Колонки — ui.columns:
+        // allocate_ui в horizontal сворачивает высоту и разваливает раскладку,
+        // а ScrollArea без явных id_salt даёт коллизии ID.
         egui::TopBottomPanel::bottom("drum_seq_panel")
             .resizable(true)
             .default_height(500.0)
             .height_range(200.0..=760.0)
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    // Left column: drum sequencer (grid ~430px tall)
-                    ui.allocate_ui(egui::vec2(ui.available_width() * 0.58, ui.available_height()), |ui| {
-                        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                ui.columns(2, |cols| {
+                    egui::ScrollArea::vertical().auto_shrink(false)
+                        .id_salt("dock_drums_scroll")
+                        .show(&mut cols[0], |ui| {
                             self.draw_drum_seq_docked(ui);
                         });
-                    });
-                    ui.separator();
-                    // Right column: looper (transport/bars/quantize/timeline/layers)
-                    ui.allocate_ui(egui::vec2(ui.available_width(), ui.available_height()), |ui| {
-                        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    egui::ScrollArea::vertical().auto_shrink(false)
+                        .id_salt("dock_looper_scroll")
+                        .show(&mut cols[1], |ui| {
                             self.draw_looper(ui);
                         });
-                    });
                 });
             });
 
