@@ -112,6 +112,23 @@ fn switching_between_wavetable_patches_does_not_free_in_rt() {
 }
 
 #[test]
+fn lfo_sine_lut_does_not_allocate() {
+    use mini_midi_synth::synth::lfo::{Lfo, LfoWaveform};
+    // The 8 KB sine LUT is hit by every Sine tick AND by apply_deform at
+    // deform >= 0.5 for ANY waveform (lfo.rs apply_deform). Without warmup it
+    // is built lazily on the audio thread's first tick.
+    mini_midi_synth::synth::lfo::warmup_sine_lut();
+    let mut lfo = Lfo::new(SR);
+    assert_no_alloc(|| {
+        for _ in 0..64 {
+            // deform 0.8 exercises both LUT consumers
+            let _ = lfo.tick_with_deform(5.0, LfoWaveform::Sine, 0.8);
+            let _ = lfo.tick_with_deform(5.0, LfoWaveform::Triangle, 0.8);
+        }
+    });
+}
+
+#[test]
 fn wavetable_note_on_does_not_allocate() {
     // Built-in wavetable bank: every note-on used to rebuild the 8x256 table
     // (take_buf + Arc::new + 13312 sin()) and drop an empty placeholder Arc

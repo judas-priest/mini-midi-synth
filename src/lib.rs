@@ -147,6 +147,7 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     // built otherwise and the first build would land in the audio callback
     // (wavetable bank on the first note-on, LFO sine LUT on the first tick).
     synth::oscillator::warmup_builtin_wavetable();
+    synth::lfo::warmup_sine_lut();
 
     #[cfg(not(target_os = "android"))]
     let available_hosts = audio::available_hosts();
