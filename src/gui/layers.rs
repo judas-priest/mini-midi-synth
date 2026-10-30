@@ -96,6 +96,9 @@ impl App {
             }
         });
 
+        // ── Performance save/load (above part rows) ──────────────────────
+        self.draw_perf_row(ui);
+
         // ── Part rows (two zones) ────────────────────────────────────────
         let max_h = (ui.available_height() * 0.55).max(120.0);
         egui::ScrollArea::vertical()
@@ -176,9 +179,6 @@ impl App {
                 self.pending_remove_part = None;
             }
         }
-
-        // ── Performance save/load (above part rows) ──────────────────────
-        self.draw_perf_row(ui);
     }
 
     /// Performance save/load row (shown above part rows).
