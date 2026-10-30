@@ -43,7 +43,7 @@ Requirement (TECHDEBT #32 фаза 1-2, сужено до варианта А): 
 **Files:**
 - Modify: `src/synth/mod.rs` (enum ControlEvent ~203-284; impl SynthEngine — рядом с looper-хендлерами ~2373-2440; `seq_target` init ~1204; pad/keys роутинг 1783-1829)
 
-- [ ] **Step 1: Три варианта ControlEvent.** Рядом с `LooperUndo` (~225):
+- [x] **Step 1: Три варианта ControlEvent.** Рядом с `LooperUndo` (~225):
 
 ```rust
     /// Master transport (#32): toggle play drums + looper together
@@ -54,7 +54,7 @@ Requirement (TECHDEBT #32 фаза 1-2, сужено до варианта А): 
     MasterRecord,
 ```
 
-- [ ] **Step 2: Методы SynthEngine** (в `impl SynthEngine`, рядом с `record_for_looper` ~1676). Понадобится `use` — путь `LooperState` уже резолвится в mod.rs (`crate::synth::looper::LooperState`):
+- [x] **Step 2: Методы SynthEngine** (в `impl SynthEngine`, рядом с `record_for_looper` ~1676). Понадобится `use` — путь `LooperState` уже резолвится в mod.rs (`crate::synth::looper::LooperState`):
 
 ```rust
     /// Master transport (#32): start both transports (drums + looper).
@@ -132,7 +132,7 @@ Requirement (TECHDEBT #32 фаза 1-2, сужено до варианта А): 
     }
 ```
 
-- [ ] **Step 3: handle_control arms** (рядом с лупер-ветками ~2373-2396; return None — heap-полей нет):
+- [x] **Step 3: handle_control arms** (рядом с лупер-ветками ~2373-2396; return None — heap-полей нет):
 
 ```rust
             ControlEvent::MasterPlay => {
@@ -149,7 +149,7 @@ Requirement (TECHDEBT #32 фаза 1-2, сужено до варианта А): 
             }
 ```
 
-- [ ] **Step 4: Роутинг пэдов/клавиш (target 2).** В `handle_event`:
+- [x] **Step 4: Роутинг пэдов/клавиш (target 2).** В `handle_event`:
   - Блок 123/82 (~1788-1801): заменить `if target == 0 { ... } else { ... }` на:
 
 ```rust
@@ -187,9 +187,9 @@ Requirement (TECHDEBT #32 фаза 1-2, сужено до варианта А): 
                     }
 ```
 
-- [ ] **Step 5: Дефолт target = 2.** `seq_target` init — объявление поля ~1204, конструктор ~1470: `Arc::new(AtomicU8::new(1))` → `Arc::new(AtomicU8::new(2))`.
+- [x] **Step 5: Дефолт target = 2.** `seq_target` init — объявление поля ~1204, конструктор ~1470: `Arc::new(AtomicU8::new(1))` → `Arc::new(AtomicU8::new(2))`.
 
-- [ ] **Step 6: Тесты (TDD — писать ДО Step 1-5, прогнать красными, потом зелёными).** Создать `tests/master_transport.rs` (харнесс — копия setup из tests/console_transport.rs):
+- [x] **Step 6: Тесты (TDD — писать ДО Step 1-5, прогнать красными, потом зелёными).** Создать `tests/master_transport.rs` (харнесс — копия setup из tests/console_transport.rs):
 
 ```rust
 //! Master transport (#32): Play/Rec/Stop drive drums + looper together.
@@ -341,9 +341,9 @@ fn tc8b_ch9_pads_still_play_drums_at_master_target() {
 }
 ```
 
-- [ ] **Step 7: Прогнать:** `cargo test --test master_transport` — сначала RED (нет вариантов/методов — не компилируется), после Step 1-5 — GREEN. Затем полный гейт: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety` (console_transport.rs обязан остаться зелёным — TC7).
+- [x] **Step 7: Прогнать:** `cargo test --test master_transport` — сначала RED (нет вариантов/методов — не компилируется), после Step 1-5 — GREEN. Затем полный гейт: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety` (console_transport.rs обязан остаться зелёным — TC7).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/synth/mod.rs tests/master_transport.rs
@@ -355,7 +355,7 @@ git commit -m "feat: master transport — Play/Rec/Stop drive drums + looper tog
 **Files:**
 - Modify: `src/gui/drums.rs` (draw_drum_seq_docked, ~18-66 — перед существующей транспортной строкой)
 
-- [ ] **Step 1: Master-строка.** Вставить ПЕРЕД существующим `ui.horizontal` с Play/Rec драм-секвенсора (~строка 25):
+- [x] **Step 1: Master-строка.** Вставить ПЕРЕД существующим `ui.horizontal` с Play/Rec драм-секвенсора (~строка 25):
 
 ```rust
         // ── Master transport (#32): drums + looper together ──────────────
@@ -400,13 +400,13 @@ git commit -m "feat: master transport — Play/Rec/Stop drive drums + looper tog
 
   Проверить импорты drums.rs: `ControlEvent` уже в scope (там пушатся DrumSeq*), `self.looper_atoms`, `self.drum_playing`, `self.drum_recording`, `self.ctrl_tx` — существующие поля App.
 
-- [ ] **Step 2: Гейты**
+- [x] **Step 2: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/gui/drums.rs
@@ -422,9 +422,9 @@ git commit -m "feat: master transport row in docked sequencer panel"
 - Modify: `src/gui/led_console.rs` (menu slot 3 цвет ~226)
 - Modify: `src/lib.rs` (headless evdev: SwitchPart ~552, ToggleDrumsSynth ~573-575)
 
-- [ ] **Step 1: Инвентаризация записей.** Grep `seq_target_atom.store` и `seq_target_local.store` по src/gui и src/lib.rs. Правила: `store(0, …)` (явный выбор drums-транспорта: Drums-вкладка и headless) ОСТАВИТЬ; все остальные `store(1, …)` заменить на `store(2, …)` — включая src/lib.rs:552 (headless SwitchPart). Каждое место перечислить в отчёте. Заодно обновить устаревшие doc-комментарии: mod.rs:1203 («0 = drums, 1 = looper» → добавить «2 = master, default»), mod.rs:1470 («default: looper…» → «default: master»), led_console.rs:49 («drums <-> looper» → «drums -> looper -> master cycle»).
+- [x] **Step 1: Инвентаризация записей.** Grep `seq_target_atom.store` и `seq_target_local.store` по src/gui и src/lib.rs. Правила: `store(0, …)` (явный выбор drums-транспорта: Drums-вкладка и headless) ОСТАВИТЬ; все остальные `store(1, …)` заменить на `store(2, …)` — включая src/lib.rs:552 (headless SwitchPart). Каждое место перечислить в отчёте. Заодно обновить устаревшие doc-комментарии: mod.rs:1203 («0 = drums, 1 = looper» → добавить «2 = master, default»), mod.rs:1470 («default: looper…» → «default: master»), led_console.rs:49 («drums <-> looper» → «drums -> looper -> master cycle»).
 
-- [ ] **Step 2: ToggleTransportTarget — цикл трёх целей.** В `execute_console_action` (~2002-2008) заменить flip 0↔1 на цикл (лог сохранить):
+- [x] **Step 2: ToggleTransportTarget — цикл трёх целей.** В `execute_console_action` (~2002-2008) заменить flip 0↔1 на цикл (лог сохранить):
 
 ```rust
             led_console::Action::ToggleTransportTarget => {
@@ -436,7 +436,7 @@ git commit -m "feat: master transport row in docked sequencer panel"
             }
 ```
 
-- [ ] **Step 3: LED — цвет цели и статус низа.**
+- [x] **Step 3: LED — цвет цели и статус низа.**
   - led_console.rs ~226 (Menu slot 3 — показывает текущую цель):
 
 ```rust
@@ -472,7 +472,7 @@ git commit -m "feat: master transport row in docked sequencer panel"
             };
 ```
 
-- [ ] **Step 3b: Headless ToggleDrumsSynth (src/lib.rs ~572-577).** Точный код сейчас:
+- [x] **Step 3b: Headless ToggleDrumsSynth (src/lib.rs ~572-577).** Точный код сейчас:
 
 ```rust
                     KeyAction::ToggleDrumsSynth => {
@@ -496,7 +496,7 @@ git commit -m "feat: master transport row in docked sequencer panel"
 
 (И в Step 1: `seq_target_local.store(1, …)` в SwitchPart (lib.rs:552) → `store(2, …)` — правило из Step 1 распространяется на `seq_target_local` тоже.)
 
-- [ ] **Step 4: Гейты**
+- [x] **Step 4: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
@@ -504,7 +504,7 @@ cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features
 
 (led_console selftest — `cargo test led_console` входит в cargo test.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/gui/mod.rs src/gui/layers.rs src/gui/settings.rs src/gui/led_console.rs src/lib.rs
@@ -516,13 +516,13 @@ git commit -m "feat: seq_target gains MASTER (2) as default; LED console 3-targe
 **Files:**
 - Modify: `docs/TECHDEBT.md` (#32)
 
-- [ ] **Step 1: Полные гейты**
+- [x] **Step 1: Полные гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety && cargo build --release
 ```
 
-- [ ] **Step 2: Дописать в #32 (после «Phase 1 (clock): ВЫПОЛНЕНО…»):**
+- [x] **Step 2: Дописать в #32 (после «Phase 1 (clock): ВЫПОЛНЕНО…»):**
 
 ```markdown
 Phase 2 (master transport, вариант А): ВЫПОЛНЕНО (2026-10-30) — MasterPlay/
@@ -543,7 +543,7 @@ MasterStop/MasterRecord; seq_target=2 MASTER (новый дефолт); пэды
   из Task 2 туда перенести.
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/TECHDEBT.md
