@@ -19,7 +19,7 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
 1. **TC-A Мультицикл:** arm → старт на границе → цикл 1: нота 60 (part 0) → Rec (finish_pending) → цикл 2: нота 67 → на границе закрылось → `Playing`, `loop_len_ticks == 2 * cycle_ticks` (96000*2 при 4/4 120BPM), обе ноты в лупере (`len >= 4` с учётом off-событий).
 2. **TC-B Позиции внутри петли:** ноты цикла 2 сидят в ПОЛОВИНЕ петли (pos fraction 0.5..1.0) — мультицикл реально удлинил петлю, а не перезаписал первый цикл.
 3. **TC-C Без второго Rec — не закрывается:** arm → старт → 3 цикла игры → всё ещё `Recording/Overdubbing`, len растёт с каждым циклом (события пишутся).
-4. **TC-D Rec после закрытия = overdub** (остаётся): Rec на Playing → Overdubbing; закрытие на границе с `finish_pending` → петля прежней длины.
+4. **TC-D Rec после закрытия = overdub** (остаётся): Rec на Playing → ARM-ветка → free-путь (лупер не Idle) → немедленный Overdubbing; следующий Rec закрывает немедленно, длина петли не меняется.
 5. **TC-E MasterStop во время мультицикл-захвата:** всё останавливает, pending снят.
 6. **TC-F ARMED-ноты не пишутся** (документируем): нота между нажатием и границей — не попадает в лупер.
 7. **TC-G Free-режим не изменился** (tests/master_transport.rs зелёные без правок).
@@ -77,13 +77,17 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
                 let samples_per_step = (self.sample_rate as f64 * 60.0) / (bpm as f64 * 4.0);
                 self.looper_cycle_ticks = (pattern_len as f64 * samples_per_step) as u32;
                 self.looper.set_loop_len_ticks(self.looper_cycle_ticks);
-                self.looper_rec_cycles = 1;
+                self.looper_rec_cycles = 0;
             } else if boundary && capturing {
                 if self.looper_finish_pending {
                     // Закрыть: петля = сыгранные целые циклы. cycles = полных
                     // циклов ДО этой границы; закрывающая граница завершает
                     // ещё один → total = cycles + 1 (иначе петля короче игры).
                     let total = self.looper_rec_cycles.saturating_add(1);
+                    // РЕЛОКАЦИЯ: во время захвата лупер оборачивался каждый
+                    // цикл (layer_id = номер круга, тики локальные 0..cycle).
+                    // Сдвинуть события круга k на k*cycle — глобальные тики.
+                    self.looper.relocate_layers(self.looper_cycle_ticks);
                     self.looper.set_loop_len_ticks(
                         total.saturating_mul(self.looper_cycle_ticks));
                     self.looper_finish_pending = false;
@@ -163,7 +167,7 @@ Requirement (юзер, 2026-10-31): «не пишет ноты, не пишет 
         }
 ```
 
-  (перед формированием event; на off НЕ чистим слот здесь — чистит replay/wrap путь как раньше; двойной off на ту же часть — второй запишется как off без держателя... для чистоты: после записи off-события 清ить нельзя (replay зависит) — ОСТАВИТЬ как в сниппете: фильтр только на входе, слот перезаписывается следующим on. Второй одинаковый off = безвредный no-op при реплее.)
+  (перед формированием event; слот чистится на записанном off — ревью Minor #6: иначе wrap Overdubbing выпускает forced-off по несуществующей ноте. Replay-путь manages свои слоты на fire-time независимо.)
 
 - [ ] **Step 4: Гейты**
 
