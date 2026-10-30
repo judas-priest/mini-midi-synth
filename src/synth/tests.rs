@@ -917,6 +917,61 @@ fn steal_prefers_releasing_voice() {
         "old stealer would have taken voice 36");
 }
 
+// ── Voice stealing: Poly-High / Poly-Low / oldest-first (audit S0) ────
+
+fn part_with_mode(play_mode: f32) -> Part {
+    let mut p = Part::new(48_000.0);
+    p.enabled = true; // note_on bails on !enabled (mod.rs:613... now 617)
+    p.params.play_mode = play_mode;
+    p
+}
+
+/// Occupy ALL 8 voices (VOICES_PER_LAYER, mod.rs:381) with sustained notes
+/// 36..44 pressed in order — nothing releasing, ages strictly increasing.
+fn fill_voices(p: &mut Part) {
+    for n in 36..36 + p.voices.len() as u8 {
+        p.note_on(n, 100);
+    }
+}
+
+#[test]
+fn poly_high_steals_the_lowest_note() {
+    // play_mode 4: highest note wins -> lowest (36) is stolen (mod.rs:717-723)
+    let mut p = part_with_mode(4.0);
+    fill_voices(&mut p);
+    p.note_on(80, 100);
+    assert!(p.voices.iter().any(|v| v.note == 80), "new note must sound");
+    assert!(!p.voices.iter().any(|v| v.src_note == 36), "lowest note 36 must be stolen");
+    let hi = p.voices.iter().find(|v| v.src_note == 43).expect("highest note 43 must survive");
+    assert!(hi.active && hi.note == 43, "surviving voice must still sound note 43");
+}
+
+#[test]
+fn poly_low_steals_the_highest_note() {
+    // play_mode 5: lowest note wins -> highest (43) is stolen (mod.rs:725-730)
+    let mut p = part_with_mode(5.0);
+    fill_voices(&mut p);
+    p.note_on(80, 100);
+    assert!(p.voices.iter().any(|v| v.note == 80), "new note must sound");
+    assert!(!p.voices.iter().any(|v| v.src_note == 43), "highest note 43 must be stolen");
+    let lo = p.voices.iter().find(|v| v.src_note == 36).expect("lowest note 36 must survive");
+    assert!(lo.active && lo.note == 36, "surviving voice must still sound note 36");
+}
+
+#[test]
+fn default_poly_steals_the_oldest_sustained_voice() {
+    // No releasing voices -> oldest sustained (first pressed, 36) dies;
+    // JUCE-style order, mod.rs:736-743. (Releasing-first is covered by
+    // steal_prefers_releasing_voice above.)
+    let mut p = part_with_mode(0.0);
+    fill_voices(&mut p);
+    p.note_on(80, 100);
+    assert!(p.voices.iter().any(|v| v.note == 80), "new note must sound");
+    assert!(!p.voices.iter().any(|v| v.src_note == 36), "oldest voice (36) must be stolen");
+    let recent = p.voices.iter().find(|v| v.src_note == 43).expect("newest voice 43 must survive");
+    assert!(recent.active && recent.note == 43);
+}
+
 // ── SF2 no-op mode switch (seamless perf switch) ───────────────
 
 #[test]
