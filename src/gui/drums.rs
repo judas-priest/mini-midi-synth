@@ -21,7 +21,12 @@ impl App {
 
 
 
-        // ── Master transport (#32): drums + looper together ──────────────
+        // ── Single master transport (#32 фаза 4) ─────────────────────────
+        let looper_undo_avail = {
+            let a = &self.looper_atoms;
+            a.layer_count.load(std::sync::atomic::Ordering::Relaxed) > 1
+                && a.event_count.load(std::sync::atomic::Ordering::Relaxed) > 0
+        };
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Master").strong().small());
             let lstate = crate::synth::looper::LooperState::from_u8(
@@ -31,51 +36,20 @@ impl App {
                 | crate::synth::looper::LooperState::Overdubbing
                 | crate::synth::looper::LooperState::Recording);
             let any_playing = self.drum_playing || looper_active;
-            if ui.selectable_label(any_playing, "\u{25B6} Play")
-                .on_hover_text("Master play: drums + looper together").clicked()
-            {
+            let play_label = if any_playing { "\u{23F9} Stop" } else { "\u{25B6} Play" };
+            if ui.button(play_label).on_hover_text("Master: drums + looper together").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterPlay);
             }
             let rec = self.drum_recording
                 || matches!(lstate,
                     crate::synth::looper::LooperState::Recording
                     | crate::synth::looper::LooperState::Overdubbing);
-            if ui.selectable_label(rec, "\u{26AB} Rec")
+            let rec_label = if rec { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
+            let rec_color = if rec { egui::Color32::RED } else { egui::Color32::GRAY };
+            if ui.button(egui::RichText::new(rec_label).color(rec_color))
                 .on_hover_text("Master record: arm drums pattern + looper (all parts)").clicked()
             {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
-            }
-            if ui.button("Stop").on_hover_text("Master stop: stop both, drain notes").clicked() {
-                let _ = self.ctrl_tx.push(ControlEvent::MasterStop);
-            }
-            ui.separator();
-            // engine status words (цвет = состояние; глифы ● / ■ в шрифте
-            // отсутствуют — текстовые статусы вместо точек)
-            ui.colored_label(
-                if self.drum_playing { egui::Color32::from_rgb(40, 200, 80) } else { egui::Color32::GRAY },
-                "drums",
-            );
-            ui.colored_label(
-                if looper_active { egui::Color32::from_rgb(40, 200, 80) } else { egui::Color32::GRAY },
-                "looper",
-            );
-        });
-
-        // Transport controls — same layout as looper
-        ui.horizontal(|ui| {
-            // Play/Stop
-            let play_label = if self.drum_playing { "\u{23F9} Stop" } else { "\u{25B6} Play" };
-            if ui.button(play_label).clicked() {
-                self.drum_playing = !self.drum_playing;
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPlay { playing: self.drum_playing });
-            }
-
-            // Rec
-            let rec_label = if self.drum_recording { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
-            let rec_color = if self.drum_recording { egui::Color32::RED } else { egui::Color32::GRAY };
-            if ui.button(egui::RichText::new(rec_label).color(rec_color)).clicked() {
-                self.drum_recording = !self.drum_recording;
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqRecord { recording: self.drum_recording });
             }
 
             // Downbeat flash indicator (lights ~150 ms after beat 1)
@@ -90,18 +64,28 @@ impl App {
                 else { egui::Color32::from_gray(45) },
             );
 
-            // Undo / Clear
-            if ui.button("Undo").on_hover_text("Undo last edit").clicked() {
+            if ui.button("Undo").on_hover_text("Undo last sequencer edit").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqUndo);
             }
             if ui.button("Clear").on_hover_text("Clear all steps").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
+            }
+            if ui.add_enabled(looper_undo_avail, egui::Button::new("L-Undo"))
+                .on_hover_text("Undo last looper layer").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
             }
 
             ui.separator();
             ui.label("BPM:");
             if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_bpm });
+            }
+            // Паттерн мутации поля — как drum_bpm выше (capture &mut self).
+            // Персист обязателен: старый чекбокс звал save_global_to_config().
+            if ui.checkbox(&mut self.drum_metronome, "Metro").on_hover_text("Metronome click on beats").changed() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
+                self.save_global_to_config();
             }
         });
 
@@ -314,8 +298,8 @@ impl App {
         }
     }
 
-    /// Drums-tab-only controls (TECHDEBT #25): mix row (Swing/Vol/V127/Metro,
-    /// BPM lives in the docked transport row), pad-remap toggle, kit save/load,
+    /// Drums-tab-only controls (TECHDEBT #25): mix row (Swing/Vol/V127,
+    /// BPM/Metro live in the docked transport row), pad-remap toggle, kit save/load,
     /// MIDI import. The grid and transport live in the docked bottom panel
     /// (draw_drum_seq_docked).
     pub(super) fn draw_drum_kit_controls(&mut self, ui: &mut egui::Ui) {
@@ -338,12 +322,6 @@ impl App {
                 .on_hover_text("Fixed velocity: every hit triggers at max (127). For controllers without velocity.").changed()
             {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
-                self.save_global_to_config();
-            }
-            if ui.checkbox(&mut self.drum_metronome, "Metro")
-                .on_hover_text("Metronome: click on every beat while the sequencer plays (accent on beat 1)").changed()
-            {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
                 self.save_global_to_config();
             }
         });
@@ -830,33 +808,6 @@ impl App {
 
         // --- Row 1: Transport + Status ---
         ui.horizontal(|ui| {
-            let play_label = match state {
-                LooperState::Playing | LooperState::Overdubbing => "\u{23F9} Stop",
-                _ => "\u{25B6} Play",
-            };
-            if ui.button(play_label).clicked() {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperTogglePlay);
-            }
-
-            let is_rec = matches!(state, LooperState::Recording | LooperState::Overdubbing);
-            let rec_label = if is_rec { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
-            let rec_color = if is_rec { egui::Color32::RED } else { egui::Color32::GRAY };
-            if ui.button(egui::RichText::new(rec_label).color(rec_color)).clicked() {
-                match state {
-                    LooperState::Idle | LooperState::Playing => {
-                        let _ = self.ctrl_tx.push(ControlEvent::LooperRecord);
-                    }
-                    LooperState::Recording | LooperState::Overdubbing => {
-                        let _ = self.ctrl_tx.push(ControlEvent::LooperStopRecord);
-                    }
-                }
-            }
-
-            let undo_label = if layer_count > 1 { format!("Undo L{layer_count}") } else { "Undo".into() };
-            if ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new(undo_label)).clicked() {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
-            }
-
             let clear_pending = self.looper_clear_confirm
                 .map(|t| t.elapsed().as_secs_f32() < 2.0).unwrap_or(false);
             let clear_label = if clear_pending { "Sure?" } else { "Clear" };
