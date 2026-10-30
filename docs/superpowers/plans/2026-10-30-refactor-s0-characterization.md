@@ -64,7 +64,7 @@ cargo deny check
 5. **TC5** `golden_engine_fx_chain_slots` — движок + init-патч со слотами fx0_type = Delay(13)/Chorus(7)/SpringReverb(17)/Nimbus(19)/Vocoder(26), mix 0.5, note-on, 0.25 c → `tests/golden/fx_chain_engine_hashes.txt`. Пин уровней «слот → движок» перед S3 (консолидация FX).
 6. **TC6** `note_on_guarded_for_every_oscillator_family` — 29 семейств осцилляторов (osc_type 0..26, 28, 29; **27 = Wavetable исключён — покрывает QW-план**): под `assert_no_alloc` NoteOn + 4 блока + NoteOff + 8 блоков. Policy при RED — в Task 2 Step 4 (не чинить, изолировать в `#[ignore]`).
 7. **TC7** `tick_block_with_active_fx_chain_does_not_allocate` — init-патч + `fx0_type=13` (Delay) + mix 0.5, NoteOn, 128 блоков под guard'ом.
-8. **TC8** `tick_block_with_lfo_deform_does_not_allocate` — init-патч + `lfo_deform=0.8` (LUT-путь `apply_deform` для ЛЮБОЙ волны, lfo.rs:286), NoteOn, 64 блока под guard'ом. (Дополняет QW2-unit-тест, см. «Разделение».)
+8. **TC8** `tick_block_with_lfo_deform_does_not_allocate` — init-патч + `lfo_deform=0.8` + `lfo_amp_depth=0.5` (LFO1 тикается только при depth-ключе — mod.rs:2758–2763; LUT-путь `apply_deform` для ЛЮБОЙ волны, lfo.rs:286), NoteOn, прогрев ленивой LUT вне guard'а (OnceLock 8 KiB, lfo.rs:6–18 — тот же one-time cost, что греет QW2-unit-тест), затем 64 блока под guard'ом. (Дополняет QW2-unit-тест, см. «Разделение».)
 9. **TC9** `set_sample_rate_is_allocation_free` — **KNOWN-RED, `#[ignore]`**: `engine.set_sample_rate(96000)` под guard'ом. Сегодня реаллоцирует 30+ FX (`reverb.rs:298-300` `*self = Self::new` + vec!-delay-lines, chorus.rs:73, spring_reverb.rs:82–85) и делает save/restore-танец 13 полей в drum.rs:1054–1090. Снять ignore после S1.
 10. **TC10** `drum_set_sample_rate_is_allocation_free` — **KNOWN-RED, `#[ignore]`**: `engine.drum_engine.set_sample_rate(96000)` под guard'ом. Сегодня `*self = Self::new(sr)` (drum.rs:1054–1090) аллоцирует 3 Arc-атома (drum.rs:1009–1011) + Vec голосов в callback'е. Снять ignore после S1.
 11. **TC11** `quantize_grids_round_to_nearest` — Quarter/Eighth/Sixteenth/Off, округление к ближайшей линии сетки (120 BPM @ 48k: beat 24000; quarter 24000, eighth 12000, sixteenth 6000).
@@ -224,51 +224,52 @@ fn check_golden(file: &str, entries: &[(String, u64)]) {
 type StereoFx = Box<dyn FnMut(f32, f32) -> (f32, f32)>;
 
 /// The FX families named by the audit S0 gap list. Two parameter sets each.
-fn fx_modules() -> Vec<(&'static str, Vec<StereoFx>)> {
+type FxFactory = Box<dyn Fn() -> StereoFx>;
+fn fx_modules() -> Vec<(&'static str, Vec<FxFactory>)> {
     vec![
         ("chorus", vec![
-            Box::new({ let mut m = chorus::Chorus::new(SR); move |l, _r| m.tick(l, 0.5) }),
-            Box::new({ let mut m = chorus::Chorus::new(SR); move |l, _r| m.tick(l * 0.5 + 0.1, 0.9) }),
+            Box::new(|| Box::new({ let mut m = chorus::Chorus::new(SR); move |l, _r| m.tick(l, 0.5) })),
+            Box::new(|| Box::new({ let mut m = chorus::Chorus::new(SR); move |l, _r| m.tick(l * 0.5 + 0.1, 0.9) })),
         ]),
         ("delay", vec![
-            Box::new({ let mut m = delay::StereoDelay::new(SR); move |l, r| m.tick(l, r, 0.3, 0.4, 0.4, 0.5, false, 0.4) }),
-            Box::new({ let mut m = delay::StereoDelay::new(SR); move |l, r| m.tick(l, r, 0.6, 0.2, 0.7, 0.3, true, 0.8) }),
+            Box::new(|| Box::new({ let mut m = delay::StereoDelay::new(SR); move |l, r| m.tick(l, r, 0.3, 0.4, 0.4, 0.5, false, 0.4) })),
+            Box::new(|| Box::new({ let mut m = delay::StereoDelay::new(SR); move |l, r| m.tick(l, r, 0.6, 0.2, 0.7, 0.3, true, 0.8) })),
         ]),
         ("reverb", vec![
-            Box::new({ let mut m = reverb::Reverb::new(SR); move |l, r| m.tick(l, r, 0.6, 0.4, 0.8, 0.1, 0.4) }),
-            Box::new({ let mut m = reverb::Reverb::new(SR); move |l, r| m.tick(l, r, 0.9, 0.2, 1.0, 0.3, 0.9) }),
+            Box::new(|| Box::new({ let mut m = reverb::Reverb::new(SR); move |l, r| m.tick(l, r, 0.6, 0.4, 0.8, 0.1, 0.4) })),
+            Box::new(|| Box::new({ let mut m = reverb::Reverb::new(SR); move |l, r| m.tick(l, r, 0.9, 0.2, 1.0, 0.3, 0.9) })),
         ]),
         ("spring_reverb", vec![
-            Box::new({ let mut m = spring_reverb::SpringReverb::new(SR); move |l, r| m.tick(l, r, 0.7, 0.6, 0.5, 0.3, 0.2, 0.0, 0.4) }),
-            Box::new({ let mut m = spring_reverb::SpringReverb::new(SR); move |l, r| m.tick(l, r, 0.3, 0.9, 0.8, 0.1, 0.8, 0.5, 0.7) }),
+            Box::new(|| Box::new({ let mut m = spring_reverb::SpringReverb::new(SR); move |l, r| m.tick(l, r, 0.7, 0.6, 0.5, 0.3, 0.2, 0.0, 0.4) })),
+            Box::new(|| Box::new({ let mut m = spring_reverb::SpringReverb::new(SR); move |l, r| m.tick(l, r, 0.3, 0.9, 0.8, 0.1, 0.8, 0.5, 0.7) })),
         ]),
         ("vocoder", vec![
-            Box::new({ let mut m = vocoder::Vocoder::new(SR); move |l, r| m.tick(l, r, (l + r) * 0.5, 0.5, 0.1, 0.6) }),
-            Box::new({ let mut m = vocoder::Vocoder::new(SR); move |l, r| m.tick(l, r, l.abs(), 0.9, 0.4, 0.9) }),
+            Box::new(|| Box::new({ let mut m = vocoder::Vocoder::new(SR); move |l, r| m.tick(l, r, (l + r) * 0.5, 0.5, 0.1, 0.6) })),
+            Box::new(|| Box::new({ let mut m = vocoder::Vocoder::new(SR); move |l, r| m.tick(l, r, l.abs(), 0.9, 0.4, 0.9) })),
         ]),
         ("nimbus", vec![
-            Box::new({ let mut m = nimbus::Nimbus::new(SR); move |l, r| m.tick(l, r, 0.3, 0.4, 0.5, 0.5, 0.3, 0.2, 0.5) }),
-            Box::new({ let mut m = nimbus::Nimbus::new(SR); move |l, r| m.tick(l, r, 0.8, 0.9, 0.2, 0.9, 0.7, 0.6, 0.9) }),
+            Box::new(|| Box::new({ let mut m = nimbus::Nimbus::new(SR); move |l, r| m.tick(l, r, 0.3, 0.4, 0.5, 0.5, 0.3, 0.2, 0.5) })),
+            Box::new(|| Box::new({ let mut m = nimbus::Nimbus::new(SR); move |l, r| m.tick(l, r, 0.8, 0.9, 0.2, 0.9, 0.7, 0.6, 0.9) })),
         ]),
         ("combulator", vec![
-            Box::new({ let mut m = combulator::Combulator::new(SR); move |l, r| m.tick(l, r, 0.4, 0.5, 0.5, 0.3, 0.6, 0.5) }),
-            Box::new({ let mut m = combulator::Combulator::new(SR); move |l, r| m.tick(l, r, 0.8, 0.2, 0.7, 0.8, 0.3, 0.9) }),
+            Box::new(|| Box::new({ let mut m = combulator::Combulator::new(SR); move |l, r| m.tick(l, r, 0.4, 0.5, 0.5, 0.3, 0.6, 0.5) })),
+            Box::new(|| Box::new({ let mut m = combulator::Combulator::new(SR); move |l, r| m.tick(l, r, 0.8, 0.2, 0.7, 0.8, 0.3, 0.9) })),
         ]),
         ("resonator", vec![
-            Box::new({ let mut m = resonator::Resonator::new(SR); move |l, r| m.tick((l + r) * 0.5, 0.6) }),
-            Box::new({ let mut m = resonator::Resonator::new(SR); move |l, r| m.tick((l - r) * 0.5, 0.95) }),
+            Box::new(|| Box::new({ let mut m = resonator::Resonator::new(SR); move |l, r| m.tick((l + r) * 0.5, 0.6) })),
+            Box::new(|| Box::new({ let mut m = resonator::Resonator::new(SR); move |l, r| m.tick((l - r) * 0.5, 0.95) })),
         ]),
         ("exciter", vec![
-            Box::new({ let mut m = exciter::Exciter::new(SR); move |l, r| m.tick(l, r, 0.5, 0.5, 0.4, 0.4) }),
-            Box::new({ let mut m = exciter::Exciter::new(SR); move |l, r| m.tick(l, r, 0.9, 0.8, 0.9, 0.8) }),
+            Box::new(|| Box::new({ let mut m = exciter::Exciter::new(SR); move |l, r| m.tick(l, r, 0.5, 0.5, 0.4, 0.4) })),
+            Box::new(|| Box::new({ let mut m = exciter::Exciter::new(SR); move |l, r| m.tick(l, r, 0.9, 0.8, 0.9, 0.8) })),
         ]),
         ("bonsai", vec![
-            Box::new({ let mut m = bonsai::Bonsai::new(SR); move |l, r| m.tick(l, r, 0.5, 0.5, 0.5, bonsai::BonsaiMode::from_param(0.3), 0.5) }),
-            Box::new({ let mut m = bonsai::Bonsai::new(SR); move |l, r| m.tick(l, r, 0.9, 0.2, 0.8, bonsai::BonsaiMode::from_param(0.8), 0.9) }),
+            Box::new(|| Box::new({ let mut m = bonsai::Bonsai::new(SR); move |l, r| m.tick(l, r, 0.5, 0.5, 0.5, bonsai::BonsaiMode::from_param(0.3), 0.5) })),
+            Box::new(|| Box::new({ let mut m = bonsai::Bonsai::new(SR); move |l, r| m.tick(l, r, 0.9, 0.2, 0.8, bonsai::BonsaiMode::from_param(0.8), 0.9) })),
         ]),
         ("neuron", vec![
-            Box::new({ let mut m = neuron::Neuron::new(SR); move |l, r| m.tick(l, r, 0.5, 0.4, 0.3, 0.0, 0.5, 0.6, 0.5, 0.4) }),
-            Box::new({ let mut m = neuron::Neuron::new(SR); move |l, r| m.tick(l, r, 0.9, 0.8, 0.7, 0.2, 0.1, 0.3, 0.9, 0.8) }),
+            Box::new(|| Box::new({ let mut m = neuron::Neuron::new(SR); move |l, r| m.tick(l, r, 0.5, 0.4, 0.3, 0.0, 0.5, 0.6, 0.5, 0.4) })),
+            Box::new(|| Box::new({ let mut m = neuron::Neuron::new(SR); move |l, r| m.tick(l, r, 0.9, 0.8, 0.7, 0.2, 0.1, 0.3, 0.9, 0.8) })),
         ]),
     ]
 }
@@ -290,26 +291,19 @@ fn render_fx(fx: &mut StereoFx) -> (u64, f32) {
 #[test]
 fn fx_modules_render_bit_deterministic() {
     // ВАЖНО: все FX stateful (delay lines, LFO phase, reverb buffers) —
-    // determinism проверяется на ДВУХ СВЕЖИХ инстансах одного param-set.
-    // fx_modules() → factories: Vec<(name, Vec<Factory>)>, Factory = замыкание,
-    // создающее новый Box<dyn StereoFx>. Если текущая fx_modules() возвращает
-    // готовые инстансы — РЕФАКТОРИНГ хелпера в фабричную форму (это test-support,
-    // допустимо) ИЛИ второй проход: пересоздать variants перед каждым рендером.
-    for (name, mut variants) in fx_modules() {
-        for (set, fx) in variants.iter_mut().enumerate() {
-            // render #1
-            let (a, peak_a) = render_fx(fx);
-            // render #2: НЕДОПУСТИМО продолжать тот же инстанс — stateful.
-            // Решение: fx_modules() отдаёт Factory; здесь два раза factory().
-            // Если фабричная форма требует слишком большого рефакторинга
-            // fx_modules() — допустимый fallback: ОДИН инстанс, но между
-            // рендерами полный reset через пересоздание ТОЛЬКО параметр-сета
-            // (то есть variants создаётся заново) — задокументировать выбор.
-            let (b, peak_b) = render_fx(fx);
+    // детерминизм проверяется на ДВУХ СВЕЖИХ инстансах одного param-set:
+    // fx_modules() отдаёт фабрики, каждая создаёт новый Box<dyn FnMut>.
+    // Рендерить один и тот же инстанс дважды НЕЛЬЗЯ — второй проход получит
+    // другое состояние (delay lines не пустые) и тест был бы ложным RED.
+    for (name, variants) in fx_modules() {
+        for (set, factory) in variants.iter().enumerate() {
+            let mut fx = factory();
+            let (a, peak_a) = render_fx(&mut fx);
+            let mut fx2 = factory();
+            let (b, _) = render_fx(&mut fx2);
             assert_eq!(a, b, "fx '{name}' set {set}: not bit-deterministic across two fresh instances");
             assert!(peak_a > 1e-4, "fx '{name}' set {set}: output silent (peak {peak_a})");
             assert!(peak_a.is_finite(), "fx '{name}' set {set}: non-finite output");
-            let _ = peak_b;
         }
     }
 }
@@ -319,9 +313,11 @@ fn fx_modules_render_bit_deterministic() {
 #[test]
 fn golden_fx_module_hashes_match() {
     let mut entries = Vec::new();
-    for (name, mut variants) in fx_modules() {
-        for (set, fx) in variants.iter_mut().enumerate() {
-            let (h, _) = render_fx(fx);
+    for (name, variants) in fx_modules() {
+        for (set, factory) in variants.iter().enumerate() {
+            // fresh instance, state capture point = start of render
+            let mut fx = factory();
+            let (h, _) = render_fx(&mut fx);
             entries.push((format!("{name}_set{set}"), h));
         }
     }
@@ -507,7 +503,7 @@ fn note_on_guarded_for_every_oscillator_family() {
         (23.0, "Saxophone"), (24.0, "ElectricPiano"), (25.0, "Alias"),
         (26.0, "Window"), (28.0, "Fm3"), (29.0, "Twist"),
     ];
-    for (osc, name) in FAMILIES {
+    for (osc, _name) in FAMILIES {
         let patch = init_patch_with(&[("osc_type", *osc)]);
         let mut engine = SynthEngine::new(SR);
         let spent = engine.handle_control(ControlEvent::load_patch_from(0, &patch));
@@ -517,10 +513,10 @@ fn note_on_guarded_for_every_oscillator_family() {
     }
 }
 
-/// Template for isolating a family that turns out to allocate today:
-/// remove its entry from FAMILIES above and add an ignored test like this
-/// with a TODO referencing the new finding. Do NOT fix prod code here
-/// (this plan is test-only) and do NOT weaken the main test.
+// Template for isolating a family that turns out to allocate today:
+// remove its entry from FAMILIES above and add an ignored test like this
+// with a TODO referencing the new finding. Do NOT fix prod code here
+// (this plan is test-only) and do NOT weaken the main test.
 //
 // #[test]
 // #[ignore = "KNOWN RED (finding YYYY-MM-DD): <family> note-on allocates <what> \
@@ -553,10 +549,12 @@ fn tick_block_with_active_fx_chain_does_not_allocate() {
 
 /// Engine-level LFO site: part LFOs tick in tick_block, and apply_deform
 /// routes ANY waveform through the sine LUT at deform >= 0.5 (lfo.rs:286).
+/// lfo1_active requires a routing depth key (mod.rs:2758-2763): deform alone
+/// never activates the LFO — lfo_amp_depth switches the site on.
 /// Distinct from the QW-batch unit test (Lfo::tick_with_deform + warmup).
 #[test]
 fn tick_block_with_lfo_deform_does_not_allocate() {
-    let patch = init_patch_with(&[("lfo_deform", 0.8), ("lfo_waveform", 0.0)]);
+    let patch = init_patch_with(&[("lfo_deform", 0.8), ("lfo_waveform", 0.0), ("lfo_amp_depth", 0.5)]);
     let mut engine = SynthEngine::new(SR);
     let spent = engine.handle_control(ControlEvent::load_patch_from(0, &patch));
     drop(spent);
@@ -564,6 +562,11 @@ fn tick_block_with_lfo_deform_does_not_allocate() {
     engine.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     let mut l = [0.0f32; BLOCK_SIZE];
     let mut r = [0.0f32; BLOCK_SIZE];
+    // Warmup OUTSIDE the guard: the global sine LUT is lazily allocated via
+    // OnceLock (lfo.rs:6-18, 8 KiB) on the first tick_with_deform — a
+    // one-time process-wide cost (the QW2 unit test warms it the same way).
+    // It is never reallocated afterwards; the guard pins steady-state ticks.
+    for _ in 0..4 { engine.tick_block(&mut l, &mut r); }
     assert_no_alloc(|| {
         for _ in 0..64 { engine.tick_block(&mut l, &mut r); }
     });
@@ -640,6 +643,12 @@ mod timing_tests {
     use super::*;
 
     const SR: f32 = 48_000.0;
+
+    /// Local copy: `snap` lives in the sibling `restore_tests` module and is
+    /// not visible from here (looper.rs:593-595).
+    fn snap(tick: u32, note: u8, vel: u8) -> LooperEventSnapshot {
+        LooperEventSnapshot { tick, note, velocity: vel, layer_id: 0, part_id: 0 }
+    }
 
     /// Looper with an established loop length (bars x 4 beats), in Recording.
     fn loop_of(bpm: f32, bars: u8) -> MidiLooper {
@@ -772,25 +781,43 @@ mod timing_tests {
 
     #[test]
     fn undo_mid_pass_repartitions_cursor() {
-        // Undo while past the removed event's tick: cursor must be
-        // recomputed (partition_point, looper.rs:304-305) so the stale
-        // cursor never re-fires or skips events on the next pass.
+        // Undo while playing, PAST the removed event's tick: the cursor must
+        // be recomputed (partition_point, looper.rs:304-305). A stale cursor
+        // (3) would skip the remaining base-layer events of the current pass;
+        // the removed layer must never fire again. NOTE: restore() leaves
+        // Idle; start_record() from Idle would WIPE the loop — toggle_play()
+        // first (Idle -> Playing from tick 0, looper.rs:273-277).
         let mut l = MidiLooper::new(SR);
-        l.restore(&[snap(100, 60, 127), snap(150, 60, 0)], 3000);
-        l.start_record();              // Overdubbing, layer 1
+        // Base layer 0: note 60 on/off early, note 72 AFTER the layer-1
+        // event that will be undone — its firing proves the repartition.
+        l.restore(&[snap(100, 60, 127), snap(150, 60, 0), snap(2000, 72, 100)], 3000);
+        l.toggle_play();               // Idle -> Playing from tick 0
+        l.start_record();              // Playing -> Overdubbing, layer 1
         l.playback_tick = 1500;
-        l.record_event(70, 100, 0);
-        l.stop_record();               // Playing
-        for _ in 0..1600 { let _ = l.tick(); } // playback_tick 1600, past 1500
-        l.undo();                      // removes (1500, note 70)
-        assert_eq!(l.len(), 2);
-        assert_eq!(l.playback_cursor, 2, "cursor repartitioned past tick 1600");
-        for _ in 0..1400 { let _ = l.tick(); } // finish the pass (3000 -> wrap)
+        l.record_event(70, 100, 0);    // layer 1 @ tick 1500 (quantize Off)
+        l.stop_record();               // -> Playing
+        for _ in 0..20 { let _ = l.tick(); } // fires 70 @1500; playback_tick 1520, stale cursor 3
+        l.undo();                      // removes (1500, note 70), recomputes cursor
+        assert_eq!(l.len(), 3);
+        assert_eq!(l.current_layer, 0);
+        // partition_point over [100,150,2000] at playback_tick 1520 -> 2
+        assert_eq!(l.playback_cursor, 2, "cursor repartitioned past the removed event");
+        // Finish the pass: 3000 - 1520 = 1480 ticks; note 72 @2000 must fire
+        // despite the stale cursor that undo() found.
+        let mut fired_72 = 0;
+        for _ in 0..1480 {
+            for &(n, v, p) in &l.tick() {
+                if p == 255 { break; }
+                if n == 72 && v > 0 { fired_72 += 1; }
+            }
+        }
+        assert_eq!(fired_72, 1, "base-layer event after the undo point still fires this pass");
         let mut fired_70 = 0;
         let mut fired_60 = 0;
         for _ in 0..3000 {             // full second pass
-            for &(n, _v, p) in &l.tick() {
+            for &(n, v, p) in &l.tick() {
                 if p == 255 { break; }
+                if v == 0 { continue; } // note-offs carry note numbers too — count attacks only
                 match n { 70 => fired_70 += 1, 60 => fired_60 += 1, _ => {} }
             }
         }
