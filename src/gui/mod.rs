@@ -1077,18 +1077,31 @@ impl eframe::App for App {
             });
         }
 
-        // TECHDEBT #25: drum step-sequencer docked to the bottom on every tab.
-        // egui carves panels in registration order (first bottom panel = the
-        // bottom-most strip), so registering AFTER keyboard_panel puts this
-        // ABOVE the keyboard/pads strip, and registering BEFORE CentralPanel
-        // makes the main field reflow instead of being overlapped.
+        // TECHDEBT #25/#30: ЕДИНАЯ docked-панель — драм-секвенсор СЛЕВА,
+        // лупер СПРАВА (один юнит, один мастер-транспорт сверху). egui carves
+        // panels in registration order (first bottom panel = the bottom-most
+        // strip), so registering AFTER keyboard_panel puts this ABOVE the
+        // keyboard/pads strip, and registering BEFORE CentralPanel makes the
+        // main field reflow instead of being overlapped.
         egui::TopBottomPanel::bottom("drum_seq_panel")
             .resizable(true)
-            .default_height(460.0)
-            .height_range(120.0..=640.0)
+            .default_height(500.0)
+            .height_range(200.0..=760.0)
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                    self.draw_drum_seq_docked(ui);
+                ui.horizontal(|ui| {
+                    // Left column: drum sequencer (grid ~430px tall)
+                    ui.allocate_ui(egui::vec2(ui.available_width() * 0.58, ui.available_height()), |ui| {
+                        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                            self.draw_drum_seq_docked(ui);
+                        });
+                    });
+                    ui.separator();
+                    // Right column: looper (transport/bars/quantize/timeline/layers)
+                    ui.allocate_ui(egui::vec2(ui.available_width(), ui.available_height()), |ui| {
+                        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                            self.draw_looper(ui);
+                        });
+                    });
                 });
             });
 
@@ -1160,8 +1173,8 @@ impl eframe::App for App {
                     self.draw_drum_kit_controls(ui);
                 });
             } else {
-                self.draw_looper(ui);
-                ui.add_space(theme::SP_XS);
+                // Лупер переехал в единую docked-панель (#30); здесь остаётся
+                // питч-секвенсор и параметры активной части
                 self.draw_pitch_sequencer(ui);
                 ui.separator();
                 ui.add_space(theme::SP_MD);
