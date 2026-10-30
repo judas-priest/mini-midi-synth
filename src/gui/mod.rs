@@ -1077,12 +1077,16 @@ impl eframe::App for App {
             .height_range(200.0..=760.0)
             .show(ctx, |ui| {
                 ui.columns(2, |cols| {
-                    egui::ScrollArea::vertical().auto_shrink(false)
+                    // ScrollArea::both: вертикальный скролл НЕ режет контент по
+                    // горизонтали — сетка драмов вылезала под колонку лупера.
+                    // now: контент клипается по ширине колонки, избыток —
+                    // горизонтальный скролл, а не наложение.
+                    egui::ScrollArea::both().auto_shrink(false)
                         .id_salt("dock_drums_scroll")
                         .show(&mut cols[0], |ui| {
                             self.draw_drum_seq_docked(ui);
                         });
-                    egui::ScrollArea::vertical().auto_shrink(false)
+                    egui::ScrollArea::both().auto_shrink(false)
                         .id_salt("dock_looper_scroll")
                         .show(&mut cols[1], |ui| {
                             self.draw_looper(ui);
