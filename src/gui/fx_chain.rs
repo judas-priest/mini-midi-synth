@@ -39,7 +39,7 @@ impl App {
         egui::Grid::new(format!("fx_chain_{part}"))
             .num_columns(1)
             .striped(true)
-            .spacing([4.0, 2.0])
+            .spacing(theme::GRID_SP_FX)
             .show(ui, |ui| {
                 for i in 0..FX_SLOTS {
                     changed |= draw_slot(ui, part, i, &mut chain.slots[i]);

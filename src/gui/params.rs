@@ -86,8 +86,8 @@ fn draw_filter_response(
     filter_type: u32,
     _sample_rate: f32,
 ) {
-    let width = ui.available_width().min(300.0);
-    let height = 80.0;
+    let width = ui.available_width().min(theme::FILTER_RESP_W);
+    let height = theme::FILTER_RESP_H;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let painter = ui.painter_at(rect);
 
@@ -147,7 +147,7 @@ fn env_shape_combo(
     ui.label(label);
     egui::ComboBox::from_id_salt(format!("{id_salt}_{part}"))
         .selected_text(*ENV_SHAPE_NAMES.get(val).unwrap_or(&"Sqrt"))
-        .width(90.0)
+        .width(90.0) // legacy width
         .show_ui(ui, |ui| {
             for (i, name) in ENV_SHAPE_NAMES.iter().enumerate() {
                 if ui.selectable_value(&mut val, i, *name).changed() {
@@ -266,8 +266,8 @@ impl App {
         // Oscillator section
         egui::Frame::default()
             .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
+            .corner_radius(theme::CARD_RADIUS)
+            .inner_margin(egui::Margin::same(theme::CARD_MARGIN as i8))
             .show(ui, |ui| {
         // Set secondary width for oscillator params
         ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
@@ -567,7 +567,7 @@ impl App {
                 let mut eng = self.parts[part].edited_params.get("twist_engine").copied().unwrap_or(8.0) as usize;
                 ui.label("Engine:");
                 egui::ComboBox::from_id_salt(format!("twist_eng_{part}"))
-                    .width(160.0)
+                    .width(160.0) // legacy width
                     .selected_text(*TWIST_ENGINES.get(eng).unwrap_or(&"?"))
                     .show_ui(ui, |ui| {
                         for (i, name) in TWIST_ENGINES.iter().enumerate() {
@@ -812,8 +812,8 @@ impl App {
         // Filter section
         egui::Frame::default()
             .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
+            .corner_radius(theme::CARD_RADIUS)
+            .inner_margin(egui::Margin::same(theme::CARD_MARGIN as i8))
             .show(ui, |ui| {
         // Primary width for filter — main sound-shaping params
         ui.style_mut().spacing.slider_width = theme::SLIDER_PRIMARY;
@@ -968,8 +968,8 @@ impl App {
         // Envelopes section
         egui::Frame::default()
             .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
+            .corner_radius(theme::CARD_RADIUS)
+            .inner_margin(egui::Margin::same(theme::CARD_MARGIN as i8))
             .show(ui, |ui| {
         // Primary width for envelopes — main sound-shaping params
         ui.style_mut().spacing.slider_width = theme::SLIDER_PRIMARY;
@@ -1012,8 +1012,8 @@ impl App {
         // Dynamics section
         egui::Frame::default()
             .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
+            .corner_radius(theme::CARD_RADIUS)
+            .inner_margin(egui::Margin::same(theme::CARD_MARGIN as i8))
             .show(ui, |ui| {
         // Secondary width for dynamics, LFOs, modulators
         ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
@@ -1042,8 +1042,8 @@ impl App {
         // LFO section
         egui::Frame::default()
             .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
+            .corner_radius(theme::CARD_RADIUS)
+            .inner_margin(egui::Margin::same(theme::CARD_MARGIN as i8))
             .show(ui, |ui| {
         ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
@@ -1222,8 +1222,8 @@ impl App {
         // Mod Matrix section
         egui::Frame::default()
             .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
+            .corner_radius(theme::CARD_RADIUS)
+            .inner_margin(egui::Margin::same(theme::CARD_MARGIN as i8))
             .show(ui, |ui| {
         ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
 
@@ -1256,7 +1256,7 @@ impl App {
                     // Source dropdown
                     let mut src_sel = ModSource::ALL.iter().position(|&s| s == src).unwrap_or(0);
                     egui::ComboBox::from_id_salt(format!("mod_src_{part}_{slot_idx}"))
-                        .width(80.0)
+                        .width(theme::COMBO_W_SM)
                         .selected_text(src.name())
                         .show_ui(ui, |ui| {
                             for (i, s) in ModSource::ALL.iter().enumerate() {
@@ -1270,7 +1270,7 @@ impl App {
                     // Dest dropdown
                     let mut dst_sel = ModDest::ALL.iter().position(|&d| d == dst).unwrap_or(0);
                     egui::ComboBox::from_id_salt(format!("mod_dst_{part}_{slot_idx}"))
-                        .width(90.0)
+                        .width(90.0) // legacy width
                         .selected_text(dst.name())
                         .show_ui(ui, |ui| {
                             for (i, d) in ModDest::ALL.iter().enumerate() {
@@ -1296,8 +1296,8 @@ impl App {
         // Voice section (Play Mode + Portamento + Unison)
         egui::Frame::default()
             .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
+            .corner_radius(theme::CARD_RADIUS)
+            .inner_margin(egui::Margin::same(theme::CARD_MARGIN as i8))
             .show(ui, |ui| {
         // Compact width for utility params
         ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
@@ -1379,8 +1379,8 @@ impl App {
         // Arpeggiator section
         egui::Frame::default()
             .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
+            .corner_radius(theme::CARD_RADIUS)
+            .inner_margin(egui::Margin::same(theme::CARD_MARGIN as i8))
             .show(ui, |ui| {
         ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
 
@@ -1419,7 +1419,7 @@ impl App {
                 ui.label("Mode:");
                 egui::ComboBox::from_id_salt(format!("arp_mode_{part}"))
                     .selected_text(*arp_mode_names.get(amode).unwrap_or(&"Up"))
-                    .width(70.0)
+                    .width(theme::COMBO_W_SM) // unify 70→80
                     .show_ui(ui, |ui| {
                         for (i, name) in arp_mode_names.iter().enumerate() {
                             if ui.selectable_value(&mut amode, i, *name).changed() {
@@ -1434,7 +1434,7 @@ impl App {
                 ui.label("Rate:");
                 egui::ComboBox::from_id_salt(format!("arp_rate_{part}"))
                     .selected_text(*arp_rate_names.get(arate).unwrap_or(&"1/8"))
-                    .width(50.0)
+                    .width(theme::COMBO_W_2CH)
                     .show_ui(ui, |ui| {
                         for (i, name) in arp_rate_names.iter().enumerate() {
                             if ui.selectable_value(&mut arate, i, *name).changed() {
@@ -1463,8 +1463,8 @@ impl App {
         // Effects section
         egui::Frame::default()
             .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
+            .corner_radius(theme::CARD_RADIUS)
+            .inner_margin(egui::Margin::same(theme::CARD_MARGIN as i8))
             .show(ui, |ui| {
         // Secondary width for effects
         ui.style_mut().spacing.slider_width = theme::SLIDER_SECONDARY;
@@ -1636,8 +1636,8 @@ impl App {
         // Pitch Bend section
         egui::Frame::default()
             .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
+            .corner_radius(theme::CARD_RADIUS)
+            .inner_margin(egui::Margin::same(theme::CARD_MARGIN as i8))
             .show(ui, |ui| {
         // Compact width for pitch bend utility
         ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;

@@ -241,6 +241,12 @@ pub enum ControlEvent {
     /// recorded, each event tagged with its own part id), false = Part
     /// (only the active part). Live transport state — not persisted.
     LooperSetSource { mix: bool },
+    /// Master transport (#32): toggle play drums + looper together
+    MasterPlay,
+    /// Master transport: stop drums + looper (drain note-offs)
+    MasterStop,
+    /// Master transport: arm/disarm recording on drums + looper
+    MasterRecord,
     SetSustain { on: bool },
     /// Static pedal-up release duration in seconds (None = patch release)
     SetSustainRelease { seconds: Option<f32> },
@@ -1200,8 +1206,27 @@ pub struct SynthEngine {
     program_change: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     global_params: GlobalParams,
     pickup_states: [PickupState; 128],
-    /// 0 = SEQ buttons target drums, 1 = SEQ buttons target looper
+    /// Drum-note mode gate for live pads: 0 = pads 36-51 trigger drums on ANY
+    /// channel (drum_mode), nonzero = pads play parts. NOT a transport target —
+    /// transport notes (81/82/83/123/124) always drive the master transport.
     seq_target: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Quantized master recording (#30 sync): arm pending until the
+    /// drum sequencer crosses its pattern boundary (current_step == 0).
+    looper_arm_pending: bool,
+    /// Как был начат ТЕКУЩИЙ захват: true = квантованный (граница такта,
+    /// петля = 1 цикл паттерна), false = свободный (немедленный).
+    looper_capture_quantized: bool,
+    /// Previous drum step for boundary edge detection.
+    looper_prev_step: u8,
+    /// Cycle length (ticks) of the last quantized capture — drift-correction
+    /// applies when the loop length still equals it.
+    looper_cycle_ticks: u32,
+    /// Досрочное закрытие мультицикл-захвата (закрытие на следующей границе).
+    looper_finish_pending: bool,
+    /// Целых циклов паттерна, записанных квантованным захватом.
+    looper_rec_cycles: u32,
+    /// GUI mirror of arm_pending (shows "ARMED" in the looper state label).
+    master_rec_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Active part index (0-7), shared with GUI for looper part recording
     active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Looper record source: true = Mix (all sounding enabled parts,
@@ -1467,7 +1492,14 @@ impl SynthEngine {
             feedback_tx: None, trash: None, program_change: None,
             global_params: GlobalParams::default(),
             pickup_states: [PickupState::default(); 128],
-            seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
+            seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: non-drum mode
+            looper_arm_pending: false,
+            looper_capture_quantized: false,
+            looper_prev_step: 0,
+            looper_cycle_ticks: 0,
+            looper_finish_pending: false,
+            looper_rec_cycles: 0,
+            master_rec_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             looper_source_mix: true,
             sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1485,6 +1517,10 @@ impl SynthEngine {
 
     pub fn seq_target_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
         self.seq_target.clone()
+    }
+
+    pub fn master_rec_pending_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.master_rec_pending.clone()
     }
 
     pub fn active_part_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
@@ -1576,13 +1612,16 @@ impl SynthEngine {
     /// Shared part note-on dispatch: range/velocity gate, root-only gate
     /// (TECHDEBT #6), DSP voice or SF2 sampler. The enabled/mute guards stay
     /// at the call sites, which intentionally differ (offs skip mute).
-    fn route_note_on(&mut self, i: usize, raw: u8, velocity: u8) {
+    /// Returns true only if the note actually SOUNDED in this part — the
+    /// looper multitrack records just sounding parts (replay honours each
+    /// part's range/transpose), callers that don't record ignore the result.
+    fn route_note_on(&mut self, i: usize, raw: u8, velocity: u8) -> bool {
         let (sf2_mode, transpose, lo, hi, vmin, vmax) = {
             let p = &self.parts[i];
             (p.sf2_mode, p.transpose, p.min_note, p.max_note, p.vel_min, p.vel_max)
         };
-        if raw < lo || raw > hi || velocity < vmin || velocity > vmax { return; }
-        let RootDecision::Sound { release, note } = self.parts[i].root_on(raw) else { return };
+        if raw < lo || raw > hi || velocity < vmin || velocity > vmax { return false; }
+        let RootDecision::Sound { release, note } = self.parts[i].root_on(raw) else { return false };
         let tr = |n: u8| (n as i16 + transpose as i16).clamp(0, 127) as u8;
         if sf2_mode {
             if let Some(old) = release { self.sampler.note_off(i, tr(old)); }
@@ -1599,6 +1638,7 @@ impl SynthEngine {
             }
             self.parts[i].note_on(note, velocity);
         }
+        true
     }
 
     /// Shared part note-off dispatch with root-only re-keying. Offs skip the
@@ -1680,6 +1720,135 @@ impl SynthEngine {
             return;
         }
         self.looper.record_event(note, velocity, part);
+    }
+
+    /// Master transport (#32): start both transports (drums + looper).
+    fn master_start(&mut self) {
+        self.drum_engine.set_playing(true);
+        if matches!(self.looper.state, crate::synth::looper::LooperState::Idle) {
+            self.looper.toggle_play();
+        }
+    }
+
+    /// Master transport: stop both; a recording looper finishes its layer
+    /// first, then stops (stop() flags needs_note_offs; actual note-offs
+    /// drain on the next looper tick, как и в ручном Stop).
+    pub fn master_stop(&mut self) {
+        self.looper_arm_pending = false;
+        self.looper_capture_quantized = false;
+        self.looper_finish_pending = false;
+        self.looper_rec_cycles = 0;
+        self.master_rec_pending.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.drum_engine.set_playing(false);
+        self.drum_engine.sequencer.reset();
+        match self.looper.state {
+            crate::synth::looper::LooperState::Recording
+            | crate::synth::looper::LooperState::Overdubbing => {
+                self.looper.toggle_record();
+                self.looper.toggle_play();
+            }
+            crate::synth::looper::LooperState::Playing => self.looper.toggle_play(),
+            _ => {}
+        }
+    }
+
+    /// Master transport: toggle play — if anything plays, stop everything;
+    /// otherwise start everything.
+    pub fn master_toggle_play(&mut self) {
+        let any = self.drum_engine.sequencer.playing
+            || matches!(
+                self.looper.state,
+                crate::synth::looper::LooperState::Playing
+                    | crate::synth::looper::LooperState::Overdubbing
+                    | crate::synth::looper::LooperState::Recording
+            );
+        if any {
+            self.master_stop();
+        } else {
+            self.master_start();
+        }
+    }
+
+    /// Master transport: toggle record arm. Quantized path: drums playing,
+    /// pattern >= 2 steps, looper Idle -> capture starts at the NEXT pattern
+    /// boundary; второй Rec закрывает на следующей границе — петля = РОВНО
+    /// N целых циклов паттерна (сколько сыграл). Everything else (stopped
+    /// sequencer, Steps=1, overdub from Playing, disarming) — прежнее
+    /// немедленное поведение (Bars свободного режима не трогаются).
+    pub fn master_toggle_record(&mut self) {
+        let looper_rec = matches!(
+            self.looper.state,
+            crate::synth::looper::LooperState::Recording
+                | crate::synth::looper::LooperState::Overdubbing
+        );
+        // Мультицикл-захват: второе нажатие = закрыть на следующей границе
+        if looper_rec && self.looper_capture_quantized {
+            self.looper_finish_pending = true;
+            return;
+        }
+        // Снять арм (toggle-семантика ожидания границы)
+        if self.looper_arm_pending {
+            self.looper_arm_pending = false;
+            self.master_rec_pending.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.drum_engine.set_recording(false);
+            return;
+        }
+        // Только сетка пишется (лупер Idle) — разармировать сетку, лупера
+        // НЕ трогать (старый toggle в этой ситуации лупер не запускал)
+        if !looper_rec && self.drum_engine.sequencer.recording {
+            self.drum_engine.set_recording(false);
+            return;
+        }
+        if !looper_rec {
+            // ARM
+            let pat = self.drum_engine.sequencer.current_pattern as usize;
+            let pattern_len = self.drum_engine.sequencer.patterns[pat].length;
+            let can_quant = self.drum_engine.sequencer.playing
+                && pattern_len > 1
+                && self.looper.state == crate::synth::looper::LooperState::Idle;
+            self.drum_engine.set_recording(true);
+            if !can_quant {
+                // Free: секвенсор стоит (autoplay), Steps=1, или overdub из Playing
+                if !self.drum_engine.sequencer.playing {
+                    self.drum_engine.set_playing(true);
+                }
+                self.looper_capture_quantized = false;
+                if matches!(
+                    self.looper.state,
+                    crate::synth::looper::LooperState::Idle
+                        | crate::synth::looper::LooperState::Playing
+                ) {
+                    self.looper.toggle_record();
+                }
+                return;
+            }
+            // Armed: ждём границы паттерна. Петля = 1 цикл паттерна:
+            // bars=1 → длина петли = bar = ровно длина паттерна (bar берёт
+            // beats_per_bar паттерна через sync_clock). Размеры совпадают.
+            self.looper.bars = 1;
+            self.drum_engine.set_playing(true);
+            self.looper_arm_pending = true;
+            self.looper_capture_quantized = true;
+            self.master_rec_pending.store(true, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+        // looper_rec && !quantized (free-захват или overdub) — закрыть сразу
+        self.master_toggle_record_free_looper();
+    }
+
+    /// Former immediate toggle: Recording/Overdubbing -> finish +
+    /// set_recording(false); Idle/Playing -> record.
+    fn master_toggle_record_free_looper(&mut self) {
+        self.drum_engine.set_recording(false);
+        if matches!(
+            self.looper.state,
+            crate::synth::looper::LooperState::Recording
+                | crate::synth::looper::LooperState::Overdubbing
+                | crate::synth::looper::LooperState::Idle
+                | crate::synth::looper::LooperState::Playing
+        ) {
+            self.looper.toggle_record();
+        }
     }
 
     pub fn pitch_seq_step_atoms(&self) -> Vec<std::sync::Arc<std::sync::atomic::AtomicU8>> {
@@ -1781,50 +1950,21 @@ impl SynthEngine {
     pub fn handle_event(&mut self, event: MidiEvent) {
         match event {
             MidiEvent::NoteOn { channel, note, velocity } => {
-                // SMK-37 Pro transport, unified: SEQ buttons (any channel,
-                // notes 123/124) and bank-2 pads ch9 (82 = pad 25 play,
-                // 83 = pad 27 rec) follow seq_target. Stop (81, pad 26) arm
-                // below. Pad notes must not fall into the trigger path.
+                // SMK-37 Pro transport: SEQ buttons (any channel, notes
+                // 123/124) and bank-2 pads ch9 (82 = pad 25 play, 83 = pad 27
+                // rec, 81 = pad 26 stop) always drive the master transport.
+                // Pad notes must not fall into the trigger path.
                 if velocity > 0 && (note == 123 || (channel == 9 && note == 82)) {
-                    let target = self.seq_target.load(std::sync::atomic::Ordering::Relaxed);
-                    if target == 0 {
-                        // Drums mode (set_playing keeps play_atom coherent
-                        // for the GUI between audio ticks)
-                        let playing = !self.drum_engine.sequencer.playing;
-                        self.drum_engine.set_playing(playing);
-                        if !playing { self.drum_engine.sequencer.reset(); }
-                    } else {
-                        // Looper mode
-                        self.looper.toggle_play();
-                    }
+                    // Master transport (#32 фаза 4): single transport, no target
+                    self.master_toggle_play();
                     return;
                 }
                 if velocity > 0 && (note == 124 || (channel == 9 && note == 83)) {
-                    let target = self.seq_target.load(std::sync::atomic::Ordering::Relaxed);
-                    if target == 0 {
-                        // set_recording snapshots (undoable) — same path as
-                        // DrumSeqRecord / pad 27 before the unification.
-                        let rec = !self.drum_engine.sequencer.recording;
-                        self.drum_engine.set_recording(rec);
-                        if rec && !self.drum_engine.sequencer.playing {
-                            self.drum_engine.set_playing(true);
-                        }
-                    } else {
-                        self.looper.toggle_record();
-                    }
+                    self.master_toggle_record();
                     return;
                 }
-                // Pad 26 (note 81, ch9): stop — outside the drum-note gate so
-                // it works at seq_target=1 (looper) too.
                 if channel == 9 && velocity > 0 && note == 81 {
-                    if self.seq_target.load(std::sync::atomic::Ordering::Relaxed) == 0 {
-                        self.drum_engine.set_playing(false);
-                        self.drum_engine.sequencer.reset();
-                    } else if matches!(self.looper.state,
-                                       crate::synth::looper::LooperState::Playing
-                                       | crate::synth::looper::LooperState::Overdubbing) {
-                        self.looper.toggle_play();
-                    }
+                    self.master_stop();
                     return;
                 }
 
@@ -1834,7 +1974,7 @@ impl SynthEngine {
                 let sampler_drums = self.sampler.drums_enabled();
                 if channel == 9 || (is_drum_note && drum_mode) {
                     // Pad bank 2 legacy undo (64, E4) lives here; 83/82/81
-                    // moved above — they follow seq_target now.
+                    // moved above — master transport now, no target.
                     if channel == 9 && velocity > 0 && note == 64 {
                         self.drum_engine.sequencer.undo();
                         return;
@@ -1842,14 +1982,14 @@ impl SynthEngine {
                     if velocity > 0 {
                         let velocity = if self.drum_engine.fixed_velocity { 127 } else { velocity };
                         let velocity = self.drum_engine.pad_velocity(note, velocity);
+                        // Слот сетки = исходная нота ПЭДА (36-51): ремап меняет
+                        // только звук. Гейт по ремапнутой ноте молча убивал
+                        // запись для китов с таргетами вне 36..=51
+                        // (Metal_Drums_v2 — TECHDEBT #22b).
+                        let pad_note = note;
                         let note = self.drum_engine.remapped_note(note);
-                        // Record into sequencer if recording
-                        // `note` here is the REMAPPED target (30..=55 legal). Only
-                        // 36..=51 maps to sequencer slots; skip recording other
-                        // targets (drop, don't clamp — clamping would corrupt
-                        // a neighbouring slot's pattern).
-                        if is_drum_note && (36..=51).contains(&note) {
-                            let slot = (note - 36) as usize;
+                        if is_drum_note {
+                            let slot = (pad_note - 36) as usize;
                             let sr = self.sample_rate;
                             if let Some((pat, _slot, step)) =
                                 self.drum_engine.sequencer.record_hit(slot, velocity, sr)
@@ -1861,6 +2001,9 @@ impl SynthEngine {
                                 }
                             }
                         }
+                        // Драмы пишутся ТОЛЬКО в сетку (кубики). В лупер не
+                        // пишем: на реплее дублировали удары сетки (решение
+                        // юзера 2026-10-31).
                         if sampler_drums {
                             let choke = self.drum_engine.sf2_choke_take(note);
                             if choke != 0 { self.sampler.drum_note_off(choke); }
@@ -1895,20 +2038,17 @@ impl SynthEngine {
                 } else {
                     for i in 0..self.parts.len() {
                         if !self.parts[i].enabled || self.parts[i].mute { continue; }
-                        self.route_note_on(i, note, velocity);
-                        // Whole-performance recording: tag the event with the
-                        // part that actually sounds it (looper replay routes
-                        // per part id).
-                        //
-                        // Accepted effects: (1) the matching off events below
-                        // are also recorded for parts that never sounded the
-                        // note (off loops don't range-check) — replayed offs
-                        // are harmless no-ops but consume looper event slots;
-                        // (2) split overlap (two parts covering the same note)
-                        // overwrites looper's single active_notes[note] slot —
-                        // the forced off at loop wrap releases only the last
-                        // part.
-                        self.record_for_looper(note, velocity, i as u8);
+                        let sounded = self.route_note_on(i, note, velocity);
+                        if sounded {
+                            // Записывается ТОЛЬКО реально звучащая часть:
+                            // реплей honoured range/transpose каждого парта.
+                            // Off-мусор (offs для частей, не звучавших ноту)
+                            // отсекается фильтром active_notes в
+                            // looper.record_event; split overlap активных нот
+                            // двух частей — оверрайд одиночного слота
+                            // active_notes остаётся accepted.
+                            self.record_for_looper(note, velocity, i as u8);
+                        }
                     }
                 }
             }
@@ -2394,6 +2534,15 @@ impl SynthEngine {
             ControlEvent::LooperSetSource { mix } => {
                 self.looper_source_mix = mix;
             }
+            ControlEvent::MasterPlay => {
+                self.master_toggle_play();
+            }
+            ControlEvent::MasterStop => {
+                self.master_stop();
+            }
+            ControlEvent::MasterRecord => {
+                self.master_toggle_record();
+            }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
                 self.drum_engine.fixed_velocity = fixed;
             }
@@ -2703,6 +2852,85 @@ impl SynthEngine {
         let beats_per_bar = self.drum_engine.sequencer.patterns[cur_pat].beats_per_bar;
         self.looper.sync_clock(seq_bpm, beats_per_bar);
 
+        // Quantized master recording: pattern boundary = sequencer wrapped to
+        // step 0 (edge-detected). Arm -> start capture (петля = 1 цикл
+        // паттерна — размеры лупера и секвенсора совпадают); каждая граница
+        // считает целый цикл, второй Rec закрывает на СЛЕДУЮЩЕЙ границе —
+        // петля = РОВНО N целых циклов.
+        let step = self.drum_engine.sequencer.current_step;
+        let prev = self.looper_prev_step;
+        self.looper_prev_step = step;
+        let quantized_looping = self.looper_capture_quantized
+            && matches!(
+                self.looper.state,
+                crate::synth::looper::LooperState::Recording
+                    | crate::synth::looper::LooperState::Overdubbing
+                    | crate::synth::looper::LooperState::Playing
+            );
+        if self.looper_arm_pending
+            || self.looper_finish_pending
+            || quantized_looping
+        {
+            let playing = self.drum_engine.sequencer.playing;
+            let lstate = self.looper.state;
+            // Квантованный захват может УЖЕ самообернуться в Overdubbing
+            // (looper.tick() переключает Recording->Overdubbing по своей длине
+            // петли на несколько сэмплов РАНЬШЕ, чем детект границы такта) —
+            // закрывать надо и его.
+            let capturing = lstate == crate::synth::looper::LooperState::Recording
+                || (lstate == crate::synth::looper::LooperState::Overdubbing
+                    && self.looper_capture_quantized);
+            let boundary = playing && step == 0 && prev != 0;
+            if boundary && self.looper_arm_pending {
+                self.looper_arm_pending = false;
+                self.master_rec_pending.store(false, std::sync::atomic::Ordering::Relaxed);
+                self.looper.toggle_record(); // Idle -> Recording (length = bars * bar)
+                // Перекроить петлю: cycle = длина паттерна (базовая единица)
+                let pat = self.drum_engine.sequencer.current_pattern as usize;
+                let pattern_len = self.drum_engine.sequencer.patterns[pat].length.max(1);
+                let bpm = self.drum_engine.sequencer.bpm.max(1.0);
+                let samples_per_step = (self.sample_rate as f64 * 60.0) / (bpm as f64 * 4.0);
+                let cycle = (pattern_len as f64 * samples_per_step) as u32;
+                self.looper.set_loop_len_ticks(cycle);
+                self.looper_cycle_ticks = cycle;
+                self.looper_rec_cycles = 0;
+            } else if boundary && capturing {
+                if self.looper_finish_pending {
+                    // Закрыть: петля = сыгранные целые циклы. cycles = полных
+                    // циклов ДО этой границы; закрывающая граница завершает
+                    // ещё один → total = cycles + 1 (иначе петля короче игры).
+                    let total = self.looper_rec_cycles.saturating_add(1);
+                    // РЕЛОКАЦИЯ: во время захвата лупер оборачивался каждый
+                    // цикл (layer_id = номер круга, тики локальные 0..cycle).
+                    // Сдвинуть события круга k на k*cycle — глобальные тики.
+                    self.looper.relocate_layers(self.looper_cycle_ticks);
+                    self.looper.set_loop_len_ticks(
+                        total.saturating_mul(self.looper_cycle_ticks));
+                    self.looper_finish_pending = false;
+                    self.looper_rec_cycles = 0;
+                    self.drum_engine.set_recording(false); // сетка тоже разармирована
+                    self.looper.toggle_record(); // Recording/Overdubbing -> Playing
+                } else {
+                    self.looper_rec_cycles += 1;
+                }
+            } else if boundary
+                && lstate == crate::synth::looper::LooperState::Playing
+                && self.looper.loop_len_ticks() == self.looper_cycle_ticks
+            {
+                // Drift correction (Mobius-style): только для петли = 1 цикл —
+                // каждый круг выравнивает петлю в ноль. Для N>1-цикловых петель
+                // seek убивал бы вторую половину (длина != cycle) — не трогаем.
+                self.looper.seek_start();
+            } else if !playing && capturing {
+                // fallback: часы умерли посреди записи — закрыть сейчас
+                // (нечётный кусок; длину петли не перекраиваем)
+                self.looper_finish_pending = false;
+                self.looper_rec_cycles = 0;
+                self.drum_engine.set_recording(false);
+                self.looper.toggle_record();
+            }
+        }
+
         // Pre-compute modulation state for each part (control rate).
         // `layer_mods` lives on the engine (zero-alloc); disabled parts retain
         // whatever previous-block values they had — never read while disabled.
@@ -2982,13 +3210,17 @@ impl SynthEngine {
                 if let Some((note, vel)) = arp_on {
                     for i in 0..self.parts.len() {
                         if !self.parts[i].enabled || self.parts[i].mute { continue; }
-                        self.route_note_on(i, note, vel);
-                        self.record_for_looper(note, vel, i as u8);
+                        // Мультитрек: писать только реально звучащую часть
+                        if self.route_note_on(i, note, vel) {
+                            self.record_for_looper(note, vel, i as u8);
+                        }
                     }
                 }
             }
 
-            // Looper: replay recorded events (routed to specific part)
+            // Looper: replay recorded events (routed to specific part).
+            // Драм-события (бывший тег 254) больше не пишутся в лупер —
+            // ударку реплеит сетка секвенсора.
             let looper_events = self.looper.tick();
             for &(note, vel, part_id) in &looper_events {
                 if note == 0 && vel == 0 && part_id == 255 { break; }

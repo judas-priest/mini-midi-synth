@@ -291,6 +291,9 @@ pub struct App {
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
     pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Master recording armed (waiting for the sequencer bar boundary) —
+    /// looper state label shows "ARMED"
+    pub master_rec_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Static pedal-up release duration (None = off, patch release)
     pub sustain_release: Option<f32>,
     /// SF2 release-time scale (1.0 = file defaults)
@@ -343,6 +346,10 @@ pub struct App {
     pub led_socket: Option<std::sync::mpsc::Sender<String>>,
     pub led_socket_alive: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub led_socket_failed_at: Option<std::time::Instant>,
+    /// In-flight connect attempt (runs off the GUI thread — unix connect
+    /// blocks on a full peer backlog).
+    pub led_connecting:
+        Option<std::sync::mpsc::Receiver<std::io::Result<std::os::unix::net::UnixStream>>>,
     pub led_last_send: Option<std::time::Instant>,
     /// Companion process WE spawned (never kill a foreign one).
     pub led_child: Option<std::process::Child>,
@@ -411,6 +418,8 @@ pub struct App {
     pub toasts: Vec<Toast>,
     // Patch search
     pub preset_search: String,
+    /// Some(part) = instrument browser modal is open for this part
+    pub inst_browser_part: Option<usize>,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
     // Split mode
@@ -467,7 +476,7 @@ impl eframe::App for App {
         ctx.style_mut(|style| {
             style.spacing.interact_size = egui::vec2(48.0, 36.0); // Material Design min touch target
             style.spacing.button_padding = egui::vec2(12.0, 8.0);
-            style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+            style.spacing.item_spacing = theme::ANDROID_ITEM_SPACING;
         });
 
         // Increase base font size and spacing
@@ -483,8 +492,8 @@ impl eframe::App for App {
                     font_id.size = size;
                 }
             }
-            style.spacing.slider_width = 250.0;
-            style.spacing.item_spacing = egui::vec2(8.0, 5.0);
+            style.spacing.slider_width = theme::SLIDER_PRIMARY;
+            style.spacing.item_spacing = theme::APP_ITEM_SPACING;
         });
 
         let has_active_notes = (0..128u8)
@@ -669,13 +678,16 @@ impl eframe::App for App {
                     Err(e) => log::warn!("[console] companion try_wait: {e}"),
                 }
             }
-            // Spawn only when nothing connected (a live foreign companion means
-            // led_socket connects and we must not churn-spawn every 5s).
+            // Spawn only when nothing connected AND a connect attempt already
+            // failed (a live foreign companion serves the socket within the
+            // 2s retry window — spawning earlier creates a duplicate that
+            // fights the foreign one over BLE).
             let backoff_ok = self.led_spawn_backoff
                 .map(|t| t.elapsed() > std::time::Duration::from_secs(5))
                 .unwrap_or(true);
             if self.led_child.is_none()
                 && self.led_socket.is_none()
+                && self.led_socket_failed_at.is_some()
                 && backoff_ok
             {
                 let path = crate::config::expand_home(&self.config.ui.led_companion_cmd);
@@ -692,41 +704,65 @@ impl eframe::App for App {
             }
         }
 
-        // LED companion socket lifecycle
+        // LED companion socket lifecycle.
+        // Connect runs on a helper thread: a unix connect() BLOCKS when the
+        // peer's accept backlog is full — on the GUI thread that froze the
+        // whole app before the first frame (observed with a companion stuck
+        // in BLE reconnect).
         if !self.config.ui.led_companion {
             if self.led_socket.take().is_some() {
                 log::info!("[console] companion disabled");
             }
+            self.led_connecting = None;
         } else if self.led_socket.is_none()
             && self.led_socket_failed_at
                 .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
                 .unwrap_or(true)
+            && self.led_connecting.is_none()
         {
-            match std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock") {
-                Ok(stream) => {
-                    let (tx, rx) = std::sync::mpsc::channel::<String>();
-                    // fresh AtomicBool на каждый коннект: старый writer не может
-                    // перезаписать флаг нового (spurious reconnect)
-                    let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-                    self.led_socket_alive = Some(alive.clone());
-                    std::thread::spawn(move || {
-                        use std::io::Write;
-                        let mut stream = stream;
-                        for msg in rx {
-                            if stream.write_all(msg.as_bytes()).is_err() {
-                                alive.store(false, std::sync::atomic::Ordering::Relaxed);
-                                break;
+            let (tx, rx) =
+                std::sync::mpsc::channel::<std::io::Result<std::os::unix::net::UnixStream>>();
+            self.led_connecting = Some(rx);
+            std::thread::spawn(move || {
+                let res = std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock");
+                let _ = tx.send(res);
+            });
+        }
+        if self.led_socket.is_none() {
+            if let Some(rx) = &mut self.led_connecting {
+                match rx.try_recv() {
+                    Ok(Ok(stream)) => {
+                        self.led_connecting = None;
+                        let (tx, rx) = std::sync::mpsc::channel::<String>();
+                        // fresh AtomicBool на каждый коннект: старый writer не может
+                        // перезаписать флаг нового (spurious reconnect)
+                        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                        self.led_socket_alive = Some(alive.clone());
+                        std::thread::spawn(move || {
+                            use std::io::Write;
+                            let mut stream = stream;
+                            for msg in rx {
+                                if stream.write_all(msg.as_bytes()).is_err() {
+                                    alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                                    break;
+                                }
                             }
-                        }
-                        alive.store(false, std::sync::atomic::Ordering::Relaxed);
-                    });
-                    self.led_socket = Some(tx);
-                    self.led_socket_failed_at = None;
-                    self.led_dirty = true; // отправить полный STATE сразу после коннекта
-                    log::info!("[console] companion connected");
-                }
-                Err(_) => {
-                    self.led_socket_failed_at = Some(std::time::Instant::now());
+                            alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                        });
+                        self.led_socket = Some(tx);
+                        self.led_socket_failed_at = None;
+                        self.led_dirty = true; // отправить полный STATE сразу после коннекта
+                        log::info!("[console] companion connected");
+                    }
+                    Ok(Err(_)) => {
+                        self.led_connecting = None;
+                        self.led_socket_failed_at = Some(std::time::Instant::now());
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.led_connecting = None;
+                        self.led_socket_failed_at = Some(std::time::Instant::now());
+                    }
                 }
             }
         }
@@ -743,22 +779,19 @@ impl eframe::App for App {
 
         // LED snapshot (16 slots = pads 17..=32, top row first)
         {
-            // Bottom row shows the ACTIVE target's transport (spec v2): drums
-            // atoms at target=0, looper state (Recording=1, Playing=2,
-            // Overdubbing=3) at target=1.
-            let target = self.seq_target_atom.load(Ordering::Relaxed);
+            // Bottom row shows the MASTER transport (single transport, #32
+            // фаза 4): the union — LED reflects "something runs".
             let lstate = crate::synth::looper::LooperState::from_u8(
                 self.looper_atoms.state.load(Ordering::Relaxed));
-            let (playing, recording) = if target == 0 {
-                (self.drum_playing, self.drum_recording)
-            } else {
-                (
-                    matches!(lstate, crate::synth::looper::LooperState::Playing
+            let (playing, recording) = (
+                self.drum_playing
+                    || matches!(lstate, crate::synth::looper::LooperState::Playing
+                            | crate::synth::looper::LooperState::Overdubbing
+                            | crate::synth::looper::LooperState::Recording),
+                self.drum_recording
+                    || matches!(lstate, crate::synth::looper::LooperState::Recording
                             | crate::synth::looper::LooperState::Overdubbing),
-                    matches!(lstate, crate::synth::looper::LooperState::Recording
-                            | crate::synth::looper::LooperState::Overdubbing),
-                )
-            };
+            );
             let mut mutes = [false; 16];
             for (i, part) in self.parts.iter().enumerate().take(16) {
                 mutes[i] = part.mute;
@@ -774,7 +807,7 @@ impl eframe::App for App {
             let top = self.console.top_colors(self.active_perf_console(), filled,
                                               self.drum_current_pattern as usize, &mutes,
                                               self.perf_window, self.pat_window,
-                                              self.mute_window, target);
+                                              self.mute_window);
             let bottom = self.console.bottom_colors(playing, recording, page_depth,
                                                     undo_avail, redo_avail);
             let mut snap = [[0u8; 3]; 16];
@@ -988,8 +1021,8 @@ impl eframe::App for App {
 
                 // Oscilloscope
                 let scope_data = self.scope_buf.read();
-                let scope_w = 150.0_f32;
-                let scope_h = 40.0_f32;
+                let scope_w = theme::SCOPE_W;
+                let scope_h = theme::SCOPE_H;
                 let (resp, painter) = ui.allocate_painter(
                     egui::vec2(scope_w, scope_h),
                     egui::Sense::hover(),
@@ -1033,259 +1066,35 @@ impl eframe::App for App {
             });
         }
 
-        // TECHDEBT #25: drum step-sequencer docked to the bottom on every tab.
-        // egui carves panels in registration order (first bottom panel = the
-        // bottom-most strip), so registering AFTER keyboard_panel puts this
-        // ABOVE the keyboard/pads strip, and registering BEFORE CentralPanel
-        // makes the main field reflow instead of being overlapped.
+        // TECHDEBT #25/#30: ЕДИНАЯ docked-панель — драм-секвенсор СЛЕВА,
+        // лупер СПРАВА (один юнит, один мастер-транспорт сверху). egui carves
+        // panels in registration order (first bottom panel = the bottom-most
+        // strip), so registering AFTER keyboard_panel puts this ABOVE the
+        // keyboard/pads strip, and registering BEFORE CentralPanel makes the
+        // main field reflow instead of being overlapped. Колонки — ui.columns:
+        // allocate_ui в horizontal сворачивает высоту и разваливает раскладку,
+        // а ScrollArea без явных id_salt даёт коллизии ID.
         egui::TopBottomPanel::bottom("drum_seq_panel")
             .resizable(true)
-            .default_height(460.0)
-            .height_range(120.0..=640.0)
+            .default_height(theme::DOCK_DEFAULT_H)
+            .height_range(theme::DOCK_H_MIN..=theme::DOCK_H_MAX)
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                    self.draw_drum_seq_docked(ui);
-                });
-            });
-
-        // Right: patch list (for active part) or GM instrument list (SF2 mode)
-        egui::SidePanel::right("preset_panel")
-            .resizable(true)
-            .default_width(160.0)
-            .width_range(120.0..=260.0)
-            .show(ctx, |ui| {
-                let part = self.active_part;
-                let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
-                let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
-
-                ui.add_space(theme::SP_SM);
-                if is_sf2 {
-                    ui.strong(format!("GM Instruments (Layer {layer_label})"));
-                } else {
-                    ui.horizontal(|ui| {
-                        if ui.small_button("\u{25C0}").on_hover_text("Previous preset").clicked() {
-                            // Prev patch
-                            let idx = self.parts[part].patch_idx;
-                            if idx > 0 {
-                                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                                self.parts[part].patch_idx = idx - 1;
-                                self.load_edited_params(part);
-                                self.send_edited_params(part);
-                                self.save_config();
-                            }
-                        }
-                        let idx = self.parts[part].patch_idx;
-                        let total = self.patches.len();
-                        ui.strong(format!("Presets ({layer_label}) {}/{}", idx + 1, total));
-                        if ui.small_button("\u{25B6}").on_hover_text("Next preset").clicked() {
-                            // Next patch
-                            let idx = self.parts[part].patch_idx;
-                            if idx + 1 < self.patches.len() {
-                                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                                self.parts[part].patch_idx = idx + 1;
-                                self.load_edited_params(part);
-                                self.send_edited_params(part);
-                                self.save_config();
-                            }
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
-                            self.push_undo_snapshot();
-                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
-                            self.send_edited_params(part);
-                        }
-                        if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
-                            self.push_undo_snapshot();
-                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.parts[part].edited_params = crate::synth::PatchParams::random_map();
-                            self.send_edited_params(part);
-                        }
-                        ui.separator();
-                        if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
-                            self.undo();
-                        }
-                        if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
-                            self.redo();
-                        }
-                    });
-                }
-                ui.add_space(theme::SP_XS);
-
-                // Search bar
-                let search_width = ui.available_width();
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    let text_w = if self.preset_search.is_empty() {
-                        search_width - 4.0
-                    } else {
-                        search_width - 22.0
-                    };
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut self.preset_search)
-                            .hint_text("\u{1F50D} Search...")
-                            .desired_width(text_w.max(60.0)),
-                    );
-                    if !self.preset_search.is_empty() && ui.small_button("\u{2715}").on_hover_text("Clear search").clicked() {
-                        self.preset_search.clear();
-                        r.request_focus();
-                    }
-                });
-                ui.separator();
-
-                let query = self.preset_search.to_lowercase();
-                let searching = !query.is_empty();
-
-                if is_sf2 {
-                    // GM instrument list with same category style as synth presets
-                    use crate::synth::sampler::GM_PROGRAM_NAMES;
-                    let current_program = self.parts[part].sf2_program;
-                    let mut toggled_cat: Option<&str> = None;
-
-                    let gm_categories: &[(&str, usize, usize)] = &[
-                        ("Piano", 0, 8),
-                        ("Chromatic Perc", 8, 16),
-                        ("Organ", 16, 24),
-                        ("Guitar", 24, 32),
-                        ("Bass", 32, 40),
-                        ("Strings", 40, 48),
-                        ("Ensemble", 48, 56),
-                        ("Brass", 56, 64),
-                        ("Reed", 64, 72),
-                        ("Pipe", 72, 80),
-                        ("Synth Lead", 80, 88),
-                        ("Synth Pad", 88, 96),
-                        ("Synth FX", 96, 104),
-                        ("Ethnic", 104, 112),
-                        ("Percussive", 112, 120),
-                        ("Sound FX", 120, 128),
-                    ];
-
-                    egui::ScrollArea::vertical()
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            for &(cat_name, start, end) in gm_categories {
-                                // Collect matching instruments in this category
-                                let matches: Vec<usize> = if searching {
-                                    (start..end)
-                                        .filter(|&i| GM_PROGRAM_NAMES[i].to_lowercase().contains(&query)
-                                            || cat_name.to_lowercase().contains(&query))
-                                        .collect()
-                                } else {
-                                    (start..end).collect()
-                                };
-                                if searching && matches.is_empty() { continue; }
-
-                                let is_collapsed = !searching && self.collapsed_categories.contains(cat_name);
-                                let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
-                                if !searching {
-                                    if ui.selectable_label(false, format!("{arrow} {cat_name}")).clicked() {
-                                        toggled_cat = Some(cat_name);
-                                    }
-                                } else {
-                                    ui.label(egui::RichText::new(cat_name).strong().small());
-                                }
-                                if !is_collapsed {
-                                    for i in matches {
-                                        let name = GM_PROGRAM_NAMES[i];
-                                        let selected = current_program == i as u8;
-                                        if ui.selectable_label(selected, format!("  {name}")).clicked() && !selected {
-                                            self.parts[part].sf2_program = i as u8;
-                                            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                                                part, program: i as u8, bank: 0,
-                                            });
-                                            if part == 0 { self.config.sf2.layer_a_program = i as u8; }
-                                            else { self.config.sf2.layer_b_program = i as u8; }
-                                            let _ = self.config.save();
-                                        }
-                                    }
-                                }
-                            }
+                ui.columns(2, |cols| {
+                    // ScrollArea::both: вертикальный скролл НЕ режет контент по
+                    // горизонтали — сетка драмов вылезала под колонку лупера.
+                    // now: контент клипается по ширине колонки, избыток —
+                    // горизонтальный скролл, а не наложение.
+                    egui::ScrollArea::both().auto_shrink(false)
+                        .id_salt("dock_drums_scroll")
+                        .show(&mut cols[0], |ui| {
+                            self.draw_drum_seq_docked(ui);
                         });
-
-                    if let Some(cat) = toggled_cat {
-                        let cat_string = cat.to_string();
-                        if self.collapsed_categories.contains(&cat_string) {
-                            self.collapsed_categories.remove(&cat_string);
-                        } else {
-                            self.collapsed_categories.insert(cat_string);
-                        }
-                        self.save_collapsed_categories();
-                    }
-                } else {
-                    // Synth patch list
-                    let current_preset_idx = self.parts[part].patch_idx;
-                    let mut new_idx: Option<usize> = None;
-                    let mut toggled_category: Option<String> = None;
-
-                    let categories: Vec<(String, usize)> = {
-                        let mut cats = Vec::new();
-                        let mut last = String::new();
-                        for (i, p) in self.patches.iter().enumerate() {
-                            if p.category != last {
-                                cats.push((p.category.clone(), i));
-                                last = p.category.clone();
-                            }
-                        }
-                        cats
-                    };
-
-                    egui::ScrollArea::vertical()
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            let mut cat_idx = 0;
-                            for (i, patch) in self.patches.iter().enumerate() {
-                                // Track category boundaries
-                                if cat_idx < categories.len() && categories[cat_idx].1 == i {
-                                    cat_idx += 1;
-                                }
-
-                                // When searching, filter by name or category
-                                if searching {
-                                    let name_match = patch.name.to_lowercase().contains(&query);
-                                    let cat_match = patch.category.to_lowercase().contains(&query);
-                                    if !name_match && !cat_match { continue; }
-                                }
-
-                                if !searching {
-                                    // Normal mode: show category headers
-                                    if cat_idx > 0 && categories[cat_idx - 1].1 == i {
-                                        let cat = &categories[cat_idx - 1].0;
-                                        let is_collapsed = self.collapsed_categories.contains(cat);
-                                        let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
-                                        if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
-                                            toggled_category = Some(cat.clone());
-                                        }
-                                    }
-                                    if self.collapsed_categories.contains(&patch.category) {
-                                        continue;
-                                    }
-                                }
-
-                                let selected = i == current_preset_idx;
-                                if ui.selectable_label(selected, format!("  {}", patch.name)).clicked() && !selected {
-                                    new_idx = Some(i);
-                                }
-                            }
+                    egui::ScrollArea::both().auto_shrink(false)
+                        .id_salt("dock_looper_scroll")
+                        .show(&mut cols[1], |ui| {
+                            self.draw_looper(ui);
                         });
-
-                    if let Some(cat) = toggled_category {
-                        if self.collapsed_categories.contains(&cat) {
-                            self.collapsed_categories.remove(&cat);
-                        } else {
-                            self.collapsed_categories.insert(cat);
-                        }
-                        self.save_collapsed_categories();
-                    }
-                    if let Some(idx) = new_idx {
-                        let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                        self.parts[part].patch_idx = idx;
-                        self.load_edited_params(part);
-                        self.send_edited_params(part);
-                        self.save_config();
-                    }
-                }
+                });
             });
 
         // Settings window
@@ -1305,6 +1114,9 @@ impl eframe::App for App {
             self.draw_keybinds_window(ctx);
         }
 
+        // Instrument browser modal (from part row)
+        self.draw_instrument_browser_modal(ctx);
+
         // Draw toast notifications
         self.toasts.retain(|t| t.created.elapsed().as_secs_f32() < 3.0);
         for (i, toast) in self.toasts.iter().enumerate() {
@@ -1319,8 +1131,8 @@ impl eframe::App for App {
                 .show(ctx, |ui| {
                     egui::Frame::default()
                         .fill(color)
-                        .corner_radius(4.0)
-                        .inner_margin(egui::Margin::symmetric(12, 6))
+                        .corner_radius(theme::CARD_RADIUS)
+                        .inner_margin(egui::Margin::symmetric(theme::TOAST_MARGIN.0, theme::TOAST_MARGIN.1))
                         .show(ui, |ui| {
                             ui.label(egui::RichText::new(&toast.message).color(egui::Color32::WHITE).strong());
                         });
@@ -1341,43 +1153,25 @@ impl eframe::App for App {
             ui.separator();
             ui.add_space(theme::SP_MD);
             if self.show_fx_chain {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).id_salt("fx_chain_scroll").show(ui, |ui| {
                     self.draw_fx_chain(ui);
                 });
             } else if self.show_midi_seq {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).id_salt("midi_seq_scroll").show(ui, |ui| {
                     self.draw_midi_seq(ui);
                 });
             } else if self.show_drums {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).id_salt("drum_kit_scroll").show(ui, |ui| {
                     self.draw_drum_kit_controls(ui);
                 });
             } else {
-                self.draw_looper(ui);
-                ui.add_space(theme::SP_XS);
+                // Лупер переехал в единую docked-панель (#30); здесь остаётся
+                // питч-секвенсор и параметры активной части
                 self.draw_pitch_sequencer(ui);
                 ui.separator();
                 ui.add_space(theme::SP_MD);
                 let part = self.active_part;
                 let is_sf2 = self.parts[part].sf2_mode;
-                // Synth / SF2 toggle
-                if self.sf2_keys_soundfont.is_some() {
-                    ui.horizontal(|ui| {
-                        ui.label("Mode:");
-                        let mut sf2 = is_sf2;
-                        if ui.selectable_label(!sf2, "Synth").on_hover_text("Use synth engine").clicked() { sf2 = false; }
-                        if ui.selectable_label(sf2, "SF2").on_hover_text("Use SoundFont samples").clicked() { sf2 = true; }
-                        if sf2 != is_sf2 {
-                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.parts[part].sf2_mode = sf2;
-                            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2 });
-                            // Save to config
-                            if part == 0 { self.config.sf2.layer_a_sf2 = sf2; }
-                            else { self.config.sf2.layer_b_sf2 = sf2; }
-                            let _ = self.config.save();
-                        }
-                    });
-                }
                 if is_sf2 && self.sf2_keys_soundfont.is_some() {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
                     let prog = self.parts[part].sf2_program;
@@ -1387,7 +1181,33 @@ impl eframe::App for App {
                         format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_keys_loaded_name, prog, name),
                     );
                 } else {
-                    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    // Header: patch name + Init/Rnd/Undo/Redo
+                    ui.horizontal(|ui| {
+                        let idx = self.parts[part].patch_idx;
+                        let name = self.patches.get(idx).map(|p| p.name.as_str()).unwrap_or("---");
+                        ui.strong(name);
+                        ui.separator();
+                        if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
+                            self.push_undo_snapshot();
+                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                            self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
+                            self.send_edited_params(part);
+                        }
+                        if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
+                            self.push_undo_snapshot();
+                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                            self.parts[part].edited_params = crate::synth::PatchParams::random_map();
+                            self.send_edited_params(part);
+                        }
+                        ui.separator();
+                        if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
+                            self.undo();
+                        }
+                        if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+                            self.redo();
+                        }
+                    });
+                    egui::ScrollArea::vertical().auto_shrink(false).id_salt("params_scroll").show(ui, |ui| {
                         self.draw_params_editable(ui);
                     });
                 }
@@ -1397,6 +1217,174 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// Instrument browser modal: search + category tree, applies to `inst_browser_part`.
+    fn draw_instrument_browser_modal(&mut self, ctx: &egui::Context) {
+        let Some(part) = self.inst_browser_part else { return };
+        let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
+        let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
+
+        let mut close = false;
+        let mut picked_patch: Option<usize> = None;
+        let mut picked_program: Option<u8> = None;
+        let mut toggled_cat: Option<String> = None;
+
+        let modal = egui::Modal::new(egui::Id::new("inst_browser")).show(ctx, |ui| {
+            ui.set_width(theme::MODAL_W_MD);
+            ui.strong(if is_sf2 {
+                format!("GM Instrument — Part {layer_label}")
+            } else {
+                format!("Patch — Part {layer_label}")
+            });
+            ui.add_space(theme::SP_XS);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = theme::SP_SM;
+                let w = ui.available_width();
+                let r = ui.add(egui::TextEdit::singleline(&mut self.preset_search)
+                    .hint_text("\u{1F50D} Search...")
+                    .desired_width((w - 22.0).max(60.0)));
+                if !self.preset_search.is_empty()
+                    && ui.small_button("\u{2715}").clicked()
+                {
+                    self.preset_search.clear();
+                    r.request_focus();
+                }
+            });
+            ui.separator();
+
+            let query = self.preset_search.to_lowercase();
+            let searching = !query.is_empty();
+
+            egui::ScrollArea::vertical().auto_shrink(false)
+                .id_salt("inst_modal_list")
+                .max_height(theme::LIST_MAX_H)
+                .show(ui, |ui| {
+                    if is_sf2 {
+                        // ── GM categories (перенос mod.rs:1141-1205: клик пишет
+                        //    picked_program, коллапс — toggled_cat) ──
+                        use crate::synth::sampler::GM_PROGRAM_NAMES;
+                        let current_program = self.parts[part].sf2_program;
+                        let gm_categories: &[(&str, usize, usize)] = &[
+                            ("Piano", 0, 8), ("Chromatic Perc", 8, 16),
+                            ("Organ", 16, 24), ("Guitar", 24, 32),
+                            ("Bass", 32, 40), ("Strings", 40, 48),
+                            ("Ensemble", 48, 56), ("Brass", 56, 64),
+                            ("Reed", 64, 72), ("Pipe", 72, 80),
+                            ("Synth Lead", 80, 88), ("Synth Pad", 88, 96),
+                            ("Synth FX", 96, 104), ("Ethnic", 104, 112),
+                            ("Percussive", 112, 120), ("Sound FX", 120, 128),
+                        ];
+                        for &(cat_name, start, end) in gm_categories {
+                            let matches: Vec<usize> = if searching {
+                                (start..end)
+                                    .filter(|&i| GM_PROGRAM_NAMES[i].to_lowercase().contains(&query)
+                                        || cat_name.to_lowercase().contains(&query))
+                                    .collect()
+                            } else {
+                                (start..end).collect()
+                            };
+                            if searching && matches.is_empty() { continue; }
+                            let is_collapsed =
+                                !searching && self.collapsed_categories.contains(cat_name);
+                            let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                            if !searching {
+                                if ui.selectable_label(false, format!("{arrow} {cat_name}")).clicked() {
+                                    toggled_cat = Some(cat_name.to_string());
+                                }
+                            } else {
+                                ui.label(egui::RichText::new(cat_name).strong().small());
+                            }
+                            if !is_collapsed {
+                                for i in matches {
+                                    let name = GM_PROGRAM_NAMES[i];
+                                    let selected = current_program == i as u8;
+                                    if ui.selectable_label(selected, format!("  {name}")).clicked() && !selected {
+                                        picked_program = Some(i as u8);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // ── DSP patch tree (перенос mod.rs:1216-1271: клик пишет
+                        //    picked_patch) ──
+                        let current_preset_idx = self.parts[part].patch_idx;
+                        let categories: Vec<(String, usize)> = {
+                            let mut cats = Vec::new();
+                            let mut last = String::new();
+                            for (i, p) in self.patches.iter().enumerate() {
+                                if p.category != last {
+                                    cats.push((p.category.clone(), i));
+                                    last = p.category.clone();
+                                }
+                            }
+                            cats
+                        };
+                        let mut cat_idx = 0;
+                        for (i, patch) in self.patches.iter().enumerate() {
+                            if cat_idx < categories.len() && categories[cat_idx].1 == i {
+                                cat_idx += 1;
+                            }
+                            if searching {
+                                let name_match = patch.name.to_lowercase().contains(&query);
+                                let cat_match = patch.category.to_lowercase().contains(&query);
+                                if !name_match && !cat_match { continue; }
+                            }
+                            if !searching {
+                                if cat_idx > 0 && categories[cat_idx - 1].1 == i {
+                                    let cat = &categories[cat_idx - 1].0;
+                                    let is_collapsed = self.collapsed_categories.contains(cat);
+                                    let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                                    if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
+                                        toggled_cat = Some(cat.clone());
+                                    }
+                                }
+                                if self.collapsed_categories.contains(&patch.category) {
+                                    continue;
+                                }
+                            }
+                            let selected = i == current_preset_idx;
+                            if ui.selectable_label(selected, format!("  {}", patch.name)).clicked() && !selected {
+                                picked_patch = Some(i);
+                            }
+                        }
+                    }
+                });
+        });
+
+        // ── Post-closure handling (after .show, reads locals + modal) ────
+        if let Some(cat) = toggled_cat {
+            if self.collapsed_categories.contains(&cat) {
+                self.collapsed_categories.remove(&cat);
+            } else {
+                self.collapsed_categories.insert(cat);
+            }
+            self.save_collapsed_categories();
+        }
+        if let Some(prog) = picked_program {
+            self.parts[part].sf2_program = prog;
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                part, program: prog, bank: 0 });
+            // Persist for parts 0/1 (seeds program on startup) — перенос mod.rs:1198-1200
+            if part == 0 { self.config.sf2.layer_a_program = prog; }
+            else { self.config.sf2.layer_b_program = prog; }
+            let _ = self.config.save();
+            close = true;
+        }
+        if let Some(idx) = picked_patch {
+            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+            self.parts[part].patch_idx = idx;
+            self.load_edited_params(part);
+            self.send_edited_params(part);
+            self.save_config();
+            close = true;
+        }
+        if modal.should_close() {
+            close = true;
+        }
+        if close {
+            self.inst_browser_part = None;
+        }
+    }
+
     /// Send initial patches to all parts at startup
     pub fn send_initial_presets(&mut self) {
         // Restore persisted live toggles (mute / root-only) — survives restarts
@@ -1539,7 +1527,7 @@ impl App {
                         self.show_drums = false;
                         self.show_midi_seq = false;
                         self.show_fx_chain = false;
-                        self.seq_target_atom.store(1, Ordering::Relaxed);
+                        self.seq_target_atom.store(2, Ordering::Relaxed);
                     }
                 }
                 KeyAction::LooperRecord => {
@@ -2027,13 +2015,6 @@ impl App {
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part, mute });
                     self.persist_parts_state();
                 }
-            }
-            led_console::Action::ToggleTransportTarget => {
-                let cur = self.seq_target_atom.load(Ordering::Relaxed);
-                let new = if cur == 0 { 1 } else { 0 };
-                self.seq_target_atom.store(new, Ordering::Relaxed);
-                log::info!("[console] seq_target -> {}",
-                           if new == 0 { "drums" } else { "looper" });
             }
             led_console::Action::Undo => {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqUndo);

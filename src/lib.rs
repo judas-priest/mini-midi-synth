@@ -103,6 +103,8 @@ struct CommonInit {
     #[cfg(feature = "gui")]
     sustain_atom: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(feature = "gui")]
+    master_rec_pending_atom: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(feature = "gui")]
     drum_step_atom: Arc<AtomicU8>,
     #[cfg(feature = "gui")]
     drum_play_atom: Arc<AtomicU8>,
@@ -230,6 +232,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     #[cfg(feature = "gui")]
     let sustain_atom = engine.sustain_atom();
     #[cfg(feature = "gui")]
+    let master_rec_pending_atom = engine.master_rec_pending_atom();
+    #[cfg(feature = "gui")]
     let pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
     #[cfg(feature = "gui")]
     let scope_buf = engine.scope_buffer();
@@ -334,6 +338,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         program_change_atom,
         #[cfg(feature = "gui")]
         sustain_atom,
+        #[cfg(feature = "gui")]
+        master_rec_pending_atom,
         #[cfg(feature = "gui")]
         #[cfg(feature = "gui")]
         drum_step_atom,
@@ -570,10 +576,9 @@ pub fn run_headless() -> Result<()> {
                         eprintln!("[input] Drums: {}", if drum_playing { "Play" } else { "Stop" });
                     }
                     KeyAction::ToggleDrumsSynth => {
-                        let current = seq_target_local.load(Ordering::Relaxed);
-                        let new = if current == 0 { 1 } else { 0 };
-                        seq_target_local.store(new, Ordering::Relaxed);
-                        eprintln!("[input] Mode: {}", if new == 0 { "Drums" } else { "Synth" });
+                        let next = if seq_target_local.load(Ordering::Relaxed) == 0 { 1 } else { 0 };
+                        seq_target_local.store(next, Ordering::Relaxed);
+                        eprintln!("[input] Mode: {}", if next == 0 { "Drums" } else { "Synth" });
                     }
                     KeyAction::PrevPreset | KeyAction::NextPreset => {
                         // Preset navigation not supported in headless mode
@@ -749,6 +754,7 @@ pub fn run_gui(
         pending_remove_part: None,
         _program_change_atom: c.program_change_atom,
         sustain_atom: c.sustain_atom,
+        master_rec_pending: c.master_rec_pending_atom,
         sustain_release: c.config.ui.sustain_release,
         sf2_release_scale: c.config.ui.sf2_release_scale,
         show_help: false,
@@ -805,6 +811,7 @@ pub fn run_gui(
         led_socket: None,
         led_socket_alive: None,
         led_socket_failed_at: None,
+        led_connecting: None,
         led_last_send: None,
         led_child: None,
         led_spawn_backoff: None,
@@ -866,6 +873,7 @@ pub fn run_gui(
         pitch_seq_scale: [0; 2],
         pitch_seq_swing: [0.0; 2],
         preset_search: String::new(),
+        inst_browser_part: None,
         scope_buf: c.scope_buf,
         split_point: c.config.ui.split_point.unwrap_or(60),
         show_fx_chain: false,

@@ -26,21 +26,24 @@ const ZONE_B: std::ops::Range<usize> = PARTS_PER_ZONE..PARTS_PER_ZONE * 2;
 
 impl App {
     pub(super) fn draw_part_rows(&mut self, ui: &mut egui::Ui) {
-        // ── Split row (top): toggle + point + view tabs ──────────────────
+        // ── Performance save/load (above Split) ──────────────────────────
+        self.draw_perf_row(ui);
+
+        // ── Split row: toggle + point + view tabs ────────────────────────
         let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
         ui.horizontal(|ui| {
-            let mut split = split_on;
-            if ui.checkbox(&mut split, "Split").on_hover_text("Enable keyboard split").changed() {
-                if split {
-                    // Enable the first free B slot
-                    if let Some(i) = ZONE_B.into_iter().find(|&i| !self.parts[i].enabled) {
-                        self.parts[i].enabled = true;
-                        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: true });
-                        self.send_edited_params(i);
-                        self.send_part_volume(i);
-                    }
-                    self.apply_split_ranges();
-                } else {
+            let split_clicked = if split_on {
+                // Split active: show as an on-toggle with explicit remove hint
+                ui.small_button("Split: вкл ✕")
+                    .on_hover_text("Выключить сплит: убрать правую руку (зона B)")
+                    .clicked()
+            } else {
+                ui.button("+ Правая рука (Split)")
+                    .on_hover_text("Добавить правую руку: зона B, клавиатура делится по Split point")
+                    .clicked()
+            };
+            if split_clicked {
+                if split_on {
                     // Disable all Zone B parts, restore Zone A to full range
                     for i in ZONE_B {
                         if self.parts[i].enabled {
@@ -59,6 +62,15 @@ impl App {
                     if self.active_part >= PARTS_PER_ZONE {
                         self.set_active_part(0);
                     }
+                } else {
+                    // Enable the first free B slot
+                    if let Some(i) = ZONE_B.into_iter().find(|&i| !self.parts[i].enabled) {
+                        self.parts[i].enabled = true;
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: true });
+                        self.send_edited_params(i);
+                        self.send_part_volume(i);
+                    }
+                    self.apply_split_ranges();
                 }
             }
 
@@ -97,7 +109,9 @@ impl App {
         });
 
         // ── Part rows (two zones) ────────────────────────────────────────
-        let max_h = (ui.available_height() * 0.55).max(120.0);
+        // Вся доступная высота минус карта зон — раньше 0.55 от остатка резал
+        // строки партов посередине и оставлял дыру над docked-панелью.
+        let max_h = (ui.available_height() - theme::PART_LIST_RESERVE).max(120.0);
         egui::ScrollArea::vertical()
             .id_salt("layers_parts_scroll")
             .auto_shrink(false)
@@ -158,7 +172,7 @@ impl App {
             let zone = if p < PARTS_PER_ZONE { "A" } else { "B" };
             let num = (p % PARTS_PER_ZONE) + 1;
             let dialog = egui::Modal::new(egui::Id::new("remove_part_dialog")).show(ui.ctx(), |ui| {
-                ui.set_width(280.0);
+                ui.set_width(280.0); // legacy width
                 ui.strong(format!("Remove part {zone}{num}?"));
                 ui.label("Its preset edits will be lost.");
                 ui.add_space(theme::SP_MD);
@@ -176,13 +190,14 @@ impl App {
                 self.pending_remove_part = None;
             }
         }
+    }
 
-        // ── Performance save/load ────────────────────────────────────────
-        ui.add_space(theme::SP_XS);
+    /// Performance save/load row (shown above part rows).
+    fn draw_perf_row(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Perf:");
             ui.add(egui::TextEdit::singleline(&mut self.perf_name)
-                .desired_width(110.0).hint_text("name"));
+                .desired_width(theme::TEXT_W_NAME).hint_text("name")); // unify 110→120
             if ui.button("Save").on_hover_text("Save performance").clicked() && !self.perf_name.trim().is_empty() {
                 let parts: Vec<PartConfig> = self.parts.iter().map(|l| {
                     let patch_name = self.patches.get(l.patch_idx)
@@ -219,7 +234,7 @@ impl App {
             let mut load_perf: Option<Performance> = None;
             egui::ComboBox::from_id_salt("perf_load")
                 .selected_text(if self.perf_list.is_empty() { "No performances" } else { "Load..." })
-                .width(120.0)
+                .width(theme::COMBO_W_MD)
                 .show_ui(ui, |ui| {
                     for (name, path) in &self.perf_list {
                         if ui.selectable_label(false, name).clicked() {
@@ -314,26 +329,27 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                 self.parts[i].sf2_mode = !sf2;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: !sf2 });
+                // Persist engine choice for parts 0/1 (seeds sf2_mode on startup)
+                if i == 0 {
+                    self.config.sf2.layer_a_sf2 = !sf2;
+                    let _ = self.config.save();
+                } else if i == 1 {
+                    self.config.sf2.layer_b_sf2 = !sf2;
+                    let _ = self.config.save();
+                }
             }
 
             // Instrument select
             if sf2 {
                 if self.sf2_keys_soundfont.is_some() {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
-                    let mut prog = self.parts[i].sf2_program;
+                    let prog = self.parts[i].sf2_program;
                     let cur_name = GM_PROGRAM_NAMES.get(prog as usize).copied().unwrap_or("?");
-                    let inst = egui::ComboBox::from_id_salt(format!("inst_sf2_{i}"))
-                        .width(170.0)
-                        .selected_text(format!("prog {prog}: {cur_name}"))
-                        .show_ui(ui, |ui| {
-                            for (p, name) in GM_PROGRAM_NAMES.iter().enumerate() {
-                                ui.selectable_value(&mut prog, p as u8, format!("prog {p}: {name}"));
-                            }
-                        });
-                    if inst.response.changed() {
-                        self.parts[i].sf2_program = prog;
-                        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                            part: i, program: prog, bank: 0 });
+                    if ui.add_sized([theme::BUTTON_W_NAME, 0.0], egui::Button::new(cur_name))
+                        .on_hover_text(format!("GM program {prog} — open instrument browser (search + categories)")).clicked()
+                    {
+                        self.preset_search.clear();
+                        self.inst_browser_part = Some(i);
                     }
                 } else {
                     ui.label(egui::RichText::new("---").weak())
@@ -346,21 +362,11 @@ impl App {
                     self.patches.iter().map(|p| p.name.clone()).collect();
                 let cur_idx = self.parts[i].patch_idx;
                 let cur = patch_names.get(cur_idx).cloned().unwrap_or_else(|| "---".into());
-                let mut new_idx = cur_idx;
-                egui::ComboBox::from_id_salt(format!("inst_dsp_{i}"))
-                    .width(170.0)
-                    .selected_text(&cur)
-                    .show_ui(ui, |ui| {
-                        for (pi, name) in patch_names.iter().enumerate() {
-                            ui.selectable_value(&mut new_idx, pi, name);
-                        }
-                    });
-                if new_idx != cur_idx {
-                    let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                    self.parts[i].patch_idx = new_idx;
-                    self.load_edited_params(i);
-                    self.send_edited_params(i);
-                    self.save_config();
+                if ui.add_sized([theme::BUTTON_W_NAME, 0.0], egui::Button::new(&cur))
+                    .on_hover_text("Open patch browser (search + categories)").clicked()
+                {
+                    self.preset_search.clear();
+                    self.inst_browser_part = Some(i);
                 }
             }
 
@@ -504,8 +510,8 @@ impl App {
 
 fn draw_key_zone_map(ui: &mut egui::Ui, parts: &[super::PartState], active: usize) {
     let colors = theme::PART_COLORS;
-    let total_w = ui.available_width().min(500.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(total_w, 8.0), egui::Sense::hover());
+    let total_w = ui.available_width().min(theme::ZONE_MAP_W_MAX);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(total_w, theme::ZONE_MAP_H), egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 0.0, theme::BG_PANEL);
     for (i, part) in parts.iter().enumerate() {

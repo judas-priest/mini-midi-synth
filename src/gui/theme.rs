@@ -24,6 +24,71 @@ pub const SLIDER_COMPACT: f32 = 120.0;
 /// Drum per-instrument sliders.
 pub const SLIDER_DRUM: f32 = 40.0;
 
+// ── Spacing (4px grid; legacy off-grid значения помечены) ──────────
+#[allow(dead_code)] // reserved token
+pub const SP_XL: f32 = 16.0; // settings help grids
+pub const GRID_TIGHT: f32 = 1.0; // drum cell pitch (intentional pixel-tight)
+pub const PAD_GAP: f32 = 3.0; // keyboard pads / perf window / zone gap
+pub const APP_ITEM_SPACING: eframe::egui::Vec2 = eframe::egui::vec2(8.0, 5.0); // global default (legacy y=5)
+#[allow(dead_code)] // Android-only (mod.rs cfg(target_os = "android"))
+pub const ANDROID_ITEM_SPACING: eframe::egui::Vec2 = eframe::egui::vec2(10.0, 8.0);
+pub const GRID_SP_FORM: [f32; 2] = [12.0, 6.0]; // settings forms
+pub const GRID_SP_LIST: [f32; 2] = [8.0, 4.0]; // macros/midi_seq grids
+pub const GRID_SP_HELP: [f32; 2] = [16.0, 2.0]; // CC help grids
+pub const GRID_SP_FX: [f32; 2] = [4.0, 2.0]; // fx chain grid
+pub const CARD_RADIUS: f32 = 4.0;
+pub const CARD_MARGIN: f32 = 6.0; // Margin::same (legacy off-grid, load-bearing)
+pub const TOAST_MARGIN: (i8, i8) = (12, 6);
+
+// ── Control widths ─────────────────────────────────────────────────
+pub const COMBO_W_2CH: f32 = 50.0;
+pub const COMBO_W_SM: f32 = 80.0;
+pub const COMBO_W_MD: f32 = 120.0;
+pub const COMBO_W_LG: f32 = 200.0; // unify 120(GM remap)/200/220(SF2 files)
+pub const COMBO_W_XL: f32 = 280.0;
+pub const TEXT_W_NAME: f32 = 120.0; // unify 80/110/120 name edits
+pub const TEXT_W_PATH: f32 = 300.0; // unify 240/300 path edits
+#[allow(dead_code)] // reserved token (velocity drag unified to DRAG_W_MD)
+pub const DRAG_W_SM: f32 = 60.0;
+pub const DRAG_W_MD: f32 = 80.0; // unify 60/80 velocity DragValues
+pub const BUTTON_W_NAME: f32 = 170.0; // part-row instrument buttons
+pub const PROGRESS_W_SM: f32 = 80.0;
+pub const PROGRESS_W_MD: f32 = 160.0;
+pub const MODAL_W_SM: f32 = 300.0;
+pub const MODAL_W_MD: f32 = 360.0;
+pub const MODAL_W_LG: f32 = 900.0; // pad remap modal (1:1)
+pub const LIST_MAX_H: f32 = 420.0;
+pub const POPUP_LIST_MAX_H: f32 = 300.0;
+
+// ── Canvas geometry (values unchanged — tokenized) ────────────────
+pub const DRUM_CELL_W: f32 = 28.0;
+pub const DRUM_CELL_H: f32 = 22.0;
+pub const DRUM_LABEL_W: f32 = 80.0;
+pub const BEAT_LED: f32 = 14.0;
+pub const PITCH_STEP_MIN: f32 = 20.0;
+pub const PITCH_STEP_MAX: f32 = 40.0;
+pub const PITCH_BAR_H: f32 = 80.0;
+pub const TIMELINE_H: f32 = 40.0;
+pub const TIMELINE_W_MAX: f32 = 600.0;
+pub const KEY_W_MIN: f32 = 6.0;
+pub const KEY_W_MAX: f32 = 18.0;
+pub const KEY_H_MIN: f32 = 70.0;
+pub const PAD_SIZE_MIN: f32 = 32.0;
+pub const PAD_SIZE_MAX: f32 = 48.0;
+pub const PAD_PERF_W: f32 = 80.0;
+pub const PAD_PERF_H: f32 = 52.0;
+pub const ZONE_MAP_H: f32 = 8.0;
+pub const ZONE_MAP_W_MAX: f32 = 500.0;
+pub const PART_LIST_RESERVE: f32 = 36.0;
+pub const FILTER_RESP_W: f32 = 300.0;
+pub const FILTER_RESP_H: f32 = 80.0;
+pub const XY_PAD_SIZE: f32 = 200.0;
+pub const SCOPE_W: f32 = 150.0;
+pub const SCOPE_H: f32 = 40.0;
+pub const DOCK_DEFAULT_H: f32 = 500.0;
+pub const DOCK_H_MIN: f32 = 200.0;
+pub const DOCK_H_MAX: f32 = 760.0;
+
 // ── Backgrounds ──────────────────────────────────────────────────────────────
 
 /// Main dark background for scope, filter response, ADSR curve.

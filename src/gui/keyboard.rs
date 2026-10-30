@@ -57,13 +57,13 @@ impl App {
                 .count() as f32;
 
             // Reserve space for pads on the right: 8 pads * pad_size + gap
-            let pad_gap = 3.0_f32;
-            let pad_size = ((ui.available_width() * 0.25) / 8.0 - pad_gap).clamp(32.0, 48.0);
-            let pad_block_w = 8.0 * (pad_size + pad_gap) + 12.0; // 12px margin
+            let pad_gap = theme::PAD_GAP;
+            let pad_size = ((ui.available_width() * 0.25) / 8.0 - pad_gap).clamp(theme::PAD_SIZE_MIN, theme::PAD_SIZE_MAX);
+            let pad_block_w = 8.0 * (pad_size + pad_gap) + 12.0; // legacy margin
 
             let available_w = ui.available_width() - pad_block_w;
-            let key_w = (available_w / total_white).clamp(6.0, 18.0);
-            let key_h = (key_w * 3.5).min(70.0);
+            let key_w = (available_w / total_white).clamp(theme::KEY_W_MIN, theme::KEY_W_MAX);
+            let key_h = (key_w * 3.5).min(theme::KEY_H_MIN);
             let black_h = key_h * 0.62;
 
             let (response, painter) = ui.allocate_painter(

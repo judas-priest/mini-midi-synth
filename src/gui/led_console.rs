@@ -46,8 +46,6 @@ pub enum Action {
     LoadPerf(usize),
     SelectPattern(usize),
     ToggleMute(usize),
-    /// Menu slot 3: flip seq_target (drums <-> looper). Stays in Menu.
-    ToggleTransportTarget,
     Undo,
     /// Pad 32 held >= HOLD: redo the last undone sequencer edit.
     Redo,
@@ -126,8 +124,7 @@ impl LedConsole {
                 0 => { self.mode = Mode::Home; None }
                 1 => { self.mode = Mode::Pattern; None }
                 2 => { self.mode = Mode::Mute; None }
-                3 => Some(Action::ToggleTransportTarget), // toggle, stays in Menu
-                _ => None, // dark slot in menu: no-op
+                _ => None, // dark slot in menu: no-op (slot 3 = ex-target toggle)
             };
         }
         if slot == 0 {
@@ -155,7 +152,8 @@ impl LedConsole {
     /// LED colors for slots 0..=7 (top row). `w_perf`/`w_pat`/`w_mute` — first
     /// index of the visible window: slot i (1..=7) shows item window + i - 1.
     /// MUTE slots cover all parts via w_mute paging (PAGE pads 28/29).
-    /// Slot 0 is the MENU button (white).
+    /// Slot 0 is the MENU button (white). No transport-target item since
+    /// #32 фаза 4: transport is always master, menu slot 3 is dark.
     #[allow(clippy::too_many_arguments)] // flat LED snapshot, callers build it inline
     pub fn top_colors(
         &self,
@@ -166,7 +164,6 @@ impl LedConsole {
         w_perf: usize,
         w_pat: usize,
         w_mute: usize,
-        seq_target: u8,
     ) -> [[u8; 3]; 8] {
         // Palette uses ONLY hues visually validated on this hardware (see
         // PADS_NOTES.md bank-1 kit colors: FF0000/00FF00/FFFF00/0066FF/FF8000/
@@ -216,14 +213,12 @@ impl LedConsole {
             Mode::Menu => {
                 // menu items are color-coded to what the row becomes after
                 // picking them: HOME -> blue perfs, PATTERN -> yellow,
-                // MUTE -> green; slot 3 IS the toggle: shows the current
-                // target (blue = drums, green = looper)
+                // MUTE -> green; slot 3 is dark (target toggle removed)
                 for (i, col) in c.iter_mut().enumerate() {
                     *col = match i {
                         0 => AVAIL,              // HOME: blue (perfs)
                         1 => [0xFF, 0xFF, 0x00], // PATTERN: yellow
                         2 => [0x00, 0xFF, 0x00], // MUTE: green
-                        3 => if seq_target == 0 { AVAIL } else { [0x00, 0xFF, 0x00] },
                         _ => [0x00, 0x00, 0x00],
                     };
                 }
@@ -386,14 +381,14 @@ mod tests {
         let mut c = LedConsole::new();
         let mutes = [false; 8];
         // window 2: slot 1 = perf idx 2 (selected), slot 2 = idx 3 (filled)
-        let home = c.top_colors(Some(2), 5, 0, &mutes, 2, 0, 0, 0);
+        let home = c.top_colors(Some(2), 5, 0, &mutes, 2, 0, 0);
         assert_eq!(home[1], [0xFF, 0x00, 0xFF]); // selected (idx 2)
         assert_eq!(home[2], [0x00, 0x66, 0xFF]); // available (idx 3)
         // slot 4 = idx 5 -> за концом списка (count 5) -> OFF
         assert_eq!(home[4], [0x00, 0x00, 0x00]);
         // pattern window 1: slot 1 = pattern 1 (selected при current=1)
         c.mode = Mode::Pattern;
-        let pat = c.top_colors(None, 0, 1, &mutes, 0, 1, 0, 0);
+        let pat = c.top_colors(None, 0, 1, &mutes, 0, 1, 0);
         assert_eq!(pat[1], [0xFF, 0x00, 0xFF]);
         assert_eq!(pat[2], [0xFF, 0xFF, 0x00]); // pattern mode speaks yellow
     }
@@ -410,29 +405,26 @@ mod tests {
     }
 
     #[test]
-    fn menu_slot3_toggles_target_and_stays_menu() {
+    fn menu_slot3_tap_is_noop_and_stays_menu() {
         let mut c = LedConsole::new();
         c.mode = Mode::Menu;
         let now = Instant::now();
         c.on_event(PadEvent::Down(3), now);
-        assert_eq!(c.on_event(PadEvent::Up(3), now + Duration::from_millis(30)),
-                   Some(Action::ToggleTransportTarget));
-        assert_eq!(c.mode, Mode::Menu, "toggle item must not leave the menu");
+        assert_eq!(c.on_event(PadEvent::Up(3), now + Duration::from_millis(30)), None);
+        assert_eq!(c.mode, Mode::Menu, "dark slot must not leave the menu");
     }
 
     #[test]
-    fn menu_slot3_led_shows_target() {
+    fn menu_slot3_led_is_off() {
         let mut c = LedConsole::new();
         c.mode = Mode::Menu;
         let mutes = [false; 8];
-        let drums = c.top_colors(None, 0, 0, &mutes, 0, 0, 0, 0);
-        assert_eq!(drums[3], [0x00, 0x66, 0xFF], "target=0 (drums): blue");
-        let looper = c.top_colors(None, 0, 0, &mutes, 0, 0, 0, 1);
-        assert_eq!(looper[3], [0x00, 0xFF, 0x00], "target=1 (looper): green");
+        let menu = c.top_colors(None, 0, 0, &mutes, 0, 0, 0);
+        assert_eq!(menu[3], [0x00, 0x00, 0x00], "slot 3 (ex-target toggle): OFF");
         // остальные пункты меню не изменились
-        assert_eq!(drums[0], [0x00, 0x66, 0xFF]); // HOME: blue
-        assert_eq!(drums[1], [0xFF, 0xFF, 0x00]); // PATTERN: yellow
-        assert_eq!(drums[2], [0x00, 0xFF, 0x00]); // MUTE: green
+        assert_eq!(menu[0], [0x00, 0x66, 0xFF]); // HOME: blue
+        assert_eq!(menu[1], [0xFF, 0xFF, 0x00]); // PATTERN: yellow
+        assert_eq!(menu[2], [0x00, 0xFF, 0x00]); // MUTE: green
     }
 
     #[test]
@@ -441,12 +433,12 @@ mod tests {
         c.mode = Mode::Mute;
         let mutes: [bool; 16] = std::array::from_fn(|i| i == 7 || i == 14);
         // window 7: slot 1 = part 7 (muted -> OFF), slot 2 = part 8 (sound -> green)
-        let top = c.top_colors(None, 0, 0, &mutes, 0, 0, 7, 0);
+        let top = c.top_colors(None, 0, 0, &mutes, 0, 0, 7);
         assert_eq!(top[1], [0x00, 0x00, 0x00], "muted part 7: OFF");
         assert_eq!(top[2], [0x00, 0xFF, 0x00], "sounding part 8: green");
         // window 14 (last page): slot 1 = part 14 (muted -> OFF),
         // slot 2 = part 15 (< 16 -> green)
-        let top = c.top_colors(None, 0, 0, &mutes, 0, 0, 14, 0);
+        let top = c.top_colors(None, 0, 0, &mutes, 0, 0, 14);
         assert_eq!(top[1], [0x00, 0x00, 0x00], "muted part 14: OFF");
         assert_eq!(top[2], [0x00, 0xFF, 0x00], "part 15: green");
         // за концом списка -> OFF (окно 14, slot 3 = part 16 — не существует)

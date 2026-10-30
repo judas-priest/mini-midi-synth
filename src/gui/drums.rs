@@ -21,21 +21,35 @@ impl App {
 
 
 
-        // Transport controls — same layout as looper
+        // ── Single master transport (#32 фаза 4) ─────────────────────────
+        let looper_undo_avail = {
+            let a = &self.looper_atoms;
+            a.layer_count.load(std::sync::atomic::Ordering::Relaxed) > 1
+                && a.event_count.load(std::sync::atomic::Ordering::Relaxed) > 0
+        };
         ui.horizontal(|ui| {
-            // Play/Stop
-            let play_label = if self.drum_playing { "\u{23F9} Stop" } else { "\u{25B6} Play" };
-            if ui.button(play_label).clicked() {
-                self.drum_playing = !self.drum_playing;
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPlay { playing: self.drum_playing });
+            ui.label(egui::RichText::new("Master").strong().small());
+            let lstate = crate::synth::looper::LooperState::from_u8(
+                self.looper_atoms.state.load(std::sync::atomic::Ordering::Relaxed));
+            let looper_active = matches!(lstate,
+                crate::synth::looper::LooperState::Playing
+                | crate::synth::looper::LooperState::Overdubbing
+                | crate::synth::looper::LooperState::Recording);
+            let any_playing = self.drum_playing || looper_active;
+            let play_label = if any_playing { "\u{23F9} Stop" } else { "\u{25B6} Play" };
+            if ui.button(play_label).on_hover_text("Master: drums + looper together").clicked() {
+                let _ = self.ctrl_tx.push(ControlEvent::MasterPlay);
             }
-
-            // Rec
-            let rec_label = if self.drum_recording { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
-            let rec_color = if self.drum_recording { egui::Color32::RED } else { egui::Color32::GRAY };
-            if ui.button(egui::RichText::new(rec_label).color(rec_color)).clicked() {
-                self.drum_recording = !self.drum_recording;
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqRecord { recording: self.drum_recording });
+            let rec = self.drum_recording
+                || matches!(lstate,
+                    crate::synth::looper::LooperState::Recording
+                    | crate::synth::looper::LooperState::Overdubbing);
+            let rec_label = if rec { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
+            let rec_color = if rec { egui::Color32::RED } else { egui::Color32::GRAY };
+            if ui.button(egui::RichText::new(rec_label).color(rec_color))
+                .on_hover_text("Master record: drums → grid, notes → looper (loop = 1 pattern cycle)").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
             }
 
             // Downbeat flash indicator (lights ~150 ms after beat 1)
@@ -43,25 +57,35 @@ impl App {
                 .map(|t| t.elapsed() < std::time::Duration::from_millis(150))
                 .unwrap_or(false);
             let (flash_rect, _) =
-                ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                ui.allocate_exact_size(egui::vec2(theme::BEAT_LED, theme::BEAT_LED), egui::Sense::hover());
             ui.painter().circle_filled(
-                flash_rect.center(), 5.0,
+                flash_rect.center(), 5.0, // legacy radius
                 if flashing { egui::Color32::from_rgb(255, 190, 60) }
                 else { egui::Color32::from_gray(45) },
             );
 
-            // Undo / Clear
-            if ui.button("Undo").on_hover_text("Undo last edit").clicked() {
+            if ui.button("Undo").on_hover_text("Undo last sequencer edit").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqUndo);
             }
             if ui.button("Clear").on_hover_text("Clear all steps").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
+            }
+            if ui.add_enabled(looper_undo_avail, egui::Button::new("L-Undo"))
+                .on_hover_text("Undo last looper layer").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
             }
 
             ui.separator();
             ui.label("BPM:");
             if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_bpm });
+            }
+            // Паттерн мутации поля — как drum_bpm выше (capture &mut self).
+            // Персист обязателен: старый чекбокс звал save_global_to_config().
+            if ui.checkbox(&mut self.drum_metronome, "Metro").on_hover_text("Metronome click on beats").changed() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
+                self.save_global_to_config();
             }
         });
 
@@ -117,9 +141,9 @@ impl App {
         ui.add_space(theme::SP_SM);
 
         // Step grid
-        let cell_w = 28.0;
-        let cell_h = 22.0;
-        let label_width = 80.0;
+        let cell_w = theme::DRUM_CELL_W;
+        let cell_h = theme::DRUM_CELL_H;
+        let label_width = theme::DRUM_LABEL_W;
         let pattern_length = self.drum_patterns[pat_idx].length as usize;
 
         // Colors per instrument type
@@ -129,6 +153,8 @@ impl App {
             ui.horizontal(|ui| {
                 // Instrument label
                 let name = DRUM_NAMES[slot];
+                // NOTE: allocate_ui внутри horizontal-строк — известный источник развалки (mod.rs docked panel);
+                // здесь легаси-грид, работает — не реплицировать.
                 ui.allocate_ui(egui::vec2(label_width, cell_h), |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(egui::RichText::new(name).small());
@@ -137,7 +163,7 @@ impl App {
 
                 // Step buttons
                 let spacing = ui.spacing().item_spacing;
-                ui.spacing_mut().item_spacing = egui::vec2(1.0, 1.0);
+                ui.spacing_mut().item_spacing = egui::vec2(theme::GRID_TIGHT, theme::GRID_TIGHT);
 
                 for step in 0..pattern_length {
                     let vel = self.drum_patterns[pat_idx].steps[slot][step].velocity;
@@ -274,8 +300,8 @@ impl App {
         }
     }
 
-    /// Drums-tab-only controls (TECHDEBT #25): mix row (Swing/Vol/V127/Metro,
-    /// BPM lives in the docked transport row), pad-remap toggle, kit save/load,
+    /// Drums-tab-only controls (TECHDEBT #25): mix row (Swing/Vol/V127,
+    /// BPM/Metro live in the docked transport row), pad-remap toggle, kit save/load,
     /// MIDI import. The grid and transport live in the docked bottom panel
     /// (draw_drum_seq_docked).
     pub(super) fn draw_drum_kit_controls(&mut self, ui: &mut egui::Ui) {
@@ -300,12 +326,6 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
                 self.save_global_to_config();
             }
-            if ui.checkbox(&mut self.drum_metronome, "Metro")
-                .on_hover_text("Metronome: click on every beat while the sequencer plays (accent on beat 1)").changed()
-            {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
-                self.save_global_to_config();
-            }
         });
 
         // Pad remap: incoming pad note -> internal slot (modal, off the main screen)
@@ -320,7 +340,7 @@ impl App {
         // Save / Load drum kit
         ui.horizontal(|ui| {
             ui.label("Kit:");
-            ui.add(egui::TextEdit::singleline(&mut self.drum_kit_name).desired_width(120.0).hint_text("name"));
+            ui.add(egui::TextEdit::singleline(&mut self.drum_kit_name).desired_width(theme::TEXT_W_NAME).hint_text("name"));
             if ui.button("Save").on_hover_text("Save drum kit").clicked() && !self.drum_kit_name.trim().is_empty() {
                 let kit = DrumKit {
                     name: self.drum_kit_name.trim().to_string(),
@@ -383,7 +403,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label("MIDI:");
             ui.add(egui::TextEdit::singleline(&mut self.drum_midi_import_path)
-                .desired_width(240.0).hint_text("path to .mid file"));
+                .desired_width(theme::TEXT_W_PATH).hint_text("path to .mid file"));
             if ui.button("Import").on_hover_text("Import from MIDI file").clicked() && !self.drum_midi_import_path.trim().is_empty() {
                 let path = std::path::PathBuf::from(self.drum_midi_import_path.trim());
                 match preset::import_midi_drums(&path) {
@@ -427,14 +447,14 @@ impl App {
                 } else { format!("note {}", v) }
             };
             let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ctx, |ui| {
-                ui.set_width(900.0);
+                ui.set_width(theme::MODAL_W_LG);
                 ui.strong("Pad Remap");
                 ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
                 ui.add_space(theme::SP_MD);
                 let mut new_remap = self.drum_remap;
                 let mut new_vels = self.drum_pad_vel;
                 let mut pad_row = |ui: &mut egui::Ui, pads: std::ops::Range<usize>, id: &str| {
-                    egui::Grid::new(id).num_columns(8).spacing([8.0, 6.0]).show(ui, |ui| {
+                    egui::Grid::new(id).num_columns(8).spacing([8.0, 6.0]).show(ui, |ui| { // legacy grid spacing
                         for p in pads {
                             let note = if p < 8 { PAD_TOP_NOTES[p] } else { PAD_BOT_NOTES[p - 8] };
                             let slot = &mut new_remap[(note - 36) as usize];
@@ -442,7 +462,7 @@ impl App {
                             ui.vertical_centered(|ui| {
                                 ui.label(format!("{}", p + 1));
                                 egui::ComboBox::from_id_salt(p)
-                                    .width(120.0)
+                                    .width(theme::COMBO_W_LG) // unify with GM-remap combo (120→200)
                                     .selected_text(sel)
                                     .show_ui(ui, |ui| {
                                         for (n, name) in kit_notes.iter() {
@@ -450,7 +470,7 @@ impl App {
                                         }
                                     });
                                 let mut vel = new_vels[(note - 36) as usize];
-                                ui.add_sized([60.0, 0.0], egui::DragValue::new(&mut vel)
+                                ui.add_sized([theme::DRAG_W_MD, 0.0], egui::DragValue::new(&mut vel)
                                     .range(0..=127)
                                     .custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{}", v as i32) }));
                                 new_vels[(note - 36) as usize] = vel;
@@ -517,12 +537,12 @@ impl App {
                 kit_names[(sel - 30) as usize].clone()
             } else { format!("note {}", sel) };
             let dialog = egui::Modal::new(egui::Id::new("remap_pad_dialog")).show(ctx, |ui| {
-                ui.set_width(300.0);
+                ui.set_width(theme::MODAL_W_SM);
                 ui.strong(format!("Pad {}", p + 1));
                 ui.label("Instrument:");
                 ui.add_space(theme::SP_MD);
                 egui::ComboBox::from_id_salt("remap_instrument")
-                    .width(200.0)
+                    .width(theme::COMBO_W_LG)
                     .selected_text(sel_name)
                     .show_ui(ui, |ui| {
                         for (n, name) in kit_notes.iter() {
@@ -532,7 +552,7 @@ impl App {
                 ui.add_space(theme::SP_MD);
                 ui.label("Velocity (Off = dynamic):");
                 let mut vel = self.drum_pad_vel[idx];
-                ui.add_sized([80.0, 0.0], egui::DragValue::new(&mut vel)
+                ui.add_sized([theme::DRAG_W_MD, 0.0], egui::DragValue::new(&mut vel)
                     .range(0..=127)
                     .custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{}", v as i32) }));
                 if vel != self.drum_pad_vel[idx] {
@@ -585,7 +605,7 @@ impl App {
                     let rate_name = rate.name();
                     egui::ComboBox::from_id_salt(format!("seq_rate_{part}"))
                         .selected_text(rate_name)
-                        .width(50.0)
+                        .width(theme::COMBO_W_2CH)
                         .show_ui(ui, |ui| {
                             for i in 0..6u8 {
                                 let r = StepRate::from_index(i);
@@ -600,7 +620,7 @@ impl App {
                     let scale = ScaleType::from_index(self.pitch_seq_scale[part]);
                     egui::ComboBox::from_id_salt(format!("seq_scale_{part}"))
                         .selected_text(scale.name())
-                        .width(80.0)
+                        .width(theme::COMBO_W_SM)
                         .show_ui(ui, |ui| {
                             for i in 0..7u8 {
                                 let s = ScaleType::from_index(i);
@@ -640,8 +660,8 @@ impl App {
 
                 // Step grid: pitch bars + gate toggles
                 let avail_w = ui.available_width();
-                let step_w = (avail_w / length as f32).clamp(20.0, 40.0);
-                let bar_h = 80.0;
+                let step_w = (avail_w / length as f32).clamp(theme::PITCH_STEP_MIN, theme::PITCH_STEP_MAX);
+                let bar_h = theme::PITCH_BAR_H;
 
                 // Pitch bars
                 let (rect, response) = ui.allocate_exact_size(
@@ -790,33 +810,6 @@ impl App {
 
         // --- Row 1: Transport + Status ---
         ui.horizontal(|ui| {
-            let play_label = match state {
-                LooperState::Playing | LooperState::Overdubbing => "\u{23F9} Stop",
-                _ => "\u{25B6} Play",
-            };
-            if ui.button(play_label).clicked() {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperTogglePlay);
-            }
-
-            let is_rec = matches!(state, LooperState::Recording | LooperState::Overdubbing);
-            let rec_label = if is_rec { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
-            let rec_color = if is_rec { egui::Color32::RED } else { egui::Color32::GRAY };
-            if ui.button(egui::RichText::new(rec_label).color(rec_color)).clicked() {
-                match state {
-                    LooperState::Idle | LooperState::Playing => {
-                        let _ = self.ctrl_tx.push(ControlEvent::LooperRecord);
-                    }
-                    LooperState::Recording | LooperState::Overdubbing => {
-                        let _ = self.ctrl_tx.push(ControlEvent::LooperStopRecord);
-                    }
-                }
-            }
-
-            let undo_label = if layer_count > 1 { format!("Undo L{layer_count}") } else { "Undo".into() };
-            if ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new(undo_label)).clicked() {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
-            }
-
             let clear_pending = self.looper_clear_confirm
                 .map(|t| t.elapsed().as_secs_f32() < 2.0).unwrap_or(false);
             let clear_label = if clear_pending { "Sure?" } else { "Clear" };
@@ -850,12 +843,20 @@ impl App {
                 LooperState::Playing => "Play",
                 LooperState::Overdubbing => "OVR",
             };
-            ui.colored_label(status_color, state_label);
+            // Quantized master recording (#30): capture armed, waiting for the
+            // sequencer bar boundary — show "ARMED" instead of the state.
+            let armed = self
+                .master_rec_pending
+                .load(std::sync::atomic::Ordering::Relaxed);
+            ui.colored_label(
+                if armed { egui::Color32::YELLOW } else { status_color },
+                if armed { "ARMED" } else { state_label },
+            );
             if event_count > 0 {
                 ui.label(egui::RichText::new(format!("{event_count}ev L{layer_count}")).small().weak());
             }
             if state != LooperState::Idle {
-                ui.add(egui::ProgressBar::new(position as f32 / 255.0).desired_width(80.0));
+                ui.add(egui::ProgressBar::new(position as f32 / 255.0).desired_width(theme::PROGRESS_W_SM));
             }
         });
 
@@ -867,6 +868,11 @@ impl App {
                     self.looper_bars = b;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: b });
                 }
+            }
+            // Честная длина петли: после квантованного захвата = цикл паттерна
+            let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
+            if loop_steps > 0 {
+                ui.label(egui::RichText::new(format!("Loop: {loop_steps} st")).small().weak());
             }
             ui.separator();
 
@@ -916,7 +922,7 @@ impl App {
                 let selected = format!("{rec_indicator}: {zone}{num} {part_name}");
                 egui::ComboBox::from_id_salt("looper_rec_part")
                     .selected_text(egui::RichText::new(&selected).color(rec_text_color))
-                    .width(160.0)
+                    .width(160.0) // legacy width
                     .show_ui(ui, |ui| {
                         for i in 0..self.parts.len() {
                             if !self.parts[i].enabled { continue; }
@@ -1007,17 +1013,32 @@ impl App {
                     part_colors[primary_part]
                 };
 
-                // Part/preset names for this layer
-                let part_names: Vec<String> = part_ids.iter().map(|&pid| {
+                // Part/preset names for this layer — компактно: имя патча
+                // режется до 12 символов, полный список в hover (узкая колонка
+                // docked-юнита: длинные подписи переносились и наезжали на S/M).
+                // pid 254 = тег драмы (bank-1 удары) — не часть, лейбл "Drums".
+                let part_label = |pid: u8, full_name: bool| -> String {
+                    if pid == 254 { return "Drums".to_string(); }
                     let z = if (pid as usize) < super::PARTS_PER_ZONE { "A" } else { "B" };
                     let n = (pid as usize % super::PARTS_PER_ZONE) + 1;
                     let pname = self.patches.get(self.parts[pid as usize].patch_idx)
                         .map(|p| p.name.as_str()).unwrap_or("---");
-                    format!("{z}{n}:{pname}")
-                }).collect();
+                    if full_name {
+                        format!("{z}{n}:{pname}")
+                    } else {
+                        let cut: String = pname.chars().take(12).collect();
+                        let dots = if pname.chars().count() > 12 { "…" } else { "" };
+                        format!("{z}{n}:{cut}{dots}")
+                    }
+                };
+                let full = part_ids.iter().map(|&pid| part_label(pid, true))
+                    .collect::<Vec<_>>().join(" ");
+                let short = part_ids.iter().map(|&pid| part_label(pid, false))
+                    .collect::<Vec<_>>().join(" ");
 
                 ui.colored_label(color, egui::RichText::new(format!("L{l}")).strong());
-                ui.colored_label(color, egui::RichText::new(part_names.join(" ")).small());
+                ui.add(egui::Label::new(egui::RichText::new(short).small()).truncate())
+                    .on_hover_text(full);
 
                 // Solo button
                 let solo_color = if soloed { egui::Color32::YELLOW } else { egui::Color32::GRAY };
@@ -1066,16 +1087,19 @@ impl App {
             (display.events.clone(), display.current_layer)
         };
 
-        let total_w = ui.available_width().min(600.0);
-        let height = 40.0;
+        let total_w = ui.available_width().min(theme::TIMELINE_W_MAX);
+        let height = theme::TIMELINE_H;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(total_w, height), egui::Sense::hover());
         let painter = ui.painter_at(rect);
 
         // Background
         painter.rect_filled(rect, 2.0, theme::BG_TIMELINE);
 
-        // Beat grid lines
-        let beats = self.looper_bars as u32 * 4;
+        // Beat grid lines — по РЕАЛЬНОЙ длине петли (loop_steps из движка):
+        // после квантованного захвата длина = цикл паттерна, Bars ≠ длина.
+        let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
+        let loop_steps = if loop_steps == 0 { self.looper_bars as u32 * 16 } else { loop_steps as u32 };
+        let beats = loop_steps / 4;
         for beat in 1..beats {
             let x = rect.left() + (beat as f32 / beats as f32) * total_w;
             let color = if beat % 4 == 0 {
@@ -1106,7 +1130,7 @@ impl App {
         let note_span = (note_hi - note_lo).max(1.0);
 
         // Draw note-on events as small rectangles
-        let dot_w = (total_w / (self.looper_bars as f32 * 16.0)).clamp(2.0, 6.0);
+        let dot_w = (total_w / loop_steps as f32).clamp(2.0, 6.0);
         let dot_h = (height / (note_span / 2.0)).clamp(2.0, 5.0);
         for ev in &events {
             if ev.velocity == 0 { continue; } // skip note-offs

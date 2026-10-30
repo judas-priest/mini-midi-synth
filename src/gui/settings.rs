@@ -33,9 +33,9 @@ impl App {
                     .small().weak());
                 ui.add_space(theme::SP_SM);
 
-                let pad_w = 80.0_f32;
-                let pad_h = 52.0_f32;
-                let gap = 3.0_f32;
+                let pad_w = theme::PAD_PERF_W;
+                let pad_h = theme::PAD_PERF_H;
+                let gap = theme::PAD_GAP;
 
                 for (row_notes, row_color) in [(&PAD_TOP[..], TOP_COLOR), (&PAD_BOT[..], BOT_COLOR)] {
                     ui.horizontal(|ui| {
@@ -135,7 +135,7 @@ impl App {
                 ui.strong("Preset (reset on patch change, pickup mode)");
                 egui::Grid::new("cc_help_preset")
                     .num_columns(3)
-                    .spacing([16.0, 2.0])
+                    .spacing(theme::GRID_SP_HELP)
                     .striped(true)
                     .show(ui, |ui| {
                         ui.strong("Control"); ui.strong("CC"); ui.strong("Parameter"); ui.end_row();
@@ -155,7 +155,7 @@ impl App {
                 ui.strong("Global (persist across patch changes)");
                 egui::Grid::new("cc_help_global")
                     .num_columns(3)
-                    .spacing([16.0, 2.0])
+                    .spacing(theme::GRID_SP_HELP)
                     .striped(true)
                     .show(ui, |ui| {
                         ui.strong("Control"); ui.strong("CC"); ui.strong("Parameter"); ui.end_row();
@@ -270,6 +270,7 @@ impl App {
         self.seq_target_atom = engine.seq_target_atom();
         self.active_part_atom = engine.active_part_atom();
         self.sustain_atom = engine.sustain_atom();
+        self.master_rec_pending = engine.master_rec_pending_atom();
         self.pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
         self.scope_buf = engine.scope_buffer();
         self.midi_seq_play_atom = engine.midi_player_play_atom();
@@ -595,7 +596,7 @@ impl App {
 
                 egui::Grid::new("audio_settings")
                     .num_columns(2)
-                    .spacing([12.0, 6.0])
+                    .spacing(theme::GRID_SP_FORM)
                     .show(ui, |ui| {
                         #[cfg(not(target_os = "android"))]
                         {
@@ -668,14 +669,14 @@ impl App {
 
                 egui::Grid::new("midi_settings")
                     .num_columns(2)
-                    .spacing([12.0, 6.0])
+                    .spacing(theme::GRID_SP_FORM)
                     .show(ui, |ui| {
                         ui.label("Port:");
                         let current_label = self.selected_midi_port.clone()
                             .unwrap_or_else(|| "(none)".to_string());
                         egui::ComboBox::from_id_salt("midi_port")
                             .selected_text(&current_label)
-                            .width(280.0)
+                            .width(theme::COMBO_W_XL)
                             .show_ui(ui, |ui| {
                                 let none_val: Option<String> = None;
                                 ui.selectable_value(&mut self.selected_midi_port, none_val, "(none)");
@@ -709,7 +710,7 @@ impl App {
                     ui.label("Keys:");
                     egui::ComboBox::from_id_salt("sf2_keys_file")
                         .selected_text(&current)
-                        .width(220.0)
+                        .width(theme::COMBO_W_LG) // unify 220→200
                         .show_ui(ui, |ui| {
                             if ui.selectable_label(self.sf2_keys_selected.is_none(), "(none)").clicked() {
                                 self.sf2_keys_selected = None;
@@ -739,7 +740,7 @@ impl App {
                     ui.label("Drums:");
                     egui::ComboBox::from_id_salt("sf2_drums_file")
                         .selected_text(&current)
-                        .width(220.0)
+                        .width(theme::COMBO_W_LG) // unify 220→200
                         .show_ui(ui, |ui| {
                             if ui.selectable_label(self.sf2_drums_selected.is_none(), "(none)").clicked() {
                                 self.sf2_drums_selected = None;
