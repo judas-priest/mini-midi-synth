@@ -716,7 +716,6 @@ pub fn run_gui(
     let parts_extra: Vec<gui::PartState> = (2..crate::synth::MAX_PARTS).map(empty_part).collect();
 
     let mut app = gui::App {
-        _frame_count: 0,
         patches: c.patches,
         note_state: c.note_state,
         pad_state: c.pad_state,

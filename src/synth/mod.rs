@@ -574,20 +574,6 @@ impl Part {
         }
     }
 
-    #[allow(dead_code)]
-    fn load_patch(&mut self, patch: &Patch) {
-        self.params = PatchParams::from_map(&patch.params);
-        self.min_note = self.params.min_note as u8;
-        self.max_note = self.params.max_note as u8;
-        self.pitch_seq.load_from_params(&patch.params);
-        self.mod_matrix.load_from_params(&patch.params);
-        for i in 0..4u8 {
-            let data = LfoStepSeqData::from_params(i, &patch.params);
-            self.lfos[i as usize].apply_step_seq(&data);
-        }
-        self.update_routing_cache();
-    }
-
     /// Update cached routing flags from mod matrix slots. Call after loading a patch
     /// or changing mod matrix routing to avoid per-block scanning.
     fn update_routing_cache(&mut self) {
@@ -1684,11 +1670,6 @@ impl SynthEngine {
     pub fn scope_buffer(&self) -> std::sync::Arc<ScopeBuffer> { self.scope_buf.clone() }
     pub fn set_program_change_atom(&mut self, atom: std::sync::Arc<std::sync::atomic::AtomicU8>) {
         self.program_change = Some(atom);
-    }
-
-    #[allow(dead_code)]
-    pub fn load_patch(&mut self, part: usize, patch: &Patch) {
-        if let Some(l) = self.parts.get_mut(part) { l.load_patch(patch); }
     }
 
     fn send_feedback(&mut self, fb: ParamFeedback) {

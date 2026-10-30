@@ -259,23 +259,6 @@ impl MsegState {
 // ---------------------------------------------------------------------------
 
 impl Mseg {
-    /// Save MSEG data to a flat param map (for patch storage).
-    #[allow(dead_code)]
-    pub fn save_to_params(&self, params: &mut std::collections::BTreeMap<String, f32>) {
-        params.insert("mseg_num_segments".into(), self.segments.len() as f32);
-        params.insert("mseg_loop_mode".into(), self.loop_mode as u8 as f32);
-        params.insert("mseg_loop_start".into(), self.loop_start as f32);
-        params.insert("mseg_loop_end".into(), self.loop_end as f32);
-        for (i, seg) in self.segments.iter().enumerate() {
-            let prefix = format!("mseg_seg{i}_");
-            params.insert(format!("{prefix}dur"), seg.duration);
-            params.insert(format!("{prefix}v0"), seg.v0);
-            params.insert(format!("{prefix}v1"), seg.v1);
-            params.insert(format!("{prefix}curve"), seg.curve_type as u8 as f32);
-            params.insert(format!("{prefix}cpv"), seg.cpv);
-        }
-    }
-
     /// Load MSEG data from a flat param map.
     pub fn load_from_params(params: &std::collections::BTreeMap<String, f32>) -> Self {
         let n = params.get("mseg_num_segments").copied().unwrap_or(0.0) as usize;

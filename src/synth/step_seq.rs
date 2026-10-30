@@ -39,18 +39,6 @@ impl StepRate {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn index(self) -> u8 {
-        match self {
-            Self::Quarter => 0,
-            Self::Eighth => 1,
-            Self::Sixteenth => 2,
-            Self::ThirtySecond => 3,
-            Self::EighthT => 4,
-            Self::SixteenthT => 5,
-        }
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             Self::Quarter => "1/4",
@@ -97,19 +85,6 @@ impl ScaleType {
             5 => Self::Dorian,
             6 => Self::Mixolydian,
             _ => Self::Chromatic,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn index(self) -> u8 {
-        match self {
-            Self::Chromatic => 0,
-            Self::Major => 1,
-            Self::Minor => 2,
-            Self::Pentatonic => 3,
-            Self::Blues => 4,
-            Self::Dorian => 5,
-            Self::Mixolydian => 6,
         }
     }
 
@@ -327,21 +302,6 @@ impl PitchSequencer {
                 .copied().unwrap_or(1.0) > 0.5;
             self.steps[i].velocity = params.get(SEQ_VEL_KEYS[i])
                 .copied().unwrap_or(0.0) as u8;
-        }
-    }
-
-    /// Save to patch params map.
-    #[allow(dead_code)]
-    pub fn save_to_params(&self, params: &mut std::collections::BTreeMap<String, f32>) {
-        params.insert("seq_enabled".into(), if self.enabled { 1.0 } else { 0.0 });
-        params.insert("seq_length".into(), self.length as f32);
-        params.insert("seq_rate".into(), self.rate.index() as f32);
-        params.insert("seq_scale".into(), self.scale.index() as f32);
-        params.insert("seq_swing".into(), self.swing);
-        for i in 0..MAX_STEPS {
-            params.insert(SEQ_PITCH_KEYS[i].to_string(), self.steps[i].pitch as f32);
-            params.insert(SEQ_GATE_KEYS[i].to_string(), if self.steps[i].gate { 1.0 } else { 0.0 });
-            params.insert(SEQ_VEL_KEYS[i].to_string(), self.steps[i].velocity as f32);
         }
     }
 }

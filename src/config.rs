@@ -285,7 +285,6 @@ impl Config {
         }
     }
 
-    #[allow(dead_code)]
     pub fn save(&self) -> Result<()> {
         let Some(path) = config_path() else {
             anyhow::bail!("Could not determine config directory");

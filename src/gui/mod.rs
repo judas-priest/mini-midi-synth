@@ -245,7 +245,6 @@ fn note_name(note: u8) -> String {
 type MidiReconnectFn = Box<dyn FnMut(&str) -> Result<(), String>>;
 
 pub struct App {
-    pub _frame_count: u64,
     pub patches: Vec<Patch>,
     pub note_state: NoteState,
     pub pad_state: midi::PadState,
@@ -1231,11 +1230,9 @@ impl eframe::App for App {
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             let mut cat_idx = 0;
-                            let mut shown_cat = String::new();
                             for (i, patch) in self.patches.iter().enumerate() {
                                 // Track category boundaries
                                 if cat_idx < categories.len() && categories[cat_idx].1 == i {
-                                    shown_cat = categories[cat_idx].0.clone();
                                     cat_idx += 1;
                                 }
 
@@ -1244,11 +1241,6 @@ impl eframe::App for App {
                                     let name_match = patch.name.to_lowercase().contains(&query);
                                     let cat_match = patch.category.to_lowercase().contains(&query);
                                     if !name_match && !cat_match { continue; }
-
-                                    // Show category header once per group
-                                    if shown_cat != patch.category || i == categories.iter().find(|(c, _)| c == &patch.category).map(|(_, idx)| *idx).unwrap_or(usize::MAX) {
-                                        // We handle this below
-                                    }
                                 }
 
                                 if !searching {
@@ -2206,69 +2198,6 @@ impl App {
     fn save_collapsed_categories(&mut self) {
         self.config.ui.collapsed_categories = self.collapsed_categories.iter().cloned().collect();
         let _ = self.config.save();
-    }
-
-    fn _save_window_size(&mut self, ctx: &egui::Context) {
-        self._frame_count += 1;
-
-        let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-
-        // Debug: log every ~5 seconds to file + stdout
-        if self._frame_count % 50 == 1 {
-            let inner = ctx.input(|i| i.viewport().inner_rect);
-            let outer = ctx.input(|i| i.viewport().outer_rect);
-            let screen = ctx.screen_rect();
-            let msg = format!(
-                "[win] inner={:?} outer={:?} screen={:.0}x{:.0} max={} fs={}\n",
-                inner.map(|r| (r.width(), r.height())),
-                outer.map(|r| (r.width(), r.height())),
-                screen.width(), screen.height(),
-                maximized, fullscreen,
-            );
-            print!("{msg}");
-            // Also write to file in case terminal swallows output
-            let _ = std::fs::write("/tmp/mini_midi_synth_debug.txt", &msg);
-        }
-
-        // Save maximized/fullscreen state
-        if maximized != self.config.ui.maximized {
-            self.config.ui.maximized = maximized;
-            let _ = self.config.save();
-        }
-
-        if maximized || fullscreen {
-            return;
-        }
-
-        // Try all available rect sources
-        let (w, h) = ctx.input(|i| {
-            let vp = i.viewport();
-            if let Some(rect) = vp.inner_rect {
-                (rect.width(), rect.height())
-            } else if let Some(rect) = vp.outer_rect {
-                (rect.width(), rect.height())
-            } else {
-                (0.0, 0.0)
-            }
-        });
-
-        let (w, h) = if w < 100.0 || h < 100.0 {
-            let rect = ctx.screen_rect();
-            (rect.width(), rect.height())
-        } else {
-            (w, h)
-        };
-
-        if w > 100.0 && h > 100.0
-            && ((w - self.config.ui.window_width).abs() > 5.0
-                || (h - self.config.ui.window_height).abs() > 5.0)
-        {
-            eprintln!("[win] SAVING: {:.0}x{:.0} -> {:.0}x{:.0}", self.config.ui.window_width, self.config.ui.window_height, w, h);
-            self.config.ui.window_width = w;
-            self.config.ui.window_height = h;
-            let _ = self.config.save();
-        }
     }
 
     fn refresh_midi_ports(&mut self) {
