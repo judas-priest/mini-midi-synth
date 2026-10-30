@@ -1050,246 +1050,6 @@ impl eframe::App for App {
                 });
             });
 
-        // Right: patch list (for active part) or GM instrument list (SF2 mode)
-        egui::SidePanel::right("preset_panel")
-            .resizable(true)
-            .default_width(160.0)
-            .width_range(120.0..=260.0)
-            .show(ctx, |ui| {
-                let part = self.active_part;
-                let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
-                let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
-
-                ui.add_space(theme::SP_SM);
-                if is_sf2 {
-                    ui.strong(format!("GM Instruments (Layer {layer_label})"));
-                } else {
-                    ui.horizontal(|ui| {
-                        if ui.small_button("\u{25C0}").on_hover_text("Previous preset").clicked() {
-                            // Prev patch
-                            let idx = self.parts[part].patch_idx;
-                            if idx > 0 {
-                                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                                self.parts[part].patch_idx = idx - 1;
-                                self.load_edited_params(part);
-                                self.send_edited_params(part);
-                                self.save_config();
-                            }
-                        }
-                        let idx = self.parts[part].patch_idx;
-                        let total = self.patches.len();
-                        ui.strong(format!("Presets ({layer_label}) {}/{}", idx + 1, total));
-                        if ui.small_button("\u{25B6}").on_hover_text("Next preset").clicked() {
-                            // Next patch
-                            let idx = self.parts[part].patch_idx;
-                            if idx + 1 < self.patches.len() {
-                                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                                self.parts[part].patch_idx = idx + 1;
-                                self.load_edited_params(part);
-                                self.send_edited_params(part);
-                                self.save_config();
-                            }
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
-                            self.push_undo_snapshot();
-                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
-                            self.send_edited_params(part);
-                        }
-                        if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
-                            self.push_undo_snapshot();
-                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.parts[part].edited_params = crate::synth::PatchParams::random_map();
-                            self.send_edited_params(part);
-                        }
-                        ui.separator();
-                        if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
-                            self.undo();
-                        }
-                        if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
-                            self.redo();
-                        }
-                    });
-                }
-                ui.add_space(theme::SP_XS);
-
-                // Search bar
-                let search_width = ui.available_width();
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    let text_w = if self.preset_search.is_empty() {
-                        search_width - 4.0
-                    } else {
-                        search_width - 22.0
-                    };
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut self.preset_search)
-                            .hint_text("\u{1F50D} Search...")
-                            .desired_width(text_w.max(60.0)),
-                    );
-                    if !self.preset_search.is_empty() && ui.small_button("\u{2715}").on_hover_text("Clear search").clicked() {
-                        self.preset_search.clear();
-                        r.request_focus();
-                    }
-                });
-                ui.separator();
-
-                let query = self.preset_search.to_lowercase();
-                let searching = !query.is_empty();
-
-                if is_sf2 {
-                    // GM instrument list with same category style as synth presets
-                    use crate::synth::sampler::GM_PROGRAM_NAMES;
-                    let current_program = self.parts[part].sf2_program;
-                    let mut toggled_cat: Option<&str> = None;
-
-                    let gm_categories: &[(&str, usize, usize)] = &[
-                        ("Piano", 0, 8),
-                        ("Chromatic Perc", 8, 16),
-                        ("Organ", 16, 24),
-                        ("Guitar", 24, 32),
-                        ("Bass", 32, 40),
-                        ("Strings", 40, 48),
-                        ("Ensemble", 48, 56),
-                        ("Brass", 56, 64),
-                        ("Reed", 64, 72),
-                        ("Pipe", 72, 80),
-                        ("Synth Lead", 80, 88),
-                        ("Synth Pad", 88, 96),
-                        ("Synth FX", 96, 104),
-                        ("Ethnic", 104, 112),
-                        ("Percussive", 112, 120),
-                        ("Sound FX", 120, 128),
-                    ];
-
-                    egui::ScrollArea::vertical()
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            for &(cat_name, start, end) in gm_categories {
-                                // Collect matching instruments in this category
-                                let matches: Vec<usize> = if searching {
-                                    (start..end)
-                                        .filter(|&i| GM_PROGRAM_NAMES[i].to_lowercase().contains(&query)
-                                            || cat_name.to_lowercase().contains(&query))
-                                        .collect()
-                                } else {
-                                    (start..end).collect()
-                                };
-                                if searching && matches.is_empty() { continue; }
-
-                                let is_collapsed = !searching && self.collapsed_categories.contains(cat_name);
-                                let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
-                                if !searching {
-                                    if ui.selectable_label(false, format!("{arrow} {cat_name}")).clicked() {
-                                        toggled_cat = Some(cat_name);
-                                    }
-                                } else {
-                                    ui.label(egui::RichText::new(cat_name).strong().small());
-                                }
-                                if !is_collapsed {
-                                    for i in matches {
-                                        let name = GM_PROGRAM_NAMES[i];
-                                        let selected = current_program == i as u8;
-                                        if ui.selectable_label(selected, format!("  {name}")).clicked() && !selected {
-                                            self.parts[part].sf2_program = i as u8;
-                                            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                                                part, program: i as u8, bank: 0,
-                                            });
-                                            if part == 0 { self.config.sf2.layer_a_program = i as u8; }
-                                            else { self.config.sf2.layer_b_program = i as u8; }
-                                            let _ = self.config.save();
-                                        }
-                                    }
-                                }
-                            }
-                        });
-
-                    if let Some(cat) = toggled_cat {
-                        let cat_string = cat.to_string();
-                        if self.collapsed_categories.contains(&cat_string) {
-                            self.collapsed_categories.remove(&cat_string);
-                        } else {
-                            self.collapsed_categories.insert(cat_string);
-                        }
-                        self.save_collapsed_categories();
-                    }
-                } else {
-                    // Synth patch list
-                    let current_preset_idx = self.parts[part].patch_idx;
-                    let mut new_idx: Option<usize> = None;
-                    let mut toggled_category: Option<String> = None;
-
-                    let categories: Vec<(String, usize)> = {
-                        let mut cats = Vec::new();
-                        let mut last = String::new();
-                        for (i, p) in self.patches.iter().enumerate() {
-                            if p.category != last {
-                                cats.push((p.category.clone(), i));
-                                last = p.category.clone();
-                            }
-                        }
-                        cats
-                    };
-
-                    egui::ScrollArea::vertical()
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            let mut cat_idx = 0;
-                            for (i, patch) in self.patches.iter().enumerate() {
-                                // Track category boundaries
-                                if cat_idx < categories.len() && categories[cat_idx].1 == i {
-                                    cat_idx += 1;
-                                }
-
-                                // When searching, filter by name or category
-                                if searching {
-                                    let name_match = patch.name.to_lowercase().contains(&query);
-                                    let cat_match = patch.category.to_lowercase().contains(&query);
-                                    if !name_match && !cat_match { continue; }
-                                }
-
-                                if !searching {
-                                    // Normal mode: show category headers
-                                    if cat_idx > 0 && categories[cat_idx - 1].1 == i {
-                                        let cat = &categories[cat_idx - 1].0;
-                                        let is_collapsed = self.collapsed_categories.contains(cat);
-                                        let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
-                                        if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
-                                            toggled_category = Some(cat.clone());
-                                        }
-                                    }
-                                    if self.collapsed_categories.contains(&patch.category) {
-                                        continue;
-                                    }
-                                }
-
-                                let selected = i == current_preset_idx;
-                                if ui.selectable_label(selected, format!("  {}", patch.name)).clicked() && !selected {
-                                    new_idx = Some(i);
-                                }
-                            }
-                        });
-
-                    if let Some(cat) = toggled_category {
-                        if self.collapsed_categories.contains(&cat) {
-                            self.collapsed_categories.remove(&cat);
-                        } else {
-                            self.collapsed_categories.insert(cat);
-                        }
-                        self.save_collapsed_categories();
-                    }
-                    if let Some(idx) = new_idx {
-                        let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                        self.parts[part].patch_idx = idx;
-                        self.load_edited_params(part);
-                        self.send_edited_params(part);
-                        self.save_config();
-                    }
-                }
-            });
-
         // Settings window
         if self.show_settings {
             self.draw_settings(ctx);
@@ -1374,6 +1134,32 @@ impl eframe::App for App {
                         format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_keys_loaded_name, prog, name),
                     );
                 } else {
+                    // Header: patch name + Init/Rnd/Undo/Redo
+                    ui.horizontal(|ui| {
+                        let idx = self.parts[part].patch_idx;
+                        let name = self.patches.get(idx).map(|p| p.name.as_str()).unwrap_or("---");
+                        ui.strong(name);
+                        ui.separator();
+                        if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
+                            self.push_undo_snapshot();
+                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                            self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
+                            self.send_edited_params(part);
+                        }
+                        if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
+                            self.push_undo_snapshot();
+                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                            self.parts[part].edited_params = crate::synth::PatchParams::random_map();
+                            self.send_edited_params(part);
+                        }
+                        ui.separator();
+                        if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
+                            self.undo();
+                        }
+                        if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+                            self.redo();
+                        }
+                    });
                     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                         self.draw_params_editable(ui);
                     });
