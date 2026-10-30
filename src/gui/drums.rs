@@ -40,23 +40,24 @@ impl App {
                 || matches!(lstate,
                     crate::synth::looper::LooperState::Recording
                     | crate::synth::looper::LooperState::Overdubbing);
-            if ui.selectable_label(rec, "\u{25CF} Rec")
+            if ui.selectable_label(rec, "\u{26AB} Rec")
                 .on_hover_text("Master record: arm drums pattern + looper (all parts)").clicked()
             {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
             }
-            if ui.button("\u{25A0} Stop").on_hover_text("Master stop: stop both, drain notes").clicked() {
+            if ui.button("\u{23F9} Stop").on_hover_text("Master stop: stop both, drain notes").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterStop);
             }
             ui.separator();
-            // engine status dots
+            // engine status words (цвет = состояние; глифы ● / ■ в шрифте
+            // отсутствуют — текстовые статусы вместо точек)
             ui.colored_label(
                 if self.drum_playing { egui::Color32::from_rgb(40, 200, 80) } else { egui::Color32::GRAY },
-                "\u{25CF} drums",
+                "drums",
             );
             ui.colored_label(
                 if looper_active { egui::Color32::from_rgb(40, 200, 80) } else { egui::Color32::GRAY },
-                "\u{25CF} looper",
+                "looper",
             );
         });
 
