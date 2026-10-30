@@ -1017,3 +1017,130 @@ fn all_notes_off_clears_root_held_and_root_active() {
     assert!(e.parts[0].note_stack.is_empty(), "note_stack survived AllNotesOff");
     assert!(!e.parts[0].keys_down.iter().any(|&k| k), "keys_down survived AllNotesOff");
 }
+
+// ── Part control-event → engine-field contract (audit S0) ──────────────
+// Perf-load (gui load_performance_by_name) and the audio reconnect re-send
+// (send_full_part_state) rely on every SetPart* event landing in exactly
+// one engine field. This pins that mapping — including the pan clamp
+// (mod.rs:2216) and the raw volume store (mod.rs:2198).
+
+#[test]
+fn part_control_events_land_in_engine_fields() {
+    let mut e = SynthEngine::new(48_000.0);
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartVolume { part: 0, volume: 0.42 });
+    let _ = e.handle_control(ControlEvent::SetPartMute { part: 0, mute: true });
+    let _ = e.handle_control(ControlEvent::SetPartRange { part: 0, min_note: 36, max_note: 84 });
+    let _ = e.handle_control(ControlEvent::SetPartVelRange { part: 0, vel_min: 20, vel_max: 100 });
+    let _ = e.handle_control(ControlEvent::SetPartPan { part: 0, pan: -0.5 });
+    let _ = e.handle_control(ControlEvent::SetPartTranspose { part: 0, semitones: -12 });
+    let _ = e.handle_control(ControlEvent::SetMacro { part: 0, index: 3, value: 0.75 });
+    let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true });
+    let p = &e.parts[0];
+    assert!(p.enabled);
+    assert!((p.volume - 0.42).abs() < 1e-6, "volume is stored raw (mod.rs:2198)");
+    assert!(p.mute);
+    assert_eq!((p.min_note, p.max_note), (36, 84));
+    assert_eq!((p.vel_min, p.vel_max), (20, 100));
+    assert!((p.pan + 0.5).abs() < 1e-6);
+    assert_eq!(p.transpose, -12);
+    assert!((p.macro_vals[3] - 0.75).abs() < 1e-6);
+    assert!(p.sf2_mode);
+    // pan is clamped into [-1, 1] (mod.rs:2216) — pin the clamp
+    let _ = e.handle_control(ControlEvent::SetPartPan { part: 0, pan: 7.0 });
+    assert!((e.parts[0].pan - 1.0).abs() < 1e-6, "pan clamped to +1");
+    // Negative: out-of-range part is a no-op everywhere
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 99, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartPan { part: 99, pan: 0.1 });
+    let _ = e.handle_control(ControlEvent::SetMacro { part: 99, index: 0, value: 1.0 });
+    assert_eq!(e.parts.len(), crate::synth::MAX_PARTS, "no part was created");
+}
+
+#[test]
+fn full_state_re_send_restores_a_fresh_engine() {
+    // Mirrors send_full_part_state (gui/mod.rs:1714-1741): after an audio
+    // reconnect a brand-new engine receives ONLY this SetPart* sequence and
+    // must match the pre-reconnect engine's part configuration. Sounding
+    // voices are deliberately NOT carried (documented re-send semantics).
+    let mut configured = SynthEngine::new(48_000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = configured.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    configured.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    push_full_part_state(&mut configured, 0, true, 0.9, 24, 96, 10, 120, 0.25, 7);
+    push_full_part_state(&mut configured, 1, false, 0.5, 0, 127, 1, 127, 0.0, 0);
+
+    let mut fresh = SynthEngine::new(48_000.0);
+    push_full_part_state(&mut fresh, 0, true, 0.9, 24, 96, 10, 120, 0.25, 7);
+    push_full_part_state(&mut fresh, 1, false, 0.5, 0, 127, 1, 127, 0.0, 0);
+
+    for i in 0..2usize {
+        let (a, b) = (&configured.parts[i], &fresh.parts[i]);
+        assert_eq!(a.enabled, b.enabled, "part {i} enabled");
+        assert_eq!(a.mute, b.mute, "part {i} mute");
+        assert_eq!(a.volume, b.volume, "part {i} volume");
+        assert_eq!((a.min_note, a.max_note), (b.min_note, b.max_note), "part {i} range");
+        assert_eq!((a.vel_min, a.vel_max), (b.vel_min, b.vel_max), "part {i} vel range");
+        assert_eq!(a.pan, b.pan, "part {i} pan");
+        assert_eq!(a.transpose, b.transpose, "part {i} transpose");
+        assert_eq!(a.macro_vals, b.macro_vals, "part {i} macros");
+        assert_eq!(a.sf2_mode, b.sf2_mode, "part {i} sf2_mode");
+    }
+    assert!(
+        configured.parts[0].voices.iter().any(|v| v.active),
+        "configured engine keeps its sounding voice (re-send does not carry it)"
+    );
+    assert!(
+        !fresh.parts[0].voices.iter().any(|v| v.active),
+        "fresh engine starts silent until a note arrives"
+    );
+}
+
+/// Exact event order of send_full_part_state (gui/mod.rs:1724-1739).
+#[allow(clippy::too_many_arguments)]
+fn push_full_part_state(
+    e: &mut SynthEngine, part: usize, enabled: bool, volume: f32,
+    min_note: u8, max_note: u8, vel_min: u8, vel_max: u8,
+    pan: f32, transpose: i8,
+) {
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part, enabled });
+    let _ = e.handle_control(ControlEvent::SetPartMute { part, mute: false });
+    let _ = e.handle_control(ControlEvent::SetPartVolume { part, volume });
+    let _ = e.handle_control(ControlEvent::SetPartRange { part, min_note, max_note });
+    let _ = e.handle_control(ControlEvent::SetPartVelRange { part, vel_min, vel_max });
+    let _ = e.handle_control(ControlEvent::SetPartPan { part, pan });
+    let _ = e.handle_control(ControlEvent::SetPartTranspose { part, semitones: transpose });
+    for index in 0..8usize {
+        let _ = e.handle_control(ControlEvent::SetMacro { part, index, value: 0.0 });
+    }
+    // sf2_mode == false in both calls here: the Sf2Mode/Sf2Program pair is
+    // pushed only when sf2_mode (gui/mod.rs:1734-1739) — TC25 pins the arm.
+}
+
+#[test]
+fn absent_parts_are_disabled_by_tail_loop() {
+    // Perf-load tail loop (gui/mod.rs:2197-2202): parts beyond the
+    // performance's part list must not keep playing — replay pins the
+    // idempotent SetPartEnabled(false) sweep.
+    let mut e = SynthEngine::new(48_000.0);
+    for i in 0..4usize {
+        let _ = e.handle_control(ControlEvent::SetPartEnabled { part: i, enabled: true });
+    }
+    // The "performance" carries 1 part -> tail loop disables 1..MAX_PARTS
+    for i in 1..crate::synth::MAX_PARTS {
+        if e.parts[i].enabled {
+            let _ = e.handle_control(ControlEvent::SetPartEnabled { part: i, enabled: false });
+        }
+    }
+    assert!(e.parts[0].enabled, "part 0 stays enabled");
+    for i in 1..4usize {
+        assert!(!e.parts[i].enabled, "part {i} disabled by the tail loop");
+    }
+    // Idempotent: a second sweep changes nothing
+    for i in 1..crate::synth::MAX_PARTS {
+        let _ = e.handle_control(ControlEvent::SetPartEnabled { part: i, enabled: false });
+    }
+    for i in 1..4usize {
+        assert!(!e.parts[i].enabled);
+    }
+    assert!(e.parts[0].enabled);
+}
