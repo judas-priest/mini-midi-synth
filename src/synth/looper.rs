@@ -348,6 +348,13 @@ impl MidiLooper {
         self.loop_length_ticks
     }
 
+    /// Drift correction (Mobius-style): jump playback to the loop start so
+    /// the loop stays phase-locked to the sequencer grid.
+    pub fn seek_start(&mut self) {
+        self.playback_tick = 0;
+        self.playback_cursor = 0;
+    }
+
     /// Toggle play/stop.
     pub fn toggle_play(&mut self) {
         match self.state {

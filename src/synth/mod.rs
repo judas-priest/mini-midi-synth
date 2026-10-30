@@ -1218,6 +1218,9 @@ pub struct SynthEngine {
     looper_capture_quantized: bool,
     /// Previous drum step for boundary edge detection.
     looper_prev_step: u8,
+    /// Cycle length (ticks) of the last quantized capture — drift-correction
+    /// applies when the loop length still equals it.
+    looper_cycle_ticks: u32,
     /// GUI mirror of arm_pending (shows "ARMED" in the looper state label).
     master_rec_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Active part index (0-7), shared with GUI for looper part recording
@@ -1489,6 +1492,7 @@ impl SynthEngine {
             looper_arm_pending: false,
             looper_capture_quantized: false,
             looper_prev_step: 0,
+            looper_cycle_ticks: 0,
             master_rec_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             looper_source_mix: true,
@@ -2846,14 +2850,14 @@ impl SynthEngine {
         let step = self.drum_engine.sequencer.current_step;
         let prev = self.looper_prev_step;
         self.looper_prev_step = step;
-        if self.looper_arm_pending
-            || (self.looper_capture_quantized
-                && matches!(
-                    self.looper.state,
-                    crate::synth::looper::LooperState::Recording
-                        | crate::synth::looper::LooperState::Overdubbing
-                ))
-        {
+        let quantized_looping = self.looper_capture_quantized
+            && matches!(
+                self.looper.state,
+                crate::synth::looper::LooperState::Recording
+                    | crate::synth::looper::LooperState::Overdubbing
+                    | crate::synth::looper::LooperState::Playing
+            );
+        if self.looper_arm_pending || quantized_looping {
             let playing = self.drum_engine.sequencer.playing;
             let lstate = self.looper.state;
             // Квантованный захват может УЖЕ самообернуться в Overdubbing
@@ -2873,11 +2877,18 @@ impl SynthEngine {
                 let pattern_len = self.drum_engine.sequencer.patterns[pat].length.max(1);
                 let bpm = self.drum_engine.sequencer.bpm.max(1.0);
                 let samples_per_step = (self.sample_rate as f64 * 60.0) / (bpm as f64 * 4.0);
-                self.looper.set_loop_len_ticks((pattern_len as f64 * samples_per_step) as u32);
+                let cycle = (pattern_len as f64 * samples_per_step) as u32;
+                self.looper.set_loop_len_ticks(cycle);
+                self.looper_cycle_ticks = cycle;
             } else if boundary && capturing {
                 // Конец цикла паттерна — закрыть захват (1 цикл = 1 петля)
                 self.drum_engine.set_recording(false); // сетка тоже разармирована
                 self.looper.toggle_record(); // Recording/Overdubbing -> Playing
+                // петля начата с границы — позиция уже 0, drift correction не нужен
+            } else if boundary && lstate == crate::synth::looper::LooperState::Playing {
+                // Drift correction (Mobius-style): каждый круг выравнивает
+                // петлю в ноль — расхождение с сеткой накапливаться не может
+                self.looper.seek_start();
             } else if !playing && capturing {
                 // tc9 fallback: часы умерли посреди записи — закрыть сейчас
                 self.drum_engine.set_recording(false);
