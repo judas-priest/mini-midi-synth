@@ -126,7 +126,7 @@ TC-C (mid-render) — дополнительный тест этого план�
 | Класс | Покрытие |
 |-------|----------|
 | SR вверх (48k→96k, 44.1k→192k) | TC-A/D/E/F, `drum_remap.rs:115-116` (двойная смена) |
-| SR вниз (96k→44.1k) | TC-D использует 48k→44.1k? — нет: вниз покрывает `drum_remap.rs:101` (48k→44.1k) + TC-A после Task 6 прогоняется и в обратную сторону руками (шаг Task 6) |
+| SR вниз (96k→44.1k) | вниз покрывает TC-D (48k→44.1k в теле теста) + drum_remap.rs:101 |
 | Двойной/повторный вызов (duplicate) | `drum_remap.rs:107-117` (дважды), TC-A вызвать дважды подряд в guard |
 | Same-SR no-op | `audio.rs:202` гейтится `new_sr != synth_sr` — движок не зовётся; сам `set_sample_rate` при том же SR должен быть безвреден: TC-D дважды |
 | Zero/garbage SR | `debug_assert!(sample_rate > 0.0)` в Reverb/Spring; из колбэка ноль невозможен (cpal negotiated), guard-тест руками не гоняется |
@@ -205,7 +205,7 @@ cargo test --features rt-assert --test rt_safety sr_change_mid_render_does_not_a
 
 ```bash
 cargo test --features rt-assert --test rt_safety
-# EXPECT: 5 passed, 3 ignored
+# EXPECT: зелёные + ignored-хвост (счёт относительный — зависит от порядка с S0)
 ```
 
 - [ ] Commit:
@@ -665,6 +665,20 @@ git commit -m "fix: Dattorro reverb set_sample_rate — len-field + SR_CAP capac
 
 ---
 
+### Task 6-pre: `Filter::reset_for_sr(&mut self, sr: f32)` (Filter владеет heap comb_buf)
+
+`Filter` владеет `comb_buf: Box<[f32; 512]>` (filter.rs:162, аллокация в
+`Filter::new` :234) — каждый `Filter::new` = 1 alloc + 1 free; ×2 фильтра ×
+128 голосов = 256 alloc внутри guard. Фикс: добавить в `impl Filter` метод,
+копирующий ВСЕ присваивания тела `Filter::new` (прочитать filter.rs:206-240:
+cutoff=8000, dirty=true, comb_idx/comb_state и прочие состояния, sample_rate)
+на существующие поля — БЕЗ замены comb_buf и любых Vec/Box. Контракт: голос
+после SR-сброса имеет свежий дефолт-фильтр, идентичный `Filter::new`. Если
+comb_buf содержимое влияет на звук до dirty-пересчёта — обнулить нулями
+на месте (write-in-place, без realloc). В сниппете Task 6 заменить
+`self.filter = Filter::new(sr)` / `self.filter2 = ...` на
+`self.filter.reset_for_sr(sr)` / `self.filter2.reset_for_sr(sr)`.
+
 ## Task 6: voice.rs — in-place SR update, без Oscillator::new
 
 Файл: `/home/dima/Projects/mini_midi_synth/src/synth/voice.rs`
@@ -712,7 +726,7 @@ cargo test --features rt-assert --test rt_safety sr_change_mid_render_does_not_a
 # остаточный alloc-сайт (кандидаты: пропущенный FX из инвентаря, sampler с SF2 — нет,
 # движок дефолтный). Не глушить assert_no_alloc, чинить сайт.
 cargo test --features rt-assert --test rt_safety
-# EXPECT: 8 passed, 0 ignored
+# EXPECT: все зелёные, 0 ignored (счёт rt_safety ОТНОСИТЕЛЬНЫЙ — зависит от порядка с S0)
 ```
 
 - [ ] Sanity-прогон вниз/вверх руками (доп. к TC-A, в guard оба направления — временно
