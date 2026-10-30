@@ -319,6 +319,14 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                 self.parts[i].sf2_mode = !sf2;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: !sf2 });
+                // Persist engine choice for parts 0/1 (seeds sf2_mode on startup)
+                if i == 0 {
+                    self.config.sf2.layer_a_sf2 = !sf2;
+                    let _ = self.config.save();
+                } else if i == 1 {
+                    self.config.sf2.layer_b_sf2 = !sf2;
+                    let _ = self.config.save();
+                }
             }
 
             // Instrument select

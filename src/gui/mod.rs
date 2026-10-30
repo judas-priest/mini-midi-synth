@@ -1360,24 +1360,6 @@ impl eframe::App for App {
                 ui.add_space(theme::SP_MD);
                 let part = self.active_part;
                 let is_sf2 = self.parts[part].sf2_mode;
-                // Synth / SF2 toggle
-                if self.sf2_keys_soundfont.is_some() {
-                    ui.horizontal(|ui| {
-                        ui.label("Mode:");
-                        let mut sf2 = is_sf2;
-                        if ui.selectable_label(!sf2, "Synth").on_hover_text("Use synth engine").clicked() { sf2 = false; }
-                        if ui.selectable_label(sf2, "SF2").on_hover_text("Use SoundFont samples").clicked() { sf2 = true; }
-                        if sf2 != is_sf2 {
-                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.parts[part].sf2_mode = sf2;
-                            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2 });
-                            // Save to config
-                            if part == 0 { self.config.sf2.layer_a_sf2 = sf2; }
-                            else { self.config.sf2.layer_b_sf2 = sf2; }
-                            let _ = self.config.save();
-                        }
-                    });
-                }
                 if is_sf2 && self.sf2_keys_soundfont.is_some() {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
                     let prog = self.parts[part].sf2_program;
