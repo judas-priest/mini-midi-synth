@@ -343,8 +343,8 @@ impl App {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
                     let prog = self.parts[i].sf2_program;
                     let cur_name = GM_PROGRAM_NAMES.get(prog as usize).copied().unwrap_or("?");
-                    if ui.add_sized([170.0, 0.0], egui::Button::new(format!("prog {prog}: {cur_name}")))
-                        .on_hover_text("Open instrument browser (search + categories)").clicked()
+                    if ui.add_sized([170.0, 0.0], egui::Button::new(cur_name))
+                        .on_hover_text(format!("GM program {prog} — open instrument browser (search + categories)")).clicked()
                     {
                         self.preset_search.clear();
                         self.inst_browser_part = Some(i);

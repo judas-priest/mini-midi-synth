@@ -805,6 +805,7 @@ pub fn run_gui(
         led_socket: None,
         led_socket_alive: None,
         led_socket_failed_at: None,
+        led_connecting: None,
         led_last_send: None,
         led_child: None,
         led_spawn_backoff: None,

@@ -343,6 +343,10 @@ pub struct App {
     pub led_socket: Option<std::sync::mpsc::Sender<String>>,
     pub led_socket_alive: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub led_socket_failed_at: Option<std::time::Instant>,
+    /// In-flight connect attempt (runs off the GUI thread — unix connect
+    /// blocks on a full peer backlog).
+    pub led_connecting:
+        Option<std::sync::mpsc::Receiver<std::io::Result<std::os::unix::net::UnixStream>>>,
     pub led_last_send: Option<std::time::Instant>,
     /// Companion process WE spawned (never kill a foreign one).
     pub led_child: Option<std::process::Child>,
@@ -697,41 +701,65 @@ impl eframe::App for App {
             }
         }
 
-        // LED companion socket lifecycle
+        // LED companion socket lifecycle.
+        // Connect runs on a helper thread: a unix connect() BLOCKS when the
+        // peer's accept backlog is full — on the GUI thread that froze the
+        // whole app before the first frame (observed with a companion stuck
+        // in BLE reconnect).
         if !self.config.ui.led_companion {
             if self.led_socket.take().is_some() {
                 log::info!("[console] companion disabled");
             }
+            self.led_connecting = None;
         } else if self.led_socket.is_none()
             && self.led_socket_failed_at
                 .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
                 .unwrap_or(true)
+            && self.led_connecting.is_none()
         {
-            match std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock") {
-                Ok(stream) => {
-                    let (tx, rx) = std::sync::mpsc::channel::<String>();
-                    // fresh AtomicBool на каждый коннект: старый writer не может
-                    // перезаписать флаг нового (spurious reconnect)
-                    let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-                    self.led_socket_alive = Some(alive.clone());
-                    std::thread::spawn(move || {
-                        use std::io::Write;
-                        let mut stream = stream;
-                        for msg in rx {
-                            if stream.write_all(msg.as_bytes()).is_err() {
-                                alive.store(false, std::sync::atomic::Ordering::Relaxed);
-                                break;
+            let (tx, rx) =
+                std::sync::mpsc::channel::<std::io::Result<std::os::unix::net::UnixStream>>();
+            self.led_connecting = Some(rx);
+            std::thread::spawn(move || {
+                let res = std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock");
+                let _ = tx.send(res);
+            });
+        }
+        if self.led_socket.is_none() {
+            if let Some(rx) = &mut self.led_connecting {
+                match rx.try_recv() {
+                    Ok(Ok(stream)) => {
+                        self.led_connecting = None;
+                        let (tx, rx) = std::sync::mpsc::channel::<String>();
+                        // fresh AtomicBool на каждый коннект: старый writer не может
+                        // перезаписать флаг нового (spurious reconnect)
+                        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                        self.led_socket_alive = Some(alive.clone());
+                        std::thread::spawn(move || {
+                            use std::io::Write;
+                            let mut stream = stream;
+                            for msg in rx {
+                                if stream.write_all(msg.as_bytes()).is_err() {
+                                    alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                                    break;
+                                }
                             }
-                        }
-                        alive.store(false, std::sync::atomic::Ordering::Relaxed);
-                    });
-                    self.led_socket = Some(tx);
-                    self.led_socket_failed_at = None;
-                    self.led_dirty = true; // отправить полный STATE сразу после коннекта
-                    log::info!("[console] companion connected");
-                }
-                Err(_) => {
-                    self.led_socket_failed_at = Some(std::time::Instant::now());
+                            alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                        });
+                        self.led_socket = Some(tx);
+                        self.led_socket_failed_at = None;
+                        self.led_dirty = true; // отправить полный STATE сразу после коннекта
+                        log::info!("[console] companion connected");
+                    }
+                    Ok(Err(_)) => {
+                        self.led_connecting = None;
+                        self.led_socket_failed_at = Some(std::time::Instant::now());
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.led_connecting = None;
+                        self.led_socket_failed_at = Some(std::time::Instant::now());
+                    }
                 }
             }
         }
