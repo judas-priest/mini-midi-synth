@@ -44,7 +44,7 @@ Requirement (юзер, 2026-10-30): «не синхронизированы ра
 - Modify: `src/synth/mod.rs` (поля SynthEngine ~1206; master_toggle_record ~1737; tick_block ~2698-2760; master_stop ~1712; atom для GUI ~1486 accessor area)
 - Modify: `src/synth/looper.rs` (методы truncate_loop / loop_len_ticks в impl MidiLooper)
 
-- [ ] **Step 1: Поля + атом.** Рядом с `seq_target` добавить:
+- [x] **Step 1: Поля + атом.** Рядом с `seq_target` добавить:
 
 ```rust
     /// Quantized master recording (#30 sync): arm/finish pending until the
@@ -91,7 +91,7 @@ Requirement (юзер, 2026-10-30): «не синхронизированы ра
 
   (visibility полей/методов сверить по факту: `bar_length_samples`/`loop_length_ticks` приватные, но методы внутри impl MidiLooper — доступ есть.)
 
-- [ ] **Step 2: master_toggle_record — диспетчер.** Текущее тело (~1737-1765) переименовать в `master_toggle_record_free_looper()` (точная копия: `set_recording(false)` + toggle_record лупера) и новый диспетчер. КЛЮЧЕВОЙ принцип ревью: free/quantized решается по тому, КАК был начат текущий захват (`looper_capture_quantized`), а не по drum_playing в момент нажатия:
+- [x] **Step 2: master_toggle_record — диспетчер.** Текущее тело (~1737-1765) переименовать в `master_toggle_record_free_looper()` (точная копия: `set_recording(false)` + toggle_record лупера) и новый диспетчер. КЛЮЧЕВОЙ принцип ревью: free/quantized решается по тому, КАК был начат текущий захват (`looper_capture_quantized`), а не по drum_playing в момент нажатия:
 
 ```rust
     /// Master transport: toggle record arm. Quantized path: drums playing,
@@ -178,7 +178,7 @@ Requirement (юзер, 2026-10-30): «не синхронизированы ра
 
   Следствие для тестов (ревью подтвердило): с дискриминатором `looper_capture_quantized` все существующие тесты master_transport.rs (tc1/tc2/tc3/tc5 — free-захваты, свежий движок) остаются зелёными БЕЗ правок; tc3 (второй MasterRecord) идёт по free-ветке и закрывается немедленно как раньше.
 
-- [ ] **Step 3: master_stop — снять pending.** В `master_stop()` в начало:
+- [x] **Step 3: master_stop — снять pending.** В `master_stop()` в начало:
 
 ```rust
         self.looper_arm_pending = false;
@@ -190,7 +190,7 @@ Requirement (юзер, 2026-10-30): «не синхронизированы ра
 
   (остальное тело без изменений: Recording → toggle_record+toggle_play и т.д.)
 
-- [ ] **Step 4: Детект границы в tick_block.** В `tick_block` ПОСЛЕ `looper.sync_clock(...)` (~2772) и до пер-сэмплового цикла. Анти-повтор (step==0 держится ~93 блока): prev_step читается и обновляется БЕЗУСЛОВНО сразу. Сигнатура tick_block: `tick_block(&mut self, buf_l: &mut [f32], buf_r: &mut [f32])`:
+- [x] **Step 4: Детект границы в tick_block.** В `tick_block` ПОСЛЕ `looper.sync_clock(...)` (~2772) и до пер-сэмплового цикла. Анти-повтор (step==0 держится ~93 блока): prev_step читается и обновляется БЕЗУСЛОВНО сразу. Сигнатура tick_block: `tick_block(&mut self, buf_l: &mut [f32], buf_r: &mut [f32])`:
 
 ```rust
         // Quantized master recording: pattern boundary = sequencer wrapped to
@@ -243,7 +243,7 @@ Requirement (юзер, 2026-10-30): «не синхронизированы ра
 
   Известные ограничения (приняты, задокументированы): (1) arm во время шага 0 ждёт СЛЕДУЮЩЕЙ границы (edge-detect); (2) Steps=1 паттерны не квантуются вовсе — их отсекает `pattern_len > 1` в диспетчере (free-путь).
 
-- [ ] **Step 5: Гейты (старые тесты упадут — ожидаемо, Task 2 чинит).**
+- [x] **Step 5: Гейты (старые тесты упадут — ожидаемо, Task 2 чинит).**
 
 ```bash
 cargo test --test master_transport 2>&1 | tail -5
@@ -254,7 +254,7 @@ cargo test --test master_transport 2>&1 | tail -5
 **Files:**
 - Create: `tests/master_rec_sync.rs`
 
-- [ ] **Step 1: Харнесс с tick_block.** Сигнатура — два буфера: `tick_block(&mut l, &mut r)` (как в tests/looper_timing.rs:52):
+- [x] **Step 1: Харнесс с tick_block.** Сигнатура — два буфера: `tick_block(&mut l, &mut r)` (как в tests/looper_timing.rs:52):
 
 ```rust
 //! Quantized master recording: looper starts at the pattern boundary,
@@ -287,7 +287,7 @@ fn run(e: &mut SynthEngine, blocks: usize) {
 fn steps(blocks: usize) -> usize { blocks * 94 }
 ```
 
-- [ ] **Step 2: Тесты:**
+- [x] **Step 2: Тесты:**
 
 ```rust
 #[test]
@@ -381,15 +381,15 @@ fn tc8_rearm_cancel() {
 
   ВАЖНО tc8: второй MasterRecord при arm_pending снимает арм — эта ветка уже есть в диспетчере Task 1 Step 2 («Снять арм»). Сниппет теста выше — финальный.
 
-- [ ] **Step 3: tests/master_transport.rs остаётся без правок.** Все его MasterRecord-тесты (tc1/tc2/tc3/tc5/tc9) стартуют со свежего движка — free-путь (секвенсор стоял в момент нажатия, `looper_capture_quantized=false`) — семантика прежняя. С дискриминатором tc3 (второй MasterRecord при уже играющих драмах) закрывается немедленно по free-ветке — зелёный. Проверить прогоном; при расхождении минимально править и объяснить в отчёте.
+- [x] **Step 3: tests/master_transport.rs остаётся без правок.** Все его MasterRecord-тесты (tc1/tc2/tc3/tc5/tc9) стартуют со свежего движка — free-путь (секвенсор стоял в момент нажатия, `looper_capture_quantized=false`) — семантика прежняя. С дискриминатором tc3 (второй MasterRecord при уже играющих драмах) закрывается немедленно по free-ветке — зелёный. Проверить прогоном; при расхождении минимально править и объяснить в отчёте.
 
-- [ ] **Step 4: Гейты**
+- [x] **Step 4: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/synth/mod.rs src/synth/looper.rs tests/master_rec_sync.rs
@@ -402,9 +402,9 @@ git commit -m "feat: quantized master recording — looper aligns to sequencer b
 - Modify: `src/gui/drums.rs` (draw_looper state label ~832-844: `status_color`/`state_label` в транспортной строке)
 - Modify: `src/gui/mod.rs` (App поле), `src/lib.rs` (литерал + CommonInit), `src/gui/settings.rs` (reconnect re-fetch ~263-276)
 
-- [ ] **Step 1: Пламб атома (урок detached-atom).** App поле `pub master_rec_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,`; CommonInit → App-литерал (`c.master_rec_pending_atom()` — сверить, как другие атомы видны в CommonInit); settings.rs `reconnect_audio` — переполучить клон.
+- [x] **Step 1: Пламб атома (урок detached-atom).** App поле `pub master_rec_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,`; CommonInit → App-литерал (`c.master_rec_pending_atom()` — сверить, как другие атомы видны в CommonInit); settings.rs `reconnect_audio` — переполучить клон.
 
-- [ ] **Step 2: Статус.** В state-лейбл лупера (drums.rs, строка статуса рядом с `status_color`):
+- [x] **Step 2: Статус.** В state-лейбл лупера (drums.rs, строка статуса рядом с `status_color`):
 
 ```rust
                 let armed = self.master_rec_pending.load(std::sync::atomic::Ordering::Relaxed);
@@ -416,7 +416,7 @@ git commit -m "feat: quantized master recording — looper aligns to sequencer b
 
   (имена локалов по факту; суть: если armed — показываем жёлтое «ARMED» вместо состояния.)
 
-- [ ] **Step 3: Гейты + Commit**
+- [x] **Step 3: Гейты + Commit**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo build --release
@@ -426,7 +426,7 @@ git commit -m "feat: ARMED status while master recording waits for the bar bound
 
 ### Task 4: TECHDEBT + финал
 
-- [ ] **Step 1:** В #32 (после Phase 4-заметки):
+- [x] **Step 1:** В #32 (после Phase 4-заметки):
 
 ```markdown
 Phase sync (квантованная запись лупера, best practice SooperLooper/Boss-RC):
@@ -438,7 +438,7 @@ Phase sync (квантованная запись лупера, best practice So
 (Bars остались ручными).
 ```
 
-- [ ] **Step 2:** Полные гейты + restart (главная сессия), commit docs.
+- [x] **Step 2:** Полные гейты + restart (главная сессия), commit docs.
 
 - [ ] **Step 3: Ручной чеклист (юзер):**
 1. Секвенсор играет, жмёшь Rec — статус ARMED (жёлтый), запись стартует с начала такта
