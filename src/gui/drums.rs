@@ -1001,22 +1001,25 @@ impl App {
                 // Part/preset names for this layer — компактно: имя патча
                 // режется до 12 символов, полный список в hover (узкая колонка
                 // docked-юнита: длинные подписи переносились и наезжали на S/M).
-                let full = part_ids.iter().map(|&pid| {
+                // pid 254 = тег драмы (bank-1 удары) — не часть, лейбл "Drums".
+                let part_label = |pid: u8, full_name: bool| -> String {
+                    if pid == 254 { return "Drums".to_string(); }
                     let z = if (pid as usize) < super::PARTS_PER_ZONE { "A" } else { "B" };
                     let n = (pid as usize % super::PARTS_PER_ZONE) + 1;
                     let pname = self.patches.get(self.parts[pid as usize].patch_idx)
                         .map(|p| p.name.as_str()).unwrap_or("---");
-                    format!("{z}{n}:{pname}")
-                }).collect::<Vec<_>>().join(" ");
-                let short = part_ids.iter().map(|&pid| {
-                    let z = if (pid as usize) < super::PARTS_PER_ZONE { "A" } else { "B" };
-                    let n = (pid as usize % super::PARTS_PER_ZONE) + 1;
-                    let pname = self.patches.get(self.parts[pid as usize].patch_idx)
-                        .map(|p| p.name.as_str()).unwrap_or("---");
-                    let cut: String = pname.chars().take(12).collect();
-                    let dots = if pname.chars().count() > 12 { "…" } else { "" };
-                    format!("{z}{n}:{cut}{dots}")
-                }).collect::<Vec<_>>().join(" ");
+                    if full_name {
+                        format!("{z}{n}:{pname}")
+                    } else {
+                        let cut: String = pname.chars().take(12).collect();
+                        let dots = if pname.chars().count() > 12 { "…" } else { "" };
+                        format!("{z}{n}:{cut}{dots}")
+                    }
+                };
+                let full = part_ids.iter().map(|&pid| part_label(pid, true))
+                    .collect::<Vec<_>>().join(" ");
+                let short = part_ids.iter().map(|&pid| part_label(pid, false))
+                    .collect::<Vec<_>>().join(" ");
 
                 ui.colored_label(color, egui::RichText::new(format!("L{l}")).strong());
                 ui.add(egui::Label::new(egui::RichText::new(short).small()).truncate())
