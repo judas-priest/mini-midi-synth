@@ -776,33 +776,19 @@ impl eframe::App for App {
 
         // LED snapshot (16 slots = pads 17..=32, top row first)
         {
-            // Bottom row shows the ACTIVE target's transport (spec v2): drums
-            // atoms at target=0, looper state (Recording=1, Playing=2,
-            // Overdubbing=3) at target=1.
-            let target = self.seq_target_atom.load(Ordering::Relaxed);
+            // Bottom row shows the MASTER transport (single transport, #32
+            // фаза 4): the union — LED reflects "something runs".
             let lstate = crate::synth::looper::LooperState::from_u8(
                 self.looper_atoms.state.load(Ordering::Relaxed));
-            let (playing, recording) = if target == 0 {
-                (self.drum_playing, self.drum_recording)
-            } else if target == 1 {
-                (
-                    matches!(lstate, crate::synth::looper::LooperState::Playing
+            let (playing, recording) = (
+                self.drum_playing
+                    || matches!(lstate, crate::synth::looper::LooperState::Playing
+                            | crate::synth::looper::LooperState::Overdubbing
+                            | crate::synth::looper::LooperState::Recording),
+                self.drum_recording
+                    || matches!(lstate, crate::synth::looper::LooperState::Recording
                             | crate::synth::looper::LooperState::Overdubbing),
-                    matches!(lstate, crate::synth::looper::LooperState::Recording
-                            | crate::synth::looper::LooperState::Overdubbing),
-                )
-            } else {
-                // MASTER: show the union — LED reflects "something runs"
-                (
-                    self.drum_playing
-                        || matches!(lstate, crate::synth::looper::LooperState::Playing
-                                | crate::synth::looper::LooperState::Overdubbing
-                                | crate::synth::looper::LooperState::Recording),
-                    self.drum_recording
-                        || matches!(lstate, crate::synth::looper::LooperState::Recording
-                                | crate::synth::looper::LooperState::Overdubbing),
-                )
-            };
+            );
             let mut mutes = [false; 16];
             for (i, part) in self.parts.iter().enumerate().take(16) {
                 mutes[i] = part.mute;
@@ -818,7 +804,7 @@ impl eframe::App for App {
             let top = self.console.top_colors(self.active_perf_console(), filled,
                                               self.drum_current_pattern as usize, &mutes,
                                               self.perf_window, self.pat_window,
-                                              self.mute_window, target);
+                                              self.mute_window);
             let bottom = self.console.bottom_colors(playing, recording, page_depth,
                                                     undo_avail, redo_avail);
             let mut snap = [[0u8; 3]; 16];
@@ -1556,7 +1542,7 @@ impl App {
                     self.show_drums = !self.show_drums;
                     self.show_looper = false;
                     if !self.show_drums {
-                        self.seq_target_atom.store(2, Ordering::Relaxed);
+                        self.seq_target_atom.store(1, Ordering::Relaxed);
                     } else {
                         self.seq_target_atom.store(0, Ordering::Relaxed);
                     }
@@ -2021,13 +2007,6 @@ impl App {
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part, mute });
                     self.persist_parts_state();
                 }
-            }
-            led_console::Action::ToggleTransportTarget => {
-                let t = self.seq_target_atom.load(Ordering::Relaxed);
-                let next = (t + 1) % 3;
-                self.seq_target_atom.store(next, Ordering::Relaxed);
-                log::info!("[console] seq_target -> {next} ({})", match next {
-                    0 => "drums", 1 => "looper", _ => "master" });
             }
             led_console::Action::Undo => {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqUndo);
