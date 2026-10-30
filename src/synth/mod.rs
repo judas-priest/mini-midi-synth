@@ -1206,8 +1206,9 @@ pub struct SynthEngine {
     program_change: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     global_params: GlobalParams,
     pickup_states: [PickupState; 128],
-    /// 0 = SEQ buttons target drums, 1 = SEQ buttons target looper,
-    /// 2 = master (drums + looper together, default)
+    /// Drum-note mode gate for live pads: 0 = pads 36-51 trigger drums on ANY
+    /// channel (drum_mode), nonzero = pads play parts. NOT a transport target —
+    /// transport notes (81/82/83/123/124) always drive the master transport.
     seq_target: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Active part index (0-7), shared with GUI for looper part recording
     active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
@@ -1474,7 +1475,7 @@ impl SynthEngine {
             feedback_tx: None, trash: None, program_change: None,
             global_params: GlobalParams::default(),
             pickup_states: [PickupState::default(); 128],
-            seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(2)), // default: master (drums + looper together)
+            seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: non-drum mode
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             looper_source_mix: true,
             sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1862,60 +1863,21 @@ impl SynthEngine {
     pub fn handle_event(&mut self, event: MidiEvent) {
         match event {
             MidiEvent::NoteOn { channel, note, velocity } => {
-                // SMK-37 Pro transport, unified: SEQ buttons (any channel,
-                // notes 123/124) and bank-2 pads ch9 (82 = pad 25 play,
-                // 83 = pad 27 rec) follow seq_target. Stop (81, pad 26) arm
-                // below. Pad notes must not fall into the trigger path.
+                // SMK-37 Pro transport: SEQ buttons (any channel, notes
+                // 123/124) and bank-2 pads ch9 (82 = pad 25 play, 83 = pad 27
+                // rec, 81 = pad 26 stop) always drive the master transport.
+                // Pad notes must not fall into the trigger path.
                 if velocity > 0 && (note == 123 || (channel == 9 && note == 82)) {
-                    let target = self.seq_target.load(std::sync::atomic::Ordering::Relaxed);
-                    if target == 0 {
-                        // Drums mode (set_playing keeps play_atom coherent
-                        // for the GUI between audio ticks)
-                        let playing = !self.drum_engine.sequencer.playing;
-                        self.drum_engine.set_playing(playing);
-                        if !playing { self.drum_engine.sequencer.reset(); }
-                    } else if target == 1 {
-                        // Looper mode
-                        self.looper.toggle_play();
-                    } else {
-                        // Master mode (#32): both together
-                        self.master_toggle_play();
-                    }
+                    // Master transport (#32 фаза 4): single transport, no target
+                    self.master_toggle_play();
                     return;
                 }
                 if velocity > 0 && (note == 124 || (channel == 9 && note == 83)) {
-                    let target = self.seq_target.load(std::sync::atomic::Ordering::Relaxed);
-                    if target == 0 {
-                        // set_recording snapshots (undoable) — same path as
-                        // DrumSeqRecord / pad 27 before the unification.
-                        let rec = !self.drum_engine.sequencer.recording;
-                        self.drum_engine.set_recording(rec);
-                        if rec && !self.drum_engine.sequencer.playing {
-                            self.drum_engine.set_playing(true);
-                        }
-                    } else if target == 1 {
-                        self.looper.toggle_record();
-                    } else {
-                        self.master_toggle_record();
-                    }
+                    self.master_toggle_record();
                     return;
                 }
-                // Pad 26 (note 81, ch9): stop — outside the drum-note gate so
-                // it works at seq_target=1 (looper) too.
                 if channel == 9 && velocity > 0 && note == 81 {
-                    let target = self.seq_target.load(std::sync::atomic::Ordering::Relaxed);
-                    if target == 0 {
-                        self.drum_engine.set_playing(false);
-                        self.drum_engine.sequencer.reset();
-                    } else if target == 1 {
-                        if matches!(self.looper.state,
-                                    crate::synth::looper::LooperState::Playing
-                                    | crate::synth::looper::LooperState::Overdubbing) {
-                            self.looper.toggle_play();
-                        }
-                    } else {
-                        self.master_stop();
-                    }
+                    self.master_stop();
                     return;
                 }
 
@@ -1925,7 +1887,7 @@ impl SynthEngine {
                 let sampler_drums = self.sampler.drums_enabled();
                 if channel == 9 || (is_drum_note && drum_mode) {
                     // Pad bank 2 legacy undo (64, E4) lives here; 83/82/81
-                    // moved above — they follow seq_target now.
+                    // moved above — master transport now, no target.
                     if channel == 9 && velocity > 0 && note == 64 {
                         self.drum_engine.sequencer.undo();
                         return;

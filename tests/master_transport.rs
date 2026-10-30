@@ -22,9 +22,9 @@ fn record_loop(e: &mut SynthEngine) {
 }
 
 #[test]
-fn tc8_default_target_is_master() {
+fn tc3_default_target_is_non_drum_mode() {
     let e = engine();
-    assert_eq!(e.seq_target_atom().load(Ordering::Relaxed), 2);
+    assert_eq!(e.seq_target_atom().load(Ordering::Relaxed), 1);
 }
 
 #[test]
@@ -98,33 +98,35 @@ fn tc5_master_stop_from_recording() {
 }
 
 #[test]
-fn tc6_pads_route_to_master_at_target_2() {
-    let mut e = engine();
-    e.seq_target_atom().store(2, Ordering::Relaxed);
-    // 83 = master rec arm
-    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
-    assert!(e.drum_engine.sequencer.recording);
-    assert!(matches!(e.looper.state, LooperState::Recording));
-    // 81 = master stop
-    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 81, velocity: 127 });
-    assert!(!e.drum_engine.sequencer.playing);
-    assert!(matches!(e.looper.state, LooperState::Idle));
-    // 82 = master play toggle (record_loop first so looper can play)
-    record_loop(&mut e);
-    let _ = e.handle_control(ControlEvent::LooperTogglePlay); // -> Idle
-    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 82, velocity: 127 });
-    assert!(e.drum_engine.sequencer.playing);
-    assert!(matches!(e.looper.state, LooperState::Playing));
+fn tc1_pads_are_always_master_any_target() {
+    for target in [0u8, 1, 2] {
+        let mut e = engine();
+        e.seq_target_atom().store(target, Ordering::Relaxed);
+        // 83 = master rec arm
+        e.handle_event(MidiEvent::NoteOn { channel: 9, note: 83, velocity: 127 });
+        assert!(e.drum_engine.sequencer.recording, "target {target}");
+        assert!(matches!(e.looper.state, LooperState::Recording), "target {target}");
+        // 81 = master stop
+        e.handle_event(MidiEvent::NoteOn { channel: 9, note: 81, velocity: 127 });
+        assert!(!e.drum_engine.sequencer.playing, "target {target}");
+        assert!(matches!(e.looper.state, LooperState::Idle), "target {target}");
+        // 82 = master play toggle
+        e.handle_event(MidiEvent::NoteOn { channel: 9, note: 82, velocity: 127 });
+        assert!(e.drum_engine.sequencer.playing, "target {target}");
+        assert!(matches!(e.looper.state, LooperState::Idle), "82 must not start empty looper, target {target}");
+    }
 }
 
 #[test]
-fn tc6b_key_123_routes_to_master() {
-    let mut e = engine();
-    e.seq_target_atom().store(2, Ordering::Relaxed);
-    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 123, velocity: 127 });
-    assert!(e.drum_engine.sequencer.playing);
-    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 123, velocity: 127 });
-    assert!(!e.drum_engine.sequencer.playing);
+fn tc1b_key_123_is_always_master() {
+    for target in [0u8, 1] {
+        let mut e = engine();
+        e.seq_target_atom().store(target, Ordering::Relaxed);
+        e.handle_event(MidiEvent::NoteOn { channel: 0, note: 123, velocity: 127 });
+        assert!(e.drum_engine.sequencer.playing, "target {target}");
+        e.handle_event(MidiEvent::NoteOn { channel: 0, note: 123, velocity: 127 });
+        assert!(!e.drum_engine.sequencer.playing, "target {target}");
+    }
 }
 
 #[test]
@@ -136,12 +138,18 @@ fn tc9_master_stop_idle_looper_stays_idle() {
 }
 
 #[test]
-fn tc8b_ch9_pads_still_play_drums_at_master_target() {
+fn tc2_target_still_gates_drum_note_mode() {
+    // target=0: note 40 on channel 0 triggers drums (drum_mode)
     let mut e = engine();
-    e.seq_target_atom().store(2, Ordering::Relaxed);
-    e.handle_event(MidiEvent::NoteOn { channel: 9, note: 40, velocity: 100 });
-    e.handle_event(MidiEvent::NoteOff { channel: 9, note: 40 });
-    // no panic, no transport change
+    e.seq_target_atom().store(0, Ordering::Relaxed);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 40, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 40 });
+    // transport untouched by a plain pad note
+    assert!(!e.drum_engine.sequencer.playing);
+    // target=1: same note goes to the part synth path (no panic, no transport)
+    e.seq_target_atom().store(1, Ordering::Relaxed);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 40, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 40 });
     assert!(!e.drum_engine.sequencer.playing);
     assert!(matches!(e.looper.state, LooperState::Idle));
 }
