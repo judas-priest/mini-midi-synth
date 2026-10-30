@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Макет: Layers + Инструмент в строке части</title>
+<style>
+  body { background:#1a1a1e; color:#ddd; font:14px/1.4 system-ui,sans-serif; margin:20px; }
+  h2 { color:#9cf; margin:24px 0 8px; }
+  h3 { color:#fc6; margin:18px 0 6px; }
+  .row { display:flex; align-items:center; gap:10px; background:#26262c; border:1px solid #333;
+         border-radius:6px; padding:8px 12px; margin:4px 0; }
+  .row.sel { border-color:#6af; background:#2a3038; }
+  .part { font-weight:bold; min-width:56px; }
+  .inst { flex:1; }
+  .inst select { background:#111; color:#eee; border:1px solid #444; border-radius:4px; padding:3px 8px; width:100%; }
+  .tag { font-size:11px; padding:2px 6px; border-radius:3px; }
+  .tag.sf2 { background:#274; color:#cfc; }
+  .tag.mute { background:#a33; color:#fcc; }
+  .tag.root { background:#45a; color:#cce; }
+  .btn { background:#333; border:1px solid #555; color:#ccc; border-radius:4px; padding:3px 10px; cursor:pointer; }
+  .btn.on { background:#6a5; color:#030; border-color:#8c7; }
+  .vol { width:110px; }
+  .note { color:#888; font-size:12px; margin-top:4px; }
+  .divider { height:8px; }
+  .bad { color:#e66; }
+  .good { color:#6d6; }
+  .box { border:1px solid #444; border-radius:8px; padding:12px 16px; margin:10px 0; }
+</style>
+</head>
+<body>
+
+<h2>Как СТАЛО (сейчас): инструмент в трёх местах</h2>
+<div class="box">
+  <span class="bad">GM-панель справа</span> — program для SF2-частей<br>
+  <span class="bad">Layers</span> — только DSP-пресет в строке, SF2-части без выбора<br>
+  <span class="bad">Дерево параметров</span> — «Mode: SF2: SC-55 | program» ← неясно, что это
+  <div class="note">Один и тот же вопрос («чем играет эта часть?») отвечает в трёх местах по-разному.</div>
+</div>
+
+<h2>Как ПРЕДЛАГАЮ: инструмент прямо в строке части</h2>
+
+<h3>Layers — строка части = всё о раскладке и звуке части</h3>
+
+<div class="row sel">
+  <span class="part">A1</span>
+  <select class="inst"><option>Bright Acoustic Piano</option><option>DX7 Tubular Bell v2</option></select>
+  <span class="tag sf2">SF2: SC-55</span>
+  <span class="tag">prog 1</span>
+  <span class="btn on">Mute</span>
+  <span class="btn">Root</span>
+  <span class="btn">DSP/SF2</span>
+  <input class="vol" type="range" min="0" max="1" step="0.01" value="0.75">
+</div>
+<div class="row">
+  <span class="part">A2</span>
+  <select class="inst"><option>DX7 Tubular Bell v2 (Resonator)</option><option>Bright Acoustic Piano</option></select>
+  <span class="tag sf2">SF2: SC-55</span>
+  <span class="tag">prog 5</span>
+  <span class="btn">Mute</span>
+  <span class="btn on">Root</span>
+  <span class="btn">DSP/SF2</span>
+  <input class="vol" type="range" min="0" max="1" step="0.01" value="0.6">
+</div>
+<div class="row">
+  <span class="part">A3</span>
+  <select class="inst"><option>Tubular Bells</option><option>FM Bell v3</option></select>
+  <span class="tag">DSP</span>
+  <span class="tag">prog —</span>
+  <span class="btn">Mute</span>
+  <span class="btn">Root</span>
+  <span class="btn">DSP/SF2</span>
+  <input class="vol" type="range" min="0" max="1" step="0.01" value="0.5">
+</div>
+<div class="note">Строка части = раскладка + инструмент + живые тумблеры. Один вопрос — один ответ: «чем играет эта часть и как».</div>
+
+<div class="divider"></div>
+
+<h3>Куда деваются остальные панели</h3>
+<div class="box">
+  <b>GM-панель справа</b> → <span class="good">браузер библиотеки</span>: послушать инструменты,
+  выбрать → «применить к выбранной части». Не редактор состояния.<br>
+  <b>Дерево параметров</b> → остаётся, но привязывается к <b>выбранной части</b>:
+  выбрал A2 в Layers → дерево показывает параметры A2. Заголовок дерева = имя части.<br>
+  <b>«Mode: SF2» из дерева исчезает</b> — движок выбирается кнопкой DSP/SF2 в строке части.
+</div>
+
+<div class="divider"></div>
+
+<h3>Правило (как во всех DAW)</h3>
+<div class="box">
+  <b>Строка части</b> = ЧТО играет и КАК раскладано (инструмент, mute, root, диапазон, громкость)<br>
+  <b>Инспектор</b> = ПОДРОБНОСТИ выбранной части (огибающие, фильтры, LFO, FX)<br>
+  <b>Docked снизу</b> = ЧТО КРУТИТЬ ВО ВРЕМЯ ИГРЫ (транспорт, BPM, лупер, мьюты)<br><br>
+  Один вопрос — одно место. Зеркала LED-консоли = слой «живого».
+</div>
+
+</body>
+</html>
