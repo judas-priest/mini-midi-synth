@@ -361,6 +361,10 @@ pub struct App {
     pub looper_clear_confirm: Option<std::time::Instant>,
     pub looper_layer_mute: [bool; 256],
     pub looper_solo_layer: Option<u8>,
+    /// Looper record source: true = Mix (all sounding parts, default),
+    /// false = active part only. Live transport state — not persisted
+    /// (like seq_target); re-pushed on audio reconnect.
+    pub looper_source_mix: bool,
     /// 0 = SEQ buttons → drums, 1 = SEQ buttons → looper
     pub seq_target_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub active_part_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,

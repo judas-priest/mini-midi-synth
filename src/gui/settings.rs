@@ -359,6 +359,12 @@ impl App {
         if let Some(layer) = self.looper_solo_layer {
             let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: Some(layer) });
         }
+        // Record source is live transport state (engine defaults to Mix); the
+        // GUI's choice survives the reconnect — re-push it (same pattern as
+        // the layer mutes above).
+        if !self.looper_source_mix {
+            let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: false });
+        }
 
         log::info!("[reconnect] Audio restarted: {actual_sr}Hz");
         Ok(())

@@ -602,6 +602,66 @@ fn looper_records_all_sounding_parts() {
     assert!(silent_peak < 1e-3, "out-of-range note was recorded (peak {silent_peak})");
 }
 
+fn looper_recorded_part_ids(e: &mut SynthEngine) -> Vec<u8> {
+    e.looper
+        .display()
+        .lock()
+        .expect("looper display lock")
+        .events
+        .iter()
+        .map(|ev| ev.part_id)
+        .collect()
+}
+
+#[test]
+fn looper_source_part_records_only_active_part() {
+    // Mix source (default) — covered by looper_records_all_sounding_parts.
+    // Part source: a note sounding on TWO parts records only the active
+    // part's events.
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 1, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartRange { part: 1, min_note: 0, max_note: 127 });
+    let _ = e.handle_control(ControlEvent::SetPartVolume { part: 1, volume: 1.0 });
+    // Negative control first: with the default Mix source BOTH parts are
+    // recorded for a note in the overlap.
+    let _ = e.handle_control(ControlEvent::LooperRecord);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = render_peak(&mut e, 4);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let _ = render_peak(&mut e, 4);
+    let _ = e.handle_control(ControlEvent::LooperStopRecord);
+    let mix_parts = looper_recorded_part_ids(&mut e);
+    assert!(mix_parts.contains(&0) && mix_parts.contains(&1),
+        "Mix source must record every sounding part: {mix_parts:?}");
+
+    // Part source (active part = 0): same overlap note -> only part 0 events.
+    let _ = e.handle_control(ControlEvent::LooperClear);
+    let _ = e.handle_control(ControlEvent::LooperSetSource { mix: false });
+    let _ = e.handle_control(ControlEvent::LooperRecord);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = render_peak(&mut e, 4);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let _ = render_peak(&mut e, 4);
+    let _ = e.handle_control(ControlEvent::LooperStopRecord);
+    let part_parts = looper_recorded_part_ids(&mut e);
+    assert!(!part_parts.is_empty(), "Part source recorded nothing");
+    assert!(part_parts.iter().all(|&p| p == 0),
+        "Part source must record only the active part: {part_parts:?}");
+
+    // Back to Mix mid-session: both parts again.
+    let _ = e.handle_control(ControlEvent::LooperClear);
+    let _ = e.handle_control(ControlEvent::LooperSetSource { mix: true });
+    let _ = e.handle_control(ControlEvent::LooperRecord);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = render_peak(&mut e, 4);
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let _ = render_peak(&mut e, 4);
+    let _ = e.handle_control(ControlEvent::LooperStopRecord);
+    let again = looper_recorded_part_ids(&mut e);
+    assert!(again.contains(&0) && again.contains(&1),
+        "toggling back to Mix must record every sounding part: {again:?}");
+}
+
 #[test]
 fn held_key_survives_pedal_up() {
     let mut e = engine_with_init_patch();

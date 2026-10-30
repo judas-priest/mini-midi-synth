@@ -234,6 +234,10 @@ pub enum ControlEvent {
     },
     LooperSetLayerMute { layer: u8, mute: bool },
     LooperSetSolo { layer: Option<u8> },
+    /// Looper record source: true = Mix (every sounding enabled part is
+    /// recorded, each event tagged with its own part id), false = Part
+    /// (only the active part). Live transport state — not persisted.
+    LooperSetSource { mix: bool },
     SetSustain { on: bool },
     /// Static pedal-up release duration in seconds (None = patch release)
     SetSustainRelease { seconds: Option<f32> },
@@ -1197,6 +1201,10 @@ pub struct SynthEngine {
     seq_target: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Active part index (0-7), shared with GUI for looper part recording
     active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Looper record source: true = Mix (all sounding enabled parts,
+    /// default), false = only the active part (LooperSetSource; live
+    /// transport state, not persisted).
+    looper_source_mix: bool,
     /// Sustain pedal state (CC64 from pedal/fader or GUI toggle), shared with GUI
     sustain: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Static pedal-up release duration (None = patch release)
@@ -1458,6 +1466,7 @@ impl SynthEngine {
             pickup_states: [PickupState::default(); 128],
             seq_target: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(1)), // default: looper (synth part shown at start)
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            looper_source_mix: true,
             sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sustain_release: None,
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
@@ -1630,9 +1639,27 @@ impl SynthEngine {
         }
         if let Some(off) = self.arpeggiator.flush_current_note() {
             self.dispatch_arp_note_off(off);
-            let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
-            self.looper.record_event(off, 0, ap);
+            // Record per part (same source-consistency as the note dispatch
+            // loop) — used to be a single event tagged with the active part.
+            for i in 0..self.parts.len() {
+                if !self.parts[i].enabled { continue; }
+                self.record_for_looper(off, 0, i as u8);
+            }
         }
+    }
+
+    /// Looper record gate (Source toggle): in Mix source (default) every
+    /// sounding part is recorded — the note dispatch loop tags each event
+    /// with its own part id; in Part source only the active part is
+    /// recorded. RT-safe: one atomic load + branch.
+    #[inline]
+    fn record_for_looper(&mut self, note: u8, velocity: u8, part: u8) {
+        if !self.looper_source_mix
+            && part != self.active_part.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return;
+        }
+        self.looper.record_event(note, velocity, part);
     }
 
     pub fn pitch_seq_step_atoms(&self) -> Vec<std::sync::Arc<std::sync::atomic::AtomicU8>> {
@@ -1843,7 +1870,7 @@ impl SynthEngine {
                         self.route_note_off(i, note);
                         // Whole-performance recording: tag with the part that
                         // receives the off (looper replay routes per part id).
-                        self.looper.record_event(note, 0, i as u8);
+                        self.record_for_looper(note, 0, i as u8);
                     }
                 } else {
                     for i in 0..self.parts.len() {
@@ -1861,7 +1888,7 @@ impl SynthEngine {
                         // overwrites looper's single active_notes[note] slot —
                         // the forced off at loop wrap releases only the last
                         // part.
-                        self.looper.record_event(note, velocity, i as u8);
+                        self.record_for_looper(note, velocity, i as u8);
                     }
                 }
             }
@@ -1881,7 +1908,7 @@ impl SynthEngine {
                         self.route_note_off(i, note);
                         // Whole-performance recording: tag with the part that
                         // receives the off (looper replay routes per part id).
-                        self.looper.record_event(note, 0, i as u8);
+                        self.record_for_looper(note, 0, i as u8);
                     }
                 }
             }
@@ -2361,6 +2388,9 @@ impl SynthEngine {
                         }
                     }
                 }
+            }
+            ControlEvent::LooperSetSource { mix } => {
+                self.looper_source_mix = mix;
             }
             ControlEvent::DrumSetFixedVelocity { fixed } => {
                 self.drum_engine.fixed_velocity = fixed;
@@ -2941,17 +2971,18 @@ impl SynthEngine {
                     for i in 0..self.parts.len() {
                         if !self.parts[i].enabled { continue; }
                         self.route_note_off(i, off_note);
+                        // Source-consistent recording: per part, like the
+                        // note dispatch loop (used to be one active-part
+                        // event — the loop replayed arps on one part only).
+                        self.record_for_looper(off_note, 0, i as u8);
                     }
-                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
-                    self.looper.record_event(off_note, 0, ap);
                 }
                 if let Some((note, vel)) = arp_on {
-                    let ap = self.active_part.load(std::sync::atomic::Ordering::Relaxed);
                     for i in 0..self.parts.len() {
                         if !self.parts[i].enabled || self.parts[i].mute { continue; }
                         self.route_note_on(i, note, vel);
+                        self.record_for_looper(note, vel, i as u8);
                     }
-                    self.looper.record_event(note, vel, ap);
                 }
             }
 

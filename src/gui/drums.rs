@@ -880,32 +880,57 @@ impl App {
             }
             ui.separator();
 
-            // "Recording to" — shows active part, allows quick switch
+            // Source toggle (TECHDEBT #33/#2 partial): Mix records every
+            // sounding enabled part (default); Part records only the active
+            // part. Live transport state — not persisted (like seq_target).
             let ap = self.active_part;
             let zone = if ap < super::PARTS_PER_ZONE { "A" } else { "B" };
             let num = (ap % super::PARTS_PER_ZONE) + 1;
             let part_name = self.patches.get(self.parts[ap].patch_idx)
                 .map(|p| p.name.as_str()).unwrap_or("---");
             let is_recording = matches!(state, LooperState::Recording | LooperState::Overdubbing);
-            let rec_indicator = if is_recording { "Rec" } else { "Part" };
-            let rec_text_color = if is_recording { egui::Color32::RED } else { part_colors[ap % 8] };
-            let selected = format!("{rec_indicator}: {zone}{num} {part_name}");
-            egui::ComboBox::from_id_salt("looper_rec_part")
-                .selected_text(egui::RichText::new(&selected).color(rec_text_color))
-                .width(160.0)
-                .show_ui(ui, |ui| {
-                    for i in 0..self.parts.len() {
-                        if !self.parts[i].enabled { continue; }
-                        let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
-                        let n = (i % super::PARTS_PER_ZONE) + 1;
-                        let pname = self.patches.get(self.parts[i].patch_idx)
-                            .map(|p| p.name.as_str()).unwrap_or("---");
-                        let label = format!("{z}{n}: {pname}");
-                        if ui.selectable_label(i == ap, egui::RichText::new(label).color(part_colors[i % 8])).clicked() {
-                            self.set_active_part(i);
+            ui.label(egui::RichText::new("Source").weak().small());
+            let mix_color = if self.looper_source_mix { egui::Color32::GREEN } else { egui::Color32::GRAY };
+            if ui.selectable_label(self.looper_source_mix, egui::RichText::new("Mix").color(mix_color))
+                .on_hover_text("Record every sounding enabled part")
+                .clicked()
+                && !self.looper_source_mix
+            {
+                self.looper_source_mix = true;
+                let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: true });
+            }
+            if self.looper_source_mix {
+                // Collapsed: a single "Part" switch to leave Mix mode.
+                if ui.selectable_label(false, "Part")
+                    .on_hover_text("Record only the active part")
+                    .clicked()
+                {
+                    self.looper_source_mix = false;
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: false });
+                }
+            } else {
+                // Part source: records the active part (red "Rec" prefix while
+                // armed); combobox switches which part is active.
+                let rec_indicator = if is_recording { "Rec" } else { "Part" };
+                let rec_text_color = if is_recording { egui::Color32::RED } else { part_colors[ap % 8] };
+                let selected = format!("{rec_indicator}: {zone}{num} {part_name}");
+                egui::ComboBox::from_id_salt("looper_rec_part")
+                    .selected_text(egui::RichText::new(&selected).color(rec_text_color))
+                    .width(160.0)
+                    .show_ui(ui, |ui| {
+                        for i in 0..self.parts.len() {
+                            if !self.parts[i].enabled { continue; }
+                            let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
+                            let n = (i % super::PARTS_PER_ZONE) + 1;
+                            let pname = self.patches.get(self.parts[i].patch_idx)
+                                .map(|p| p.name.as_str()).unwrap_or("---");
+                            let label = format!("{z}{n}: {pname}");
+                            if ui.selectable_label(i == ap, egui::RichText::new(label).color(part_colors[i % 8])).clicked() {
+                                self.set_active_part(i);
+                            }
                         }
-                    }
-                });
+                    });
+            }
         });
 
         // --- Timeline ---
