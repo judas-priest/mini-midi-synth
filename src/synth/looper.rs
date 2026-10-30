@@ -151,6 +151,14 @@ pub struct MidiLooper {
     current_layer: u8,
     pub state: LooperState,
     pub bpm: f32,
+    /// BPM the current loop was established at; drives the regrid ratio on
+    /// tempo changes. `0.0` = provenance unknown (post-restore): the next
+    /// sync_clock adopts the new tempo WITHOUT rescaling the restored loop.
+    loop_bpm: f32,
+    /// Beats per bar, synced per block from the drum sequencer's current
+    /// pattern (REFACTOR_AUDIT S5). Affects loop length only at the next
+    /// start_record — an existing loop is never re-bared.
+    pub beats_per_bar: u8,
     pub bars: u8,           // loop length in bars (1,2,4,8)
     pub quantize: Quantize,
     pub sample_rate: f32,
@@ -183,6 +191,8 @@ impl MidiLooper {
             current_layer: 0,
             state: LooperState::Idle,
             bpm: 120.0,
+            loop_bpm: 120.0,
+            beats_per_bar: 4,
             bars: 4,
             quantize: Quantize::Off,
             sample_rate,
@@ -214,7 +224,7 @@ impl MidiLooper {
     }
 
     fn bar_length_samples(&self) -> u32 {
-        ((60.0 / self.bpm) * 4.0 * self.sample_rate) as u32 // 4 beats per bar
+        ((60.0 / self.bpm) * self.beats_per_bar as f32 * self.sample_rate) as u32
     }
 
     fn quantize_tick(&self, tick: u32) -> u32 {
@@ -233,6 +243,50 @@ impl MidiLooper {
         }
     }
 
+    /// Per-block clock sync (REFACTOR_AUDIT S5): the drum sequencer BPM is the
+    /// single canonical clock (same precedent as arp/pitch_seq in tick_block).
+    /// Called once per block, before the per-sample tick() loop.
+    ///
+    /// A mid-loop tempo change rescales the recorded loop proportionally
+    /// (event ticks, loop length, playback position): musical positions
+    /// survive and the loop plays back at the new tempo like a DAW clip.
+    /// Events are note on/offs, not audio — no time-stretch needed. Rounding
+    /// error is bounded by ±1 sample per event per regrid; a BPM drag regrids
+    /// every frame, worst case ~2 ms drift at 48 kHz after ~100 steps.
+    /// RT-safe: integer math, no allocation.
+    pub fn sync_clock(&mut self, bpm: f32, beats_per_bar: u8) {
+        if !bpm.is_finite() || bpm <= 0.0 { return; }
+        self.beats_per_bar = beats_per_bar.clamp(1, 16);
+        if (self.bpm - bpm).abs() < 0.01 { return; }
+        if self.loop_length_ticks > 0 && self.loop_bpm > 0.0 {
+            self.regrid(bpm);
+        }
+        self.bpm = bpm;
+        self.loop_bpm = bpm;
+    }
+
+    /// Rescale loop content and playback position from self.bpm to `new_bpm`.
+    /// Per-event scale `t * new_len / old_len` is monotone non-decreasing in
+    /// `t`, so the sorted-by-tick invariant is preserved (duplicates legal —
+    /// record_event already inserts those). Cursor re-derivation mirrors
+    /// undo() (partition_point below).
+    fn regrid(&mut self, new_bpm: f32) {
+        let old_len = self.loop_length_ticks as u64;
+        let new_len = ((old_len as f64) * (self.bpm as f64 / new_bpm as f64)) as u64;
+        if new_len == 0 || new_len > u32::MAX as u64 { return; }
+        let new_len = new_len as u32;
+        let scale = |t: u32| ((t as u64 * new_len as u64) / old_len) as u32;
+        for i in 0..self.len as usize {
+            self.events[i].tick = scale(self.events[i].tick);
+        }
+        let new_pos = scale(self.playback_tick);
+        self.loop_length_ticks = new_len;
+        self.playback_tick = new_pos.min(new_len - 1);
+        self.playback_cursor = self.events[..self.len as usize]
+            .partition_point(|e| e.tick < self.playback_tick);
+        self.update_display();
+    }
+
     /// Start recording. If first time, establishes loop length from bars setting.
     pub fn start_record(&mut self) {
         if self.state == LooperState::Idle {
@@ -240,6 +294,7 @@ impl MidiLooper {
             self.len = 0;
             self.current_layer = 0;
             self.loop_length_ticks = self.bar_length_samples() * self.bars as u32;
+            self.loop_bpm = self.bpm;
             self.recording_start_tick = self.global_tick;
             self.playback_tick = 0;
             self.playback_cursor = 0;
@@ -316,6 +371,7 @@ impl MidiLooper {
     pub fn clear(&mut self) {
         self.len = 0;
         self.loop_length_ticks = 0;
+        self.loop_bpm = 0.0;
         self.playback_tick = 0;
         self.playback_cursor = 0;
         self.current_layer = 0;
@@ -344,6 +400,9 @@ impl MidiLooper {
         self.active_notes = [255; 128];
         self.active_note_layers = [0; 128];
         self.loop_length_ticks = loop_length_ticks;
+        // Provenance unknown (ticks were rescaled to the new SR by the GUI):
+        // first sync_clock must NOT regrid.
+        self.loop_bpm = 0.0;
         self.state = LooperState::Idle;
         for ev in events {
             if self.len as usize >= MAX_LOOP_EVENTS { break; }
@@ -914,5 +973,145 @@ mod timing_tests {
         assert_eq!(l.current_layer, 1);
         assert_eq!(l.playback_tick, 0, "position resets for the overdub pass");
         assert_eq!(l.loop_length_ticks, 96_000, "loop length survives the switch");
+    }
+}
+
+#[cfg(test)]
+mod clock_sync_tests {
+    use super::*;
+
+    const SR: f32 = 48_000.0;
+
+    fn loop_at(bpm: f32, loop_ticks: u32) -> MidiLooper {
+        let mut l = MidiLooper::new(SR);
+        l.bpm = bpm;
+        l.loop_bpm = bpm;
+        l.loop_length_ticks = loop_ticks;
+        l
+    }
+
+    #[test]
+    fn sync_updates_bpm_and_beats_per_bar() {
+        let mut l = loop_at(120.0, 96_000);
+        l.sync_clock(90.0, 3);
+        assert_eq!(l.bpm, 90.0);
+        assert_eq!(l.beats_per_bar, 3);
+        assert_eq!(l.loop_bpm, 90.0);
+    }
+
+    #[test]
+    fn regrid_halves_loop_at_double_bpm() {
+        let mut l = loop_at(120.0, 96_000);
+        l.events[0].tick = 24_000;
+        l.events[1].tick = 48_000;
+        l.len = 2;
+        l.playback_tick = 24_000;
+        l.sync_clock(240.0, 4);
+        assert_eq!(l.loop_length_ticks, 48_000);
+        assert_eq!(l.events[0].tick, 12_000);
+        assert_eq!(l.events[1].tick, 24_000);
+        assert_eq!(l.playback_tick, 12_000);
+        assert_eq!(l.loop_bpm, 240.0);
+    }
+
+    #[test]
+    fn regrid_doubles_loop_at_half_bpm() {
+        let mut l = loop_at(120.0, 48_000);
+        l.playback_tick = 12_000;
+        l.sync_clock(90.0, 4);
+        assert_eq!(l.loop_length_ticks, 64_000); // 48_000 * 120/90
+        assert_eq!(l.playback_tick, 16_000);
+    }
+
+    #[test]
+    fn regrid_preserves_position_fraction_mid_playback() {
+        let mut l = loop_at(120.0, 96_000);
+        l.playback_tick = 24_000; // exactly 1/4
+        l.sync_clock(60.0, 4);    // x2 length
+        let frac = l.playback_tick as f64 / l.loop_length_ticks as f64;
+        assert!((frac - 0.25).abs() < 0.001, "fraction drifted: {frac}");
+    }
+
+    #[test]
+    fn events_stay_sorted_after_regrid() {
+        let mut l = loop_at(120.0, 96_000);
+        l.events[0].tick = 10_000;
+        l.events[1].tick = 10_001;
+        l.events[2].tick = 10_002;
+        l.len = 3;
+        l.sync_clock(240.0, 4);
+        for w in l.events[..3].windows(2) {
+            assert!(w[0].tick <= w[1].tick, "sort broken: {} > {}", w[0].tick, w[1].tick);
+            assert!(w[1].tick <= l.loop_length_ticks);
+        }
+    }
+
+    #[test]
+    fn restore_sentinel_adopts_bpm_without_regrid() {
+        let mut l = MidiLooper::new(SR);
+        l.restore(&[LooperEventSnapshot { tick: 24_000, note: 60, velocity: 127, layer_id: 0, part_id: 0 }], 96_000);
+        l.sync_clock(90.0, 4);
+        assert_eq!(l.loop_length_ticks, 96_000, "sentinel: no regrid after restore");
+        assert_eq!(l.events[0].tick, 24_000);
+        assert_eq!(l.bpm, 90.0);
+    }
+
+    #[test]
+    fn same_bpm_sync_is_noop() {
+        let mut l = loop_at(120.0, 96_000);
+        l.events[0].tick = 24_000;
+        l.len = 1;
+        l.playback_tick = 48_000;
+        let before = (l.loop_length_ticks, l.events[0].tick, l.playback_tick);
+        for _ in 0..10 { l.sync_clock(120.0, 4); }
+        assert_eq!(before, (l.loop_length_ticks, l.events[0].tick, l.playback_tick));
+    }
+
+    #[test]
+    fn bar_length_uses_beats_per_bar() {
+        let mut l = MidiLooper::new(SR); // bpm 120
+        l.beats_per_bar = 3;
+        l.bars = 1;
+        l.start_record();
+        assert_eq!(l.loop_length_ticks, 72_000); // 0.5s * 3 * 48k
+        let mut q = MidiLooper::new(SR);
+        q.beats_per_bar = 4;
+        q.bars = 1;
+        q.start_record();
+        assert_eq!(q.loop_length_ticks, 96_000);
+    }
+
+    #[test]
+    fn non_positive_or_nan_bpm_is_ignored() {
+        let mut l = loop_at(120.0, 96_000);
+        l.sync_clock(0.0, 4);
+        l.sync_clock(-10.0, 4);
+        l.sync_clock(f32::NAN, 4);
+        l.sync_clock(f32::INFINITY, 4);
+        assert_eq!(l.bpm, 120.0);
+        assert_eq!(l.loop_length_ticks, 96_000);
+        assert_eq!(l.beats_per_bar, 4); // not touched by the NaN call
+    }
+
+    #[test]
+    fn degenerate_regrid_skips_but_adopts_bpm() {
+        let mut l = loop_at(120.0, 8);
+        l.events[0].tick = 4;
+        l.len = 1;
+        l.sync_clock(1.0e7, 4); // new_len == 0
+        assert_eq!(l.loop_length_ticks, 8);
+        assert_eq!(l.events[0].tick, 4);
+        assert_eq!(l.bpm, 1.0e7);
+    }
+
+    #[test]
+    fn quantize_grid_follows_synced_bpm() {
+        // beat_samples @60bpm/48k = 48_000; grid 1/16 = 12_000 (was @120: 6_000).
+        // tick 17_000: @120 (grid 6_000) -> 18_000. @60 (grid 12_000) -> 12_000.
+        let mut l = loop_at(120.0, 192_000);
+        l.quantize = Quantize::Sixteenth;
+        assert_eq!(l.quantize_tick(17_000), 18_000);
+        l.sync_clock(60.0, 4); // regrid x2, grid is now 12_000
+        assert_eq!(l.quantize_tick(17_000), 12_000);
     }
 }
