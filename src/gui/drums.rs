@@ -49,11 +49,6 @@ impl App {
             if ui.button(egui::RichText::new(rec_label).color(rec_color))
                 .on_hover_text("Master record: drums → grid, notes → looper (loop = 1 pattern cycle)").clicked()
             {
-                // Квантованный путь (секвенсор играет) ставит Bars=1 в движке —
-                // зеркало GUI для честных Bars/timeline
-                if self.drum_playing {
-                    self.looper_bars = 1;
-                }
                 let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
             }
 
@@ -872,6 +867,11 @@ impl App {
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: b });
                 }
             }
+            // Честная длина петли: после квантованного захвата = цикл паттерна
+            let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
+            if loop_steps > 0 {
+                ui.label(egui::RichText::new(format!("Loop: {loop_steps} st")).small().weak());
+            }
             ui.separator();
 
             ui.label(egui::RichText::new("Q").weak().small());
@@ -1093,8 +1093,11 @@ impl App {
         // Background
         painter.rect_filled(rect, 2.0, theme::BG_TIMELINE);
 
-        // Beat grid lines
-        let beats = self.looper_bars as u32 * 4;
+        // Beat grid lines — по РЕАЛЬНОЙ длине петли (loop_steps из движка):
+        // после квантованного захвата длина = цикл паттерна, Bars ≠ длина.
+        let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
+        let loop_steps = if loop_steps == 0 { self.looper_bars as u32 * 16 } else { loop_steps as u32 };
+        let beats = loop_steps / 4;
         for beat in 1..beats {
             let x = rect.left() + (beat as f32 / beats as f32) * total_w;
             let color = if beat % 4 == 0 {
@@ -1125,7 +1128,7 @@ impl App {
         let note_span = (note_hi - note_lo).max(1.0);
 
         // Draw note-on events as small rectangles
-        let dot_w = (total_w / (self.looper_bars as f32 * 16.0)).clamp(2.0, 6.0);
+        let dot_w = (total_w / loop_steps as f32).clamp(2.0, 6.0);
         let dot_h = (height / (note_span / 2.0)).clamp(2.0, 5.0);
         for ev in &events {
             if ev.velocity == 0 { continue; } // skip note-offs
