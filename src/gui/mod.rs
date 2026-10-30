@@ -411,6 +411,8 @@ pub struct App {
     pub toasts: Vec<Toast>,
     // Patch search
     pub preset_search: String,
+    /// Some(part) = instrument browser modal is open for this part
+    pub inst_browser_part: Option<usize>,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
     // Split mode
@@ -1305,6 +1307,9 @@ impl eframe::App for App {
             self.draw_keybinds_window(ctx);
         }
 
+        // Instrument browser modal (from part row)
+        self.draw_instrument_browser_modal(ctx);
+
         // Draw toast notifications
         self.toasts.retain(|t| t.created.elapsed().as_secs_f32() < 3.0);
         for (i, toast) in self.toasts.iter().enumerate() {
@@ -1379,6 +1384,173 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// Instrument browser modal: search + category tree, applies to `inst_browser_part`.
+    fn draw_instrument_browser_modal(&mut self, ctx: &egui::Context) {
+        let Some(part) = self.inst_browser_part else { return };
+        let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
+        let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
+
+        let mut close = false;
+        let mut picked_patch: Option<usize> = None;
+        let mut picked_program: Option<u8> = None;
+        let mut toggled_cat: Option<String> = None;
+
+        let modal = egui::Modal::new(egui::Id::new("inst_browser")).show(ctx, |ui| {
+            ui.set_width(360.0);
+            ui.strong(if is_sf2 {
+                format!("GM Instrument — Part {layer_label}")
+            } else {
+                format!("Patch — Part {layer_label}")
+            });
+            ui.add_space(theme::SP_XS);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let w = ui.available_width();
+                let r = ui.add(egui::TextEdit::singleline(&mut self.preset_search)
+                    .hint_text("\u{1F50D} Search...")
+                    .desired_width((w - 22.0).max(60.0)));
+                if !self.preset_search.is_empty()
+                    && ui.small_button("\u{2715}").clicked()
+                {
+                    self.preset_search.clear();
+                    r.request_focus();
+                }
+            });
+            ui.separator();
+
+            let query = self.preset_search.to_lowercase();
+            let searching = !query.is_empty();
+
+            egui::ScrollArea::vertical().auto_shrink(false)
+                .max_height(420.0)
+                .show(ui, |ui| {
+                    if is_sf2 {
+                        // ── GM categories (перенос mod.rs:1141-1205: клик пишет
+                        //    picked_program, коллапс — toggled_cat) ──
+                        use crate::synth::sampler::GM_PROGRAM_NAMES;
+                        let current_program = self.parts[part].sf2_program;
+                        let gm_categories: &[(&str, usize, usize)] = &[
+                            ("Piano", 0, 8), ("Chromatic Perc", 8, 16),
+                            ("Organ", 16, 24), ("Guitar", 24, 32),
+                            ("Bass", 32, 40), ("Strings", 40, 48),
+                            ("Ensemble", 48, 56), ("Brass", 56, 64),
+                            ("Reed", 64, 72), ("Pipe", 72, 80),
+                            ("Synth Lead", 80, 88), ("Synth Pad", 88, 96),
+                            ("Synth FX", 96, 104), ("Ethnic", 104, 112),
+                            ("Percussive", 112, 120), ("Sound FX", 120, 128),
+                        ];
+                        for &(cat_name, start, end) in gm_categories {
+                            let matches: Vec<usize> = if searching {
+                                (start..end)
+                                    .filter(|&i| GM_PROGRAM_NAMES[i].to_lowercase().contains(&query)
+                                        || cat_name.to_lowercase().contains(&query))
+                                    .collect()
+                            } else {
+                                (start..end).collect()
+                            };
+                            if searching && matches.is_empty() { continue; }
+                            let is_collapsed =
+                                !searching && self.collapsed_categories.contains(cat_name);
+                            let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                            if !searching {
+                                if ui.selectable_label(false, format!("{arrow} {cat_name}")).clicked() {
+                                    toggled_cat = Some(cat_name.to_string());
+                                }
+                            } else {
+                                ui.label(egui::RichText::new(cat_name).strong().small());
+                            }
+                            if !is_collapsed {
+                                for i in matches {
+                                    let name = GM_PROGRAM_NAMES[i];
+                                    let selected = current_program == i as u8;
+                                    if ui.selectable_label(selected, format!("  {name}")).clicked() && !selected {
+                                        picked_program = Some(i as u8);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // ── DSP patch tree (перенос mod.rs:1216-1271: клик пишет
+                        //    picked_patch) ──
+                        let current_preset_idx = self.parts[part].patch_idx;
+                        let categories: Vec<(String, usize)> = {
+                            let mut cats = Vec::new();
+                            let mut last = String::new();
+                            for (i, p) in self.patches.iter().enumerate() {
+                                if p.category != last {
+                                    cats.push((p.category.clone(), i));
+                                    last = p.category.clone();
+                                }
+                            }
+                            cats
+                        };
+                        let mut cat_idx = 0;
+                        for (i, patch) in self.patches.iter().enumerate() {
+                            if cat_idx < categories.len() && categories[cat_idx].1 == i {
+                                cat_idx += 1;
+                            }
+                            if searching {
+                                let name_match = patch.name.to_lowercase().contains(&query);
+                                let cat_match = patch.category.to_lowercase().contains(&query);
+                                if !name_match && !cat_match { continue; }
+                            }
+                            if !searching {
+                                if cat_idx > 0 && categories[cat_idx - 1].1 == i {
+                                    let cat = &categories[cat_idx - 1].0;
+                                    let is_collapsed = self.collapsed_categories.contains(cat);
+                                    let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                                    if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
+                                        toggled_cat = Some(cat.clone());
+                                    }
+                                }
+                                if self.collapsed_categories.contains(&patch.category) {
+                                    continue;
+                                }
+                            }
+                            let selected = i == current_preset_idx;
+                            if ui.selectable_label(selected, format!("  {}", patch.name)).clicked() && !selected {
+                                picked_patch = Some(i);
+                            }
+                        }
+                    }
+                });
+        });
+
+        // ── Post-closure handling (after .show, reads locals + modal) ────
+        if let Some(cat) = toggled_cat {
+            if self.collapsed_categories.contains(&cat) {
+                self.collapsed_categories.remove(&cat);
+            } else {
+                self.collapsed_categories.insert(cat);
+            }
+            self.save_collapsed_categories();
+        }
+        if let Some(prog) = picked_program {
+            self.parts[part].sf2_program = prog;
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                part, program: prog, bank: 0 });
+            // Persist for parts 0/1 (seeds program on startup) — перенос mod.rs:1198-1200
+            if part == 0 { self.config.sf2.layer_a_program = prog; }
+            else { self.config.sf2.layer_b_program = prog; }
+            let _ = self.config.save();
+            close = true;
+        }
+        if let Some(idx) = picked_patch {
+            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+            self.parts[part].patch_idx = idx;
+            self.load_edited_params(part);
+            self.send_edited_params(part);
+            self.save_config();
+            close = true;
+        }
+        if modal.should_close() {
+            close = true;
+        }
+        if close {
+            self.inst_browser_part = None;
+        }
+    }
+
     /// Send initial patches to all parts at startup
     pub fn send_initial_presets(&mut self) {
         // Restore persisted live toggles (mute / root-only) — survives restarts

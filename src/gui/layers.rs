@@ -332,20 +332,13 @@ impl App {
             if sf2 {
                 if self.sf2_keys_soundfont.is_some() {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
-                    let mut prog = self.parts[i].sf2_program;
+                    let prog = self.parts[i].sf2_program;
                     let cur_name = GM_PROGRAM_NAMES.get(prog as usize).copied().unwrap_or("?");
-                    let inst = egui::ComboBox::from_id_salt(format!("inst_sf2_{i}"))
-                        .width(170.0)
-                        .selected_text(format!("prog {prog}: {cur_name}"))
-                        .show_ui(ui, |ui| {
-                            for (p, name) in GM_PROGRAM_NAMES.iter().enumerate() {
-                                ui.selectable_value(&mut prog, p as u8, format!("prog {p}: {name}"));
-                            }
-                        });
-                    if inst.response.changed() {
-                        self.parts[i].sf2_program = prog;
-                        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                            part: i, program: prog, bank: 0 });
+                    if ui.add_sized([170.0, 0.0], egui::Button::new(format!("prog {prog}: {cur_name}")))
+                        .on_hover_text("Open instrument browser (search + categories)").clicked()
+                    {
+                        self.preset_search.clear();
+                        self.inst_browser_part = Some(i);
                     }
                 } else {
                     ui.label(egui::RichText::new("---").weak())
@@ -358,21 +351,11 @@ impl App {
                     self.patches.iter().map(|p| p.name.clone()).collect();
                 let cur_idx = self.parts[i].patch_idx;
                 let cur = patch_names.get(cur_idx).cloned().unwrap_or_else(|| "---".into());
-                let mut new_idx = cur_idx;
-                egui::ComboBox::from_id_salt(format!("inst_dsp_{i}"))
-                    .width(170.0)
-                    .selected_text(&cur)
-                    .show_ui(ui, |ui| {
-                        for (pi, name) in patch_names.iter().enumerate() {
-                            ui.selectable_value(&mut new_idx, pi, name);
-                        }
-                    });
-                if new_idx != cur_idx {
-                    let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                    self.parts[i].patch_idx = new_idx;
-                    self.load_edited_params(i);
-                    self.send_edited_params(i);
-                    self.save_config();
+                if ui.add_sized([170.0, 0.0], egui::Button::new(&cur))
+                    .on_hover_text("Open patch browser (search + categories)").clicked()
+                {
+                    self.preset_search.clear();
+                    self.inst_browser_part = Some(i);
                 }
             }
 

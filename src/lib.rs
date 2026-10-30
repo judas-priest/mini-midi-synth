@@ -866,6 +866,7 @@ pub fn run_gui(
         pitch_seq_scale: [0; 2],
         pitch_seq_swing: [0.0; 2],
         preset_search: String::new(),
+        inst_browser_part: None,
         scope_buf: c.scope_buf,
         split_point: c.config.ui.split_point.unwrap_or(60),
         show_fx_chain: false,
