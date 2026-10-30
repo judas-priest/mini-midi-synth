@@ -165,6 +165,10 @@ pub struct MidiLooper {
     layer_mute: [bool; 256],
     solo_layer: Option<u8>,
     atoms: Arc<LooperAtoms>,
+    /// Last values published to `atoms` (write-on-change: tick() calls
+    /// update_atoms every sample). position is cached as u16 because every
+    /// u8 value is legal — u16::MAX is the "never written" sentinel.
+    atom_cache: (u8, u16, u16, u8),
     display: Arc<Mutex<LooperDisplay>>,
 }
 
@@ -190,6 +194,7 @@ impl MidiLooper {
             layer_mute: [false; 256],
             solo_layer: None,
             atoms: LooperAtoms::new(),
+            atom_cache: (u8::MAX, u16::MAX, u16::MAX, u8::MAX),
             display: LooperDisplay::new(),
         }
     }
@@ -285,6 +290,7 @@ impl MidiLooper {
         if self.active_notes.iter().any(|&a| a != 255) {
             self.needs_note_offs = true;
         }
+        self.sync_atoms();
     }
 
     /// Undo last overdub part.
@@ -320,6 +326,7 @@ impl MidiLooper {
         self.layer_mute = [false; 256];
         self.solo_layer = None;
         self.update_display();
+        self.sync_atoms();
     }
 
     /// Number of recorded events.
@@ -354,8 +361,7 @@ impl MidiLooper {
         self.current_layer = events.iter().map(|e| e.layer_id).max().unwrap_or(0);
         // Fresh engine: mute/solo are at defaults; events keep their old
         // layer_ids, which stay valid because ids are copied 1:1.
-        self.atoms.state.store(LooperState::Idle.to_u8(), Ordering::Relaxed);
-        self.update_atoms();
+        self.sync_atoms();
         self.update_display();
     }
 
@@ -574,14 +580,40 @@ impl MidiLooper {
         }
     }
 
-    fn update_atoms(&self) {
-        self.atoms.state.store(self.state.to_u8(), Ordering::Relaxed);
+    /// Publishes looper state to the GUI atoms, storing only fields whose
+    /// value actually changed. Called every sample from tick() — at 48 kHz
+    /// the old version did ~48k atomic stores + an f64 divide per second even
+    /// while Idle; the GUI reads at <= 60 Hz, so per-change publication is
+    /// visually identical.
+    fn update_atoms(&mut self) {
         let pos = if self.loop_length_ticks > 0 {
             (self.playback_tick as f64 / self.loop_length_ticks as f64 * 255.0) as u8
         } else { 0 };
-        self.atoms.position.store(pos, Ordering::Relaxed);
-        self.atoms.event_count.store(self.len, Ordering::Relaxed);
-        self.atoms.layer_count.store(self.current_layer + 1, Ordering::Relaxed);
+        let next = (self.state.to_u8(), pos as u16, self.len as u16, self.current_layer + 1);
+        if next.0 != self.atom_cache.0 {
+            self.atoms.state.store(next.0, Ordering::Relaxed);
+            self.atom_cache.0 = next.0;
+        }
+        if next.1 != self.atom_cache.1 {
+            self.atoms.position.store(next.1 as u8, Ordering::Relaxed);
+            self.atom_cache.1 = next.1;
+        }
+        if next.2 != self.atom_cache.2 {
+            self.atoms.event_count.store(next.2, Ordering::Relaxed);
+            self.atom_cache.2 = next.2;
+        }
+        if next.3 != self.atom_cache.3 {
+            self.atoms.layer_count.store(next.3, Ordering::Relaxed);
+            self.atom_cache.3 = next.3;
+        }
+    }
+
+    /// Unconditionally re-publishes: invalidates the cache first. Required in
+    /// restore/clear/stop, which mutate several fields at once and may run
+    /// while tick() is not driving updates.
+    fn sync_atoms(&mut self) {
+        self.atom_cache = (u8::MAX, u16::MAX, u16::MAX, u8::MAX);
+        self.update_atoms();
     }
 
 }
@@ -630,6 +662,51 @@ mod restore_tests {
             .collect();
         l.restore(&events, u32::MAX / 2);
         assert_eq!(l.len() as usize, MAX_LOOP_EVENTS);
+    }
+
+    #[test]
+    fn clear_refreshes_atoms_immediately() {
+        let mut l = MidiLooper::new(48_000.0);
+        l.state = LooperState::Recording;
+        l.record_event(60, 100, 0);
+        l.tick(); // publishes event_count = 1
+        assert_eq!(l.atoms.event_count.load(Ordering::Relaxed), 1);
+        l.clear();
+        assert_eq!(l.atoms.event_count.load(Ordering::Relaxed), 0,
+            "clear must refresh atoms without waiting for a tick");
+        assert_eq!(l.atoms.state.load(Ordering::Relaxed), 0);
+        assert_eq!(l.atoms.layer_count.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn stop_publishes_idle_state_without_tick() {
+        let mut l = MidiLooper::new(48_000.0);
+        l.restore(&[snap(0, 60, 127)], 48_000);
+        l.toggle_play();
+        l.tick();
+        assert_eq!(l.atoms.state.load(Ordering::Relaxed), 2, "expected Playing");
+        l.toggle_play(); // -> stop()
+        assert_eq!(l.atoms.state.load(Ordering::Relaxed), 0,
+            "stop must refresh the state atom immediately");
+    }
+
+    #[test]
+    fn position_atom_walks_and_wraps() {
+        // loop of 256 ticks: pos = playback_tick (max 254 — the u8 quant
+        // (t*255/len) as u8 never reaches 255; existing behavior).
+        let mut l = MidiLooper::new(48_000.0);
+        l.restore(&[snap(0, 60, 127)], 256);
+        l.toggle_play();
+        let mut seen_254 = false;
+        let mut saw_zero_after_254 = false;
+        for _ in 0..600 {
+            l.tick();
+            let p = l.atoms.position.load(Ordering::Relaxed);
+            if p == 254 { seen_254 = true; }
+            if seen_254 && p == 0 { saw_zero_after_254 = true; break; }
+        }
+        assert!(seen_254, "position never reached 254");
+        assert!(saw_zero_after_254, "position atom did not wrap back to 0");
     }
 
 }
