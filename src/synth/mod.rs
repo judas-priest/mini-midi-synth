@@ -1895,14 +1895,14 @@ impl SynthEngine {
                     if velocity > 0 {
                         let velocity = if self.drum_engine.fixed_velocity { 127 } else { velocity };
                         let velocity = self.drum_engine.pad_velocity(note, velocity);
+                        // Слот сетки = исходная нота ПЭДА (36-51): ремап меняет
+                        // только звук. Гейт по ремапнутой ноте молча убивал
+                        // запись для китов с таргетами вне 36..=51
+                        // (Metal_Drums_v2 — TECHDEBT #22b).
+                        let pad_note = note;
                         let note = self.drum_engine.remapped_note(note);
-                        // Record into sequencer if recording
-                        // `note` here is the REMAPPED target (30..=55 legal). Only
-                        // 36..=51 maps to sequencer slots; skip recording other
-                        // targets (drop, don't clamp — clamping would corrupt
-                        // a neighbouring slot's pattern).
-                        if is_drum_note && (36..=51).contains(&note) {
-                            let slot = (note - 36) as usize;
+                        if is_drum_note {
+                            let slot = (pad_note - 36) as usize;
                             let sr = self.sample_rate;
                             if let Some((pat, _slot, step)) =
                                 self.drum_engine.sequencer.record_hit(slot, velocity, sr)
