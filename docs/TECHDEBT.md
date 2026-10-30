@@ -647,3 +647,14 @@ Swing, слайдеры L/T/D/P (DSP-only), vel ranges, pan.
 Без потери функциональности: ничего не удаляется, раскладка по частоте
 использования. Дополнения #30 выше (looper docked, тоггл docked/in-tab, полный
 юнит) — входят в этот дизайн.
+## REFACTOR_AUDIT.md (2026-10-30, параллельная сессия) — полный аудит 36.7k LOC
+6 аудиторов + сверка 2-й итерацией. Quick wins (RT/GUI perf + латентные баги):
+QW1 wavetable alloc на каждый note-on (8KB+13k sin, CONFIRMED), QW2 LFO LUT
+ленивая аллокация на аудиопотоке, QW3 drain-хелпер + root_held ghost-rekey,
+QW6 looper атомы на каждый сэмпл (48k div/s), QW8 dead code sweep, QW9 config
+save на каждый кадр при драге. Strategic: S0 characterization-тесты (блокирует
+S1-S5), S1 RT-safe set_sample_rate (=старый #12), S2 реестр параметров (7-8
+мест на параметр), S3 консолидация FX, S4 god-файлы, S5 clock-sync лупера
+(ПЕРЕД #32), S6 dsp_utils dedup, S7 engine handles, S8 pitch-bend routing.
+Файл: REFACTOR_AUDIT.md (корень). Быстрые QW1/QW2 — кандидаты на причину
+клиппинга #19 (аллокации в колбэке = dropouts при игре wavetable-патчей).
