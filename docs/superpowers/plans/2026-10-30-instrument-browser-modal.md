@@ -42,7 +42,7 @@ Requirement (юзер): «правую панель с пресетами убр
 - Modify: `src/gui/mod.rs` (App fields ~346-350; вызов окон ~1291-1306)
 - Modify: `src/gui/layers.rs` (draw_part_row, instrument select ~320-377)
 
-- [ ] **Step 1: Поле App + открытие модала.** В `App` (рядом с `preset_search`) добавить:
+- [x] **Step 1: Поле App + открытие модала.** В `App` (рядом с `preset_search`) добавить:
 
 ```rust
     /// Some(part) = instrument browser modal is open for this part
@@ -51,7 +51,7 @@ Requirement (юзер): «правую панель с пресетами убр
 
 Инициализация в `App::new`-литерале: `inst_browser_part: None,`.
 
-- [ ] **Step 2: Метод-модал в mod.rs.** В `impl App` добавить (рендер списка — дословный перенос внутренностей панели mod.rs:1137-1288, `part` теперь из `inst_browser_part`). СТРУКТУРА КРИТИЧНА: всё, что читает `modal` (в т.ч. `should_close()`), — строго ПОСЛЕ `.show(...)`; локальные аккумуляторы `picked_*`/`toggled_cat`/`close` объявлены ДО `.show` и обрабатываются ПОСЛЕ него:
+- [x] **Step 2: Метод-модал в mod.rs.** В `impl App` добавить (рендер списка — дословный перенос внутренностей панели mod.rs:1137-1288, `part` теперь из `inst_browser_part`). СТРУКТУРА КРИТИЧНА: всё, что читает `modal` (в т.ч. `should_close()`), — строго ПОСЛЕ `.show(...)`; локальные аккумуляторы `picked_*`/`toggled_cat`/`close` объявлены ДО `.show` и обрабатываются ПОСЛЕ него:
 
 ```rust
     /// Instrument browser modal: search + category tree, applies to `inst_browser_part`.
@@ -224,14 +224,14 @@ Requirement (юзер): «правую панель с пресетами убр
 
 Примечание: `egui::Modal::show(ctx, impl FnOnce(&mut Ui))` — FnOnce, мутирующие захваты локалей легальны; `modal.should_close()` существует (`ModalResponse`). Проверено ревьюером по egui-0.31.1 modal.rs.
 
-- [ ] **Step 3: Вызов модала.** В `update()` после блока окон (mod.rs, после `if self.show_keybinds_window { ... }`, ~строка 1306):
+- [x] **Step 3: Вызов модала.** В `update()` после блока окон (mod.rs, после `if self.show_keybinds_window { ... }`, ~строка 1306):
 
 ```rust
         // Instrument browser modal (from part row)
         self.draw_instrument_browser_modal(ctx);
 ```
 
-- [ ] **Step 4: Кнопки в строке парта (layers.rs).** В `draw_part_row`:
+- [x] **Step 4: Кнопки в строке парта (layers.rs).** В `draw_part_row`:
   - SF2-ветка (сейчас ComboBox `inst_sf2_{i}`, ~320-337): заменить ComboBox на кнопку:
 
 ```rust
@@ -258,13 +258,13 @@ Requirement (юзер): «правую панель с пресетами убр
 
   (Блок `if new_idx != cur_idx {...}` от ComboBox удалить целиком — выбор теперь через модал. Локальный `use crate::synth::sampler::GM_PROGRAM_NAMES;` в SF2-ветке layers.rs сохранить — новый код его использует.)
 
-- [ ] **Step 5: Гейты**
+- [x] **Step 5: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/gui/mod.rs src/gui/layers.rs
@@ -276,7 +276,7 @@ git commit -m "feat: instrument browser modal from part row (search + categories
 **Files:**
 - Modify: `src/gui/mod.rs` (else-ветка right panel ~1355-1390; удаление SidePanel 1051-1289)
 
-- [ ] **Step 1: Шапка params-редактора.** В else-ветке главного централ-панела (где `let is_sf2 = ...` и дальше `if is_sf2 ... else { ScrollArea draw_params_editable }`) перед ScrollArea вставить шапку с именем патча и кнопками (перенос логики mod.rs:1092-1112 + имя из правой панели):
+- [x] **Step 1: Шапка params-редактора.** В else-ветке главного централ-панела (где `let is_sf2 = ...` и дальше `if is_sf2 ... else { ScrollArea draw_params_editable }`) перед ScrollArea вставить шапку с именем патча и кнопками (перенос логики mod.rs:1092-1112 + имя из правой панели):
 
 ```rust
                 } else {
@@ -314,19 +314,19 @@ git commit -m "feat: instrument browser modal from part row (search + categories
 
   (Ветка `if is_sf2 && self.sf2_keys_soundfont.is_some()` со статус-строкой — без изменений, Init/Rnd для SF2 не показываем, как было.)
 
-- [ ] **Step 2: Удалить SidePanel::right("preset_panel")** целиком (mod.rs:1051-1289, от комментария `// Right: patch list ...` до закрывающей `});` перед `// Settings window`).
+- [x] **Step 2: Удалить SidePanel::right("preset_panel")** целиком (mod.rs:1051-1289, от комментария `// Right: patch list ...` до закрывающей `});` перед `// Settings window`).
 
-- [ ] **Step 3: Мёртвое и зеркало теста.** Grep `LAYER_NAMES` в mod.rs — если использовался только панелью и новым модалом, оставить (модал его использует). Grep `preset_search` — должен остаться (модал). Если clippy ругается на неиспользуемое — удалить конкретное. Затем **tests/ui_layout_contract.rs**: тест зеркалит `SidePanel::right("preset_panel")` (там ~строка 52) и тестирует «phantom layout» после удаления панели — обновить зеркало: убрать right-panel из регистрации в `frame()` (helper вернёт кортеж на элемент меньше — поправить деструктуризацию в обоих тестах), удалить/поправить `gm_panel_resize_reflows_central` и правую часть `panels_carve_no_overlap`. Заголовок теста явно требует синхронизировать зеркало с mod.rs.
+- [x] **Step 3: Мёртвое и зеркало теста.** Grep `LAYER_NAMES` в mod.rs — если использовался только панелью и новым модалом, оставить (модал его использует). Grep `preset_search` — должен остаться (модал). Если clippy ругается на неиспользуемое — удалить конкретное. Затем **tests/ui_layout_contract.rs**: тест зеркалит `SidePanel::right("preset_panel")` (там ~строка 52) и тестирует «phantom layout» после удаления панели — обновить зеркало: убрать right-panel из регистрации в `frame()` (helper вернёт кортеж на элемент меньше — поправить деструктуризацию в обоих тестах), удалить/поправить `gm_panel_resize_reflows_central` и правую часть `panels_carve_no_overlap`. Заголовок теста явно требует синхронизировать зеркало с mod.rs.
 
 Примечание о сознательной потере: кнопки ◀▶ (prev/next preset, mod.rs:1065-1091) удаляются вместе с панелью БЕЗ замены — вариант 1 согласован с юзером, перебор патчей остаётся возможен через модал. Если позже понадобится — вернём как кнопки рядом с кнопкой патча в строке парта.
 
-- [ ] **Step 4: Гейты**
+- [x] **Step 4: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/gui/mod.rs tests/ui_layout_contract.rs
@@ -335,7 +335,7 @@ git commit -m "feat: drop presets side panel; Init/Rnd/Undo/Redo in params heade
 
 ### Task 3: Финальная верификация
 
-- [ ] **Step 1:** Полные гейты обоих коммитов уже зелёные — прогнать `cargo build --release`.
+- [x] **Step 1:** Полные гейты обоих коммитов уже зелёные — прогнать `cargo build --release`.
 
 - [ ] **Step 2: Ручной чеклист (юзер):**
 1. Правой панели нет, парты на всю ширину
