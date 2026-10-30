@@ -177,7 +177,12 @@ impl App {
             }
         }
 
-        // ── Performance save/load ────────────────────────────────────────
+        // ── Performance save/load (above part rows) ──────────────────────
+        self.draw_perf_row(ui);
+    }
+
+    /// Performance save/load row (shown above part rows).
+    fn draw_perf_row(&mut self, ui: &mut egui::Ui) {
         ui.add_space(theme::SP_XS);
         ui.horizontal(|ui| {
             ui.label("Perf:");
