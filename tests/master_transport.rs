@@ -52,6 +52,8 @@ fn tc2_master_record_writes_both() {
         .iter()
         .any(|s| s.velocity > 0);
     assert!(hit, "pad note 40 must land in drum pattern slot 4 (any step)");
+    // Драмы в лупер НЕ пишутся (дубили удары сетки на реплее — 2026-10-31)
+    assert_eq!(e.looper.len(), 0, "drum hits must not enter the looper");
     // pitched note (ch0) lands in the looper. Атомы публикуются только в
     // update_atoms (per-sample из tick) — без tick_block они нулевые,
     // поэтому проверяем len() (увеличивается синхронно в record_event).

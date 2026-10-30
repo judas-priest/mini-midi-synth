@@ -47,8 +47,13 @@ impl App {
             let rec_label = if rec { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
             let rec_color = if rec { egui::Color32::RED } else { egui::Color32::GRAY };
             if ui.button(egui::RichText::new(rec_label).color(rec_color))
-                .on_hover_text("Master record: arm drums pattern + looper (all parts)").clicked()
+                .on_hover_text("Master record: drums → grid, notes → looper (loop = 1 pattern cycle)").clicked()
             {
+                // Квантованный путь (секвенсор играет) ставит Bars=1 в движке —
+                // зеркало GUI для честных Bars/timeline
+                if self.drum_playing {
+                    self.looper_bars = 1;
+                }
                 let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
             }
 

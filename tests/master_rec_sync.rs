@@ -1,5 +1,5 @@
 //! Quantized master recording: looper starts at the pattern boundary,
-//! auto-closes after `bars` bars, early stop is boundary-quantized (#30 sync).
+//! петля = РОВНО 1 цикл паттерна, закрывается сама на его конце (#30 sync).
 
 use mini_midi_synth::synth::looper::LooperState;
 use mini_midi_synth::synth::{ControlEvent, SynthEngine};
@@ -37,49 +37,47 @@ fn tc1_start_at_boundary() {
     assert!(matches!(e.looper.state, LooperState::Idle), "not capturing until boundary");
     run(&mut e, steps(12)); // crosses the boundary
     assert!(!e.master_rec_pending_atom().load(Ordering::Relaxed));
-    assert!(matches!(e.looper.state, LooperState::Recording), "capture started at boundary");
+    assert!(
+        matches!(e.looper.state, LooperState::Recording | LooperState::Overdubbing),
+        "capture started at boundary"
+    );
 }
 
 #[test]
-fn tc2_auto_close_after_one_bar() {
+fn tc2_auto_close_after_one_cycle() {
     let mut e = engine();
     let _ = e.handle_control(ControlEvent::MasterPlay);
-    let _ = e.handle_control(ControlEvent::LooperSetBars { bars: 1 });
     run(&mut e, steps(3));
     let _ = e.handle_control(ControlEvent::MasterRecord);
     run(&mut e, steps(16)); // to the boundary: start
-    assert!(matches!(e.looper.state, LooperState::Recording));
-    run(&mut e, steps(16) + steps(16)); // one full bar after start + margin
-    assert!(matches!(e.looper.state, LooperState::Playing), "auto-closed after `bars` bars");
+    assert!(matches!(
+        e.looper.state,
+        LooperState::Recording | LooperState::Overdubbing
+    ));
+    run(&mut e, steps(16) + steps(16)); // one full pattern cycle + margin
+    assert!(matches!(e.looper.state, LooperState::Playing), "auto-closed after one pattern cycle");
 }
 
 #[test]
-fn tc3_early_stop_quantized() {
+fn tc3_loop_is_one_pattern_cycle() {
     let mut e = engine();
     let _ = e.handle_control(ControlEvent::MasterPlay);
-    let _ = e.handle_control(ControlEvent::LooperSetBars { bars: 4 });
     run(&mut e, steps(2));
     let _ = e.handle_control(ControlEvent::MasterRecord);
-    run(&mut e, steps(14)); // boundary: recording
-    run(&mut e, steps(24)); // 1.5 bars into the capture
-    let _ = e.handle_control(ControlEvent::MasterRecord); // early stop request
-    assert!(matches!(e.looper.state, LooperState::Recording), "not closed immediately");
-    run(&mut e, steps(10)); // next boundary
-    assert!(matches!(e.looper.state, LooperState::Playing), "closed at the boundary");
-    // Досрочное закрытие ОБРЕЗАЕТ петлю до записанных целых тактов (2 из 4):
-    // эталон — полная 4-тактная петля второго движка.
-    let mut e2 = engine();
-    let _ = e2.handle_control(ControlEvent::MasterPlay);
-    let _ = e2.handle_control(ControlEvent::LooperSetBars { bars: 4 });
-    run(&mut e2, steps(2));
-    let _ = e2.handle_control(ControlEvent::MasterRecord);
-    run(&mut e2, steps(14) + steps(16) * 4); // start + full 4 bars auto-close
-    assert!(matches!(e2.looper.state, LooperState::Playing));
-    assert_eq!(
-        e.looper.loop_len_ticks() * 2,
-        e2.looper.loop_len_ticks(),
-        "early-closed loop must be exactly half the full-bars loop"
+    run(&mut e, steps(14)); // boundary: capture starts
+    run(&mut e, steps(16) * 2); // full cycle + margin -> auto-closed
+    assert!(matches!(e.looper.state, LooperState::Playing), "closed after one cycle");
+    // Петля = ровно 1 цикл паттерна: 16 шагов * 6000 сэмплов/шаг.
+    // (лупер тикает раньше детекта границы — допуск на 1 блок)
+    let expected = 16 * 6000;
+    let got = e.looper.loop_len_ticks();
+    assert!(
+        got >= expected - 64 && got <= expected + 64,
+        "loop must equal one pattern cycle: got {got}, want {expected}±64"
     );
+    // Rec после закрытия = overdub поверх петли (Boss-семантика)
+    let _ = e.handle_control(ControlEvent::MasterRecord);
+    assert!(matches!(e.looper.state, LooperState::Overdubbing), "post-close Rec overdubs");
 }
 
 #[test]

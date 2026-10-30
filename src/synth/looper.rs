@@ -331,12 +331,11 @@ impl MidiLooper {
         }
     }
 
-    /// Quantized early-finish (#30 sync): truncate the loop to the whole bars
-    /// actually recorded (start_record pre-gridded `bars`; early press closes
-    /// sooner — trim the silence tail).
-    pub fn truncate_loop(&mut self, bars: u8) {
-        let bar = self.bar_length_samples();
-        self.loop_length_ticks = bar.saturating_mul(bars.max(1) as u32);
+    /// Quantized master rec (#30 sync): set the loop to an arbitrary tick
+    /// length (в т.ч. длину цикла паттерна — размеры лупера и секвенсора
+    /// совпадают для любых sig/free длин).
+    pub fn set_loop_len_ticks(&mut self, ticks: u32) {
+        self.loop_length_ticks = ticks.max(1);
         self.update_display();
         self.sync_atoms();
     }
