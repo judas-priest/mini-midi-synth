@@ -234,6 +234,9 @@ pub enum ControlEvent {
     },
     LooperSetLayerMute { layer: u8, mute: bool },
     LooperSetSolo { layer: Option<u8> },
+    /// Per-part replay mute (TECHDEBT #30/#34): a muted part's recorded
+    /// events are skipped on looper playback; its sounding notes are flushed.
+    LooperSetPartMute { part: u8, mute: bool },
     /// Looper record source: true = Mix (every sounding enabled part is
     /// recorded, each event tagged with its own part id), false = Part
     /// (only the active part). Live transport state — not persisted.
@@ -1648,6 +1651,23 @@ impl SynthEngine {
         }
     }
 
+    /// Routes the note-offs returned by looper mute/solo mutators to the
+    /// recorded part (SF2 or DSP), so muting stops what is sounding.
+    fn route_looper_note_offs(&mut self, note_offs: &[(u8, u8, u8)]) {
+        for &(note, vel, part_id) in note_offs {
+            if part_id == 255 { break; }
+            if vel == 0 {
+                if let Some(part) = self.parts.get_mut(part_id as usize) {
+                    if part.sf2_mode {
+                        self.sampler.note_off(part_id as usize, note);
+                    } else {
+                        part.note_off(note);
+                    }
+                }
+            }
+        }
+    }
+
     /// Looper record gate (Source toggle): in Mix source (default) every
     /// sounding part is recorded — the note dispatch loop tags each event
     /// with its own part id; in Part source only the active part is
@@ -2361,33 +2381,15 @@ impl SynthEngine {
             }
             ControlEvent::LooperSetLayerMute { layer, mute } => {
                 let note_offs = self.looper.set_layer_mute(layer, mute);
-                for &(note, vel, part_id) in &note_offs {
-                    if part_id == 255 { break; }
-                    if vel == 0 {
-                        if let Some(part) = self.parts.get_mut(part_id as usize) {
-                            if part.sf2_mode {
-                                self.sampler.note_off(part_id as usize, note);
-                            } else {
-                                part.note_off(note);
-                            }
-                        }
-                    }
-                }
+                self.route_looper_note_offs(&note_offs);
             }
             ControlEvent::LooperSetSolo { layer } => {
                 let note_offs = self.looper.set_solo(layer);
-                for &(note, vel, part_id) in &note_offs {
-                    if part_id == 255 { break; }
-                    if vel == 0 {
-                        if let Some(part) = self.parts.get_mut(part_id as usize) {
-                            if part.sf2_mode {
-                                self.sampler.note_off(part_id as usize, note);
-                            } else {
-                                part.note_off(note);
-                            }
-                        }
-                    }
-                }
+                self.route_looper_note_offs(&note_offs);
+            }
+            ControlEvent::LooperSetPartMute { part, mute } => {
+                let note_offs = self.looper.set_part_mute(part, mute);
+                self.route_looper_note_offs(&note_offs);
             }
             ControlEvent::LooperSetSource { mix } => {
                 self.looper_source_mix = mix;

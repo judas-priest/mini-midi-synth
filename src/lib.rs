@@ -819,6 +819,7 @@ pub fn run_gui(
         looper_layer_mute: [false; 256],
         looper_solo_layer: None,
         looper_source_mix: true,
+        looper_part_mutes: [false; 16],
         seq_target_atom: c.seq_target_atom,
         active_part_atom: c.active_part_atom,
         keybinds: gui::keybinds::Keybinds::from_config(&c.config.ui.keybinds),

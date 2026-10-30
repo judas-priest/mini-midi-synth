@@ -8,6 +8,8 @@ use std::sync::Mutex;
 
 const MAX_LOOP_EVENTS: usize = 4096;
 const MAX_SIMULTANEOUS: usize = 16;
+/// Per-part replay mute slots; matches synth::MAX_PARTS.
+const MAX_LOOP_PARTS: usize = 16;
 
 /// Shared state for GUI to read without ring buffer spam.
 pub struct LooperAtoms {
@@ -172,6 +174,10 @@ pub struct MidiLooper {
     // Per-layer mute/solo
     layer_mute: [bool; 256],
     solo_layer: Option<u8>,
+    // Per-part replay mute (TECHDEBT #30/#34): a muted part's recorded
+    // events are skipped in tick(); sounding notes of that part are flushed
+    // by set_part_mute.
+    part_mutes: [bool; MAX_LOOP_PARTS],
     atoms: Arc<LooperAtoms>,
     /// Last values published to `atoms` (write-on-change: tick() calls
     /// update_atoms every sample). position is cached as u16 because every
@@ -203,6 +209,7 @@ impl MidiLooper {
             global_tick: 0,
             layer_mute: [false; 256],
             solo_layer: None,
+            part_mutes: [false; MAX_LOOP_PARTS],
             atoms: LooperAtoms::new(),
             atom_cache: (u8::MAX, u16::MAX, u16::MAX, u8::MAX),
             display: LooperDisplay::new(),
@@ -381,6 +388,7 @@ impl MidiLooper {
         self.needs_note_offs = false;
         self.layer_mute = [false; 256];
         self.solo_layer = None;
+        self.part_mutes = [false; MAX_LOOP_PARTS];
         self.update_display();
         self.sync_atoms();
     }
@@ -473,6 +481,35 @@ impl MidiLooper {
             return layer_id == solo;
         }
         !self.layer_mute[layer_id as usize]
+    }
+
+    /// Mute/unmute a part's events in the loop (TECHDEBT #30/#34). Returns
+    /// note-offs for currently sounding notes recorded from that part, the
+    /// same contract as `set_layer_mute`.
+    pub fn set_part_mute(&mut self, part: u8, mute: bool) -> [(u8, u8, u8); MAX_SIMULTANEOUS] {
+        let mut out = [(0u8, 0u8, 255u8); MAX_SIMULTANEOUS];
+        if (part as usize) < MAX_LOOP_PARTS {
+            self.part_mutes[part as usize] = mute;
+        }
+        if mute {
+            // Send note-offs for any active notes recorded from this part
+            let mut count = 0;
+            for note in 0..128u8 {
+                if self.active_notes[note as usize] == part && count < MAX_SIMULTANEOUS {
+                    out[count] = (note, 0, self.active_notes[note as usize]);
+                    self.active_notes[note as usize] = 255;
+                    count += 1;
+                }
+            }
+        }
+        out
+    }
+
+    /// Check if a part's recorded events should be replayed. Out-of-range
+    /// part ids (shouldn't happen) stay audible.
+    #[inline]
+    fn is_part_audible(&self, part_id: u8) -> bool {
+        !self.part_mutes.get(part_id as usize).copied().unwrap_or(false)
     }
 
     /// Record a MIDI event. Called from audio thread when a note event arrives.
@@ -575,6 +612,10 @@ impl MidiLooper {
             self.playback_cursor += 1;
 
             if !self.is_layer_audible(e.layer_id) { continue; }
+            // Part mute filter: skips note-ons AND their note-offs (a muted
+            // part never sounds, so its offs are redundant); a part muted
+            // mid-note got its sounding notes flushed by set_part_mute.
+            if !self.is_part_audible(e.part_id) { continue; }
 
             out[count] = (e.note, e.velocity, e.part_id);
             // Track active notes + which layer produced them
@@ -1115,3 +1156,117 @@ mod clock_sync_tests {
         assert_eq!(l.quantize_tick(17_000), 12_000);
     }
 }
+
+#[cfg(test)]
+mod part_mute_tests {
+    use super::*;
+
+    const SR: f32 = 48_000.0;
+
+    fn snap(tick: u32, note: u8, vel: u8, part_id: u8) -> LooperEventSnapshot {
+        LooperEventSnapshot { tick, note, velocity: vel, layer_id: 0, part_id }
+    }
+
+    /// Fire events from a full pass over a 1000-tick loop, collecting
+    /// (note, velocity, part) triples (sentinel dropped).
+    fn fire_pass(l: &mut MidiLooper) -> Vec<(u8, u8, u8)> {
+        let mut fired = Vec::new();
+        for _ in 0..1000 {
+            for &(n, v, p) in &l.tick() {
+                if p == 255 { break; }
+                fired.push((n, v, p));
+            }
+        }
+        fired
+    }
+
+    fn two_part_looper() -> MidiLooper {
+        let mut l = MidiLooper::new(SR);
+        // Part 0: note 60 held; part 1: note 72 held. Sorted by tick —
+        // restore() copies the slice 1:1 without re-sorting.
+        l.restore(&[
+            snap(0, 60, 127, 0),
+            snap(0, 72, 127, 1),
+            snap(500, 60, 0, 0),
+            snap(500, 72, 0, 1),
+        ], 1000);
+        l.toggle_play(); // Playing from tick 0
+        l
+    }
+
+    #[test]
+    fn part_mute_skips_only_that_parts_events() {
+        let mut l = two_part_looper();
+        l.set_part_mute(0, true);
+        let fired = fire_pass(&mut l);
+        let parts: Vec<u8> = fired.iter().filter(|&&(_, v, _)| v > 0).map(|&(_, _, p)| p).collect();
+        assert_eq!(parts, vec![1], "muted part 0 must not fire, part 1 must");
+        // Unmute: both parts replay again.
+        l.set_part_mute(0, false);
+        let fired = fire_pass(&mut l);
+        let mut saw_p0 = false;
+        let mut saw_p1 = false;
+        for &(_, v, p) in &fired {
+            if v > 0 {
+                match p { 0 => saw_p0 = true, 1 => saw_p1 = true, _ => {} }
+            }
+        }
+        assert!(saw_p0 && saw_p1, "unmute must restore both parts: {fired:?}");
+    }
+
+    #[test]
+    fn set_part_mute_flushes_sounding_notes_of_that_part() {
+        let mut l = two_part_looper();
+        // advance 100 ticks: both tick-0 note-ons fired and are still held
+        // (their offs sit at tick 500, not reached yet)
+        for _ in 0..100 { let _ = l.tick(); }
+        let offs = l.set_part_mute(0, true);
+        assert_eq!(offs[0], (60, 0, 0), "held note of muted part must be flushed");
+        assert!(offs[1..].iter().all(|&t| t == (0, 0, 255)), "only part 0's note flushed: {offs:?}");
+        assert_eq!(l.active_notes[60], 255, "part 0 note cleared");
+        assert_eq!(l.active_notes[72], 1, "part 1 note untouched");
+        // Muting the same part again must not re-flush (notes already gone).
+        let again = l.set_part_mute(0, true);
+        assert!(again.iter().all(|&t| t == (0, 0, 255)));
+    }
+
+    #[test]
+    fn unmute_does_not_retrigger_skipped_pass() {
+        // Events skipped while muted must not fire retroactively in the same
+        // pass — the cursor advanced past them.
+        let mut l = two_part_looper();
+        let mut fired_60 = 0;
+        // advance 100 ticks (past the tick-0 events) BEFORE muting
+        for _ in 0..100 { for &(n, v, _) in &l.tick() { if v > 0 && n == 60 { fired_60 += 1; } } }
+        assert_eq!(fired_60, 1);
+        l.set_part_mute(0, true);
+        l.set_part_mute(0, false); // mute + unmute within the same pass
+        // rest of the pass: note 60's events are behind the cursor; nothing
+        // of it may fire again until the next wrap.
+        let mut extra_60 = 0;
+        for _ in 0..900 { for &(n, v, _) in &l.tick() { if v > 0 && n == 60 { extra_60 += 1; } } }
+        assert_eq!(extra_60, 0, "mute/unmute mid-pass must not retrigger");
+    }
+
+    #[test]
+    fn clear_resets_part_mutes() {
+        let mut l = two_part_looper();
+        l.set_part_mute(1, true);
+        l.clear();
+        assert!(l.part_mutes.iter().all(|&m| !m), "clear must reset part mutes");
+        l.restore(&[snap(0, 72, 127, 1)], 1000);
+        l.toggle_play();
+        let fired = fire_pass(&mut l);
+        assert!(fired.contains(&(72, 127, 1)), "after clear the part must be audible again");
+    }
+
+    #[test]
+    fn out_of_range_part_mute_is_a_safe_noop() {
+        let mut l = two_part_looper();
+        l.set_part_mute(200, true); // must not panic
+        let fired = fire_pass(&mut l);
+        assert_eq!(fired.iter().filter(|&&(_, v, _)| v > 0).count(), 2,
+            "out-of-range mute must not silence anything");
+    }
+}
+

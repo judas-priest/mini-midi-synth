@@ -662,6 +662,84 @@ fn looper_source_part_records_only_active_part() {
         "toggling back to Mix must record every sounding part: {again:?}");
 }
 
+/// Record one note per part (Mix source), restart playback from tick 0 and
+/// collect note-on part ids straight from the looper replay.
+fn replay_note_on_parts(e: &mut SynthEngine, ticks: usize) -> Vec<u8> {
+    // StopRecord left the transport mid-loop; stop -> play restarts at tick 0.
+    let _ = e.handle_control(ControlEvent::LooperTogglePlay); // stop -> Idle
+    let _ = e.handle_control(ControlEvent::LooperTogglePlay); // Idle -> Playing from 0
+    let mut parts = Vec::new();
+    for _ in 0..ticks {
+        for &(_, v, p) in &e.looper.tick() {
+            if p == 255 { break; }
+            if v > 0 { parts.push(p); }
+        }
+    }
+    parts
+}
+
+#[test]
+fn looper_part_mute_filters_replay_per_part() {
+    let mut e = engine_with_init_patch();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 1, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartRange { part: 1, min_note: 60, max_note: 127 });
+    let _ = e.handle_control(ControlEvent::SetPartVolume { part: 1, volume: 1.0 });
+    let _ = e.handle_control(ControlEvent::SetPartVolume { part: 0, volume: 1.0 });
+    // Record one note per part (Mix, default): 36 -> part 0, 84 -> part 1.
+    let _ = e.handle_control(ControlEvent::LooperRecord);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 36, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 84, velocity: 127 });
+    let _ = e.handle_control(ControlEvent::LooperStopRecord);
+    // (the recorded note-ons sit at tick 0; offs never recorded — stopped
+    // via LooperStopRecord, wrap will force offs)
+
+    // Mute part 0 -> replay fires only part 1's note-ons. (Recording tags
+    // every enabled part, even ones whose range rejects the note — replay
+    // range-filters, so here both surviving events belong to part 1.)
+    let _ = e.handle_control(ControlEvent::LooperSetPartMute { part: 0, mute: true });
+    let parts = replay_note_on_parts(&mut e, 2000);
+    assert!(!parts.is_empty() && parts.iter().all(|&p| p == 1),
+        "muted part 0 must not replay, part 1 must: {parts:?}");
+
+    // Unmute -> both parts replay.
+    let _ = e.handle_control(ControlEvent::LooperSetPartMute { part: 0, mute: false });
+    let parts = replay_note_on_parts(&mut e, 2000);
+    assert!(parts.contains(&0) && parts.contains(&1),
+        "unmute must restore both parts: {parts:?}");
+}
+
+#[test]
+fn looper_part_mute_silences_playback_of_muted_part_audio() {
+    // Audio-path check: loop recorded on part 0 only; muting part 0 makes
+    // playback silent, unmuting restores it.
+    let mut e = engine_with_init_patch();
+    // Shorten the patch release so the live note's tail dies before the
+    // playback phase and cannot pollute the peak checks.
+    let mut patch = init_patch_mut();
+    patch.params.insert("amp_release".into(), 0.02);
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
+    let _ = e.handle_control(ControlEvent::LooperRecord);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 36, velocity: 127 });
+    let _ = render_peak(&mut e, 4); // note-on lands at tick 256
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 36 });
+    let _ = render_peak(&mut e, 4); // note-off lands at tick 512
+    // Let the live voice's release tail (0.02 s ≈ 15 blocks) decay below
+    // SILENCE before the playback phase, so it cannot pollute the peaks.
+    let _ = render_peak(&mut e, 120);
+    let _ = e.handle_control(ControlEvent::LooperStopRecord);
+    let _ = e.handle_control(ControlEvent::LooperSetPartMute { part: 0, mute: true });
+    let _ = e.handle_control(ControlEvent::LooperTogglePlay);
+    let _ = e.handle_control(ControlEvent::LooperTogglePlay); // Playing from tick 0
+    let muted_peak = render_peak(&mut e, 200);
+    assert!(muted_peak < SILENCE, "muted part must not sound (peak {muted_peak})");
+    let _ = e.handle_control(ControlEvent::LooperSetPartMute { part: 0, mute: false });
+    // The muted pass already played past the note — restart from tick 0.
+    let _ = e.handle_control(ControlEvent::LooperTogglePlay);
+    let _ = e.handle_control(ControlEvent::LooperTogglePlay);
+    let unmuted_peak = render_peak(&mut e, 200);
+    assert!(unmuted_peak > SILENCE, "unmute must restore replay (peak {unmuted_peak})");
+}
+
 #[test]
 fn held_key_survives_pedal_up() {
     let mut e = engine_with_init_patch();

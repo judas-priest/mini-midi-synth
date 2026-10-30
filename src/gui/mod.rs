@@ -365,6 +365,9 @@ pub struct App {
     /// false = active part only. Live transport state — not persisted
     /// (like seq_target); re-pushed on audio reconnect.
     pub looper_source_mix: bool,
+    /// Per-part looper replay mute (TECHDEBT #30/#34), indexed by part.
+    /// Not persisted; re-pushed on audio reconnect (same as layer mutes).
+    pub looper_part_mutes: [bool; 16],
     /// 0 = SEQ buttons → drums, 1 = SEQ buttons → looper
     pub seq_target_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub active_part_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,

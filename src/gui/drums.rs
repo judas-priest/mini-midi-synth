@@ -933,6 +933,33 @@ impl App {
             }
         });
 
+        // --- Part mutes: filter looper replay per part (TECHDEBT #30/#34),
+        // same "M" button pattern as the layer mutes below ---
+        let any_part_enabled = self.parts.iter().any(|p| p.enabled);
+        if any_part_enabled {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Mute parts").weak().small());
+                for i in 0..self.parts.len().min(self.looper_part_mutes.len()) {
+                    if !self.parts[i].enabled { continue; }
+                    let muted = self.looper_part_mutes[i];
+                    let color = if muted { egui::Color32::RED } else { part_colors[i % 8] };
+                    let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
+                    let n = (i % super::PARTS_PER_ZONE) + 1;
+                    if ui.button(egui::RichText::new(format!("{z}{n}")).small().color(color))
+                        .on_hover_text(if muted {
+                            "Unmute part in looper replay"
+                        } else {
+                            "Mute part in looper replay"
+                        })
+                        .clicked()
+                    {
+                        self.looper_part_mutes[i] = !muted;
+                        let _ = self.ctrl_tx.push(ControlEvent::LooperSetPartMute { part: i as u8, mute: !muted });
+                    }
+                }
+            });
+        }
+
         // --- Timeline ---
         if event_count > 0 {
             self.draw_looper_timeline(ui, state, position, &part_colors);
@@ -1086,11 +1113,12 @@ impl App {
             let x = rect.left() + ev.position * total_w;
             let y = rect.bottom() - ((ev.note as f32 - note_lo) / note_span) * height;
             let color = part_colors[ev.part_id as usize % 8];
-            // Dim muted/non-solo layers, older layers slightly dimmer
+            // Dim muted/non-solo layers, muted parts, older layers slightly dimmer
             let layer_muted = self.looper_layer_mute[ev.layer_id as usize];
+            let part_muted = self.looper_part_mutes.get(ev.part_id as usize).copied().unwrap_or(false);
             let layer_hidden = if let Some(solo) = self.looper_solo_layer {
                 ev.layer_id != solo
-            } else { layer_muted };
+            } else { layer_muted || part_muted };
             let alpha = if layer_hidden { 40 }
             else if ev.layer_id == current_layer { 255 }
             else { 180u8.saturating_sub(current_layer.saturating_sub(ev.layer_id) * 30) };
