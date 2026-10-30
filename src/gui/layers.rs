@@ -98,7 +98,11 @@ impl App {
 
         // ── Part rows (two zones) ────────────────────────────────────────
         let max_h = (ui.available_height() * 0.55).max(120.0);
-        egui::ScrollArea::vertical().auto_shrink(false).max_height(max_h).show(ui, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("layers_parts_scroll")
+            .auto_shrink(false)
+            .max_height(max_h)
+            .show(ui, |ui| {
             let sp = self.split_point;
 
             // ── Zone A ───────────────────────────────────────────────────
@@ -112,7 +116,9 @@ impl App {
             });
             for i in ZONE_A {
                 if !self.parts[i].enabled { continue; }
-                self.draw_part_row(ui, i);
+                ui.push_id(format!("part_row_{i}"), |ui| {
+                    self.draw_part_row(ui, i);
+                });
             }
             let a_count = ZONE_A.filter(|&i| self.parts[i].enabled).count();
             if a_count < PARTS_PER_ZONE
@@ -129,7 +135,9 @@ impl App {
                 });
                 for i in ZONE_B {
                     if !self.parts[i].enabled { continue; }
-                    self.draw_part_row(ui, i);
+                    ui.push_id(format!("part_row_{i}"), |ui| {
+                        self.draw_part_row(ui, i);
+                    });
                 }
                 let b_count = ZONE_B.filter(|&i| self.parts[i].enabled).count();
                 if b_count < PARTS_PER_ZONE
