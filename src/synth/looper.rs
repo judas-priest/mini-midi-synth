@@ -331,6 +331,21 @@ impl MidiLooper {
         }
     }
 
+    /// Quantized early-finish (#30 sync): truncate the loop to the whole bars
+    /// actually recorded (start_record pre-gridded `bars`; early press closes
+    /// sooner — trim the silence tail).
+    pub fn truncate_loop(&mut self, bars: u8) {
+        let bar = self.bar_length_samples();
+        self.loop_length_ticks = bar.saturating_mul(bars.max(1) as u32);
+        self.update_display();
+        self.sync_atoms();
+    }
+
+    /// Loop length in ticks (test/GUI introspection).
+    pub fn loop_len_ticks(&self) -> u32 {
+        self.loop_length_ticks
+    }
+
     /// Toggle play/stop.
     pub fn toggle_play(&mut self) {
         match self.state {
