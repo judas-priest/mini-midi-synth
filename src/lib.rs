@@ -549,7 +549,7 @@ pub fn run_headless() -> Result<()> {
                 match &action {
                     KeyAction::SwitchPart(p) => {
                         c.active_part_atom.store(*p, Ordering::Relaxed);
-                        seq_target_local.store(1, Ordering::Relaxed);
+                        seq_target_local.store(2, Ordering::Relaxed);
                         eprintln!("[input] Part A{}", p + 1);
                     }
                     KeyAction::LooperRecord => {
@@ -570,10 +570,10 @@ pub fn run_headless() -> Result<()> {
                         eprintln!("[input] Drums: {}", if drum_playing { "Play" } else { "Stop" });
                     }
                     KeyAction::ToggleDrumsSynth => {
-                        let current = seq_target_local.load(Ordering::Relaxed);
-                        let new = if current == 0 { 1 } else { 0 };
-                        seq_target_local.store(new, Ordering::Relaxed);
-                        eprintln!("[input] Mode: {}", if new == 0 { "Drums" } else { "Synth" });
+                        let next = (seq_target_local.load(Ordering::Relaxed) + 1) % 3;
+                        seq_target_local.store(next, Ordering::Relaxed);
+                        eprintln!("[input] Mode: {}", match next {
+                            0 => "Drums", 1 => "Looper", _ => "Master" });
                     }
                     KeyAction::PrevPreset | KeyAction::NextPreset => {
                         // Preset navigation not supported in headless mode

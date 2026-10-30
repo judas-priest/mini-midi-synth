@@ -784,12 +784,23 @@ impl eframe::App for App {
                 self.looper_atoms.state.load(Ordering::Relaxed));
             let (playing, recording) = if target == 0 {
                 (self.drum_playing, self.drum_recording)
-            } else {
+            } else if target == 1 {
                 (
                     matches!(lstate, crate::synth::looper::LooperState::Playing
                             | crate::synth::looper::LooperState::Overdubbing),
                     matches!(lstate, crate::synth::looper::LooperState::Recording
                             | crate::synth::looper::LooperState::Overdubbing),
+                )
+            } else {
+                // MASTER: show the union — LED reflects "something runs"
+                (
+                    self.drum_playing
+                        || matches!(lstate, crate::synth::looper::LooperState::Playing
+                                | crate::synth::looper::LooperState::Overdubbing
+                                | crate::synth::looper::LooperState::Recording),
+                    self.drum_recording
+                        || matches!(lstate, crate::synth::looper::LooperState::Recording
+                                | crate::synth::looper::LooperState::Overdubbing),
                 )
             };
             let mut mutes = [false; 16];
@@ -1510,7 +1521,7 @@ impl App {
                         self.show_drums = false;
                         self.show_midi_seq = false;
                         self.show_fx_chain = false;
-                        self.seq_target_atom.store(1, Ordering::Relaxed);
+                        self.seq_target_atom.store(2, Ordering::Relaxed);
                     }
                 }
                 KeyAction::LooperRecord => {
@@ -1533,7 +1544,7 @@ impl App {
                     self.show_drums = !self.show_drums;
                     self.show_looper = false;
                     if !self.show_drums {
-                        self.seq_target_atom.store(1, Ordering::Relaxed);
+                        self.seq_target_atom.store(2, Ordering::Relaxed);
                     } else {
                         self.seq_target_atom.store(0, Ordering::Relaxed);
                     }
@@ -2000,11 +2011,11 @@ impl App {
                 }
             }
             led_console::Action::ToggleTransportTarget => {
-                let cur = self.seq_target_atom.load(Ordering::Relaxed);
-                let new = if cur == 0 { 1 } else { 0 };
-                self.seq_target_atom.store(new, Ordering::Relaxed);
-                log::info!("[console] seq_target -> {}",
-                           if new == 0 { "drums" } else { "looper" });
+                let t = self.seq_target_atom.load(Ordering::Relaxed);
+                let next = (t + 1) % 3;
+                self.seq_target_atom.store(next, Ordering::Relaxed);
+                log::info!("[console] seq_target -> {next} ({})", match next {
+                    0 => "drums", 1 => "looper", _ => "master" });
             }
             led_console::Action::Undo => {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqUndo);

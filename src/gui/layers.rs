@@ -315,7 +315,7 @@ impl App {
                 self.set_active_part(i);
                 self.show_drums = false; self.show_looper = false;
                 self.show_midi_seq = false; self.show_fx_chain = false;
-                self.seq_target_atom.store(1, Ordering::Relaxed);
+                self.seq_target_atom.store(2, Ordering::Relaxed);
             }
 
             // Engine toggle (DSP/SF2)

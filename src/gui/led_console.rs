@@ -46,7 +46,7 @@ pub enum Action {
     LoadPerf(usize),
     SelectPattern(usize),
     ToggleMute(usize),
-    /// Menu slot 3: flip seq_target (drums <-> looper). Stays in Menu.
+    /// Menu slot 3: cycle seq_target (drums -> looper -> master). Stays in Menu.
     ToggleTransportTarget,
     Undo,
     /// Pad 32 held >= HOLD: redo the last undone sequencer edit.
@@ -217,13 +217,15 @@ impl LedConsole {
                 // menu items are color-coded to what the row becomes after
                 // picking them: HOME -> blue perfs, PATTERN -> yellow,
                 // MUTE -> green; slot 3 IS the toggle: shows the current
-                // target (blue = drums, green = looper)
+                // target (blue = drums, green = looper, white = master)
                 for (i, col) in c.iter_mut().enumerate() {
                     *col = match i {
                         0 => AVAIL,              // HOME: blue (perfs)
                         1 => [0xFF, 0xFF, 0x00], // PATTERN: yellow
                         2 => [0x00, 0xFF, 0x00], // MUTE: green
-                        3 => if seq_target == 0 { AVAIL } else { [0x00, 0xFF, 0x00] },
+                        3 => if seq_target == 0 { AVAIL }
+                             else if seq_target == 1 { [0x00, 0xFF, 0x00] }
+                             else { [0xFF, 0xFF, 0xFF] }, // MASTER: white
                         _ => [0x00, 0x00, 0x00],
                     };
                 }

@@ -417,7 +417,7 @@ impl App {
                                 self.show_drums = !self.show_drums;
                                 self.show_looper = false;
                                 if !self.show_drums {
-                                    self.seq_target_atom.store(1, std::sync::atomic::Ordering::Relaxed);
+                                    self.seq_target_atom.store(2, std::sync::atomic::Ordering::Relaxed);
                                 } else {
                                     self.seq_target_atom.store(0, std::sync::atomic::Ordering::Relaxed);
                                 }
