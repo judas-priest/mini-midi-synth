@@ -43,7 +43,8 @@ impl BbdEnsemble {
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
-        self.buf = vec![0.0; BUF];
+        // BUF is SR-independent — zero in place, no realloc (RT-safe).
+        self.buf.fill(0.0);
         self.write = 0;
         self.input_lp = 0.0;
         self.lp_l = [0.0; 3];
