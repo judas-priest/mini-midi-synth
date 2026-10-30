@@ -39,7 +39,7 @@ Requirement (юзер, 2026-10-30): «зачем мне несколько кн�
 **Files:**
 - Modify: `src/synth/mod.rs` (handle_event transport-блоки ~1874-1917; seq_target init ~1481; doc-комментарий поля ~1206)
 
-- [ ] **Step 1: Блок 123/82** — заменить ветвление по target на безусловный мастер (заодно обновить doc-комментарий над блоком ~1865-1868 «…follow seq_target…» → «always drive the master transport»):
+- [x] **Step 1: Блок 123/82** — заменить ветвление по target на безусловный мастер (заодно обновить doc-комментарий над блоком ~1865-1868 «…follow seq_target…» → «always drive the master transport»):
 
 ```rust
                 if velocity > 0 && (note == 123 || (channel == 9 && note == 82)) {
@@ -49,7 +49,7 @@ Requirement (юзер, 2026-10-30): «зачем мне несколько кн�
                 }
 ```
 
-- [ ] **Step 2: Блок 124/83:**
+- [x] **Step 2: Блок 124/83:**
 
 ```rust
                 if velocity > 0 && (note == 124 || (channel == 9 && note == 83)) {
@@ -58,7 +58,7 @@ Requirement (юзер, 2026-10-30): «зачем мне несколько кн�
                 }
 ```
 
-- [ ] **Step 3: Блок 81:**
+- [x] **Step 3: Блок 81:**
 
 ```rust
                 if channel == 9 && velocity > 0 && note == 81 {
@@ -67,7 +67,7 @@ Requirement (юзер, 2026-10-30): «зачем мне несколько кн�
                 }
 ```
 
-- [ ] **Step 4: seq_target — сузить семантику.** Doc-комментарий поля (~1206) заменить:
+- [x] **Step 4: seq_target — сузить семантику.** Doc-комментарий поля (~1206) заменить:
 
 ```rust
     /// Drum-note mode gate for live pads: 0 = pads 36-51 trigger drums on ANY
@@ -77,7 +77,7 @@ Requirement (юзер, 2026-10-30): «зачем мне несколько кн�
 
 Конструктор (~1481): `AtomicU8::new(2)` → `AtomicU8::new(1)` (комментарий «default: master…» → «default: non-drum mode»). Заодно обновить устаревший комментарий в drum-пути (~1927-1928: «83/82/81 moved above — they follow seq_target now» → «83/82/81 moved above — master transport now, no target»).
 
-- [ ] **Step 5: Тесты — переписать `tests/master_transport.rs`.** Заменить tc6/tc6b/tc8/tc8b на:
+- [x] **Step 5: Тесты — переписать `tests/master_transport.rs`.** Заменить tc6/tc6b/tc8/tc8b на:
 
 ```rust
 #[test]
@@ -138,7 +138,7 @@ fn tc2_target_still_gates_drum_note_mode() {
 
 (Старые tc8 «default == 2», tc6, tc6b, tc8b — УДАЛИТЬ ЦЕЛИКОМ; их заменяют новые tc1_pads_are_always_master_any_target / tc1b_key_123_is_always_master / tc2_target_still_gates_drum_note_mode / tc3_default_target_is_non_drum_mode из сниппета выше — имена уникальны, конфликтов со старыми tc1_master_record_arms_both / tc2_master_record_writes_both / tc3_master_record_off_finishes_both нет: разные суффиксы. Старые tc1_master_record_arms_both, tc2_master_record_writes_both, tc3_master_record_off_finishes_both, tc4_master_play_toggle, tc5_master_stop_from_recording, tc9_master_stop_idle_looper_stays_idle — НЕ ТРОГАТЬ, helper `record_loop` остаётся (используется tc4).)
 
-- [ ] **Step 6: Переписать `tests/console_transport.rs`** под новую семантику (заголовок: «Transport pads drive the MASTER transport regardless of seq_target; seq_target gates drum-note mode only»):
+- [x] **Step 6: Переписать `tests/console_transport.rs`** под новую семантику (заголовок: «Transport pads drive the MASTER transport regardless of seq_target; seq_target gates drum-note mode only»):
 
 ```rust
 //! Transport pads (bank-2 notes 81/82/83 ch9) + keys 123/124 ALWAYS drive the
@@ -226,13 +226,13 @@ fn seq_target_zero_enables_drum_note_mode_for_plain_pads() {
 }
 ```
 
-- [ ] **Step 7: Гейты**
+- [x] **Step 7: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test --test master_transport --test console_transport && cargo test --features rt-assert --test rt_safety
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/synth/mod.rs tests/master_transport.rs tests/console_transport.rs
@@ -245,7 +245,7 @@ git commit -m "feat: transport pads/keys always drive master; seq_target is drum
 - Modify: `src/gui/drums.rs` (Master row ~24-61; drum transport row ~63-106; draw_looper transport row ~825-860; draw_drum_kit_controls Metro ~281-412)
 - Modify: `src/gui/mod.rs` ( ничего — панель уже колонки)
 
-- [ ] **Step 1: Заменить Master-строку и драм-транспортную строку на ОДНУ.** В `draw_drum_seq_docked` удалить блок «Master transport» (строки ~24-61 целиком) и транспортный `ui.horizontal` (~64-106: Play/Stop/Rec/flash/Undo/Clear/BPM). На их месте — одна строка:
+- [x] **Step 1: Заменить Master-строку и драм-транспортную строку на ОДНУ.** В `draw_drum_seq_docked` удалить блок «Master transport» (строки ~24-61 целиком) и транспортный `ui.horizontal` (~64-106: Play/Stop/Rec/flash/Undo/Clear/BPM). На их месте — одна строка:
 
 ```rust
         // ── Single master transport (#32 фаза 4) ─────────────────────────
@@ -324,17 +324,17 @@ git commit -m "feat: transport pads/keys always drive master; seq_target is drum
 
   `self.drum_metronome` — поле App (сейчас мутится чекбоксом в draw_drum_kit_controls ~337-348); мутация в замыкании — тот же паттерн, что `drum_bpm` (drums.rs:103 мутирует поле прямо в замыкании — это компилируется). Персист `save_global_to_config()` ОБЯЗАТЕЛЕН (старый чекбокс его звал; `config.ui.drum_metronome` читается при старте — gui/mod.rs:1498, ре-пуш 1419).
 
-- [ ] **Step 2: Убрать Metro из вкладки Drums.** В `draw_drum_kit_controls` (drums.rs ~281-412) удалить чекбокс Metro (`DrumSetMetronome`) — он переехал в транспортную строку. Swing/Vol/V127/Kit I/O НЕ трогать (SETUP остаётся на вкладке, спека #30).
+- [x] **Step 2: Убрать Metro из вкладки Drums.** В `draw_drum_kit_controls` (drums.rs ~281-412) удалить чекбокс Metro (`DrumSetMetronome`) — он переехал в транспортную строку. Swing/Vol/V127/Kit I/O НЕ трогать (SETUP остаётся на вкладке, спека #30).
 
-- [ ] **Step 3: Убрать из строки лупера только транспортные кнопки.** Транспортная строка `draw_looper` — ОДИН `ui.horizontal` на drums.rs:832-900, в котором живут: Play/Stop (`LooperTogglePlay`, ~832-840), Rec (`LooperRecord`/`LooperStopRecord`, ~840-855), Undo (`LooperUndo`, ~855-859), Clear с 2s-подтверждением (`self.looper_clear_confirm`, ~860-877: клик ставит confirm, expiry-проверка ~875-877, второй клик в окне 2с делает `LooperClear`), state-лейбл (`status_color`, ~881-893), лейбл `{event_count}ev L{layer_count}` (~894-896), ProgressBar с гейтом `if state != Idle` (~897-899, `position as f32 / 255.0`). УДАЛИТЬ только Play/Stop, Rec, Undo. Всё остальное (Clear с его логикой подтверждения, state-лейбл, ev/L-лейбл, ProgressBar с гейтом) ОСТАЁТСЯ на месте в той же строке — код не переносить, не переименовывать.
+- [x] **Step 3: Убрать из строки лупера только транспортные кнопки.** Транспортная строка `draw_looper` — ОДИН `ui.horizontal` на drums.rs:832-900, в котором живут: Play/Stop (`LooperTogglePlay`, ~832-840), Rec (`LooperRecord`/`LooperStopRecord`, ~840-855), Undo (`LooperUndo`, ~855-859), Clear с 2s-подтверждением (`self.looper_clear_confirm`, ~860-877: клик ставит confirm, expiry-проверка ~875-877, второй клик в окне 2с делает `LooperClear`), state-лейбл (`status_color`, ~881-893), лейбл `{event_count}ev L{layer_count}` (~894-896), ProgressBar с гейтом `if state != Idle` (~897-899, `position as f32 / 255.0`). УДАЛИТЬ только Play/Stop, Rec, Undo. Всё остальное (Clear с его логикой подтверждения, state-лейбл, ev/L-лейбл, ProgressBar с гейтом) ОСТАЁТСЯ на месте в той же строке — код не переносить, не переименовывать.
 
-- [ ] **Step 4: Гейты**
+- [x] **Step 4: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/gui/drums.rs
@@ -348,10 +348,10 @@ git commit -m "feat: single master transport row in docked unit; looper/drum tra
 - Modify: `src/gui/mod.rs` (execute_console_action arm ~2011-2018; top_colors caller ~810-820; seq_target store-сайты)
 - Modify: `src/gui/layers.rs` (~318), `src/gui/settings.rs` (~420), `src/lib.rs` (~552, ~572-577)
 
-- [ ] **Step 1: Удалить Action::ToggleTransportTarget.** В led_console.rs: убрать вариант из enum; в `tap()` slot 3 → `_ => None` (dark slot); в Menu-цветах slot 3 → `[0x00, 0x00, 0x00]` (OFF). Параметр `seq_target: u8` в `top_colors(...)` удалить (больше не читается), обновить doc-комментарий.
-- [ ] **Step 2: selftest led_console.** Затронутые тесты (anchors по факту): `menu_slot3_toggles_target_and_stays_menu` (~415) и `menu_slot3_led_shows_target` (~426) — перевести: tap slot 3 в Menu → `None`, цвет slot 3 → OFF; тесты без слота 3, но передающие последний аргумент seq_target в `top_colors` — `window_offsets_map_targets_to_slots` (~391, 398) и `mute_mode_windows_over_all_parts` (~446, 451) — механически убрать лишний аргумент.
-- [ ] **Step 3: execute_console_action** (gui/mod.rs, arm `ToggleTransportTarget` ~2025-2031) — удалить arm. Caller `top_colors(...)` в LED-снапшоте — убрать последний аргумент `seq_target`. ТАМ ЖЕ (gui/mod.rs:782-805): нижний ряд LED-транспорта ветвится `target == 0 → драмы / target == 1 → лупер / else → union` — после удаления cycling значения 2 не бывает, а пэды всегда мастер → ветку упростить ДО union-варианта безусловно (удалить if/else, оставить union-вычисление); удалить ставший мёртвым `let target = self.seq_target_atom.load(...)` (~782) и обновить устаревший комментарий над блоком (~779-781 «Bottom row shows the ACTIVE target's transport…»).
-- [ ] **Step 4: seq_target store-сайты → 1.** Все не-драмовые записи: layers.rs:318, settings.rs:420 (`!show_drums` ветка), gui/mod.rs:1536 (SwitchPart), gui/mod.rs:1559 (ToggleDrumsSynth !show_drums ветка; соседний store(0) в 1561 оставить), lib.rs:552 — `store(2, …)` → `store(1, …)`. lib.rs ToggleDrumsSynth (~572-577) — вернуть flip 0↔1:
+- [x] **Step 1: Удалить Action::ToggleTransportTarget.** В led_console.rs: убрать вариант из enum; в `tap()` slot 3 → `_ => None` (dark slot); в Menu-цветах slot 3 → `[0x00, 0x00, 0x00]` (OFF). Параметр `seq_target: u8` в `top_colors(...)` удалить (больше не читается), обновить doc-комментарий.
+- [x] **Step 2: selftest led_console.** Затронутые тесты (anchors по факту): `menu_slot3_toggles_target_and_stays_menu` (~415) и `menu_slot3_led_shows_target` (~426) — перевести: tap slot 3 в Menu → `None`, цвет slot 3 → OFF; тесты без слота 3, но передающие последний аргумент seq_target в `top_colors` — `window_offsets_map_targets_to_slots` (~391, 398) и `mute_mode_windows_over_all_parts` (~446, 451) — механически убрать лишний аргумент.
+- [x] **Step 3: execute_console_action** (gui/mod.rs, arm `ToggleTransportTarget` ~2025-2031) — удалить arm. Caller `top_colors(...)` в LED-снапшоте — убрать последний аргумент `seq_target`. ТАМ ЖЕ (gui/mod.rs:782-805): нижний ряд LED-транспорта ветвится `target == 0 → драмы / target == 1 → лупер / else → union` — после удаления cycling значения 2 не бывает, а пэды всегда мастер → ветку упростить ДО union-варианта безусловно (удалить if/else, оставить union-вычисление); удалить ставший мёртвым `let target = self.seq_target_atom.load(...)` (~782) и обновить устаревший комментарий над блоком (~779-781 «Bottom row shows the ACTIVE target's transport…»).
+- [x] **Step 4: seq_target store-сайты → 1.** Все не-драмовые записи: layers.rs:318, settings.rs:420 (`!show_drums` ветка), gui/mod.rs:1536 (SwitchPart), gui/mod.rs:1559 (ToggleDrumsSynth !show_drums ветка; соседний store(0) в 1561 оставить), lib.rs:552 — `store(2, …)` → `store(1, …)`. lib.rs ToggleDrumsSynth (~572-577) — вернуть flip 0↔1:
 
 ```rust
                     KeyAction::ToggleDrumsSynth => {
@@ -361,13 +361,13 @@ git commit -m "feat: single master transport row in docked unit; looper/drum tra
                     }
 ```
 
-- [ ] **Step 5: Гейты**
+- [x] **Step 5: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/gui/led_console.rs src/gui/mod.rs src/gui/layers.rs src/gui/settings.rs src/lib.rs
@@ -379,9 +379,9 @@ git commit -m "feat: drop transport-target cycling — LED menu slot 3 dark, seq
 **Files:**
 - Modify: `docs/TECHDEBT.md` (#32)
 
-- [ ] **Step 1:** Полные гейты + `cargo build --release`.
+- [x] **Step 1:** Полные гейты + `cargo build --release`.
 
-- [ ] **Step 2: В #32 дописать:**
+- [x] **Step 2: В #32 дописать:**
 
 ```markdown
 Phase 4 (упрощение pad-меню): ВЫПОЛНЕНО (2026-10-30) — transport-ноты
@@ -396,14 +396,14 @@ GUI: одна транспортная строка в docked-юните (Master
 
 И в списке отложенного убрать пункт «Фаза 4: упрощение pad-меню…» (выполнена).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/TECHDEBT.md
 git commit -m "docs: #32 phase 4 single transport realized; pad-menu simplification done"
 ```
 
-- [ ] **Step 4: Ручной чеклист (юзер):**
+- [ ] **Step 4: Ручной чеклист (юзер)** — остаётся юзеру:
 1. В docked-юните ОДНА транспортная строка (Master Play/Rec, Undo/Clear, L-Undo, BPM, Metro, flash)
 2. У лупера — только state + прогресс + Clear; у драмов — Pattern/сигнатура/Steps/сетка
 3. Пэды 25/26/27 и клавиши 123/124 = мастер при любом режиме
