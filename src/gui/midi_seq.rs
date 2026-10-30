@@ -131,7 +131,7 @@ impl App {
         let has_sf2 = self.sf2_keys_soundfont.is_some();
 
         // ── Track list ─────────────────────────────────────────────────────
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        egui::ScrollArea::vertical().auto_shrink(false).id_salt("midi_tracks_scroll").show(ui, |ui| {
             egui::Grid::new("midi_seq_tracks")
                 .num_columns(6)
                 .striped(true)
@@ -231,6 +231,7 @@ impl App {
                                 .width(theme::COMBO_W_LG)
                                 .show_ui(ui, |ui| {
                                     egui::ScrollArea::vertical()
+                                        .id_salt("gm_popup_scroll")
                                         .max_height(theme::POPUP_LIST_MAX_H)
                                         .show(ui, |ui| {
                                             for (p, name) in GM_PROGRAM_NAMES.iter().enumerate() {

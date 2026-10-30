@@ -153,6 +153,8 @@ impl App {
             ui.horizontal(|ui| {
                 // Instrument label
                 let name = DRUM_NAMES[slot];
+                // NOTE: allocate_ui внутри horizontal-строк — известный источник развалки (mod.rs docked panel);
+                // здесь легаси-грид, работает — не реплицировать.
                 ui.allocate_ui(egui::vec2(label_width, cell_h), |ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(egui::RichText::new(name).small());

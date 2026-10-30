@@ -147,9 +147,9 @@ pub const DOCK_H_MAX: f32 = 760.0;
 
 **Files:** src/gui/{mod,midi_seq}.rs
 
-- [ ] **Step 1: id_salt всем ScrollArea (7):** mod.rs:1156 → `"fx_chain_scroll"`; mod.rs:1160 → `"midi_seq_scroll"`; mod.rs:1164 → `"drum_kit_scroll"`; mod.rs:1210 → `"params_scroll"`; mod.rs:1257 → `"inst_modal_list"`; midi_seq.rs:134 → `"midi_tracks_scroll"`; midi_seq.rs:233 → `"gm_popup_scroll"`.
-- [ ] **Step 2: Ban-комментарий** на drums.rs:156 `allocate_ui`: `// NOTE: allocate_ui внутри horizontal-строк — известный источник развалки (mod.rs docked panel); здесь легаси-грид, работает — не реплицировать`.
-- [ ] **Step 3: Гейты + Commit** `git commit -m "fix: id_salt on all ScrollAreas; ban-comment on grid allocate_ui"`.
+- [x] **Step 1: id_salt всем ScrollArea (7):** mod.rs:1156 → `"fx_chain_scroll"`; mod.rs:1160 → `"midi_seq_scroll"`; mod.rs:1164 → `"drum_kit_scroll"`; mod.rs:1210 → `"params_scroll"`; mod.rs:1257 → `"inst_modal_list"`; midi_seq.rs:134 → `"midi_tracks_scroll"`; midi_seq.rs:233 → `"gm_popup_scroll"`.
+- [x] **Step 2: Ban-комментарий** на drums.rs:156 `allocate_ui`: `// NOTE: allocate_ui внутри horizontal-строк — известный источник развалки (mod.rs docked panel); здесь легаси-грид, работает — не реплицировать`.
+- [x] **Step 3: Гейты + Commit** `git commit -m "fix: id_salt on all ScrollAreas; ban-comment on grid allocate_ui"`.
 
 ### Task 4: PR
 

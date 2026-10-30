@@ -1153,15 +1153,15 @@ impl eframe::App for App {
             ui.separator();
             ui.add_space(theme::SP_MD);
             if self.show_fx_chain {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).id_salt("fx_chain_scroll").show(ui, |ui| {
                     self.draw_fx_chain(ui);
                 });
             } else if self.show_midi_seq {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).id_salt("midi_seq_scroll").show(ui, |ui| {
                     self.draw_midi_seq(ui);
                 });
             } else if self.show_drums {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).id_salt("drum_kit_scroll").show(ui, |ui| {
                     self.draw_drum_kit_controls(ui);
                 });
             } else {
@@ -1207,7 +1207,7 @@ impl eframe::App for App {
                             self.redo();
                         }
                     });
-                    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    egui::ScrollArea::vertical().auto_shrink(false).id_salt("params_scroll").show(ui, |ui| {
                         self.draw_params_editable(ui);
                     });
                 }
@@ -1255,6 +1255,7 @@ impl App {
             let searching = !query.is_empty();
 
             egui::ScrollArea::vertical().auto_shrink(false)
+                .id_salt("inst_modal_list")
                 .max_height(theme::LIST_MAX_H)
                 .show(ui, |ui| {
                     if is_sf2 {
