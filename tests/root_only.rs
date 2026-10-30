@@ -89,3 +89,50 @@ fn root_only_suppressed_note_leaves_no_stuck_voice() {
     settle(&mut e);
     assert!(render_peak(&mut e, 20) < SILENCE, "stuck voice after all keys released");
 }
+
+fn root_only_engine() -> SynthEngine {
+    let patches = preset::load_all_patches();
+    let patch = patches
+        .iter()
+        .find(|p| p.name.eq_ignore_ascii_case("init"))
+        .or_else(|| patches.first())
+        .expect("factory presets are compiled in")
+        .clone();
+    let mut e = SynthEngine::new(SR);
+    e.set_patches(patches);
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartVolume { part: 0, volume: 1.0 });
+    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    e
+}
+
+#[test]
+fn all_notes_off_clears_root_tracking() {
+    // Stale root_active after a panic must not ghost-suppress the next note
+    // on a root_only patch: press root 36 + suppressed 60, AllNotesOff, then
+    // 48 must sound as the new lowest (and only) root.
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 36, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 }); // suppressed
+    assert!(render_peak(&mut e, 50) > SILENCE, "root 36 did not sound");
+    let _ = e.handle_control(ControlEvent::AllNotesOff);
+    settle(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 48, velocity: 127 });
+    let peak = render_peak(&mut e, 100);
+    assert!(peak > SILENCE, "note 48 ghost-suppressed after AllNotesOff (peak {peak})");
+}
+
+#[test]
+fn midi_seq_stop_clears_root_tracking() {
+    // Same ghost through the MIDI transport stop path.
+    let mut e = root_only_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 36, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 }); // suppressed
+    assert!(render_peak(&mut e, 50) > SILENCE, "root 36 did not sound");
+    let _ = e.handle_control(ControlEvent::MidiSeqPlay { playing: false });
+    settle(&mut e);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 48, velocity: 127 });
+    let peak = render_peak(&mut e, 100);
+    assert!(peak > SILENCE, "note 48 ghost-suppressed after MIDI-seq stop (peak {peak})");
+}

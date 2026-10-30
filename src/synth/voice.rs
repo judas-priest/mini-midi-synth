@@ -176,17 +176,24 @@ impl Voice {
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.oscs = [
-            Oscillator::new(sample_rate),
-            Oscillator::new(sample_rate),
-            Oscillator::new(sample_rate),
-        ];
-        self.filter = Filter::new(sample_rate);
-        self.filter2 = Filter::new(sample_rate);
+        // RT-safe (called from the audio callback on JACK rate change): must
+        // NOT rebuild oscillators — Oscillator::new heap-allocates a Wavetable
+        // Arc (oscillator.rs `Arc::new(Vec::new())`) and dropping the old
+        // states would free the pooled delay-line buffers here. Every note_on
+        // fully re-initializes all three oscillators (reset() + per-type
+        // init_*), so updating the SR field in place is sufficient; voices are
+        // deactivated so nothing stale is rendered.
+        self.sample_rate = sample_rate;
+        for osc in &mut self.oscs {
+            osc.sample_rate = sample_rate;
+        }
+        // Filter owns a heap comb_buf — reset IN PLACE (no realloc).
+        self.filter.reset_for_sr(sample_rate);
+        self.filter2.reset_for_sr(sample_rate);
+        // Plain structs — assignments, no heap.
         self.formant_filter = FormantFilter::new(sample_rate);
         self.amp_env = Envelope::new(sample_rate);
         self.filter_env = Envelope::new(sample_rate);
-        self.sample_rate = sample_rate;
         self.active = false;
     }
 

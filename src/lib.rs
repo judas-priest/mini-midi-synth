@@ -143,6 +143,12 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     let config = Config::load();
     let patches = preset::load_all_patches();
 
+    // Warm static DSP tables BEFORE the audio stream exists: both are lazily
+    // built otherwise and the first build would land in the audio callback
+    // (wavetable bank on the first note-on, LFO sine LUT on the first tick).
+    synth::oscillator::warmup_builtin_wavetable();
+    synth::lfo::warmup_sine_lut();
+
     #[cfg(not(target_os = "android"))]
     let available_hosts = audio::available_hosts();
 
@@ -710,7 +716,6 @@ pub fn run_gui(
     let parts_extra: Vec<gui::PartState> = (2..crate::synth::MAX_PARTS).map(empty_part).collect();
 
     let mut app = gui::App {
-        _frame_count: 0,
         patches: c.patches,
         note_state: c.note_state,
         pad_state: c.pad_state,
@@ -810,11 +815,11 @@ pub fn run_gui(
         looper_display: c.looper_display,
         looper_bars: 4,
         looper_quantize: 0,
-        looper_sync_bpm: c.config.ui.looper_sync_bpm,
-        looper_bpm: 120.0,
         looper_clear_confirm: None,
         looper_layer_mute: [false; 256],
         looper_solo_layer: None,
+        looper_source_mix: true,
+        looper_part_mutes: [false; 16],
         seq_target_atom: c.seq_target_atom,
         active_part_atom: c.active_part_atom,
         keybinds: gui::keybinds::Keybinds::from_config(&c.config.ui.keybinds),

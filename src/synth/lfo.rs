@@ -5,14 +5,24 @@ use std::sync::OnceLock;
 
 static SINE_TABLE: OnceLock<Box<[f32; 2048]>> = OnceLock::new();
 
+fn build_sine_lut() -> Box<[f32; 2048]> {
+    let mut t = Box::new([0.0f32; 2048]);
+    for i in 0..2048 {
+        t[i] = (i as f32 / 2048.0 * std::f32::consts::TAU).sin();
+    }
+    t
+}
+
+/// Pre-builds the 2048-sample sine LUT. Called from init_common before the
+/// audio stream exists: the LUT is read by every Sine tick and by
+/// apply_deform (deform >= 0.5, any waveform) — lazily the first read would
+/// allocate 8 KB in the audio callback.
+pub fn warmup_sine_lut() {
+    let _ = SINE_TABLE.get_or_init(build_sine_lut);
+}
+
 fn sine_lut(phase: f32) -> f32 {
-    let table = SINE_TABLE.get_or_init(|| {
-        let mut t = Box::new([0.0f32; 2048]);
-        for i in 0..2048 {
-            t[i] = (i as f32 / 2048.0 * std::f32::consts::TAU).sin();
-        }
-        t
-    });
+    let table = SINE_TABLE.get_or_init(build_sine_lut);
     let idx = (phase * 2048.0) as usize & 2047;
     table[idx]
 }

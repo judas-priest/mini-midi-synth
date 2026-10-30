@@ -6,6 +6,50 @@ use std::sync::Arc;
 use super::bass::BassModel;
 use super::epiano::ElectricPianoModel;
 use super::piano::PianoModel;
+use std::sync::OnceLock;
+
+/// Shared built-in wavetable bank (8 x 256 additive waveforms, sine->saw).
+/// Built once by `warmup_builtin_wavetable` (called from init_common, before
+/// the audio stream exists) so a note-on only clones the Arc. `get_or_init`
+/// stays as a safety net for engine users that skipped warmup (tests) — the
+/// build then happens off the audio thread's first note, not per note-on.
+static BUILTIN_WAVETABLE: OnceLock<Arc<Vec<f32>>> = OnceLock::new();
+/// Shared empty placeholder table for reset(); the real table arrives via
+/// init_wavetable before the first tick. Previously this was a fresh
+/// `Arc::new(Vec::new())` on EVERY note-on.
+static EMPTY_WAVETABLE: OnceLock<Arc<Vec<f32>>> = OnceLock::new();
+
+fn build_builtin_wavetable() -> Arc<Vec<f32>> {
+    let wt_frames = Oscillator::WT_COUNT;
+    let wt_frame_size = Oscillator::WT_SIZE;
+    let mut table = vec![0.0_f32; wt_frames * wt_frame_size];
+    let harmonics: [usize; 8] = [1, 2, 3, 4, 6, 8, 12, 16];
+    for (wt, &n_harm) in harmonics.iter().enumerate() {
+        let offset = wt * wt_frame_size;
+        let mut peak = 0.0_f32;
+        for i in 0..wt_frame_size {
+            let p = i as f32 / wt_frame_size as f32;
+            let mut s = 0.0f32;
+            for h in 1..=n_harm {
+                s += (p * h as f32 * TAU).sin() / h as f32;
+            }
+            table[offset + i] = s;
+            peak = peak.max(s.abs());
+        }
+        if peak > 0.001 {
+            for x in &mut table[offset..offset + wt_frame_size] { *x /= peak; }
+        }
+    }
+    Arc::new(table)
+}
+
+/// Pre-builds both static wavetable Arcs. MUST be called from init_common
+/// before the audio stream starts; without it the first Wavetable note-on
+/// builds the bank (8 KB alloc + 13312 sin()) in the audio callback.
+pub fn warmup_builtin_wavetable() {
+    let _ = BUILTIN_WAVETABLE.get_or_init(build_builtin_wavetable);
+    let _ = EMPTY_WAVETABLE.get_or_init(|| Arc::new(Vec::new()));
+}
 
 const TAU: f32 = 2.0 * PI;
 
@@ -638,7 +682,7 @@ impl Oscillator {
             },
             OscType::Wavetable => OscState::Wavetable {
                 phase: 0.0,
-                table: Arc::new(Vec::new()),
+                table: EMPTY_WAVETABLE.get_or_init(|| Arc::new(Vec::new())).clone(),
                 wt_frames: Self::WT_COUNT,
                 wt_frame_size: Self::WT_SIZE,
             },
@@ -2545,31 +2589,16 @@ impl Oscillator {
     pub fn init_wavetable(&mut self, morph: f32) {
         self.wavetable_morph = morph.clamp(0.0, 1.0);
         self.reclaim_buffers();
-
-        let wt_frames = Self::WT_COUNT;
-        let wt_frame_size = Self::WT_SIZE;
-        let total = wt_frames * wt_frame_size;
-        let mut table = Self::take_buf(&mut self.pool_a, total);
-
-        let harmonics: [usize; 8] = [1, 2, 3, 4, 6, 8, 12, 16];
-        for (wt, &n_harm) in harmonics.iter().enumerate() {
-            let offset = wt * wt_frame_size;
-            let mut peak = 0.0_f32;
-            for i in 0..wt_frame_size {
-                let p = i as f32 / wt_frame_size as f32;
-                let mut s = 0.0f32;
-                for h in 1..=n_harm {
-                    s += (p * h as f32 * TAU).sin() / h as f32;
-                }
-                table[offset + i] = s;
-                peak = peak.max(s.abs());
-            }
-            if peak > 0.001 {
-                for x in &mut table[offset..offset + wt_frame_size] { *x /= peak; }
-            }
-        }
-
-        self.state = OscState::Wavetable { phase: 0.0, table: Arc::new(table), wt_frames, wt_frame_size };
+        // Shared bank: Arc::clone instead of a per-note-on rebuild (the old
+        // take_buf path allocated on every note-on because Wavetable buffers
+        // are excluded from the pool recycle — see reclaim_buffers).
+        let table = BUILTIN_WAVETABLE.get_or_init(build_builtin_wavetable).clone();
+        self.state = OscState::Wavetable {
+            phase: 0.0,
+            table,
+            wt_frames: Self::WT_COUNT,
+            wt_frame_size: Self::WT_SIZE,
+        };
     }
 
     /// Initialize wavetable from external .wt data (parsed Surge wavetable).

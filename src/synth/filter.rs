@@ -274,6 +274,79 @@ impl Filter {
         f
     }
 
+    /// In-place equivalent of `*self = Self::new(sample_rate)` (RT-safe: runs
+    /// in the audio callback on SR change). Replicates every field assignment
+    /// of `Filter::new` without replacing the heap-owned `comb_buf` — it is
+    /// zeroed in place instead. After this call the filter is identical to a
+    /// freshly constructed one.
+    pub fn reset_for_sr(&mut self, sample_rate: f32) {
+        self.filter_type = FilterType::LowPass;
+        self.cutoff = 8000.0;
+        self.resonance = 0.0;
+        self.sample_rate = sample_rate;
+        self.ic1eq = 0.0;
+        self.ic2eq = 0.0;
+        self.g = 0.0;
+        self.k = 0.0;
+        self.a1 = 0.0;
+        self.a2 = 0.0;
+        self.a3 = 0.0;
+        self.dirty = true;
+        self.moog_stage = [0.0; 4];
+        self.moog_tanh = [0.0; 4];
+        self.moog_delay4 = 0.0;
+        self.moog_tune = 0.0;
+        self.moog_res_quad = 0.0;
+        self.moog_acr = 0.0;
+        self.moog_gain_comp = 1.0;
+        // Diode ladder state (Stilson & Smith / Zavalishin improved)
+        self.diode_stage = [0.0; 4];
+        self.diode_feedback = 0.0;
+        self.diode_tune = 0.0;
+        self.diode_res = 0.0;
+        self.diode_gain_comp = 1.0;
+        // Comb filter state — comb_buf is Box-allocated in new(); zero in place.
+        self.comb_buf.fill(0.0);
+        self.comb_write = 0;
+        self.comb_delay = 100;
+        self.comb_feedback = 0.0;
+        self.comb_dc_x1 = 0.0;
+        self.comb_dc_y1 = 0.0;
+        // Allpass filter state
+        self.allpass_x1 = 0.0;
+        self.allpass_y1 = 0.0;
+        self.allpass_coeff = 0.0;
+        // LP24/HP24 second SVF stage
+        self.ic1eq2 = 0.0;
+        self.ic2eq2 = 0.0;
+        // K35 Sallen-Key stage states
+        self.k35_s1 = 0.0;
+        self.k35_s2 = 0.0;
+        // OB-Xd 2-pole
+        self.obxd_s1 = 0.0;
+        self.obxd_s2 = 0.0;
+        // OB-Xd 4-pole second stage
+        self.obxd4_s1 = 0.0;
+        self.obxd4_s2 = 0.0;
+        // Tripole
+        self.tri_s1 = 0.0;
+        self.tri_s2 = 0.0;
+        self.tri_s3 = 0.0;
+        // Sample & Hold
+        self.snh_phase = 0.0;
+        self.snh_held = 0.0;
+        self.svf_morph = 0.0;
+        self.pv_s1 = 0.0;
+        self.pv_s2 = 0.0;
+        self.pv_delay = 0.0;
+        self.pv_tune = 0.0;
+        self.pv_res = 0.0;
+        self.pv_drive = 0.0;
+        self.pv_starve = 0.0;
+        self.coeff_counter = 7; // so first tick after set_cutoff/set_resonance triggers update
+        self.update_coefficients();
+    }
+
     pub fn set_type(&mut self, ft: FilterType) {
         self.filter_type = ft;
     }

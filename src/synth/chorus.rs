@@ -70,7 +70,8 @@ impl Chorus {
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
-        self.buffer = vec![0.0; BUFFER_SIZE];
+        // BUFFER_SIZE is SR-independent — zero in place, no realloc (RT-safe).
+        self.buffer.fill(0.0);
         self.write_pos = 0;
         self.bbd_lp_l = 0.0;
         self.bbd_lp_r = 0.0;

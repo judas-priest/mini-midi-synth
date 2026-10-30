@@ -572,16 +572,4 @@ impl ModMatrix {
             };
         }
     }
-
-    /// Save to flat param map.
-    #[allow(dead_code)]
-    pub fn save_to_params(&self, params: &mut std::collections::BTreeMap<String, f32>) {
-        for (i, slot) in self.slots.iter().enumerate() {
-            if slot.source != ModSource::None && slot.dest != ModDest::None {
-                params.insert(MOD_SOURCE_KEYS[i].to_string(), slot.source as u8 as f32);
-                params.insert(MOD_DEST_KEYS[i].to_string(), slot.dest as u8 as f32);
-                params.insert(MOD_DEPTH_KEYS[i].to_string(), slot.depth);
-            }
-        }
-    }
 }

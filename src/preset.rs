@@ -497,19 +497,6 @@ const FACTORY_PRESETS: &[(&str, &str, &str)] = &[
     ("Saxophone", "alto_sax_v2",    include_str!("../presets/alto_sax_v2.json")),
     ("Saxophone", "tenor_sax_v2",   include_str!("../presets/tenor_sax_v2.json")),
     ("Saxophone", "bari_sax_v2",    include_str!("../presets/bari_sax_v2.json")),
-    // Sequences (ported from Surge XT)
-    // Surge XT: Bass
-    // Surge XT: Brass
-    // Surge XT: Chords
-    // Surge XT: Experimental
-    // Surge XT: Keys
-    // Surge XT: Leads
-    // Surge XT: Pads
-    // Surge XT: Percussion
-    // Surge XT: Plucks
-    // Surge XT: Polysynths
-    // Surge XT: Sequences
-    // Surge XT: Winds
 ];
 
 /// Return user patch directory (~/.config/mini_midi_synth/presets/).

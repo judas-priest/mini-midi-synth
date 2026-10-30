@@ -18,6 +18,12 @@ fn fast_sin(x: f32) -> f32 {
 
 const REFERENCE_SR: f32 = 29761.0;
 
+/// Ceiling sample rate the reverb buffers are sized for at construction.
+/// audio.rs negotiates at most 192 kHz, so set_sample_rate only rescales
+/// active lengths inside preallocated capacity — never reallocates.
+/// Memory cost vs old code at 48 kHz: ~460 KB instead of ~75 KB, allocated once.
+const SR_CAP: f32 = 192_000.0;
+
 // Input diffuser delay lengths and coefficients (at 29761 Hz)
 const INPUT_AP_DELAYS: [usize; 4] = [142, 107, 379, 277];
 const INPUT_AP_COEFFS: [f32; 4] = [0.750, 0.750, 0.625, 0.625];
@@ -73,18 +79,24 @@ fn scale_len(base: usize, sr: f32) -> usize {
 
 #[derive(Clone)]
 struct DattorroAP {
-    buffer: Vec<f32>,
+    buffer: Vec<f32>, // capacity, sized once for SR_CAP
+    len: usize,       // active length (<= buffer.len()); all wrap math uses this
     pos: usize,
     coeff: f32,
 }
 
 impl DattorroAP {
-    fn new(len: usize, coeff: f32) -> Self {
-        Self {
-            buffer: vec![0.0; len.max(1)],
-            pos: 0,
-            coeff,
-        }
+    fn new(cap: usize, len: usize, coeff: f32) -> Self {
+        let len = len.max(1).min(cap.max(1));
+        Self { buffer: vec![0.0; cap.max(1)], len, pos: 0, coeff }
+    }
+
+    /// RT-safe resize: clamp to capacity, zero, reset position. No realloc.
+    fn set_len(&mut self, len: usize) {
+        let len = len.max(1).min(self.buffer.len());
+        self.buffer.fill(0.0);
+        self.len = len;
+        self.pos = 0;
     }
 
     #[inline]
@@ -93,7 +105,7 @@ impl DattorroAP {
         let v = input - self.coeff * delayed;
         self.buffer[self.pos] = v;
         self.pos += 1;
-        if self.pos >= self.buffer.len() {
+        if self.pos >= self.len {
             self.pos = 0;
         }
         delayed + self.coeff * v
@@ -103,7 +115,7 @@ impl DattorroAP {
     /// interpolation, then writes at the current position.
     #[inline]
     fn tick_mod(&mut self, input: f32, lfo_offset: f32) -> f32 {
-        let len = self.buffer.len();
+        let len = self.len;
         // Nominal read position (where we'd normally read)
         // Read from `len` samples back, offset by LFO modulation
         let read_f = self.pos as f32 + (len as f32) - lfo_offset;
@@ -125,7 +137,7 @@ impl DattorroAP {
     /// Read from the buffer at `offset` samples behind the write head.
     #[inline]
     fn read_at(&self, offset: usize) -> f32 {
-        let len = self.buffer.len();
+        let len = self.len;
         let idx = (self.pos + len - offset.min(len)) % len;
         self.buffer[idx]
     }
@@ -137,23 +149,30 @@ impl DattorroAP {
 
 #[derive(Clone)]
 struct DelayLine {
-    buffer: Vec<f32>,
+    buffer: Vec<f32>, // capacity, sized once for SR_CAP
+    len: usize,       // active length (<= buffer.len())
     pos: usize,
 }
 
 impl DelayLine {
-    fn new(len: usize) -> Self {
-        Self {
-            buffer: vec![0.0; len.max(1)],
-            pos: 0,
-        }
+    fn new(cap: usize, len: usize) -> Self {
+        let len = len.max(1).min(cap.max(1));
+        Self { buffer: vec![0.0; cap.max(1)], len, pos: 0 }
+    }
+
+    /// RT-safe resize: clamp to capacity, zero, reset position. No realloc.
+    fn set_len(&mut self, len: usize) {
+        let len = len.max(1).min(self.buffer.len());
+        self.buffer.fill(0.0);
+        self.len = len;
+        self.pos = 0;
     }
 
     #[inline]
     fn push(&mut self, sample: f32) {
         self.buffer[self.pos] = sample;
         self.pos += 1;
-        if self.pos >= self.buffer.len() {
+        if self.pos >= self.len {
             self.pos = 0;
         }
     }
@@ -161,7 +180,7 @@ impl DelayLine {
     /// Read the sample that is `offset` samples behind the write head.
     #[inline]
     fn read_at(&self, offset: usize) -> f32 {
-        let len = self.buffer.len();
+        let len = self.len;
         let idx = (self.pos + len - offset.min(len)) % len;
         self.buffer[idx]
     }
@@ -230,6 +249,7 @@ pub struct Reverb {
     bw_state: f32,
     // Pre-delay
     pre_delay_buf: Vec<f32>,
+    pre_delay_len: usize,
     pre_delay_pos: usize,
     // Input diffusers (4 allpass cascade)
     input_ap: [DattorroAP; 4],
@@ -258,31 +278,33 @@ pub struct Reverb {
 
 impl Reverb {
     pub fn new(sample_rate: f32) -> Self {
+        debug_assert!(sample_rate <= SR_CAP + 0.5, "SR above SR_CAP not supported by preallocated buffers");
+        let cap = |base: usize| scale_len(base, SR_CAP);
+        let len = |base: usize| scale_len(base, sample_rate);
         let input_ap = std::array::from_fn(|i| {
-            DattorroAP::new(scale_len(INPUT_AP_DELAYS[i], sample_rate), INPUT_AP_COEFFS[i])
+            DattorroAP::new(cap(INPUT_AP_DELAYS[i]), len(INPUT_AP_DELAYS[i]), INPUT_AP_COEFFS[i])
         });
-
-        // Max pre-delay ~100ms
-        let pre_delay_max = (sample_rate * 0.1) as usize + 1;
 
         Self {
             sample_rate,
             bw_state: 0.0,
-            pre_delay_buf: vec![0.0; pre_delay_max],
+            // Max pre-delay ~100ms at SR_CAP
+            pre_delay_buf: vec![0.0; (SR_CAP * 0.1) as usize + 1],
+            pre_delay_len: (sample_rate * 0.1) as usize + 1,
             pre_delay_pos: 0,
             input_ap,
             // Left tank
-            mod_ap_l: DattorroAP::new(scale_len(MOD_AP_L_DELAY, sample_rate), MOD_AP_COEFF),
-            delay_l1: DelayLine::new(scale_len(DELAY_L1_LEN, sample_rate)),
+            mod_ap_l: DattorroAP::new(cap(MOD_AP_L_DELAY), len(MOD_AP_L_DELAY), MOD_AP_COEFF),
+            delay_l1: DelayLine::new(cap(DELAY_L1_LEN), len(DELAY_L1_LEN)),
             damp_state_l: 0.0,
-            ap_l2: DattorroAP::new(scale_len(AP_L2_DELAY, sample_rate), TANK_AP2_COEFF),
-            delay_l2: DelayLine::new(scale_len(DELAY_L2_LEN, sample_rate)),
+            ap_l2: DattorroAP::new(cap(AP_L2_DELAY), len(AP_L2_DELAY), TANK_AP2_COEFF),
+            delay_l2: DelayLine::new(cap(DELAY_L2_LEN), len(DELAY_L2_LEN)),
             // Right tank
-            mod_ap_r: DattorroAP::new(scale_len(MOD_AP_R_DELAY, sample_rate), MOD_AP_COEFF),
-            delay_r1: DelayLine::new(scale_len(DELAY_R1_LEN, sample_rate)),
+            mod_ap_r: DattorroAP::new(cap(MOD_AP_R_DELAY), len(MOD_AP_R_DELAY), MOD_AP_COEFF),
+            delay_r1: DelayLine::new(cap(DELAY_R1_LEN), len(DELAY_R1_LEN)),
             damp_state_r: 0.0,
-            ap_r2: DattorroAP::new(scale_len(AP_R2_DELAY, sample_rate), TANK_AP2_COEFF),
-            delay_r2: DelayLine::new(scale_len(DELAY_R2_LEN, sample_rate)),
+            ap_r2: DattorroAP::new(cap(AP_R2_DELAY), len(AP_R2_DELAY), TANK_AP2_COEFF),
+            delay_r2: DelayLine::new(cap(DELAY_R2_LEN), len(DELAY_R2_LEN)),
             // Feedback
             left_out: 0.0,
             right_out: 0.0,
@@ -296,7 +318,35 @@ impl Reverb {
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
-        *self = Self::new(sr);
+        // RT-safe (called from the audio callback): rescales active lengths
+        // inside buffers preallocated for SR_CAP. Equivalent to the old
+        // `*self = Self::new(sr)` — zeroed buffers, recomputed taps, reset state.
+        debug_assert!(sr <= SR_CAP + 0.5, "SR above SR_CAP would clamp reverb lengths");
+        self.sample_rate = sr;
+        let len = |base: usize| scale_len(base, sr);
+        for (i, ap) in self.input_ap.iter_mut().enumerate() {
+            ap.set_len(len(INPUT_AP_DELAYS[i]));
+        }
+        self.mod_ap_l.set_len(len(MOD_AP_L_DELAY));
+        self.delay_l1.set_len(len(DELAY_L1_LEN));
+        self.ap_l2.set_len(len(AP_L2_DELAY));
+        self.delay_l2.set_len(len(DELAY_L2_LEN));
+        self.mod_ap_r.set_len(len(MOD_AP_R_DELAY));
+        self.delay_r1.set_len(len(DELAY_R1_LEN));
+        self.ap_r2.set_len(len(AP_R2_DELAY));
+        self.delay_r2.set_len(len(DELAY_R2_LEN));
+        self.pre_delay_buf.fill(0.0);
+        self.pre_delay_len = (sr * 0.1) as usize + 1;
+        self.pre_delay_pos = 0;
+        self.bw_state = 0.0;
+        self.damp_state_l = 0.0;
+        self.damp_state_r = 0.0;
+        self.left_out = 0.0;
+        self.right_out = 0.0;
+        self.lfo_phase_l = 0.0;
+        self.lfo_phase_r = 0.25;
+        self.lfo_excursion = LFO_EXCURSION_BASE * sr / REFERENCE_SR;
+        self.taps = DattorroTaps::new(sr);
     }
 
     /// Process one stereo sample.
@@ -320,8 +370,8 @@ impl Reverb {
 
         // --- Pre-delay ---
         let pd_samples = ((pre_delay * self.sample_rate) as usize)
-            .min(self.pre_delay_buf.len() - 1);
-        let pd_len = self.pre_delay_buf.len();
+            .min(self.pre_delay_len - 1);
+        let pd_len = self.pre_delay_len;
         let pd_read = {
             let p = self.pre_delay_pos + pd_len - pd_samples;
             if p >= pd_len { p - pd_len } else { p }

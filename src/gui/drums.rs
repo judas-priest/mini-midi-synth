@@ -57,6 +57,12 @@ impl App {
             if ui.button("Clear").on_hover_text("Clear all steps").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
             }
+
+            ui.separator();
+            ui.label("BPM:");
+            if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_bpm });
+            }
         });
 
         // Pattern selector + length
@@ -268,24 +274,13 @@ impl App {
         }
     }
 
-    /// Drums-tab-only controls (TECHDEBT #25): mix row (BPM/Swing/Vol/V127/
-    /// Metro), pad-remap toggle, kit save/load, MIDI import. The grid and
-    /// transport live in the docked bottom panel (draw_drum_seq_docked).
+    /// Drums-tab-only controls (TECHDEBT #25): mix row (Swing/Vol/V127/Metro,
+    /// BPM lives in the docked transport row), pad-remap toggle, kit save/load,
+    /// MIDI import. The grid and transport live in the docked bottom panel
+    /// (draw_drum_seq_docked).
     pub(super) fn draw_drum_kit_controls(&mut self, ui: &mut egui::Ui) {
         // Mix row
         ui.horizontal(|ui| {
-            // BPM
-            ui.label("BPM:");
-            if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_bpm });
-                if self.looper_sync_bpm {
-                    self.looper_bpm = self.drum_bpm;
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.drum_bpm });
-                }
-            }
-
-            ui.separator();
-
             // Swing + Vol
             ui.label("Swing:");
             if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).fixed_decimals(2)).on_hover_text("Swing amount").changed() {
@@ -378,10 +373,6 @@ impl App {
                             swing: kit.swing,
                             volume: kit.volume,
                         });
-                        if self.looper_sync_bpm {
-                            self.looper_bpm = kit.bpm;
-                            let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: kit.bpm });
-                        }
                     }
                     Err(e) => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
@@ -413,10 +404,6 @@ impl App {
                             swing: self.drum_swing,
                             volume: self.drum_volume,
                         });
-                        if self.looper_sync_bpm {
-                            self.looper_bpm = bpm;
-                            let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm });
-                        }
                     }
                     Err(e) => { self.show_toast(format!("Import error: {e}"), ToastKind::Error); }
                 }
@@ -893,48 +880,85 @@ impl App {
             }
             ui.separator();
 
-            if ui.selectable_label(self.looper_sync_bpm, "Sync").on_hover_text("Sync BPM with drum sequencer").clicked() {
-                self.looper_sync_bpm = !self.looper_sync_bpm;
-                if self.looper_sync_bpm {
-                    self.looper_bpm = self.drum_bpm;
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.drum_bpm });
-                }
-            }
-            if !self.looper_sync_bpm
-                && ui.add(egui::DragValue::new(&mut self.looper_bpm).range(40.0..=300.0).speed(0.5).prefix("BPM ")).changed()
-            {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
-            }
-
-            ui.separator();
-
-            // "Recording to" — shows active part, allows quick switch
+            // Source toggle (TECHDEBT #33/#2 partial): Mix records every
+            // sounding enabled part (default); Part records only the active
+            // part. Live transport state — not persisted (like seq_target).
             let ap = self.active_part;
             let zone = if ap < super::PARTS_PER_ZONE { "A" } else { "B" };
             let num = (ap % super::PARTS_PER_ZONE) + 1;
             let part_name = self.patches.get(self.parts[ap].patch_idx)
                 .map(|p| p.name.as_str()).unwrap_or("---");
             let is_recording = matches!(state, LooperState::Recording | LooperState::Overdubbing);
-            let rec_indicator = if is_recording { "Rec" } else { "Part" };
-            let rec_text_color = if is_recording { egui::Color32::RED } else { part_colors[ap % 8] };
-            let selected = format!("{rec_indicator}: {zone}{num} {part_name}");
-            egui::ComboBox::from_id_salt("looper_rec_part")
-                .selected_text(egui::RichText::new(&selected).color(rec_text_color))
-                .width(160.0)
-                .show_ui(ui, |ui| {
-                    for i in 0..self.parts.len() {
-                        if !self.parts[i].enabled { continue; }
-                        let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
-                        let n = (i % super::PARTS_PER_ZONE) + 1;
-                        let pname = self.patches.get(self.parts[i].patch_idx)
-                            .map(|p| p.name.as_str()).unwrap_or("---");
-                        let label = format!("{z}{n}: {pname}");
-                        if ui.selectable_label(i == ap, egui::RichText::new(label).color(part_colors[i % 8])).clicked() {
-                            self.set_active_part(i);
+            ui.label(egui::RichText::new("Source").weak().small());
+            let mix_color = if self.looper_source_mix { egui::Color32::GREEN } else { egui::Color32::GRAY };
+            if ui.selectable_label(self.looper_source_mix, egui::RichText::new("Mix").color(mix_color))
+                .on_hover_text("Record every sounding enabled part")
+                .clicked()
+                && !self.looper_source_mix
+            {
+                self.looper_source_mix = true;
+                let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: true });
+            }
+            if self.looper_source_mix {
+                // Collapsed: a single "Part" switch to leave Mix mode.
+                if ui.selectable_label(false, "Part")
+                    .on_hover_text("Record only the active part")
+                    .clicked()
+                {
+                    self.looper_source_mix = false;
+                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: false });
+                }
+            } else {
+                // Part source: records the active part (red "Rec" prefix while
+                // armed); combobox switches which part is active.
+                let rec_indicator = if is_recording { "Rec" } else { "Part" };
+                let rec_text_color = if is_recording { egui::Color32::RED } else { part_colors[ap % 8] };
+                let selected = format!("{rec_indicator}: {zone}{num} {part_name}");
+                egui::ComboBox::from_id_salt("looper_rec_part")
+                    .selected_text(egui::RichText::new(&selected).color(rec_text_color))
+                    .width(160.0)
+                    .show_ui(ui, |ui| {
+                        for i in 0..self.parts.len() {
+                            if !self.parts[i].enabled { continue; }
+                            let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
+                            let n = (i % super::PARTS_PER_ZONE) + 1;
+                            let pname = self.patches.get(self.parts[i].patch_idx)
+                                .map(|p| p.name.as_str()).unwrap_or("---");
+                            let label = format!("{z}{n}: {pname}");
+                            if ui.selectable_label(i == ap, egui::RichText::new(label).color(part_colors[i % 8])).clicked() {
+                                self.set_active_part(i);
+                            }
                         }
-                    }
-                });
+                    });
+            }
         });
+
+        // --- Part mutes: filter looper replay per part (TECHDEBT #30/#34),
+        // same "M" button pattern as the layer mutes below ---
+        let any_part_enabled = self.parts.iter().any(|p| p.enabled);
+        if any_part_enabled {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Mute parts").weak().small());
+                for i in 0..self.parts.len().min(self.looper_part_mutes.len()) {
+                    if !self.parts[i].enabled { continue; }
+                    let muted = self.looper_part_mutes[i];
+                    let color = if muted { egui::Color32::RED } else { part_colors[i % 8] };
+                    let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
+                    let n = (i % super::PARTS_PER_ZONE) + 1;
+                    if ui.button(egui::RichText::new(format!("{z}{n}")).small().color(color))
+                        .on_hover_text(if muted {
+                            "Unmute part in looper replay"
+                        } else {
+                            "Mute part in looper replay"
+                        })
+                        .clicked()
+                    {
+                        self.looper_part_mutes[i] = !muted;
+                        let _ = self.ctrl_tx.push(ControlEvent::LooperSetPartMute { part: i as u8, mute: !muted });
+                    }
+                }
+            });
+        }
 
         // --- Timeline ---
         if event_count > 0 {
@@ -1089,11 +1113,12 @@ impl App {
             let x = rect.left() + ev.position * total_w;
             let y = rect.bottom() - ((ev.note as f32 - note_lo) / note_span) * height;
             let color = part_colors[ev.part_id as usize % 8];
-            // Dim muted/non-solo layers, older layers slightly dimmer
+            // Dim muted/non-solo layers, muted parts, older layers slightly dimmer
             let layer_muted = self.looper_layer_mute[ev.layer_id as usize];
+            let part_muted = self.looper_part_mutes.get(ev.part_id as usize).copied().unwrap_or(false);
             let layer_hidden = if let Some(solo) = self.looper_solo_layer {
                 ev.layer_id != solo
-            } else { layer_muted };
+            } else { layer_muted || part_muted };
             let alpha = if layer_hidden { 40 }
             else if ev.layer_id == current_layer { 255 }
             else { 180u8.saturating_sub(current_layer.saturating_sub(ev.layer_id) * 30) };

@@ -164,7 +164,7 @@ rt-assert` в обязательный прогон. Suite прогнан в с�
 golden-тесты сначала пинуют детерминизм (фикс. SR, denormals, без wall-clock).
 M–L. **Блокирует S1–S5.**
 
-**S1. RT-safe `set_sample_rate` (расширение TECHDEBT #12).**
+**РЕАЛИЗОВАНО 2026-10-30** — **S1. RT-safe `set_sample_rate` (расширение TECHDEBT #12).**
 `audio.rs:199-205` вызывает его в колбэке (динамическая смена SR в JACK,
 реагирует на `jack_sr` atomic из error-callback); реаллоцирует 32 эффекта
 (`reverb.rs:298-300` — `*self = Self::new(sr)` + vec! delay lines, `chorus.rs:73`,
@@ -247,7 +247,7 @@ borrow'ов, после — rt-assert прогон); ui_layout_contract.rs — �
 mod.rs видят приватное, родитель — нет). После S0; после S2/S3, чтобы код не
 двигать дважды.
 
-**S5. Предпосылки #32 (looper/transport).**
+**S5. Предпосылки #32 (looper/transport). — ВЫПОЛНЕНО 2026-10-30 (plan docs/superpowers/plans/2026-10-30-refactor-s5-clock-sync.md).**
 Looper BPM задаётся только через `LooperSetBpm` (mod.rs:2362), тогда как
 arp/LFO/pitch_seq получают BPM секвенсора каждый блок (mod.rs:2714-2715,
 источник — `drum_engine.sequencer.bpm`, писатели только GUI: DrumSeqBpm,
