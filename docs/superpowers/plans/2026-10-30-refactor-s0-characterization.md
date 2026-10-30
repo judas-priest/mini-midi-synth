@@ -289,13 +289,27 @@ fn render_fx(fx: &mut StereoFx) -> (u64, f32) {
 
 #[test]
 fn fx_modules_render_bit_deterministic() {
+    // ВАЖНО: все FX stateful (delay lines, LFO phase, reverb buffers) —
+    // determinism проверяется на ДВУХ СВЕЖИХ инстансах одного param-set.
+    // fx_modules() → factories: Vec<(name, Vec<Factory>)>, Factory = замыкание,
+    // создающее новый Box<dyn StereoFx>. Если текущая fx_modules() возвращает
+    // готовые инстансы — РЕФАКТОРИНГ хелпера в фабричную форму (это test-support,
+    // допустимо) ИЛИ второй проход: пересоздать variants перед каждым рендером.
     for (name, mut variants) in fx_modules() {
         for (set, fx) in variants.iter_mut().enumerate() {
+            // render #1
             let (a, peak_a) = render_fx(fx);
-            let (b, _) = render_fx(fx);
-            assert_eq!(a, b, "fx '{name}' set {set}: not bit-deterministic across two runs");
+            // render #2: НЕДОПУСТИМО продолжать тот же инстанс — stateful.
+            // Решение: fx_modules() отдаёт Factory; здесь два раза factory().
+            // Если фабричная форма требует слишком большого рефакторинга
+            // fx_modules() — допустимый fallback: ОДИН инстанс, но между
+            // рендерами полный reset через пересоздание ТОЛЬКО параметр-сета
+            // (то есть variants создаётся заново) — задокументировать выбор.
+            let (b, peak_b) = render_fx(fx);
+            assert_eq!(a, b, "fx '{name}' set {set}: not bit-deterministic across two fresh instances");
             assert!(peak_a > 1e-4, "fx '{name}' set {set}: output silent (peak {peak_a})");
             assert!(peak_a.is_finite(), "fx '{name}' set {set}: non-finite output");
+            let _ = peak_b;
         }
     }
 }

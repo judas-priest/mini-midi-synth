@@ -705,9 +705,10 @@ comb_buf содержимое влияет на звук до dirty-пересч
         for osc in &mut self.oscs {
             osc.sample_rate = sample_rate;
         }
+        // Filter владеет heap comb_buf — reset IN PLACE (Task 6-pre):
+        self.filter.reset_for_sr(sample_rate);
+        self.filter2.reset_for_sr(sample_rate);
         // Plain structs — assignments, no heap.
-        self.filter = Filter::new(sample_rate);
-        self.filter2 = Filter::new(sample_rate);
         self.formant_filter = FormantFilter::new(sample_rate);
         self.amp_env = Envelope::new(sample_rate);
         self.filter_env = Envelope::new(sample_rate);
@@ -865,7 +866,7 @@ cargo test drum_remap   # regression: user-state сохранение
 ```bash
 cargo clippy --all-targets -- -D warnings
 cargo test
-cargo test --features rt-assert --test rt_safety   # 8 passed, 0 ignored
+cargo test --features rt-assert --test rt_safety   # все зелёные, 0 ignored (счёт относительный)
 cargo deny check
 ```
 
