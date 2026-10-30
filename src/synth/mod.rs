@@ -956,6 +956,30 @@ impl Part {
         self.root_active
     }
 
+    /// Drains a part on state changes / panic: releases (or kills) DSP voices,
+    /// releases this part's SF2 voices, and clears every held-note tracking
+    /// field — pedal-held notes, keys down, mono/latch stacks, and the
+    /// root-only rekey state. Without the root clear a stale root_active
+    /// ghost-suppresses the next note after MIDI-stop / AllNotesOff on
+    /// root_only patches (see root_on/root_off). `kill`: CC120 semantics
+    /// (immediate) vs release (CC123 / state change). Caller must have lifted
+    /// engine-level sustain via set_sustain(0) first — this fn does not touch
+    /// part.sustain_pedal. Zero-allocation (audio thread).
+    fn drain_notes(&mut self, sampler: &mut SamplerEngine, idx: usize, kill: bool) {
+        sampler.part_all_notes_off(idx);
+        for voice in &mut self.voices {
+            if voice.active {
+                if kill { voice.kill(); } else { voice.note_off(); }
+            }
+        }
+        self.sustained_notes = [false; 128];
+        self.keys_down = [false; 128];
+        self.note_stack.clear();
+        self.latch_held.clear();
+        self.root_held = [false; 128];
+        self.root_active = None;
+    }
+
     fn update_held_range(&mut self) {
         let mut lo = 255u8;
         let mut hi = 0u8;
@@ -1969,19 +1993,8 @@ impl SynthEngine {
                     // sustain atom must not stay stuck ON.
                     self.set_sustain(0);
                     let all_sound_off = cc == 120; // All Sound Off kills, All Notes Off releases
-                    for part in &mut self.parts {
-                        for v in &mut part.voices {
-                            if v.active {
-                                if all_sound_off { v.kill(); } else { v.note_off(); }
-                            }
-                        }
-                        part.note_stack.clear();
-                        part.latch_held.clear();
-                        part.root_held = [false; 128];
-                        part.root_active = None;
-                        part.sustain_pedal = 0.0;
-                        part.sustained_notes = [false; 128];
-                        part.keys_down = [false; 128];
+                    for (i, part) in self.parts.iter_mut().enumerate() {
+                        part.drain_notes(&mut self.sampler, i, all_sound_off);
                     }
                     if all_sound_off {
                         self.sampler.all_sound_off();
@@ -2138,21 +2151,7 @@ impl SynthEngine {
             ControlEvent::SetPartEnabled { part, enabled } => {
                 if let Some(l) = self.parts.get_mut(part) {
                     if !enabled {
-                        // Single cleanup: drain SF2 voices, release DSP voices,
-                        // clear held-note state. (This used to be duplicated in
-                        // a second `if !enabled` block below, whose note_off
-                        // pass re-armed the release envelope of voices that
-                        // were already releasing.)
-                        self.sampler.part_all_notes_off(part);
-                        for voice in &mut l.voices {
-                            if voice.active { voice.note_off(); }
-                        }
-                        l.sustained_notes = [false; 128];
-                        l.keys_down = [false; 128];
-                        l.note_stack.clear();
-                        l.latch_held.clear();
-                        l.root_held = [false; 128];
-                        l.root_active = None;
+                        l.drain_notes(&mut self.sampler, part, false);
                     }
                     l.enabled = enabled;
                 }
@@ -2161,23 +2160,12 @@ impl SynthEngine {
                 if let Some(l) = self.parts.get_mut(part) {
                     l.mute = mute;
                     if mute {
-                        // A muted part must not keep sounding; SF2 voices live
-                        // in the sampler, not in l.voices.
-                        self.sampler.part_all_notes_off(part);
-                        // SF2 output is summed globally in tick_block, so the
-                        // mix gate cannot reach it — gate at the source with
-                        // CC7 (instant; a click is possible but the release
-                        // drain above keeps the tail short).
-                        self.sampler.set_layer_volume(part, if l.mute { 0.0 } else { l.volume });
-                        for voice in &mut l.voices {
-                            if voice.active { voice.note_off(); }
-                        }
-                        l.sustained_notes = [false; 128];
-                        l.keys_down = [false; 128];
-                        l.note_stack.clear();
-                        l.latch_held.clear();
-                        l.root_held = [false; 128];
-                        l.root_active = None;
+                        // Drain both voice owners + held-note state; SF2 output
+                        // is summed globally in tick_block, so also gate at the
+                        // source with CC7 (instant; the release drain above
+                        // keeps the tail short).
+                        l.drain_notes(&mut self.sampler, part, false);
+                        self.sampler.set_layer_volume(part, 0.0);
                     } else {
                         // Restore the SF2 channel volume zeroed on mute.
                         self.sampler.set_layer_volume(part, l.volume);
@@ -2422,17 +2410,8 @@ impl SynthEngine {
             }
             ControlEvent::AllNotesOff => {
                 self.set_sustain(0);
-                for part in &mut self.parts {
-                    // Kill all active voices immediately
-                    for v in &mut part.voices {
-                        if v.active { v.note_off(); }
-                    }
-                    // Clear held-note state so retriggering doesn't ghost
-                    part.note_stack.clear();
-                    part.latch_held.clear();
-                    part.sustain_pedal = 0.0;
-                    part.sustained_notes = [false; 128];
-                    part.keys_down = [false; 128];
+                for (i, part) in self.parts.iter_mut().enumerate() {
+                    part.drain_notes(&mut self.sampler, i, false);
                 }
                 self.sampler.all_notes_off();
                 self.drum_engine.reset_choke_state();
@@ -2472,17 +2451,8 @@ impl SynthEngine {
                     if l.sf2_mode == enabled { return None; }
                 }
                 // Engine switch: both voice owners must be drained
-                self.sampler.part_all_notes_off(part);
                 if let Some(l) = self.parts.get_mut(part) {
-                    for voice in &mut l.voices {
-                        if voice.active { voice.note_off(); }
-                    }
-                    l.sustained_notes = [false; 128];
-                    l.keys_down = [false; 128];
-                    l.note_stack.clear();
-                    l.latch_held.clear();
-                    l.root_held = [false; 128];
-                    l.root_active = None;
+                    l.drain_notes(&mut self.sampler, part, false);
                     l.sf2_mode = enabled;
                     // (Re)apply the part's pan on the SF2 channel — CC10 was
                     // never sent while the part was in DSP mode.
@@ -2558,10 +2528,13 @@ impl SynthEngine {
                 self.sampler.all_notes_off();
                 // The sequencer no longer owns any channel program
                 self.sampler.seq_channels_release();
-                for part in &mut self.parts {
-                    for voice in &mut part.voices {
-                        if voice.active { voice.note_off(); }
-                    }
+                // Full per-part drain: closes the root_held/root_active gap
+                // (ghost rekey on root_only patches after loading a new MIDI
+                // file). The global all_notes_off above stays for drum/seq
+                // channels not mapped to parts; the per-part CC123 is
+                // redundant but idempotent.
+                for (i, part) in self.parts.iter_mut().enumerate() {
+                    part.drain_notes(&mut self.sampler, i, false);
                 }
                 self.seq_route = [0u8; 16];
                 // The Box moves into the player; what it displaced comes back
@@ -2589,10 +2562,10 @@ impl SynthEngine {
                     self.sampler.all_notes_off();
                     // Playback stopped: give the shared channels back to the parts
                     self.sampler.seq_channels_release();
-                    for part in &mut self.parts {
-                        for voice in &mut part.voices {
-                            if voice.active { voice.note_off(); }
-                        }
+                    // Full per-part drain: closes the root_held/root_active gap
+                    // (ghost rekey on root_only patches after MIDI-stop).
+                    for (i, part) in self.parts.iter_mut().enumerate() {
+                        part.drain_notes(&mut self.sampler, i, false);
                     }
                 }
             }

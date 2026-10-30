@@ -942,3 +942,23 @@ fn sf2_mode_noop_does_not_clear_dsp_state() {
     // Out-of-range part: no-op, no panic
     let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part: 99, enabled: true });
 }
+
+// ── Part::drain_notes root-state guard ─────────────────────────
+
+#[test]
+fn all_notes_off_clears_root_held_and_root_active() {
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 36, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 }); // suppressed
+    for _ in 0..50 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(36), "root tracking did not engage");
+    let _ = e.handle_control(ControlEvent::AllNotesOff);
+    assert!(e.parts[0].root_active.is_none(), "root_active survived AllNotesOff");
+    assert!(e.parts[0].root_held.iter().all(|&h| !h), "root_held survived AllNotesOff");
+    assert!(e.parts[0].note_stack.is_empty(), "note_stack survived AllNotesOff");
+    assert!(!e.parts[0].keys_down.iter().any(|&k| k), "keys_down survived AllNotesOff");
+}
