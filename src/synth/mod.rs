@@ -226,7 +226,6 @@ pub enum ControlEvent {
     LooperClear,
     LooperSetBars { bars: u8 },
     LooperSetQuantize { quantize: u8 },
-    LooperSetBpm { bpm: f32 },
     /// Restore recorded looper content after an audio reconnect. The payload
     /// owns heap memory and is handed back from handle_control for disposal.
     LooperRestore {
@@ -2328,7 +2327,6 @@ impl SynthEngine {
             ControlEvent::LooperSetQuantize { quantize } => {
                 self.looper.quantize = looper::Quantize::from_index(quantize);
             }
-            ControlEvent::LooperSetBpm { bpm } => { self.looper.bpm = bpm; }
             ControlEvent::LooperRestore { events, loop_length_ticks } => {
                 self.looper.restore(&events, loop_length_ticks);
                 // Heap-owning payload: hand it back for GUI-thread disposal.
@@ -2667,6 +2665,11 @@ impl SynthEngine {
 
         let seq_bpm = self.drum_engine.sequencer.bpm;
         self.arpeggiator.set_bpm(seq_bpm);
+        // Looper follows the same canonical clock (REFACTOR_AUDIT S5): bpm +
+        // current pattern's beats_per_bar, synced every block like arp/LFO.
+        let cur_pat = self.drum_engine.sequencer.current_pattern as usize;
+        let beats_per_bar = self.drum_engine.sequencer.patterns[cur_pat].beats_per_bar;
+        self.looper.sync_clock(seq_bpm, beats_per_bar);
 
         // Pre-compute modulation state for each part (control rate).
         // `layer_mods` lives on the engine (zero-alloc); disabled parts retain

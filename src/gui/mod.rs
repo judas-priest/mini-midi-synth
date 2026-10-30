@@ -358,8 +358,6 @@ pub struct App {
     pub looper_display: std::sync::Arc<std::sync::Mutex<LooperDisplay>>,
     pub looper_bars: u8,
     pub looper_quantize: u8,
-    pub looper_sync_bpm: bool,
-    pub looper_bpm: f32,
     pub looper_clear_confirm: Option<std::time::Instant>,
     pub looper_layer_mute: [bool; 256],
     pub looper_solo_layer: Option<u8>,
@@ -1501,7 +1499,6 @@ impl App {
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
         self.config.ui.split_point = Some(self.split_point);
-        self.config.ui.looper_sync_bpm = self.looper_sync_bpm;
         self.config.ui.keybinds = self.keybinds.to_config();
         let _ = self.config.save();
         self.last_config_save = std::time::Instant::now();
@@ -1831,7 +1828,6 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
         self.push_drum_remap();
         self.push_drum_pad_vel();
-        let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: self.looper_bars });
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: self.looper_quantize });
         // Choke semantics survive reconnect even if the SF2 restore path bails

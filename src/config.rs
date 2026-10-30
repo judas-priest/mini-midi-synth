@@ -139,15 +139,10 @@ pub struct UiSettings {
     /// Companion spawn command path (python3 hardcoded); `~/` expands to HOME.
     #[serde(default = "default_led_companion_cmd")]
     pub led_companion_cmd: String,
-    /// Sync looper BPM with drum sequencer BPM.
-    #[serde(default = "default_looper_sync_bpm")]
-    pub looper_sync_bpm: bool,
     /// Keybindings: egui key name → action string.
     #[serde(default)]
     pub keybinds: std::collections::HashMap<String, String>,
 }
-
-fn default_looper_sync_bpm() -> bool { true }
 
 fn default_led_companion_cmd() -> String { "~/Projects/smk37_config/pad_console.py".to_string() }
 
@@ -206,7 +201,6 @@ impl Default for Config {
                 led_companion: false,
                 led_companion_cmd: default_led_companion_cmd(),
             parts_state: Vec::new(),
-                looper_sync_bpm: true,
                 keybinds: std::collections::HashMap::new(),
             },
         }
@@ -295,5 +289,22 @@ impl Config {
         let json = serde_json::to_string_pretty(self)?;
         write_atomic(&path, &json)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_config_with_looper_sync_bpm_key_parses() {
+        // TC17: pre-S5 config files carry the removed key; serde must ignore it.
+        let json = r#"{
+            "audio": { "backend": "JACK", "sample_rate": 48000, "buffer_size": 256 },
+            "midi": { "port_name": null },
+            "ui": { "window_width": 1280.0, "window_height": 800.0, "last_preset": null, "looper_sync_bpm": false }
+        }"#;
+        let cfg: Config = serde_json::from_str(json).expect("legacy config must parse");
+        assert_eq!(cfg.audio.sample_rate, 48000);
     }
 }

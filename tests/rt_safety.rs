@@ -380,3 +380,23 @@ fn drum_set_sample_rate_is_allocation_free() {
     let mut engine = SynthEngine::new(SR);
     assert_no_alloc(|| engine.drum_engine.set_sample_rate(96_000.0));
 }
+
+/// Regrid (REFACTOR_AUDIT S5) rescales up to MAX_LOOP_EVENTS event ticks and
+/// calls update_display inside tick_block — must stay allocation-free.
+#[test]
+fn looper_bpm_regrid_does_not_allocate() {
+    let mut engine = SynthEngine::new(SR);
+    let _ = engine.handle_control(ControlEvent::DrumSeqBpm { bpm: 120.0 });
+    let _ = engine.handle_control(ControlEvent::LooperRecord);
+    engine.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    engine.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let mut l = [0.0f32; BLOCK_SIZE];
+    let mut r = [0.0f32; BLOCK_SIZE];
+    engine.tick_block(&mut l, &mut r);
+    let _ = engine.handle_control(ControlEvent::LooperStopRecord);
+
+    assert_no_alloc(|| {
+        let _ = engine.handle_control(ControlEvent::DrumSeqBpm { bpm: 90.0 });
+        for _ in 0..4 { engine.tick_block(&mut l, &mut r); } // first block regrids
+    });
+}

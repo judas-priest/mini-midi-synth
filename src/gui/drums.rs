@@ -57,6 +57,12 @@ impl App {
             if ui.button("Clear").on_hover_text("Clear all steps").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
             }
+
+            ui.separator();
+            ui.label("BPM:");
+            if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_bpm });
+            }
         });
 
         // Pattern selector + length
@@ -268,24 +274,13 @@ impl App {
         }
     }
 
-    /// Drums-tab-only controls (TECHDEBT #25): mix row (BPM/Swing/Vol/V127/
-    /// Metro), pad-remap toggle, kit save/load, MIDI import. The grid and
-    /// transport live in the docked bottom panel (draw_drum_seq_docked).
+    /// Drums-tab-only controls (TECHDEBT #25): mix row (Swing/Vol/V127/Metro,
+    /// BPM lives in the docked transport row), pad-remap toggle, kit save/load,
+    /// MIDI import. The grid and transport live in the docked bottom panel
+    /// (draw_drum_seq_docked).
     pub(super) fn draw_drum_kit_controls(&mut self, ui: &mut egui::Ui) {
         // Mix row
         ui.horizontal(|ui| {
-            // BPM
-            ui.label("BPM:");
-            if ui.add(egui::DragValue::new(&mut self.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_bpm });
-                if self.looper_sync_bpm {
-                    self.looper_bpm = self.drum_bpm;
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.drum_bpm });
-                }
-            }
-
-            ui.separator();
-
             // Swing + Vol
             ui.label("Swing:");
             if ui.add(egui::Slider::new(&mut self.drum_swing, 0.0..=0.66).fixed_decimals(2)).on_hover_text("Swing amount").changed() {
@@ -378,10 +373,6 @@ impl App {
                             swing: kit.swing,
                             volume: kit.volume,
                         });
-                        if self.looper_sync_bpm {
-                            self.looper_bpm = kit.bpm;
-                            let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: kit.bpm });
-                        }
                     }
                     Err(e) => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
@@ -413,10 +404,6 @@ impl App {
                             swing: self.drum_swing,
                             volume: self.drum_volume,
                         });
-                        if self.looper_sync_bpm {
-                            self.looper_bpm = bpm;
-                            let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm });
-                        }
                     }
                     Err(e) => { self.show_toast(format!("Import error: {e}"), ToastKind::Error); }
                 }
@@ -891,21 +878,6 @@ impl App {
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: idx });
                 }
             }
-            ui.separator();
-
-            if ui.selectable_label(self.looper_sync_bpm, "Sync").on_hover_text("Sync BPM with drum sequencer").clicked() {
-                self.looper_sync_bpm = !self.looper_sync_bpm;
-                if self.looper_sync_bpm {
-                    self.looper_bpm = self.drum_bpm;
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.drum_bpm });
-                }
-            }
-            if !self.looper_sync_bpm
-                && ui.add(egui::DragValue::new(&mut self.looper_bpm).range(40.0..=300.0).speed(0.5).prefix("BPM ")).changed()
-            {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperSetBpm { bpm: self.looper_bpm });
-            }
-
             ui.separator();
 
             // "Recording to" — shows active part, allows quick switch

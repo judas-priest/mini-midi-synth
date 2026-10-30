@@ -815,8 +815,6 @@ pub fn run_gui(
         looper_display: c.looper_display,
         looper_bars: 4,
         looper_quantize: 0,
-        looper_sync_bpm: c.config.ui.looper_sync_bpm,
-        looper_bpm: 120.0,
         looper_clear_confirm: None,
         looper_layer_mute: [false; 256],
         looper_solo_layer: None,
