@@ -1822,10 +1822,8 @@ impl SynthEngine {
                 }
                 return;
             }
-            // Armed: ждём границы паттерна. Петля = 1 цикл паттерна:
-            // bars=1 → длина петли = bar = ровно длина паттерна (bar берёт
-            // beats_per_bar паттерна через sync_clock). Размеры совпадают.
-            self.looper.bars = 1;
+            // Armed: ждём границы паттерна. Петля = Bars × цикл паттерна
+            // (Boss LOOP LENGTH), Bars юзера учитываются в tick_block.
             self.drum_engine.set_playing(true);
             self.looper_arm_pending = true;
             self.looper_capture_quantized = true;
@@ -2885,33 +2883,30 @@ impl SynthEngine {
                 self.looper_arm_pending = false;
                 self.master_rec_pending.store(false, std::sync::atomic::Ordering::Relaxed);
                 self.looper.toggle_record(); // Idle -> Recording (length = bars * bar)
-                // Перекроить петлю: cycle = длина паттерна (базовая единица)
+                // Boss RC-семантика: петля = Bars × цикл паттерна; авто-закрытие
+                // после Bars циклов; тики записи НЕПРЕРЫВНЫ (wrap только на
+                // конце всей петли) — релокация не нужна.
                 let pat = self.drum_engine.sequencer.current_pattern as usize;
                 let pattern_len = self.drum_engine.sequencer.patterns[pat].length.max(1);
                 let bpm = self.drum_engine.sequencer.bpm.max(1.0);
                 let samples_per_step = (self.sample_rate as f64 * 60.0) / (bpm as f64 * 4.0);
                 let cycle = (pattern_len as f64 * samples_per_step) as u32;
-                self.looper.set_loop_len_ticks(cycle);
+                let bars = self.looper.bars.max(1) as u32;
+                self.looper.set_loop_len_ticks(cycle.saturating_mul(bars));
                 self.looper_cycle_ticks = cycle;
                 self.looper_rec_cycles = 0;
             } else if boundary && capturing {
-                if self.looper_finish_pending {
-                    // Закрыть: петля = сыгранные целые циклы. cycles = полных
-                    // циклов ДО этой границы; закрывающая граница завершает
-                    // ещё один → total = cycles + 1 (иначе петля короче игры).
-                    let total = self.looper_rec_cycles.saturating_add(1);
-                    // РЕЛОКАЦИЯ: во время захвата лупер оборачивался каждый
-                    // цикл (layer_id = номер круга, тики локальные 0..cycle).
-                    // Сдвинуть события круга k на k*cycle — глобальные тики.
-                    self.looper.relocate_layers(self.looper_cycle_ticks);
+                self.looper_rec_cycles += 1;
+                let bars = self.looper.bars.max(1) as u32;
+                // Досрочный Rec — тоже закрыть; Boss: конец выравнивается на такт
+                if self.looper_finish_pending || self.looper_rec_cycles >= bars {
+                    // Петля = сыгранные целые циклы (тики непрерывны — без релокации)
                     self.looper.set_loop_len_ticks(
-                        total.saturating_mul(self.looper_cycle_ticks));
+                        self.looper_rec_cycles.saturating_mul(self.looper_cycle_ticks));
                     self.looper_finish_pending = false;
                     self.looper_rec_cycles = 0;
                     self.drum_engine.set_recording(false); // сетка тоже разармирована
                     self.looper.toggle_record(); // Recording/Overdubbing -> Playing
-                } else {
-                    self.looper_rec_cycles += 1;
                 }
             } else if boundary
                 && lstate == crate::synth::looper::LooperState::Playing

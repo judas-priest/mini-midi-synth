@@ -860,7 +860,8 @@ impl App {
 
         // --- Row 2: Bars + Quantize + BPM + Recording target ---
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Bars").weak().small());
+            ui.label(egui::RichText::new("Bars").weak().small())
+                .on_hover_text("Циклов паттерна в петле: запись сама закроется после них; досрочный Rec = сколько сыграл");
             for &b in &[1u8, 2, 4, 8] {
                 if ui.selectable_label(self.looper_bars == b, format!("{b}")).clicked() {
                     self.looper_bars = b;
@@ -874,7 +875,8 @@ impl App {
             }
             ui.separator();
 
-            ui.label(egui::RichText::new("Q").weak().small());
+            ui.label(egui::RichText::new("Q").weak().small())
+                .on_hover_text("Квантование нот по сетке при записи (Boss Loop Quantize)");
             for (idx, &label) in ["Off", "1/4", "1/8", "1/16"].iter().enumerate() {
                 let idx = idx as u8;
                 if ui.selectable_label(self.looper_quantize == idx, label).clicked() {
