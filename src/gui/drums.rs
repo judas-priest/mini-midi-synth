@@ -447,7 +447,6 @@ impl App {
                 .resizable(true)
                 .default_width(920.0)
                 .show(ctx, |ui| {
-                ui.strong("Pad Remap");
                 ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
                 ui.add_space(theme::SP_MD);
                 let mut new_remap = self.drum_remap;

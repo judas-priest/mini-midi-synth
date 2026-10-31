@@ -1538,9 +1538,16 @@ impl App {
     /// Send edited params to synth engine for a given part
     fn process_keybinds(&mut self, ctx: &egui::Context) {
         use keybinds::KeyAction;
-        // Collect triggered actions to avoid borrow conflict
+        // Collect triggered actions to avoid borrow conflict.
+        // repeat: false — авто-повтор не должен триггерить хоткеи
+        // (иначе удержание X обходило бы 2s-confirm лупера).
         let triggered: Vec<KeyAction> = self.keybinds.binds().iter()
-            .filter(|(key, _)| ctx.input(|i| i.key_pressed(*key)))
+            .filter(|(key, _)| {
+                ctx.input(|i| {
+                    i.events.iter().any(|e| matches!(e,
+                        egui::Event::Key { key: k, pressed: true, repeat: false, .. } if k == key))
+                })
+            })
             .map(|(_, action)| action.clone())
             .collect();
         for action in triggered {
