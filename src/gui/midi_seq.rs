@@ -185,14 +185,15 @@ impl App {
                         };
                         ui.label(egui::RichText::new(ch_lbl).monospace());
 
-                        // Track name (truncated)
+                        // Track name (truncated) — hover с полным именем
+                        // (M3: эллипсис без tooltip недопустим)
                         let name = if track.name.chars().count() > 24 {
                             let truncated: String = track.name.chars().take(23).collect();
                             format!("{truncated}…")
                         } else {
                             track.name.clone()
                         };
-                        ui.label(name);
+                        ui.label(name).on_hover_text(track.name.clone());
 
                         // Instrument type selector
                         let prev_instr = track.instrument;

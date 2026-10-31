@@ -11,7 +11,7 @@ impl App {
             ui.strong("FX Chain");
             ui.label("— 16 slots, serial processing");
             ui.separator();
-            if super::confirm::confirm_button(ui, "Reset", &mut self.fx_reset_confirm, true, "Reset FX chain to defaults") {
+            if super::confirm::confirm_button(ui, "Reset FX", &mut self.fx_reset_confirm, true, "Reset FX chain to defaults") {
                 let chain = FxChain { active: true, ..FxChain::default() };
                 flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
                 self.send_edited_params(part);
@@ -44,12 +44,17 @@ impl App {
                 for i in 0..FX_SLOTS {
                     changed |= draw_slot(ui, part, i, &mut chain.slots[i]);
 
-                    // Swap buttons (outside closure so we can act on the chain)
+                    // Swap buttons (outside closure so we can act on the chain).
+                    // Хит-зона 24×24 — WCAG 2.5.8 (голый small_button ~20px)
                     ui.horizontal(|ui| {
-                        if i > 0 && ui.small_button("↑").on_hover_text("Move up").clicked() {
+                        let up = ui.add_sized([24.0, 24.0], egui::Button::new("↑").small())
+                            .on_hover_text("Move up");
+                        if i > 0 && up.clicked() {
                             swap = Some((i - 1, i));
                         }
-                        if i + 1 < FX_SLOTS && ui.small_button("↓").on_hover_text("Move down").clicked() {
+                        let down = ui.add_sized([24.0, 24.0], egui::Button::new("↓").small())
+                            .on_hover_text("Move down");
+                        if i + 1 < FX_SLOTS && down.clicked() {
                             swap = Some((i, i + 1));
                         }
                     });

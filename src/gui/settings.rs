@@ -72,17 +72,24 @@ impl App {
                                 painter.rect_stroke(rect, 4.0, egui::Stroke::new(2.0, egui::Color32::WHITE), egui::StrokeKind::Outside);
                             }
 
-                            // Performance name inside
-                            if let Some(ref name) = self.pad_perf_map[idx] {
+                            // Performance name inside (чёрный на светлом пэде:
+                            // белый был 3.14:1 на бирюзовом при 11px — аудит п.5)
+                            let full_name = self.pad_perf_map[idx].clone();
+                            if let Some(ref name) = full_name {
                                 let display: String = name.chars().take(10).collect();
                                 painter.text(
                                     rect.center(),
                                     egui::Align2::CENTER_CENTER,
                                     display,
                                     egui::FontId::proportional(11.0),
-                                    egui::Color32::WHITE,
+                                    egui::Color32::BLACK,
                                 );
                             }
+
+                            // Полное имя по hover (M3: эллипсис без tooltip недопустим);
+                            // переприсвоение — on_hover_text потребляет response
+                            let response = response.on_hover_text(full_name
+                                .unwrap_or_else(|| "empty — click to assign".to_string()));
 
                             // Left click: combo popup to pick perf
                             let popup_id = ui.id().with(format!("pad_popup_{note}"));
@@ -657,7 +664,20 @@ impl App {
                     });
 
                 ui.add_space(theme::SP_SM);
-                ui.colored_label(theme::TEXT_SECONDARY, "Restart to apply audio changes.");
+                // Restart-required — состояние (настройки ≠ активные), а не
+                // событие: один persistent-баннер, никакого toast. Backend
+                // тоже требует рестарта — включён в сравнение.
+                let pending_backend = self
+                    .available_hosts
+                    .get(self.selected_host_idx)
+                    .map(|(_, name)| self.config.audio.backend != *name)
+                    .unwrap_or(false);
+                let pending = pending_backend
+                    || self.selected_sample_rate != self.config.audio.sample_rate
+                    || self.selected_buffer_size != self.config.audio.buffer_size;
+                if pending {
+                    ui.colored_label(theme::TEXT_WARN, "Restart required to apply audio changes.");
+                }
                 if ui.button("Save Audio Settings").clicked() {
                     #[cfg(not(target_os = "android"))]
                     if let Some((_, host_name)) = self.available_hosts.get(self.selected_host_idx) {
@@ -665,14 +685,12 @@ impl App {
                         self.config.audio.sample_rate = self.selected_sample_rate;
                         self.config.audio.buffer_size = self.selected_buffer_size;
                         self.save_config();
-                        self.show_toast("Audio saved. Restart to apply.", ToastKind::Info);
                     }
                     #[cfg(target_os = "android")]
                     {
                         self.config.audio.sample_rate = self.selected_sample_rate;
                         self.config.audio.buffer_size = self.selected_buffer_size;
                         self.save_config();
-                        self.show_toast("Audio saved. Restart to apply.", ToastKind::Info);
                     }
                 }
 
