@@ -22,11 +22,6 @@ impl App {
 
 
         // ── Single master transport (#32 фаза 4) ─────────────────────────
-        let looper_undo_avail = {
-            let a = &self.looper_atoms;
-            a.layer_count.load(std::sync::atomic::Ordering::Relaxed) > 1
-                && a.event_count.load(std::sync::atomic::Ordering::Relaxed) > 0
-        };
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Master").strong().small());
             let lstate = crate::synth::looper::LooperState::from_u8(
@@ -76,11 +71,6 @@ impl App {
             }
             if ui.button("Clear").on_hover_text("Clear all steps").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
-            }
-            if ui.add_enabled(looper_undo_avail, egui::Button::new("L-Undo"))
-                .on_hover_text("Undo last looper layer").clicked()
-            {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
             }
 
             ui.separator();
@@ -832,6 +822,13 @@ impl App {
             }
             if self.looper_clear_confirm.map(|t| t.elapsed().as_secs_f32() >= 2.0).unwrap_or(false) {
                 self.looper_clear_confirm = None;
+            }
+
+            // Undo layer: снимает последний overdub-слой целиком
+            if ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new("Undo Layer"))
+                .on_hover_text(format!("Undo last looper layer (L{layer_count})")).clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
             }
 
             ui.separator();
