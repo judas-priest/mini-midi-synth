@@ -308,6 +308,11 @@ impl AudioBackend {
                     // itself keeps running. Tearing down and rebuilding the
                     // whole engine here caused audible dropouts under load.
                     // Real disconnects surface as different errors.
+                } else if msg.contains("buffer size changed to:") {
+                    // JACK/PipeWire buffer-size notification — same family as
+                    // «sample rate changed»: stream survives (vendor patch),
+                    // data callback подхватывает реальный буфер. Раньше падало
+                    // в ветку «device disconnected» и дёргало reconnect.
                 } else {
                     // Device disconnected (headphones unplugged etc.)
                     disconnected_err.store(true, Ordering::Relaxed);
