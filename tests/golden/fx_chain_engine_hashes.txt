@@ -1,5 +1,5 @@
-fx_chain_Delay	0c789e78808a862d
-fx_chain_Chorus	ebf47245c90d267d
-fx_chain_SpringReverb	127d6e69141a048e
-fx_chain_Nimbus	7854c534c35a1921
-fx_chain_Vocoder	f2e00975f6a81e29
+fx_chain_Delay	0971fbb926b05641
+fx_chain_Chorus	85474ff8a6e38f8c
+fx_chain_SpringReverb	a065079e3b7cedd4
+fx_chain_Nimbus	148dafa952fc8c39
+fx_chain_Vocoder	f919ca9c7ecea6cd
