@@ -855,14 +855,21 @@ impl App {
                 LooperState::Playing => "Play",
                 LooperState::Overdubbing => "OVR",
             };
-            // Quantized master capture (#30): индикация, на каком цикле стоим
+            // Quantized master capture: режим и счётчик раздельно (практика
+            // RC-505/Ableton — счётчик тактов живёт ТОЛЬКО в первичной записи;
+            // при overdub/play никаких номеров проходов).
+            // WAIT = ждём границу такта (count-in), REC n = захвачено n тактов
+            // (открытая длина — закрывает Rec), CLOSING = ждём границу для
+            // закрытия. PLAY/OVR — без чисел.
             let rec_state = self.master_rec_state.load(std::sync::atomic::Ordering::Relaxed);
             let rec_cycle = self.master_rec_cycle.load(std::sync::atomic::Ordering::Relaxed);
-            let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
             let (label, label_color) = match rec_state {
-                1 => ("ARMED".to_string(), egui::Color32::YELLOW),
-                2 => (format!("REC {}/{}", rec_cycle, self.looper_bars), egui::Color32::RED),
-                3 => (format!("END {}/{}", rec_cycle, self.looper_bars), egui::Color32::ORANGE),
+                1 => ("WAIT".to_string(), theme::CURVE_FILTER),
+                2 => (
+                    if rec_cycle == 1 { "REC 1 bar".to_string() } else { format!("REC {rec_cycle} bars") },
+                    egui::Color32::RED,
+                ),
+                3 => ("CLOSING".to_string(), egui::Color32::ORANGE),
                 _ => (state_label.to_string(), status_color),
             };
             ui.colored_label(label_color, label);
@@ -870,18 +877,14 @@ impl App {
                 ui.label(egui::RichText::new(format!("{event_count}ev L{layer_count}")).small().weak());
             }
             if state != LooperState::Idle {
-                let frac = position as f32 / 255.0;
-                let bar_frac = if rec_state >= 2 && self.looper_bars > 0 {
-                    // Квантованный захват: прогресс ВНУТРИ текущего цикла
-                    (frac * self.looper_bars as f32) % 1.0
-                } else {
-                    frac
-                };
+                // Движок публикует позицию: при захвате — внутри текущего
+                // цикла (один оборот = такт), после — доля всей петли.
+                let bar_frac = position as f32 / 255.0;
                 ui.add(egui::ProgressBar::new(bar_frac).desired_width(80.0))
-                    .on_hover_text(if rec_state >= 2 {
-                        format!("Cycle {} ({} steps per loop)", rec_cycle, loop_steps)
-                    } else {
-                        "Loop position".to_string()
+                    .on_hover_text(match rec_state {
+                        2 => format!("Captured {rec_cycle} bar(s) so far — press Rec to close on the next bar line"),
+                        3 => "Closing on the next bar line".to_string(),
+                        _ => "Loop position".to_string(),
                     });
             }
             // ＋такт / −такт — длина петли прямо во время записи
@@ -901,7 +904,7 @@ impl App {
         // --- Row 2: Bars + Quantize + BPM + Recording target ---
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Bars").weak().small())
-                .on_hover_text("Pattern cycles in the loop: recording auto-closes after them; early Rec = keep what you played");
+                .on_hover_text("Loop length for the looper's free (non-quantized) recording. Quantized master capture is open-ended: press Rec to close, +1/−1 bar while capturing");
             for &b in &[1u8, 2, 4, 8] {
                 if ui.selectable_label(self.looper_bars == b, format!("{b}")).clicked() {
                     self.looper_bars = b;

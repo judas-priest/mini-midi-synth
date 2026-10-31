@@ -1781,6 +1781,7 @@ impl SynthEngine {
         self.looper_overdub_active = false;
         self.looper_finish_pending = false;
         self.looper_rec_cycles = 0;
+        self.looper.set_display_cycle_ticks(None);
         self.set_master_rec_state(0, 0);
         self.drum_engine.set_playing(false);
         self.drum_engine.sequencer.reset();
@@ -3021,6 +3022,8 @@ impl SynthEngine {
                 // playback_tick НЕ оборачивается, тики событий глобальные.
                 // Реальная длина = looper_rec_cycles циклов; Rec закрывает.
                 self.looper.set_loop_len_ticks(cycle.saturating_mul(64));
+                // GUI-позиция = прогресс текущего цикла (см. set_display_cycle_ticks)
+                self.looper.set_display_cycle_ticks(Some(cycle));
                 self.looper_cycle_ticks = cycle;
                 self.looper_rec_cycles = 1;
                 self.set_master_rec_state(2, 1); // capturing, cycle 1
@@ -3031,6 +3034,7 @@ impl SynthEngine {
                     let kept = self.looper_rec_cycles.saturating_mul(self.looper_cycle_ticks);
                     self.looper.trim_after(kept);
                     self.looper.set_loop_len_ticks(kept);
+                    self.looper.set_display_cycle_ticks(None);
                     self.looper_rec_cycles = 0;
                     self.drum_engine.set_recording(false); // сетка тоже разармирована
                     self.looper.toggle_record(); // Recording/Overdubbing -> Playing
@@ -3053,6 +3057,7 @@ impl SynthEngine {
                 // fallback: часы умерли посреди записи — закрыть сейчас
                 // (нечётный кусок; длину петли не перекраиваем)
                 self.looper_finish_pending = false;
+                self.looper.set_display_cycle_ticks(None);
                 self.looper_rec_cycles = 0;
                 self.drum_engine.set_recording(false);
                 self.looper.toggle_record();
