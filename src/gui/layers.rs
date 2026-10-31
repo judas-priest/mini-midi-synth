@@ -34,12 +34,12 @@ impl App {
         ui.horizontal(|ui| {
             let split_clicked = if split_on {
                 // Split active: show as an on-toggle with explicit remove hint
-                ui.small_button("Split: вкл ✕")
-                    .on_hover_text("Выключить сплит: убрать правую руку (зона B)")
+                ui.small_button("Split: ON ✕")
+                    .on_hover_text("Turn split off: remove right hand (zone B)")
                     .clicked()
             } else {
-                ui.button("+ Правая рука (Split)")
-                    .on_hover_text("Добавить правую руку: зона B, клавиатура делится по Split point")
+                ui.button("+ Right hand (Split)")
+                    .on_hover_text("Add right hand: zone B, keyboard splits at the Split point")
                     .clicked()
             };
             if split_clicked {
@@ -121,9 +121,9 @@ impl App {
 
             // ── Zone A ───────────────────────────────────────────────────
             let a_header = if split_on {
-                format!("◀ Левая рука (A) — 0..{}", sp.saturating_sub(1))
+                format!("◀ Left hand (A) — 0..{}", sp.saturating_sub(1))
             } else {
-                "◀ Левая рука (A)".to_string()
+                "◀ Left hand (A)".to_string()
             };
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(a_header).weak().small());
@@ -136,7 +136,7 @@ impl App {
             }
             let a_count = ZONE_A.filter(|&i| self.parts[i].enabled).count();
             if a_count < PARTS_PER_ZONE
-                && ui.small_button("+ Добавить парт").on_hover_text("Add part to Zone A").clicked()
+                && ui.small_button("+ Add part").on_hover_text("Add part to Zone A").clicked()
             {
                 self.add_part_to_zone(false);
             }
@@ -145,7 +145,7 @@ impl App {
             if split_on {
                 ui.add_space(theme::SP_XS);
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("▶ Правая рука (B) — {sp}..127")).weak().small());
+                    ui.label(egui::RichText::new(format!("▶ Right hand (B) — {sp}..127")).weak().small());
                 });
                 for i in ZONE_B {
                     if !self.parts[i].enabled { continue; }
@@ -155,7 +155,7 @@ impl App {
                 }
                 let b_count = ZONE_B.filter(|&i| self.parts[i].enabled).count();
                 if b_count < PARTS_PER_ZONE
-                    && ui.small_button("+ Добавить парт").on_hover_text("Add part to Zone B").clicked()
+                    && ui.small_button("+ Add part").on_hover_text("Add part to Zone B").clicked()
                 {
                     self.add_part_to_zone(true);
                 }

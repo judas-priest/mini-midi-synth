@@ -880,7 +880,7 @@ impl App {
                 };
                 ui.add(egui::ProgressBar::new(bar_frac).desired_width(80.0))
                     .on_hover_text(if rec_state >= 2 {
-                        format!("Цикл {} ({} шагов в петле)", rec_cycle, loop_steps)
+                        format!("Cycle {} ({} steps per loop)", rec_cycle, loop_steps)
                     } else {
                         "Loop position".to_string()
                     });
