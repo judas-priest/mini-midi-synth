@@ -267,11 +267,9 @@ impl App {
                 // effect on SF2 kits (TECHDEBT #33). Grayed out with a tooltip
                 // instead of silently doing nothing.
                 let dsp_kit = !(self.sf2_drums_enabled && self.sf2_drums_soundfont.is_some());
-                let dsp_hint = if dsp_kit { "" } else { " — DSP only, no effect in SF2 mode" };
-                if !dsp_kit {
-                    ui.label(egui::RichText::new("L T D P: DSP-engine only — no effect on SF2 kits")
-                        .small().weak());
-                }
+                let dsp_hint = if dsp_kit { "" } else { " — DSP only (rustysynth limitation: one drum channel, global release)" };
+                // L и T работают на обоих движках: на SF2 — velocity-scale и
+                // транспозиция ноты (раунд 4). P/D — только DSP (см. hover).
                 ui.horizontal(|ui| {
                     let mut sm = self.drum_slot_mutes_view[slot];
                     if ui.add_sized([52.0, 0.0], egui::Checkbox::new(&mut sm, "Mute"))
@@ -286,11 +284,11 @@ impl App {
                     let mut decay = self.drum_params[slot].decay;
 
                     ui.style_mut().spacing.slider_width = theme::SLIDER_DRUM;
-                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text(format!("Level: {level:.2}{dsp_hint}")).changed() {
+                    if ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text(format!("Level: {level:.2}")).changed() {
                         self.drum_params[slot].level = level;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
                     }
-                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).on_hover_text(format!("Tune: {tune:+.1} st{dsp_hint}")).changed() {
+                    if ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).on_hover_text(format!("Tune: {tune:+.1} st")).changed() {
                         self.drum_params[slot].tune = tune;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
                     }
