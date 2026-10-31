@@ -38,7 +38,9 @@ impl App {
                 theme::MIDI_SEQ_LOOP_OFF
             };
             let mut loop_text = egui::RichText::new("↻ Loop").color(loop_col);
-            if self.midi_seq_looping { loop_text = loop_text.strong(); }
+            if self.midi_seq_looping {
+                loop_text = loop_text.underline(); // неколоровый признак (WCAG 1.4.1)
+            }
             if ui.button(loop_text).clicked() {
                 self.midi_seq_looping = !self.midi_seq_looping;
                 let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetLooping {
@@ -160,7 +162,9 @@ impl App {
                         // Mute button
                         let mut m_text = egui::RichText::new("M").monospace();
                         if track.muted {
-                            m_text = m_text.color(egui::Color32::YELLOW).strong();
+                            // Зачёркивание — неколоровый признак (WCAG 1.4.1);
+                            // strong() в egui 0.31 — не bold, с .color() это no-op.
+                            m_text = m_text.color(egui::Color32::YELLOW).strikethrough();
                         } else {
                             m_text = m_text.color(theme::MIDI_SEQ_MUTE_INACTIVE);
                         }

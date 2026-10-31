@@ -1073,7 +1073,7 @@ impl App {
                 // Solo button
                 let solo_color = if soloed { egui::Color32::YELLOW } else { egui::Color32::GRAY };
                 let mut s_text = egui::RichText::new("S").color(solo_color);
-                if soloed { s_text = s_text.strong(); }
+                if soloed { s_text = s_text.underline(); } // неколоровый признак (WCAG 1.4.1)
                 if ui.button(s_text).on_hover_text("Solo layer").clicked() {
                     if soloed {
                         self.looper_solo_layer = None;
@@ -1087,7 +1087,7 @@ impl App {
                 // Mute button
                 let mute_color = if muted { egui::Color32::RED } else { egui::Color32::GRAY };
                 let mut m_text = egui::RichText::new("M").color(mute_color);
-                if muted { m_text = m_text.strong(); }
+                if muted { m_text = m_text.strikethrough(); } // неколоровый признак (WCAG 1.4.1)
                 if ui.button(m_text).on_hover_text("Mute layer").clicked() {
                     let new_mute = !muted;
                     self.looper_layer_mute[*layer_id as usize] = new_mute;

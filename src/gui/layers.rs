@@ -307,9 +307,8 @@ impl App {
             let muted = self.parts[i].mute;
             let label_text = if muted {
                 // Зачёркивание — второй признак состояния помимо цвета (WCAG 1.4.1);
-                // gray(150) вместо GRAY — 5.6:1 вместо 4.2:1.
-                egui::RichText::new(label).strong().strikethrough()
-                    .color(egui::Color32::from_gray(150))
+                // GRAY(160) на BG_PANEL = 6.4:1.
+                egui::RichText::new(label).strong().strikethrough().color(egui::Color32::GRAY)
             } else {
                 egui::RichText::new(label).strong()
             };
