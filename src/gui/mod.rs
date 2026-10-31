@@ -14,6 +14,7 @@ mod macros;
 mod theme;
 pub mod keybinds;
 pub mod led_console;
+mod confirm;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -291,9 +292,11 @@ pub struct App {
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
     pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Master recording armed (waiting for the sequencer bar boundary) —
-    /// looper state label shows "ARMED"
-    pub master_rec_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Master capture state: 0 idle, 1 armed, 2 capturing, 3 closing —
+    /// looper state label shows "ARMED" / "REC k/N"
+    pub master_rec_state: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Current capture cycle (1-based)
+    pub master_rec_cycle: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Static pedal-up release duration (None = off, patch release)
     pub sustain_release: Option<f32>,
     /// SF2 release-time scale (1.0 = file defaults)
@@ -366,6 +369,8 @@ pub struct App {
     pub looper_bars: u8,
     pub looper_quantize: u8,
     pub looper_clear_confirm: Option<std::time::Instant>,
+    pub drum_clear_confirm: Option<std::time::Instant>,
+    pub fx_reset_confirm: Option<std::time::Instant>,
     pub looper_layer_mute: [bool; 256],
     pub looper_solo_layer: Option<u8>,
     /// Looper record source: true = Mix (all sounding parts, default),
@@ -382,6 +387,8 @@ pub struct App {
     pub keybinds: keybinds::Keybinds,
     pub show_keybinds_window: bool,
     pub keybind_capturing: Option<keybinds::KeyAction>,
+    pub keybinds_reset_confirm: Option<std::time::Instant>,
+    pub unbind_confirm: Option<(keybinds::KeyAction, std::time::Instant)>,
     // Performance save/load
     pub perf_name: String,
     pub perf_list: Vec<(String, std::path::PathBuf)>,
@@ -1166,51 +1173,55 @@ impl eframe::App for App {
                 });
             } else {
                 // Лупер переехал в единую docked-панель (#30); здесь остаётся
-                // питч-секвенсор и параметры активной части
-                self.draw_pitch_sequencer(ui);
-                ui.separator();
-                ui.add_space(theme::SP_MD);
-                let part = self.active_part;
-                let is_sf2 = self.parts[part].sf2_mode;
-                if is_sf2 && self.sf2_keys_soundfont.is_some() {
-                    use crate::synth::sampler::GM_PROGRAM_NAMES;
-                    let prog = self.parts[part].sf2_program;
-                    let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
-                    ui.colored_label(
-                        theme::TEXT_SF2_STATUS,
-                        format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_keys_loaded_name, prog, name),
-                    );
-                } else {
-                    // Header: patch name + Init/Rnd/Undo/Redo
-                    ui.horizontal(|ui| {
-                        let idx = self.parts[part].patch_idx;
-                        let name = self.patches.get(idx).map(|p| p.name.as_str()).unwrap_or("---");
-                        ui.strong(name);
-                        ui.separator();
-                        if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
-                            self.push_undo_snapshot();
-                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
-                            self.send_edited_params(part);
-                        }
-                        if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
-                            self.push_undo_snapshot();
-                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.parts[part].edited_params = crate::synth::PatchParams::random_map();
-                            self.send_edited_params(part);
-                        }
-                        ui.separator();
-                        if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
-                            self.undo();
-                        }
-                        if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
-                            self.redo();
-                        }
-                    });
-                    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                // питч-секвенсор и параметры активной части. ScrollArea как в
+                // остальных ветках, на ВСЮ ветку: без него секвенсор молча
+                // обрезается docked-панелью (audit High п.1), а оборачивать
+                // только секвенсор нельзя — auto_shrink(false) съел бы высоту
+                // параметров ниже. Вложенный ScrollArea параметров удалён.
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    self.draw_pitch_sequencer(ui);
+                    ui.separator();
+                    ui.add_space(theme::SP_MD);
+                    let part = self.active_part;
+                    let is_sf2 = self.parts[part].sf2_mode;
+                    if is_sf2 && self.sf2_keys_soundfont.is_some() {
+                        use crate::synth::sampler::GM_PROGRAM_NAMES;
+                        let prog = self.parts[part].sf2_program;
+                        let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
+                        ui.colored_label(
+                            theme::TEXT_SF2_STATUS,
+                            format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_keys_loaded_name, prog, name),
+                        );
+                    } else {
+                        // Header: patch name + Init/Rnd/Undo/Redo
+                        ui.horizontal(|ui| {
+                            let idx = self.parts[part].patch_idx;
+                            let name = self.patches.get(idx).map(|p| p.name.as_str()).unwrap_or("---");
+                            ui.strong(name);
+                            ui.separator();
+                            if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
+                                self.push_undo_snapshot();
+                                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                                self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
+                                self.send_edited_params(part);
+                            }
+                            if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
+                                self.push_undo_snapshot();
+                                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                                self.parts[part].edited_params = crate::synth::PatchParams::random_map();
+                                self.send_edited_params(part);
+                            }
+                            ui.separator();
+                            if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
+                                self.undo();
+                            }
+                            if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+                                self.redo();
+                            }
+                        });
                         self.draw_params_editable(ui);
-                    });
-                }
+                    }
+                });
             }
         });
     }
@@ -1228,13 +1239,20 @@ impl App {
         let mut picked_program: Option<u8> = None;
         let mut toggled_cat: Option<String> = None;
 
-        let modal = egui::Modal::new(egui::Id::new("inst_browser")).show(ctx, |ui| {
-            ui.set_width(360.0);
-            ui.strong(if is_sf2 {
-                format!("GM Instrument — Part {layer_label}")
-            } else {
-                format!("Patch — Part {layer_label}")
-            });
+        // Немодальное окно: выбор инструмента обратим (клик по другому патчу
+        // перекроет), полноэкранная модалка избыточна (audit Medium п.8).
+        let mut win_open = true;
+        let title = if is_sf2 {
+            format!("GM Instrument — Part {layer_label}")
+        } else {
+            format!("Patch — Part {layer_label}")
+        };
+        let win = egui::Window::new(title)
+            .open(&mut win_open)
+            .resizable(true)
+            .default_width(400.0)
+            .default_height(540.0)
+            .show(ctx, |ui| {
             ui.add_space(theme::SP_XS);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
@@ -1376,7 +1394,7 @@ impl App {
             self.save_config();
             close = true;
         }
-        if modal.should_close() {
+        if !win_open || win.is_none() {
             close = true;
         }
         if close {
@@ -1458,6 +1476,14 @@ impl App {
                 self.load_sf2_drums(idx);
             }
         }
+
+        // Restore last performance (after SF2 load — part sf2_program applies
+        // to the loaded soundfont)
+        if let Some(name) = self.config.ui.last_performance.clone() {
+            if self.load_performance_by_name(&name) {
+                log::info!("[init] performance restored: {name}");
+            }
+        }
     }
 
     fn find_or_add_sf2(&mut self, sf2_path: &str) -> Option<usize> {
@@ -1512,9 +1538,16 @@ impl App {
     /// Send edited params to synth engine for a given part
     fn process_keybinds(&mut self, ctx: &egui::Context) {
         use keybinds::KeyAction;
-        // Collect triggered actions to avoid borrow conflict
+        // Collect triggered actions to avoid borrow conflict.
+        // repeat: false — авто-повтор не должен триггерить хоткеи
+        // (иначе удержание X обходило бы 2s-confirm лупера).
         let triggered: Vec<KeyAction> = self.keybinds.binds().iter()
-            .filter(|(key, _)| ctx.input(|i| i.key_pressed(*key)))
+            .filter(|(key, _)| {
+                ctx.input(|i| {
+                    i.events.iter().any(|e| matches!(e,
+                        egui::Event::Key { key: k, pressed: true, repeat: false, .. } if k == key))
+                })
+            })
             .map(|(_, action)| action.clone())
             .collect();
         for action in triggered {
@@ -1539,7 +1572,16 @@ impl App {
                     let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
                 }
                 KeyAction::LooperClear => {
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
+                    // Тот же 2s-confirm, что у кнопки Clear (audit High п.2):
+                    // первое нажатие взводит, второе в течение окна — очищает.
+                    let armed = matches!(self.looper_clear_confirm, Some(t)
+                        if t.elapsed() < confirm::CONFIRM_WINDOW);
+                    if armed {
+                        let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
+                        self.looper_clear_confirm = None;
+                    } else {
+                        self.looper_clear_confirm = Some(Instant::now());
+                    }
                 }
                 KeyAction::DrumTogglePlay => {
                     self.drum_playing = !self.drum_playing;
@@ -1606,18 +1648,29 @@ impl App {
                         if ui.button(btn_text).clicked() {
                             self.keybind_capturing = Some(action.clone());
                         }
-                        if ui.small_button("x").clicked() {
-                            // Unbind
-                            if let Some(key) = self.keybinds.key_for_action(&action) {
-                                self.keybinds.binds_mut().retain(|(k, _)| *k != key);
-                                self.config.ui.keybinds = self.keybinds.to_config();
+                        // Unbind — тот же 2s-confirm, взвод на конкретное действие.
+                        // Expire через is_some_and: нельзя мутировать поле под &borrow.
+                        if self.unbind_confirm.as_ref().is_some_and(|(_, t)| t.elapsed() >= confirm::CONFIRM_WINDOW) {
+                            self.unbind_confirm = None;
+                        }
+                        let armed = matches!(&self.unbind_confirm, Some((a, _)) if a == &action);
+                        let ub_color = if armed { egui::Color32::RED } else { ui.visuals().text_color() };
+                        if ui.small_button(egui::RichText::new(if armed { "Sure?" } else { "x" }).color(ub_color)).clicked() {
+                            if armed {
+                                if let Some(key) = self.keybinds.key_for_action(&action) {
+                                    self.keybinds.binds_mut().retain(|(k, _)| *k != key);
+                                    self.config.ui.keybinds = self.keybinds.to_config();
+                                }
+                                self.unbind_confirm = None;
+                            } else {
+                                self.unbind_confirm = Some((action.clone(), Instant::now()));
                             }
                         }
                         ui.end_row();
                     }
                 });
                 ui.add_space(theme::SP_SM);
-                if ui.button("Reset Defaults").clicked() {
+                if confirm::confirm_button(ui, "Reset Defaults", &mut self.keybinds_reset_confirm, true, "Restore default keybindings (custom binds are lost)") {
                     self.keybinds = keybinds::Keybinds::defaults();
                     self.config.ui.keybinds = self.keybinds.to_config();
                     self.keybind_capturing = None;
@@ -2132,6 +2185,9 @@ impl App {
                 .unwrap_or(60)
         });
         self.perf_name = perf.name.clone();
+        // Запомнить перф — восстановится при старте (юзер-репорт 2026-10-31)
+        self.config.ui.last_performance = Some(perf.name.clone());
+        self.save_config();
         for (i, part) in parts.iter().enumerate() {
             if i >= self.parts.len() { break; }
             let patch_idx = self.patches.iter()

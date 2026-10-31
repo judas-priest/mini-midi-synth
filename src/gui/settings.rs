@@ -270,7 +270,8 @@ impl App {
         self.seq_target_atom = engine.seq_target_atom();
         self.active_part_atom = engine.active_part_atom();
         self.sustain_atom = engine.sustain_atom();
-        self.master_rec_pending = engine.master_rec_pending_atom();
+        self.master_rec_state = engine.master_rec_state_atom();
+        self.master_rec_cycle = engine.master_rec_cycle_atom();
         self.pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
         self.scope_buf = engine.scope_buffer();
         self.midi_seq_play_atom = engine.midi_player_play_atom();
@@ -399,6 +400,17 @@ impl App {
                     ParamFeedback::DrumStepRecorded { pattern, slot, step, velocity } => {
                         if (pattern as usize) < self.drum_patterns.len() {
                             self.drum_patterns[pattern as usize].steps[slot as usize][step as usize].velocity = velocity;
+                        }
+                    }
+                    ParamFeedback::DrumPatternsSync { patterns } => {
+                        // Engine-side undo/redo — the GUI mirror was stale
+                        // (notes on screen, silence on playback)
+                        self.drum_patterns = *patterns;
+                    }
+                    ParamFeedback::DrumCleared { pattern } => {
+                        if (pattern as usize) < self.drum_patterns.len() {
+                            self.drum_patterns[pattern as usize].steps =
+                                [[Default::default(); 16]; 16];
                         }
                     }
                     ParamFeedback::PickupPending { key, cc_position } => {

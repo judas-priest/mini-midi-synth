@@ -22,11 +22,6 @@ impl App {
 
 
         // ── Single master transport (#32 фаза 4) ─────────────────────────
-        let looper_undo_avail = {
-            let a = &self.looper_atoms;
-            a.layer_count.load(std::sync::atomic::Ordering::Relaxed) > 1
-                && a.event_count.load(std::sync::atomic::Ordering::Relaxed) > 0
-        };
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Master").strong().small());
             let lstate = crate::synth::looper::LooperState::from_u8(
@@ -51,6 +46,13 @@ impl App {
             {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
             }
+            // Overdub (слой поверх готовой петли): старт/закрытие на границе
+            let ovr_enabled = lstate == crate::synth::looper::LooperState::Playing;
+            if ui.add_enabled(ovr_enabled, egui::Button::new("Layer"))
+                .on_hover_text("Layer: overdub over the loop — starts at the boundary, press again to close").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::MasterOverdub);
+            }
 
             // Downbeat flash indicator (lights ~150 ms after beat 1)
             let flashing = self.drum_beat_flash
@@ -67,13 +69,8 @@ impl App {
             if ui.button("Undo").on_hover_text("Undo last sequencer edit").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqUndo);
             }
-            if ui.button("Clear").on_hover_text("Clear all steps").clicked() {
+            if super::confirm::confirm_button(ui, "Clear", &mut self.drum_clear_confirm, true, "Clear all steps") {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
-            }
-            if ui.add_enabled(looper_undo_avail, egui::Button::new("L-Undo"))
-                .on_hover_text("Undo last looper layer").clicked()
-            {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
             }
 
             ui.separator();
@@ -276,20 +273,20 @@ impl App {
                     let mut decay = self.drum_params[slot].decay;
 
                     ui.style_mut().spacing.slider_width = theme::SLIDER_DRUM;
-                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text(format!("Level{dsp_hint}")).changed() {
+                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text(format!("Level: {level:.2}{dsp_hint}")).changed() {
                         self.drum_params[slot].level = level;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
                     }
-                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).on_hover_text(format!("Tune (semitones){dsp_hint}")).changed() {
+                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).on_hover_text(format!("Tune: {tune:+.1} st{dsp_hint}")).changed() {
                         self.drum_params[slot].tune = tune;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
                     }
-                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).on_hover_text(format!("Decay time{dsp_hint}")).changed() {
+                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).on_hover_text(format!("Decay: {decay:.2} s{dsp_hint}")).changed() {
                         self.drum_params[slot].decay = decay;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
                     }
                     let mut pan = self.drum_params[slot].pan;
-                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).on_hover_text(format!("Pan L/R{dsp_hint}")).changed() {
+                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).on_hover_text(format!("Pan: {pan:+.2}{dsp_hint}")).changed() {
                         self.drum_params[slot].pan = pan;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
                     }
@@ -444,9 +441,12 @@ impl App {
                     kit_names[(v - 30) as usize].clone()
                 } else { format!("note {}", v) }
             };
-            let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ctx, |ui| {
-                ui.set_width(900.0);
-                ui.strong("Pad Remap");
+            let mut win_open = true;
+            let win = egui::Window::new("Pad Remap")
+                .open(&mut win_open)
+                .resizable(true)
+                .default_width(920.0)
+                .show(ctx, |ui| {
                 ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
                 ui.add_space(theme::SP_MD);
                 let mut new_remap = self.drum_remap;
@@ -515,7 +515,7 @@ impl App {
                     self.save_drum_pad_vel();
                 }
             });
-            if dialog.should_close() {
+            if !win_open || win.is_none() {
                 self.show_drum_remap = false;
             }
         }
@@ -534,8 +534,12 @@ impl App {
             let sel_name = if (30..=55).contains(&sel) && !kit_names[(sel - 30) as usize].is_empty() {
                 kit_names[(sel - 30) as usize].clone()
             } else { format!("note {}", sel) };
-            let dialog = egui::Modal::new(egui::Id::new("remap_pad_dialog")).show(ctx, |ui| {
-                ui.set_width(300.0);
+            let mut win_open = true;
+            let win = egui::Window::new(format!("Pad {}", p + 1))
+                .open(&mut win_open)
+                .resizable(false)
+                .default_width(320.0)
+                .show(ctx, |ui| {
                 ui.strong(format!("Pad {}", p + 1));
                 ui.label("Instrument:");
                 ui.add_space(theme::SP_MD);
@@ -572,7 +576,7 @@ impl App {
                 self.push_drum_remap();
                 self.save_drum_remap();
             }
-            if dialog.should_close() {
+            if !win_open || win.is_none() {
                 self.remap_pad = None;
             }
         }
@@ -720,15 +724,26 @@ impl App {
                     );
                     painter.rect_filled(bar_rect, 1.0, bar_color);
 
-                    // Pitch label
+                    // Pitch label. Clamped inside the allocation: при pitch=±24
+                    // бар доходит до края и подпись над ним клипается
+                    // (audit Medium п.11). Если подпись легла на бар — чёрный
+                    // цвет (7:1 на синем вместо 1.43:1 у gray(180)).
                     if pitch != 0.0 {
                         let label = format!("{:+}", step.pitch);
+                        let raw_y = if pitch > 0.0 { bar_top - 8.0 } else { bar_bottom + 8.0 };
+                        let y = raw_y.clamp(rect.top() + 6.0, rect.top() + bar_h - 6.0);
+                        let label_pos = egui::pos2(x + step_w * 0.5, y);
+                        let color = if bar_rect.contains(label_pos) {
+                            egui::Color32::BLACK
+                        } else {
+                            theme::TEXT_OVERLAY
+                        };
                         painter.text(
-                            egui::pos2(x + step_w * 0.5, if pitch > 0.0 { bar_top - 8.0 } else { bar_bottom + 8.0 }),
+                            label_pos,
                             egui::Align2::CENTER_CENTER,
                             &label,
                             egui::FontId::proportional(9.0),
-                            theme::TEXT_OVERLAY,
+                            color,
                         );
                     }
 
@@ -808,23 +823,21 @@ impl App {
 
         // --- Row 1: Transport + Status ---
         ui.horizontal(|ui| {
-            let clear_pending = self.looper_clear_confirm
-                .map(|t| t.elapsed().as_secs_f32() < 2.0).unwrap_or(false);
-            let clear_label = if clear_pending { "Sure?" } else { "Clear" };
-            let clear_color = if clear_pending { egui::Color32::RED } else { ui.visuals().text_color() };
-            if ui.add_enabled(
+            if super::confirm::confirm_button(
+                ui,
+                "Clear",
+                &mut self.looper_clear_confirm,
                 event_count > 0 || state != LooperState::Idle,
-                egui::Button::new(egui::RichText::new(clear_label).color(clear_color)),
-            ).clicked() {
-                if clear_pending {
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
-                    self.looper_clear_confirm = None;
-                } else {
-                    self.looper_clear_confirm = Some(std::time::Instant::now());
-                }
+                "Clear the whole looper (destructive)",
+            ) {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
             }
-            if self.looper_clear_confirm.map(|t| t.elapsed().as_secs_f32() >= 2.0).unwrap_or(false) {
-                self.looper_clear_confirm = None;
+
+            // Undo layer: снимает последний overdub-слой целиком
+            if ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new("Undo Layer"))
+                .on_hover_text(format!("Undo last looper layer (L{layer_count})")).clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
             }
 
             ui.separator();
@@ -841,26 +854,53 @@ impl App {
                 LooperState::Playing => "Play",
                 LooperState::Overdubbing => "OVR",
             };
-            // Quantized master recording (#30): capture armed, waiting for the
-            // sequencer bar boundary — show "ARMED" instead of the state.
-            let armed = self
-                .master_rec_pending
-                .load(std::sync::atomic::Ordering::Relaxed);
-            ui.colored_label(
-                if armed { egui::Color32::YELLOW } else { status_color },
-                if armed { "ARMED" } else { state_label },
-            );
+            // Quantized master capture (#30): индикация, на каком цикле стоим
+            let rec_state = self.master_rec_state.load(std::sync::atomic::Ordering::Relaxed);
+            let rec_cycle = self.master_rec_cycle.load(std::sync::atomic::Ordering::Relaxed);
+            let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
+            let (label, label_color) = match rec_state {
+                1 => ("ARMED".to_string(), egui::Color32::YELLOW),
+                2 => (format!("REC {}/{}", rec_cycle, self.looper_bars), egui::Color32::RED),
+                3 => (format!("END {}/{}", rec_cycle, self.looper_bars), egui::Color32::ORANGE),
+                _ => (state_label.to_string(), status_color),
+            };
+            ui.colored_label(label_color, label);
             if event_count > 0 {
                 ui.label(egui::RichText::new(format!("{event_count}ev L{layer_count}")).small().weak());
             }
             if state != LooperState::Idle {
-                ui.add(egui::ProgressBar::new(position as f32 / 255.0).desired_width(80.0));
+                let frac = position as f32 / 255.0;
+                let bar_frac = if rec_state >= 2 && self.looper_bars > 0 {
+                    // Квантованный захват: прогресс ВНУТРИ текущего цикла
+                    (frac * self.looper_bars as f32) % 1.0
+                } else {
+                    frac
+                };
+                ui.add(egui::ProgressBar::new(bar_frac).desired_width(80.0))
+                    .on_hover_text(if rec_state >= 2 {
+                        format!("Cycle {} ({} steps per loop)", rec_cycle, loop_steps)
+                    } else {
+                        "Loop position".to_string()
+                    });
+            }
+            // ＋такт / −такт — длина петли прямо во время записи
+            let capturing = rec_state == 2;
+            if ui.add_enabled(capturing, egui::Button::new("+1 bar"))
+                .on_hover_text("Add a bar to the loop (recording continues)").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::CaptureCycleAdd);
+            }
+            if ui.add_enabled(capturing, egui::Button::new("−1 bar"))
+                .on_hover_text("Remove the last bar (write cursor rewinds — replay it)").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::CaptureCycleRemove);
             }
         });
 
         // --- Row 2: Bars + Quantize + BPM + Recording target ---
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Bars").weak().small());
+            ui.label(egui::RichText::new("Bars").weak().small())
+                .on_hover_text("Pattern cycles in the loop: recording auto-closes after them; early Rec = keep what you played");
             for &b in &[1u8, 2, 4, 8] {
                 if ui.selectable_label(self.looper_bars == b, format!("{b}")).clicked() {
                     self.looper_bars = b;
@@ -874,7 +914,8 @@ impl App {
             }
             ui.separator();
 
-            ui.label(egui::RichText::new("Q").weak().small());
+            ui.label(egui::RichText::new("Q").weak().small())
+                .on_hover_text("Quantize notes to the grid while recording (Loop Quantize)");
             for (idx, &label) in ["Off", "1/4", "1/8", "1/16"].iter().enumerate() {
                 let idx = idx as u8;
                 if ui.selectable_label(self.looper_quantize == idx, label).clicked() {
@@ -1040,7 +1081,9 @@ impl App {
 
                 // Solo button
                 let solo_color = if soloed { egui::Color32::YELLOW } else { egui::Color32::GRAY };
-                if ui.button(egui::RichText::new("S").color(solo_color)).on_hover_text("Solo layer").clicked() {
+                let mut s_text = egui::RichText::new("S").color(solo_color);
+                if soloed { s_text = s_text.underline(); } // неколоровый признак (WCAG 1.4.1)
+                if ui.button(s_text).on_hover_text("Solo layer").clicked() {
                     if soloed {
                         self.looper_solo_layer = None;
                         let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: None });
@@ -1052,7 +1095,9 @@ impl App {
 
                 // Mute button
                 let mute_color = if muted { egui::Color32::RED } else { egui::Color32::GRAY };
-                if ui.button(egui::RichText::new("M").color(mute_color)).on_hover_text("Mute layer").clicked() {
+                let mut m_text = egui::RichText::new("M").color(mute_color);
+                if muted { m_text = m_text.strikethrough(); } // неколоровый признак (WCAG 1.4.1)
+                if ui.button(m_text).on_hover_text("Mute layer").clicked() {
                     let new_mute = !muted;
                     self.looper_layer_mute[*layer_id as usize] = new_mute;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: *layer_id, mute: new_mute });

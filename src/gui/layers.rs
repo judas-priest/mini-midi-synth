@@ -34,12 +34,12 @@ impl App {
         ui.horizontal(|ui| {
             let split_clicked = if split_on {
                 // Split active: show as an on-toggle with explicit remove hint
-                ui.small_button("Split: вкл ✕")
-                    .on_hover_text("Выключить сплит: убрать правую руку (зона B)")
+                ui.small_button("Split: ON ✕")
+                    .on_hover_text("Turn split off: remove right hand (zone B)")
                     .clicked()
             } else {
-                ui.button("+ Правая рука (Split)")
-                    .on_hover_text("Добавить правую руку: зона B, клавиатура делится по Split point")
+                ui.button("+ Right hand (Split)")
+                    .on_hover_text("Add right hand: zone B, keyboard splits at the Split point")
                     .clicked()
             };
             if split_clicked {
@@ -121,9 +121,9 @@ impl App {
 
             // ── Zone A ───────────────────────────────────────────────────
             let a_header = if split_on {
-                format!("◀ Левая рука (A) — 0..{}", sp.saturating_sub(1))
+                format!("◀ Left hand (A) — 0..{}", sp.saturating_sub(1))
             } else {
-                "◀ Левая рука (A)".to_string()
+                "◀ Left hand (A)".to_string()
             };
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(a_header).weak().small());
@@ -136,7 +136,7 @@ impl App {
             }
             let a_count = ZONE_A.filter(|&i| self.parts[i].enabled).count();
             if a_count < PARTS_PER_ZONE
-                && ui.small_button("+ Добавить парт").on_hover_text("Add part to Zone A").clicked()
+                && ui.small_button("+ Add part").on_hover_text("Add part to Zone A").clicked()
             {
                 self.add_part_to_zone(false);
             }
@@ -145,7 +145,7 @@ impl App {
             if split_on {
                 ui.add_space(theme::SP_XS);
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("▶ Правая рука (B) — {sp}..127")).weak().small());
+                    ui.label(egui::RichText::new(format!("▶ Right hand (B) — {sp}..127")).weak().small());
                 });
                 for i in ZONE_B {
                     if !self.parts[i].enabled { continue; }
@@ -155,7 +155,7 @@ impl App {
                 }
                 let b_count = ZONE_B.filter(|&i| self.parts[i].enabled).count();
                 if b_count < PARTS_PER_ZONE
-                    && ui.small_button("+ Добавить парт").on_hover_text("Add part to Zone B").clicked()
+                    && ui.small_button("+ Add part").on_hover_text("Add part to Zone B").clicked()
                 {
                     self.add_part_to_zone(true);
                 }
@@ -306,7 +306,9 @@ impl App {
             let label = format!("{zone}{num}");
             let muted = self.parts[i].mute;
             let label_text = if muted {
-                egui::RichText::new(label).strong().color(egui::Color32::GRAY)
+                // Зачёркивание — второй признак состояния помимо цвета (WCAG 1.4.1);
+                // GRAY(160) на BG_PANEL = 6.4:1.
+                egui::RichText::new(label).strong().strikethrough().color(egui::Color32::GRAY)
             } else {
                 egui::RichText::new(label).strong()
             };
@@ -517,21 +519,38 @@ fn draw_key_zone_map(ui: &mut egui::Ui, parts: &[super::PartState], active: usiz
     for (i, part) in parts.iter().enumerate() {
         if !part.enabled { continue; }
         let c = colors[i % colors.len()];
-        let color = if i == active { c }
-            else { egui::Color32::from_rgba_premultiplied(c.r()/2, c.g()/2, c.b()/2, 180) };
+        // Полный цвет у всех зон: приглушённые неактивные зоны падали ниже
+        // 3:1 по фону (audit Medium п.5). Активная зона — белая обводка
+        // (неколоровый признак, WCAG 1.4.1), а не затемнение.
         let lo = part.min_note as f32 / 127.0;
         let hi = (part.max_note as f32 + 1.0) / 127.0;
         let zone = egui::Rect::from_min_max(
             egui::pos2(rect.left() + lo * total_w, rect.top()),
             egui::pos2((rect.left() + hi * total_w).min(rect.right()), rect.bottom()),
         );
-        painter.rect_filled(zone, 0.0, color);
+        painter.rect_filled(zone, 0.0, c);
     }
     for oct in 0..11 {
         let x = rect.left() + (oct * 12) as f32 / 127.0 * total_w;
         painter.line_segment(
             [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
             egui::Stroke::new(0.5, theme::STROKE_ZONE_DIV),
+        );
+    }
+    // Активная зона поверх октавных разделителей (иначе серые линии 0.5px
+    // прорезают белую обводку на границах, кратных 12).
+    for (i, part) in parts.iter().enumerate() {
+        if !part.enabled || i != active { continue; }
+        let lo = part.min_note as f32 / 127.0;
+        let hi = (part.max_note as f32 + 1.0) / 127.0;
+        let zone = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + lo * total_w, rect.top()),
+            egui::pos2((rect.left() + hi * total_w).min(rect.right()), rect.bottom()),
+        );
+        painter.rect_stroke(
+            zone, 0.0,
+            egui::Stroke::new(1.5, egui::Color32::WHITE),
+            egui::StrokeKind::Inside,
         );
     }
 }

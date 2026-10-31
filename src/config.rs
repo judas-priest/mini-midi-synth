@@ -130,6 +130,9 @@ pub struct UiSettings {
     /// Keyboard split note persisted across restarts.
     #[serde(default)]
     pub split_point: Option<u8>,
+    /// Last loaded performance — restored at startup.
+    #[serde(default)]
+    pub last_performance: Option<String>,
     /// Live per-part toggles that must survive restarts (mute / root-only).
     #[serde(default)]
     pub parts_state: Vec<PartUiState>,
@@ -198,6 +201,7 @@ impl Default for Config {
                 layer_b_volume: 0.5,
                 pad_perf_map: Vec::new(),
                 split_point: None,
+                last_performance: None,
                 led_companion: false,
                 led_companion_cmd: default_led_companion_cmd(),
             parts_state: Vec::new(),

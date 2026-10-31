@@ -33,10 +33,11 @@ fn tc1_start_at_boundary() {
     let _ = e.handle_control(ControlEvent::MasterPlay); // drums playing from step 0
     run(&mut e, steps(5)); // playhead ~step 5
     let _ = e.handle_control(ControlEvent::MasterRecord);
-    assert!(e.master_rec_pending_atom().load(Ordering::Relaxed), "armed");
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 1, "armed");
     assert!(matches!(e.looper.state, LooperState::Idle), "not capturing until boundary");
     run(&mut e, steps(12)); // crosses the boundary
-    assert!(!e.master_rec_pending_atom().load(Ordering::Relaxed));
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 2, "capturing");
+    assert_eq!(e.master_rec_cycle_atom().load(Ordering::Relaxed), 1);
     assert!(
         matches!(e.looper.state, LooperState::Recording | LooperState::Overdubbing),
         "capture started at boundary"
@@ -119,7 +120,7 @@ fn tc5_master_stop_clears_pending() {
     run(&mut e, steps(4));
     let _ = e.handle_control(ControlEvent::MasterRecord); // armed
     let _ = e.handle_control(ControlEvent::MasterStop);
-    assert!(!e.master_rec_pending_atom().load(Ordering::Relaxed));
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 0);
     assert!(matches!(e.looper.state, LooperState::Idle));
 }
 
@@ -130,7 +131,7 @@ fn tc8_rearm_cancel() {
     run(&mut e, steps(6));
     let _ = e.handle_control(ControlEvent::MasterRecord); // armed
     let _ = e.handle_control(ControlEvent::MasterRecord); // cancel before boundary
-    assert!(!e.master_rec_pending_atom().load(Ordering::Relaxed), "disarmed");
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 0, "disarmed");
     run(&mut e, steps(10));
     assert!(matches!(e.looper.state, LooperState::Idle), "never started");
 }
@@ -169,4 +170,104 @@ fn tc9_multitrack_records_only_sounding_parts() {
     let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть
     run(&mut e, steps(16));
     assert!(matches!(e.looper.state, LooperState::Playing));
+}
+
+#[test]
+fn tc10_rec_after_close_starts_fresh() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // старт
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    run(&mut e, steps(16)); // цикл 1 завершён
+    let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть
+    run(&mut e, steps(16)); // граница: Playing, петля = 1 цикл
+    assert!(matches!(e.looper.state, LooperState::Playing));
+    let old_len = e.looper.len();
+    assert!(old_len > 0);
+
+    // Rec после закрытия = НОВАЯ запись: петля стёрта, свежий арм
+    let _ = e.handle_control(ControlEvent::MasterRecord);
+    assert!(matches!(e.looper.state, LooperState::Idle), "old loop cleared");
+    assert_eq!(e.looper.len(), 0, "old events wiped");
+    run(&mut e, steps(16)); // граница: свежий захват
+    assert!(matches!(e.looper.state, LooperState::Recording));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 72 });
+    let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть свежий
+    run(&mut e, steps(16));
+    assert!(matches!(e.looper.state, LooperState::Playing));
+    // В петле только новая нота — старой 60 нет
+    {
+        let disp = e.looper.display();
+        let disp = disp.lock().unwrap();
+        let ons: Vec<_> = disp.events.iter().filter(|ev| ev.velocity > 0).collect();
+        assert!(ons.iter().any(|ev| ev.note == 72), "fresh capture recorded");
+        assert!(!ons.iter().any(|ev| ev.note == 60), "old loop content must be gone");
+    }
+}
+
+#[test]
+fn tc11_overdub_layer_boundary_aligned() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // старт
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    // Закрыть в ПЕРВОМ цикле: Rec до его границы → петля = 1 цикл
+    run(&mut e, steps(10));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть
+    run(&mut e, steps(6)); // граница: Playing, петля = 1 цикл
+    let len_before = e.looper.len();
+    assert!(matches!(e.looper.state, LooperState::Playing));
+
+    // Слой: Ovr → на границе Overdubbing
+    let _ = e.handle_control(ControlEvent::MasterOverdub);
+    assert!(matches!(e.looper.state, LooperState::Playing), "waits for boundary");
+    run(&mut e, steps(16)); // граница: overdub started
+    assert!(matches!(e.looper.state, LooperState::Overdubbing));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 65, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 65 });
+    let _ = e.handle_control(ControlEvent::MasterOverdub); // закрыть слой
+    run(&mut e, steps(16)); // граница: Playing
+    assert!(matches!(e.looper.state, LooperState::Playing));
+    // Длина петли не изменилась; слой записан
+    assert!(
+        (e.looper.loop_len_ticks() as i64 - 96000).abs() <= 64,
+        "loop length unchanged: {}", e.looper.loop_len_ticks()
+    );
+    assert!(e.looper.len() > len_before, "layer captured");
+}
+
+#[test]
+fn tc12_cycle_remove_cuts_last_cycle() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // граница: захват, cycle 1
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    run(&mut e, steps(16)); // граница: cycle 2
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 67, velocity: 100 }); // плохая нота в cycle 2
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 67 });
+    let _ = e.handle_control(ControlEvent::CaptureCycleRemove); // −1: убрать cycle 2
+    run(&mut e, steps(8)); // доигрываем до границы (уже в урезанном cycle 1→2)
+    let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть
+    run(&mut e, steps(16));
+    assert!(matches!(e.looper.state, LooperState::Playing));
+    {
+        let disp = e.looper.display();
+        let disp = disp.lock().unwrap();
+        let ons: Vec<_> = disp.events.iter().filter(|ev| ev.velocity > 0).collect();
+        assert!(ons.iter().any(|ev| ev.note == 60), "cycle-1 note kept");
+        assert!(!ons.iter().any(|ev| ev.note == 67), "cycle-2 note removed");
+    }
 }

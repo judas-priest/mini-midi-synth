@@ -175,24 +175,28 @@ pub const SEQ_STEP_HIGHLIGHT: Color32 = Color32::from_rgb(0, 255, 200);
 /// Gate-on indicator color.
 pub const SEQ_GATE_ON: Color32 = Color32::from_rgb(0, 200, 120);
 
-/// Gate-off indicator color.
-pub const SEQ_GATE_OFF: Color32 = Color32::from_gray(50);
+/// Gate-off indicator color (non-text fill, ≥3:1 on BG_PANEL — WCAG 1.4.11;
+/// was gray(50) = 1.30:1).
+pub const SEQ_GATE_OFF: Color32 = Color32::from_gray(110);
 
 // ── MIDI sequencer ───────────────────────────────────────────────────────────
 
 /// Loop button active.
 pub const MIDI_SEQ_LOOP_ON: Color32 = Color32::from_rgb(80, 210, 100);
 
-/// Mute button inactive.
-pub const MIDI_SEQ_MUTE_INACTIVE: Color32 = Color32::from_gray(80);
+/// Mute button inactive (text — ≥4.5:1 on BG_PANEL, WCAG 1.4.3; was gray(80) = 2.1:1).
+pub const MIDI_SEQ_MUTE_INACTIVE: Color32 = Color32::from_gray(140);
+
+/// Loop button inactive (text — ≥4.5:1; was egui DARK_GRAY = gray(96) ≈ 2.6:1).
+pub const MIDI_SEQ_LOOP_OFF: Color32 = Color32::from_gray(140);
 
 // ── Looper ───────────────────────────────────────────────────────────────────
 
 /// Overdub state indicator.
 pub const LOOPER_OVERDUB: Color32 = Color32::from_rgb(255, 140, 0);
 
-/// Muted layer label.
-pub const LOOPER_LAYER_MUTED: Color32 = Color32::from_gray(80);
+/// Muted layer label (text — ≥4.5:1; was gray(80) = 2.1:1).
+pub const LOOPER_LAYER_MUTED: Color32 = Color32::from_gray(140);
 
 // ── Part colors (8 zones) ────────────────────────────────────────────────────
 
@@ -227,3 +231,77 @@ pub const DRUM_COLORS: [Color32; 16] = [
     Color32::from_rgb(60, 100, 60),   // High Tom
     Color32::from_rgb(180, 180, 60),  // Ride
 ];
+
+// ── Drum pad categories (single source with DRUM_COLORS) ────────────────────
+/// Pad color for kick sounds = grid Kick.
+pub const DRUM_CAT_KICK: Color32 = DRUM_COLORS[0];
+/// Pad color for snare sounds = grid Snare.
+pub const DRUM_CAT_SNARE: Color32 = DRUM_COLORS[2];
+/// Pad color for hi-hat sounds = grid Closed HH.
+pub const DRUM_CAT_HATS: Color32 = DRUM_COLORS[6];
+/// Pad color for cymbal sounds = grid Crash.
+pub const DRUM_CAT_CYMBALS: Color32 = DRUM_COLORS[13];
+/// Pad color for tom sounds = grid Low Tom.
+pub const DRUM_CAT_TOMS: Color32 = DRUM_COLORS[9];
+/// Pad color for perc/clap/rim sounds = grid Clap.
+pub const DRUM_CAT_PERC: Color32 = DRUM_COLORS[3];
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rel_luminance(c: Color32) -> f64 {
+        fn ch(v: u8) -> f64 {
+            let s = v as f64 / 255.0;
+            if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+        }
+        0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+    }
+
+    /// WCAG 2.x contrast ratio.
+    fn contrast(a: Color32, b: Color32) -> f64 {
+        let (la, lb) = (rel_luminance(a), rel_luminance(b));
+        let (hi, lo) = if la >= lb { (la, lb) } else { (lb, la) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    /// Audit Medium п.5: muted/inactive state tokens must meet WCAG — 3:1
+    /// non-text (1.4.11) для заливки, 4.5:1 текста (1.4.3) для букв-лейблов.
+    #[test]
+    fn muted_state_tokens_meet_non_text_contrast() {
+        let non_text: [(&str, Color32, Color32, f64); 4] = [
+            ("SEQ_GATE_OFF", SEQ_GATE_OFF, BG_PANEL, 3.0),
+            ("LOOPER_LAYER_MUTED", LOOPER_LAYER_MUTED, BG_PANEL, 4.5),
+            ("MIDI_SEQ_MUTE_INACTIVE", MIDI_SEQ_MUTE_INACTIVE, BG_PANEL, 4.5),
+            ("MIDI_SEQ_LOOP_OFF", MIDI_SEQ_LOOP_OFF, BG_PANEL, 4.5),
+        ];
+        for (name, fg, bg, min) in non_text {
+            let c = contrast(fg, bg);
+            assert!(c >= min, "{name}: {c:.2}:1 < {min}:1 (WCAG)");
+        }
+    }
+
+    /// Audit Medium п.5: every key-zone color must stay visible on the map
+    /// background. The map paints BG_PANEL (layers.rs:516), not BG_TIMELINE —
+    /// guard the pairing the code actually uses.
+    #[test]
+    fn key_zone_colors_meet_non_text_contrast() {
+        for (i, c) in PART_COLORS.iter().enumerate() {
+            let cr = contrast(*c, BG_PANEL);
+            assert!(cr >= 3.0, "PART_COLORS[{i}]: {cr:.2}:1 < 3:1 on BG_PANEL");
+        }
+    }
+
+    /// Audit Medium п.10: pads and step grid must share one palette source.
+    #[test]
+    fn drum_category_colors_derive_from_grid_palette() {
+        assert_eq!(DRUM_CAT_KICK, DRUM_COLORS[0]);
+        assert_eq!(DRUM_CAT_SNARE, DRUM_COLORS[2]);
+        assert_eq!(DRUM_CAT_HATS, DRUM_COLORS[6]);
+        assert_eq!(DRUM_CAT_CYMBALS, DRUM_COLORS[13]);
+        assert_eq!(DRUM_CAT_TOMS, DRUM_COLORS[9]);
+        assert_eq!(DRUM_CAT_PERC, DRUM_COLORS[3]);
+    }
+}
