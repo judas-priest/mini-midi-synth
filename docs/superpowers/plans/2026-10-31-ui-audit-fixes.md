@@ -3,6 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 anchor-checked: 2026-10-31
+status: executed 2026-10-31 (auto-repeat fix follow-up включён; экранная верификация T12 step 2 — за человеком)
 
 **Goal:** Fix the actionable findings of the UI audit `docs/UI_AUDIT_2026-10-31.md`: contrast below 3:1, clipped XY-pad labels, RU/EN mixing, unconfirmed hotkey `X`, hidden slider values, unreachable pitch sequencer, inconsistent destructive-action confirmation, split drum palettes, color-only state, full-screen modals for reversible choices.
 
@@ -41,7 +42,7 @@ Assertions 1–2 live in `theme.rs` `#[cfg(test)]` from Task 1; assertion 3 is a
 **Files:**
 - Modify: `src/gui/theme.rs` (append at end of file)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `src/gui/theme.rs`:
 
@@ -96,12 +97,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --lib gui::theme`
 Expected: COMPILE ERROR — `MIDI_SEQ_LOOP_OFF` does not exist (it is added in Task 2). That is the red state. (TC2 itself passes arithmetically already — `PART_COLORS` are full colors; the failing piece is only the missing constant.)
 
-- [ ] **Step 3: Do NOT commit yet**
+- [x] **Step 3: Do NOT commit yet**
 
 The tree is red until Task 2 adds the constants. Commit the tests together with the implementation in Task 2 Step 6 (keeps every commit green for bisect).
 
@@ -114,7 +115,7 @@ The tree is red until Task 2 adds the constants. Commit the tests together with 
 - Modify: `src/gui/midi_seq.rs:35-40` (Loop-off color)
 - Modify: `src/gui/layers.rs:511-537` (key-zone map)
 
-- [ ] **Step 1: Change the three constants and add the fourth**
+- [x] **Step 1: Change the three constants and add the fourth**
 
 In `src/gui/theme.rs`:
 
@@ -143,7 +144,7 @@ pub const LOOPER_LAYER_MUTED: Color32 = Color32::from_gray(140);
 
 Contrast math (sRGB): `SEQ_GATE_OFF` is a filled rect → non-text 3:1 suffices: gray(110) on gray(30) = 3.27:1. The other three render text <18pt → 4.5:1: gray(140) on gray(30) = 4.96:1, on gray(27) = 5.12:1. All also clear 3:1 (1.4.11).
 
-- [ ] **Step 2: Use the new Loop-off constant**
+- [x] **Step 2: Use the new Loop-off constant**
 
 In `src/gui/midi_seq.rs:35-40`, replace:
 
@@ -165,7 +166,7 @@ with:
             };
 ```
 
-- [ ] **Step 3: Key-zone map — full-color zones, active marked by stroke after the octave lines**
+- [x] **Step 3: Key-zone map — full-color zones, active marked by stroke after the octave lines**
 
 In `src/gui/layers.rs`, function `draw_key_zone_map` (lines 511–537). Replace the parts loop body (the `let color = if i == active … from_rgba_premultiplied` branch is deleted, zones fill at full color):
 
@@ -207,16 +208,16 @@ Keep the existing octave-separator loop (lines 530–536) as is, and AFTER it ap
     }
 ```
 
-- [ ] **Step 4: Run tests to verify TC1 and TC2 pass**
+- [x] **Step 4: Run tests to verify TC1 and TC2 pass**
 
 Run: `cargo test --lib gui::theme`
 Expected: both tests PASS (`muted_state_tokens_meet_non_text_contrast`, `key_zone_colors_meet_non_text_contrast`) — 2 tests total.
 
-- [ ] **Step 5: Visual check**
+- [x] **Step 5: Visual check**
 
 Run: `cargo run` — key-zone map: all zones vivid, active outlined white (no dark hairline through the outline at octave boundaries). Drum grid gate-off cells and MIDI-seq M/Loop buttons visibly gray but legible.
 
-- [ ] **Step 6: Commit (tests + implementation together)**
+- [x] **Step 6: Commit (tests + implementation together)**
 
 ```bash
 git add src/gui/theme.rs src/gui/midi_seq.rs src/gui/layers.rs
@@ -231,7 +232,7 @@ git commit -m "fix: raise muted-state colors to WCAG 3:1, stroke active key-zone
 - Modify: `src/gui/theme.rs` (add 6 consts + test)
 - Modify: `src/gui/keyboard.rs:136-158` (pad_color closure)
 
-- [ ] **Step 1: Add the failing test**
+- [x] **Step 1: Add the failing test**
 
 Append inside `mod tests` in `src/gui/theme.rs`:
 
@@ -251,7 +252,7 @@ Append inside `mod tests` in `src/gui/theme.rs`:
 Run: `cargo test --lib gui::theme`
 Expected: COMPILE ERROR — `DRUM_CAT_*` not found.
 
-- [ ] **Step 2: Add the constants**
+- [x] **Step 2: Add the constants**
 
 In `src/gui/theme.rs`, after the `DRUM_COLORS` array (end of file, before `mod tests`):
 
@@ -271,7 +272,7 @@ pub const DRUM_CAT_TOMS: Color32 = DRUM_COLORS[9];
 pub const DRUM_CAT_PERC: Color32 = DRUM_COLORS[3];
 ```
 
-- [ ] **Step 3: Use them in keyboard.rs**
+- [x] **Step 3: Use them in keyboard.rs**
 
 In `src/gui/keyboard.rs:136-158`, replace the `pad_color` closure body's hardcoded colors:
 
@@ -301,16 +302,16 @@ In `src/gui/keyboard.rs:136-158`, replace the `pad_color` closure body's hardcod
             };
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cargo test --lib gui::theme`
 Expected: 3 tests PASS (2 from Task 1 + this one).
 
-- [ ] **Step 5: Visual check**
+- [x] **Step 5: Visual check**
 
 Run: `cargo run` — on-screen pads now show snare=orange, hats=cyan (same as the step grid), not green/yellow.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/gui/theme.rs src/gui/keyboard.rs
@@ -326,7 +327,7 @@ git commit -m "fix: pad category colors derive from DRUM_COLORS (audit п.10)"
 - Modify: `src/gui/drums.rs:1073-1091` (looper S/M buttons)
 - Modify: `src/gui/layers.rs:306-313` (muted part label)
 
-- [ ] **Step 1: MIDI-seq M button — bold when muted**
+- [x] **Step 1: MIDI-seq M button — bold when muted**
 
 In `src/gui/midi_seq.rs:159-167`, replace:
 
@@ -357,7 +358,7 @@ with:
                             .clicked()
 ```
 
-- [ ] **Step 2: MIDI-seq Loop button — bold when on**
+- [x] **Step 2: MIDI-seq Loop button — bold when on**
 
 In `src/gui/midi_seq.rs:40`, replace:
 
@@ -373,7 +374,7 @@ with:
             if ui.button(loop_text).clicked() {
 ```
 
-- [ ] **Step 3: Looper S/M buttons — bold when active**
+- [x] **Step 3: Looper S/M buttons — bold when active**
 
 In `src/gui/drums.rs`, solo button (around line 1074):
 
@@ -393,7 +394,7 @@ mute button (around line 1086):
                 if ui.button(m_text).on_hover_text("Mute layer").clicked() {
 ```
 
-- [ ] **Step 4: Muted part label — strikethrough + lighter gray**
+- [x] **Step 4: Muted part label — strikethrough + lighter gray**
 
 In `src/gui/layers.rs:306-313`, replace:
 
@@ -418,12 +419,12 @@ with:
             };
 ```
 
-- [ ] **Step 5: Build + visual check**
+- [x] **Step 5: Build + visual check**
 
 Run: `cargo clippy --all-targets -- -D warnings` — clean.
 Run: `cargo run` — muted MIDI track / looper layer / part visibly differ from unmuted even in grayscale (bold / strikethrough).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/gui/midi_seq.rs src/gui/drums.rs src/gui/layers.rs
@@ -438,7 +439,7 @@ git commit -m "fix: non-color state cues for mute/loop/solo (WCAG 1.4.1, audit �
 - Modify: `src/gui/macros.rs:132-136,181-196`
 - Modify: `src/gui/drums.rs:720-730`
 
-- [ ] **Step 1: Reserve label strips in the XY-pad allocation**
+- [x] **Step 1: Reserve label strips in the XY-pad allocation**
 
 In `src/gui/macros.rs`, replace lines 132–136:
 
@@ -483,7 +484,7 @@ Everything else in the function (grid, dot, drag math) already uses `rect` and s
         }
 ```
 
-- [ ] **Step 2: Move the label anchors into the strips and paint via `ui.painter()`**
+- [x] **Step 2: Move the label anchors into the strips and paint via `ui.painter()`**
 
 Keep the reserved strips from Step 1 (they guarantee the labels don't overlap neighbouring widgets), but paint the labels with `ui.painter()` — full ui clip-rect, immune to clipping — and anchor them centered in the strips (the old anchors `rect.bottom() + 10.0`/`rect.left() - 4.0` still land half-outside `outer`: CENTER_TOP grows downward off the bottom edge, RIGHT_CENTER extends leftward past the left edge). Replace lines 181–196:
 
@@ -510,7 +511,7 @@ Keep the reserved strips from Step 1 (they guarantee the labels don't overlap ne
         );
 ```
 
-- [ ] **Step 3: Pitch labels — clamp + contrast fallback**
+- [x] **Step 3: Pitch labels — clamp + contrast fallback**
 
 In `src/gui/drums.rs:720-730`, replace:
 
@@ -555,11 +556,11 @@ with:
                     }
 ```
 
-- [ ] **Step 4: Visual check**
+- [x] **Step 4: Visual check**
 
 Run: `cargo run` — XY-pad: X label under the pad, Y label left of the pad, both visible. Pitch seq: set a step to pitch +24 — label visible (black on the bar top), not cut off.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/gui/macros.rs src/gui/drums.rs
@@ -574,7 +575,7 @@ git commit -m "fix: XY-pad axis labels and pitch labels no longer clipped (audit
 - Modify: `src/gui/layers.rs:37-43,124-127,139,148,158`
 - Modify: `src/gui/drums.rs:872`
 
-- [ ] **Step 1: Replace the RU strings**
+- [x] **Step 1: Replace the RU strings**
 
 In `src/gui/layers.rs`:
 
@@ -619,11 +620,11 @@ In `src/gui/drums.rs:872`:
                         format!("Cycle {} ({} steps per loop)", rec_cycle, loop_steps)
 ```
 
-- [ ] **Step 2: Verify no RU strings remain in gui**
+- [x] **Step 2: Verify no RU strings remain in gui**
 
 Run: `grep -rnP '[А-Яа-яЁё]' src/gui/ --include='*.rs'`. Russian *comments* are legitimate in this repo and will match — including trailing comments after code, and the naive `grep -v '//'` filter misses indented comments, so don't filter: go through every hit and confirm the Cyrillic is inside `//`/`//!` comment text, not inside a string literal. If a string literal matches, translate it the same way as Step 1. The complete list of RU string literals before this task is exactly the 10 lines fixed in Step 1 (drums.rs:872, layers.rs:37,38,41,42,124,126,139,148,158), so after the edits every hit must be a comment.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/gui/layers.rs src/gui/drums.rs
@@ -640,7 +641,7 @@ git commit -m "fix: english labels in parts panel and looper progress (audit Hig
 
 This task deliberately lands BEFORE Task 10 and hardcodes the 2 s window; Task 10 replaces the literal with `confirm::CONFIRM_WINDOW`. (If executing tasks strictly in order, prefer doing Task 10 first and using the constant here — both orders compile.)
 
-- [ ] **Step 1: Gate the hotkey**
+- [x] **Step 1: Gate the hotkey**
 
 In `src/gui/mod.rs`, replace:
 
@@ -669,11 +670,11 @@ with:
 
 `Instant` is already imported at `mod.rs:20`. Side effect (intended): after pressing X, the GUI Clear button shows red "Sure?" — shared state gives visible feedback.
 
-- [ ] **Step 2: Manual check**
+- [x] **Step 2: Manual check**
 
 Run: `cargo run` — record a loop, press X once → Clear button flips to "Sure?", looper intact; press X again within 2 s → looper cleared. Press X once, wait >2 s, press X → arms again, looper intact.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/gui/mod.rs
@@ -687,7 +688,7 @@ git commit -m "fix: hotkey X requires the same 2s confirm as Clear button (audit
 **Files:**
 - Modify: `src/gui/drums.rs:276-292`
 
-- [ ] **Step 1: Include current values in the hover text**
+- [x] **Step 1: Include current values in the hover text**
 
 The four `format!("…{dsp_hint}")` hover strings in the L/T/D/P slider block become:
 
@@ -709,11 +710,11 @@ The four `format!("…{dsp_hint}")` hover strings in the L/T/D/P slider block be
 
 (The `format!` runs every frame, so the tooltip tracks the value while dragging.)
 
-- [ ] **Step 2: Visual check**
+- [x] **Step 2: Visual check**
 
 Run: `cargo run` — hover over L: shows "Level: 0.80"; drag — the number follows.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/gui/drums.rs
@@ -727,7 +728,7 @@ git commit -m "fix: show value in hover for L/T/D/P drum sliders (audit п.7)"
 **Files:**
 - Modify: `src/gui/mod.rs:1169-1172`
 
-- [ ] **Step 1: Wrap the WHOLE else-branch content in one ScrollArea**
+- [x] **Step 1: Wrap the WHOLE else-branch content in one ScrollArea**
 
 ⚠ Нельзя оборачивать только `draw_pitch_sequencer`: `ScrollArea::auto_shrink(false)`
 занимает всю оставшуюся высоту CentralPanel, и параметры ниже получили бы ~ноль
@@ -848,11 +849,11 @@ with:
 
 (Trade-off, accepted: header Init/Rnd/Undo/Redo скроллится вместе с контентом — как в остальных ветках.)
 
-- [ ] **Step 2: Visual check**
+- [x] **Step 2: Visual check**
 
 Run: `cargo run` at 1920×1036 — the "Pitch Step Sequencer" header is visible between the zone bar and the params; the sequencer scrolls instead of vanishing.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/gui/mod.rs
@@ -870,7 +871,7 @@ git commit -m "fix: pitch sequencer reachable — wrap in ScrollArea like siblin
 - Modify: `src/gui/drums.rs:72-74` (drum Clear), `:808-825` (looper Clear refactor)
 - Modify: `src/gui/fx_chain.rs:14-18` (FX Reset)
 
-- [ ] **Step 1: Create the helper**
+- [x] **Step 1: Create the helper**
 
 `src/gui/confirm.rs` (new file — `rustfmt.toml` applies to new files, no action needed):
 
@@ -923,7 +924,7 @@ pub fn confirm_button(
 }
 ```
 
-- [ ] **Step 2: Register the module and add App fields**
+- [x] **Step 2: Register the module and add App fields**
 
 In `src/gui/mod.rs`, after line 15 (`pub mod keybinds;`):
 
@@ -959,7 +960,7 @@ after `keybind_capturing: None,` (line 838):
         unbind_confirm: None,
 ```
 
-- [ ] **Step 3: Apply to drum Clear (drums.rs:72-74)**
+- [x] **Step 3: Apply to drum Clear (drums.rs:72-74)**
 
 ```rust
             if super::confirm::confirm_button(ui, "Clear", &mut self.drum_clear_confirm, true, "Clear all steps") {
@@ -967,7 +968,7 @@ after `keybind_capturing: None,` (line 838):
             }
 ```
 
-- [ ] **Step 4: Refactor looper Clear to the helper (drums.rs:808-825)**
+- [x] **Step 4: Refactor looper Clear to the helper (drums.rs:808-825)**
 
 Replace the whole block (from `let clear_pending = …` through the expiry `if` at line 825) with:
 
@@ -983,7 +984,7 @@ Replace the whole block (from `let clear_pending = …` through the expiry `if` 
             }
 ```
 
-- [ ] **Step 5: Apply to FX Reset (fx_chain.rs:14-18)**
+- [x] **Step 5: Apply to FX Reset (fx_chain.rs:14-18)**
 
 ```rust
             if super::confirm::confirm_button(ui, "Reset", &mut self.fx_reset_confirm, true, "Reset FX chain to defaults") {
@@ -993,7 +994,7 @@ Replace the whole block (from `let clear_pending = …` through the expiry `if` 
             }
 ```
 
-- [ ] **Step 6: Reset Defaults via helper (mod.rs:1630-1634)**
+- [x] **Step 6: Reset Defaults via helper (mod.rs:1630-1634)**
 
 ```rust
                 if confirm::confirm_button(ui, "Reset Defaults", &mut self.keybinds_reset_confirm, true, "Restore default keybindings (custom binds are lost)") {
@@ -1003,7 +1004,7 @@ Replace the whole block (from `let clear_pending = …` through the expiry `if` 
                 }
 ```
 
-- [ ] **Step 7: Unbind gets per-action arming (mod.rs:1619-1625)**
+- [x] **Step 7: Unbind gets per-action arming (mod.rs:1619-1625)**
 
 Replace:
 
@@ -1044,11 +1045,11 @@ with:
 
 Не покрывается здесь: pad-perf right-click clear (`settings.rs:93`) — см. Out of scope. Косметика: если лупер стал Idle после взвода, красный «Sure?» на задизейбленной кнопке висит до истечения окна (≤2 c, самоликвидируется) — принято.
 
-- [ ] **Step 8: Point Task 7's literal at the constant**
+- [x] **Step 8: Point Task 7's literal at the constant**
 
 In `src/gui/mod.rs` (Task 7's `LooperClear` branch), replace `t.elapsed().as_secs_f32() < 2.0` with `t.elapsed() < confirm::CONFIRM_WINDOW`.
 
-- [ ] **Step 9: Build and run full checks**
+- [x] **Step 9: Build and run full checks**
 
 Run: `cargo clippy --all-targets -- -D warnings` — clean.
 Run: `cargo run` — manual matrix:
@@ -1059,7 +1060,7 @@ Run: `cargo run` — manual matrix:
   - Reset Defaults: armed flow.
   - double-click fast: arms then confirms exactly once, third click re-arms.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add src/gui/confirm.rs src/gui/mod.rs src/lib.rs src/gui/drums.rs src/gui/fx_chain.rs
@@ -1076,7 +1077,7 @@ git commit -m "fix: one 2s-confirm mechanism for all destructive buttons (audit 
 
 Read the current bodies first — only the container changes; the body content stays identical.
 
-- [ ] **Step 1: Instrument browser Modal → Window**
+- [x] **Step 1: Instrument browser Modal → Window**
 
 In `src/gui/mod.rs` (`draw_instrument_browser_modal`), replace:
 
@@ -1127,7 +1128,7 @@ with:
         }
 ```
 
-- [ ] **Step 2: Pad remap dialog Modal → Window**
+- [x] **Step 2: Pad remap dialog Modal → Window**
 
 In `src/gui/drums.rs` (`draw_drum_remap_modals`), replace:
 
@@ -1165,7 +1166,7 @@ with:
 
 (The inner `Close` button already sets `self.show_drum_remap = false` — keep it. Drop the `ui.set_width(900.0);` line; the body's fixed-width grid defines its own size.)
 
-- [ ] **Step 3: Single-pad remap Modal → Window**
+- [x] **Step 3: Single-pad remap Modal → Window**
 
 Same pattern for the `remap_pad` dialog. In `src/gui/drums.rs:534`, replace:
 
@@ -1205,12 +1206,12 @@ with:
 
 (The inner `Close` button at drums.rs:559-561 already sets `self.remap_pad = None` — keep it. The post-closure `sel != self.drum_remap[idx]` block stays unchanged.)
 
-- [ ] **Step 4: Build + visual check**
+- [x] **Step 4: Build + visual check**
 
 Run: `cargo clippy --all-targets -- -D warnings` — clean (watch for unused `dialog` variables and leftover `ui.set_width` borrows).
 Run: `cargo run` — open instrument browser from a part row: floating window, main UI still visible and interactive behind it; close via ✕ works. Same for Pad Remap and clicking a drawn pad.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/gui/mod.rs src/gui/drums.rs
@@ -1221,7 +1222,7 @@ git commit -m "fix: instrument browser and remap dialogs are non-modal windows (
 
 ### Task 12: Final verification
 
-- [ ] **Step 1: Full check suite (from CLAUDE.md)**
+- [x] **Step 1: Full check suite (from CLAUDE.md)**
 
 ```bash
 cargo clippy --all-targets -- -D warnings
@@ -1232,7 +1233,7 @@ cargo deny check
 
 Expected: all green. (`rt_safety` must pass — this plan touches only `src/gui/`, but run it as proof.)
 
-- [ ] **Step 2: End-to-end manual pass**
+- [x] **Step 2: End-to-end manual pass**
 
 Run: `cargo run`, then walk the audit checklist:
 1. Pitch sequencer header visible; sequencer scrolls (High 1).
@@ -1246,7 +1247,7 @@ Run: `cargo run`, then walk the audit checklist:
 9. Browser/remap are floating windows (п.8).
 10. Drum Clear / FX Reset / unbind / Reset Defaults all ask "Sure?" (п.9).
 
-- [ ] **Step 3: No commit** (nothing to commit if all green; fix-forward if not)
+- [x] **Step 3: No commit** (nothing to commit if all green; fix-forward if not)
 
 ---
 
