@@ -103,7 +103,8 @@ struct CommonInit {
     #[cfg(feature = "gui")]
     sustain_atom: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(feature = "gui")]
-    master_rec_pending_atom: Arc<std::sync::atomic::AtomicBool>,
+    master_rec_state_atom: Arc<std::sync::atomic::AtomicU8>,
+    master_rec_cycle_atom: Arc<std::sync::atomic::AtomicU8>,
     #[cfg(feature = "gui")]
     drum_step_atom: Arc<AtomicU8>,
     #[cfg(feature = "gui")]
@@ -232,7 +233,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     #[cfg(feature = "gui")]
     let sustain_atom = engine.sustain_atom();
     #[cfg(feature = "gui")]
-    let master_rec_pending_atom = engine.master_rec_pending_atom();
+    let master_rec_state_atom = engine.master_rec_state_atom();
+    let master_rec_cycle_atom = engine.master_rec_cycle_atom();
     #[cfg(feature = "gui")]
     let pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
     #[cfg(feature = "gui")]
@@ -339,7 +341,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         #[cfg(feature = "gui")]
         sustain_atom,
         #[cfg(feature = "gui")]
-        master_rec_pending_atom,
+        master_rec_state_atom,
+        master_rec_cycle_atom,
         #[cfg(feature = "gui")]
         #[cfg(feature = "gui")]
         drum_step_atom,
@@ -754,7 +757,8 @@ pub fn run_gui(
         pending_remove_part: None,
         _program_change_atom: c.program_change_atom,
         sustain_atom: c.sustain_atom,
-        master_rec_pending: c.master_rec_pending_atom,
+        master_rec_state: c.master_rec_state_atom,
+        master_rec_cycle: c.master_rec_cycle_atom,
         sustain_release: c.config.ui.sustain_release,
         sf2_release_scale: c.config.ui.sf2_release_scale,
         show_help: false,

@@ -33,10 +33,11 @@ fn tc1_start_at_boundary() {
     let _ = e.handle_control(ControlEvent::MasterPlay); // drums playing from step 0
     run(&mut e, steps(5)); // playhead ~step 5
     let _ = e.handle_control(ControlEvent::MasterRecord);
-    assert!(e.master_rec_pending_atom().load(Ordering::Relaxed), "armed");
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 1, "armed");
     assert!(matches!(e.looper.state, LooperState::Idle), "not capturing until boundary");
     run(&mut e, steps(12)); // crosses the boundary
-    assert!(!e.master_rec_pending_atom().load(Ordering::Relaxed));
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 2, "capturing");
+    assert_eq!(e.master_rec_cycle_atom().load(Ordering::Relaxed), 1);
     assert!(
         matches!(e.looper.state, LooperState::Recording | LooperState::Overdubbing),
         "capture started at boundary"
@@ -119,7 +120,7 @@ fn tc5_master_stop_clears_pending() {
     run(&mut e, steps(4));
     let _ = e.handle_control(ControlEvent::MasterRecord); // armed
     let _ = e.handle_control(ControlEvent::MasterStop);
-    assert!(!e.master_rec_pending_atom().load(Ordering::Relaxed));
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 0);
     assert!(matches!(e.looper.state, LooperState::Idle));
 }
 
@@ -130,7 +131,7 @@ fn tc8_rearm_cancel() {
     run(&mut e, steps(6));
     let _ = e.handle_control(ControlEvent::MasterRecord); // armed
     let _ = e.handle_control(ControlEvent::MasterRecord); // cancel before boundary
-    assert!(!e.master_rec_pending_atom().load(Ordering::Relaxed), "disarmed");
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 0, "disarmed");
     run(&mut e, steps(10));
     assert!(matches!(e.looper.state, LooperState::Idle), "never started");
 }

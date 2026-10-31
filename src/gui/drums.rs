@@ -841,20 +841,33 @@ impl App {
                 LooperState::Playing => "Play",
                 LooperState::Overdubbing => "OVR",
             };
-            // Quantized master recording (#30): capture armed, waiting for the
-            // sequencer bar boundary — show "ARMED" instead of the state.
-            let armed = self
-                .master_rec_pending
-                .load(std::sync::atomic::Ordering::Relaxed);
-            ui.colored_label(
-                if armed { egui::Color32::YELLOW } else { status_color },
-                if armed { "ARMED" } else { state_label },
-            );
+            // Quantized master capture (#30): индикация, на каком цикле стоим
+            let rec_state = self.master_rec_state.load(std::sync::atomic::Ordering::Relaxed);
+            let rec_cycle = self.master_rec_cycle.load(std::sync::atomic::Ordering::Relaxed);
+            let (label, label_color) = match rec_state {
+                1 => ("ARMED".to_string(), egui::Color32::YELLOW),
+                2 => (format!("REC {}/{}", rec_cycle, self.looper_bars), egui::Color32::RED),
+                3 => (format!("END {}/{}", rec_cycle, self.looper_bars), egui::Color32::ORANGE),
+                _ => (state_label.to_string(), status_color),
+            };
+            ui.colored_label(label_color, label);
             if event_count > 0 {
                 ui.label(egui::RichText::new(format!("{event_count}ev L{layer_count}")).small().weak());
             }
             if state != LooperState::Idle {
-                ui.add(egui::ProgressBar::new(position as f32 / 255.0).desired_width(80.0));
+                let frac = position as f32 / 255.0;
+                let bar_frac = if rec_state >= 2 && self.looper_bars > 0 {
+                    // Квантованный захват: прогресс ВНУТРИ текущего цикла
+                    (frac * self.looper_bars as f32) % 1.0
+                } else {
+                    frac
+                };
+                ui.add(egui::ProgressBar::new(bar_frac).desired_width(80.0))
+                    .on_hover_text(if rec_state >= 2 {
+                        format!("Цикл {}/{}", rec_cycle, self.looper_bars)
+                    } else {
+                        "Loop position".to_string()
+                    });
             }
         });
 

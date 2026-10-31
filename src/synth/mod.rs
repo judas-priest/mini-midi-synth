@@ -1231,7 +1231,11 @@ pub struct SynthEngine {
     /// Целых циклов паттерна, записанных квантованным захватом.
     looper_rec_cycles: u32,
     /// GUI mirror of arm_pending (shows "ARMED" in the looper state label).
-    master_rec_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Master capture state for GUI: 0 = idle, 1 = armed (waiting for the
+    /// boundary), 2 = capturing, 3 = capturing, closing at the next boundary.
+    master_rec_state: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Current capture cycle (1-based), for the "REC k/N" readout.
+    master_rec_cycle: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Active part index (0-7), shared with GUI for looper part recording
     active_part: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Looper record source: true = Mix (all sounding enabled parts,
@@ -1504,7 +1508,8 @@ impl SynthEngine {
             looper_cycle_ticks: 0,
             looper_finish_pending: false,
             looper_rec_cycles: 0,
-            master_rec_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            master_rec_state: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            master_rec_cycle: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             looper_source_mix: true,
             sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1524,8 +1529,17 @@ impl SynthEngine {
         self.seq_target.clone()
     }
 
-    pub fn master_rec_pending_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
-        self.master_rec_pending.clone()
+    pub fn master_rec_state_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
+        self.master_rec_state.clone()
+    }
+
+    pub fn master_rec_cycle_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
+        self.master_rec_cycle.clone()
+    }
+
+    fn set_master_rec_state(&self, state: u8, cycle: u8) {
+        self.master_rec_state.store(state, std::sync::atomic::Ordering::Relaxed);
+        self.master_rec_cycle.store(cycle, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn active_part_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
@@ -1743,7 +1757,7 @@ impl SynthEngine {
         self.looper_capture_quantized = false;
         self.looper_finish_pending = false;
         self.looper_rec_cycles = 0;
-        self.master_rec_pending.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.set_master_rec_state(0, 0);
         self.drum_engine.set_playing(false);
         self.drum_engine.sequencer.reset();
         match self.looper.state {
@@ -1794,7 +1808,7 @@ impl SynthEngine {
         // Снять арм (toggle-семантика ожидания границы)
         if self.looper_arm_pending {
             self.looper_arm_pending = false;
-            self.master_rec_pending.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.set_master_rec_state(0, 0);
             self.drum_engine.set_recording(false);
             return;
         }
@@ -1832,7 +1846,7 @@ impl SynthEngine {
             self.drum_engine.set_playing(true);
             self.looper_arm_pending = true;
             self.looper_capture_quantized = true;
-            self.master_rec_pending.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.set_master_rec_state(1, 0);
             return;
         }
         // looper_rec && !quantized (free-захват или overdub) — закрыть сразу
@@ -2906,7 +2920,6 @@ impl SynthEngine {
             let boundary = playing && step == 0 && prev != 0;
             if boundary && self.looper_arm_pending {
                 self.looper_arm_pending = false;
-                self.master_rec_pending.store(false, std::sync::atomic::Ordering::Relaxed);
                 self.looper.toggle_record(); // Idle -> Recording (length = bars * bar)
                 // Boss RC-семантика: петля = Bars × цикл паттерна; авто-закрытие
                 // после Bars циклов; тики записи НЕПРЕРЫВНЫ (wrap только на
@@ -2920,8 +2933,12 @@ impl SynthEngine {
                 self.looper.set_loop_len_ticks(cycle.saturating_mul(bars));
                 self.looper_cycle_ticks = cycle;
                 self.looper_rec_cycles = 0;
+                self.set_master_rec_state(2, 1); // capturing, cycle 1/N
             } else if boundary && capturing {
                 self.looper_rec_cycles += 1;
+                self.set_master_rec_state(
+                    if self.looper_finish_pending { 3 } else { 2 },
+                    (self.looper_rec_cycles + 1).min(255) as u8); // entering cycle k+1 (или закрывающий)
                 let bars = self.looper.bars.max(1) as u32;
                 // Досрочный Rec — тоже закрыть; Boss: конец выравнивается на такт
                 if self.looper_finish_pending || self.looper_rec_cycles >= bars {
