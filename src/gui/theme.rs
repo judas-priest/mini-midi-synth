@@ -232,6 +232,20 @@ pub const DRUM_COLORS: [Color32; 16] = [
     Color32::from_rgb(180, 180, 60),  // Ride
 ];
 
+// ── Drum pad categories (single source with DRUM_COLORS) ────────────────────
+/// Pad color for kick sounds = grid Kick.
+pub const DRUM_CAT_KICK: Color32 = DRUM_COLORS[0];
+/// Pad color for snare sounds = grid Snare.
+pub const DRUM_CAT_SNARE: Color32 = DRUM_COLORS[2];
+/// Pad color for hi-hat sounds = grid Closed HH.
+pub const DRUM_CAT_HATS: Color32 = DRUM_COLORS[6];
+/// Pad color for cymbal sounds = grid Crash.
+pub const DRUM_CAT_CYMBALS: Color32 = DRUM_COLORS[13];
+/// Pad color for tom sounds = grid Low Tom.
+pub const DRUM_CAT_TOMS: Color32 = DRUM_COLORS[9];
+/// Pad color for perc/clap/rim sounds = grid Clap.
+pub const DRUM_CAT_PERC: Color32 = DRUM_COLORS[3];
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -278,5 +292,16 @@ mod tests {
             let cr = contrast(*c, BG_PANEL);
             assert!(cr >= 3.0, "PART_COLORS[{i}]: {cr:.2}:1 < 3:1 on BG_PANEL");
         }
+    }
+
+    /// Audit Medium п.10: pads and step grid must share one palette source.
+    #[test]
+    fn drum_category_colors_derive_from_grid_palette() {
+        assert_eq!(DRUM_CAT_KICK, DRUM_COLORS[0]);
+        assert_eq!(DRUM_CAT_SNARE, DRUM_COLORS[2]);
+        assert_eq!(DRUM_CAT_HATS, DRUM_COLORS[6]);
+        assert_eq!(DRUM_CAT_CYMBALS, DRUM_COLORS[13]);
+        assert_eq!(DRUM_CAT_TOMS, DRUM_COLORS[9]);
+        assert_eq!(DRUM_CAT_PERC, DRUM_COLORS[3]);
     }
 }

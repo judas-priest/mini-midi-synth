@@ -143,17 +143,17 @@ impl App {
                     String::new()
                 };
                 if name.contains("hat") || name.contains("hh") {
-                    egui::Color32::from_rgb(212, 200, 70)   // hats: yellow
+                    theme::DRUM_CAT_HATS
                 } else if name.contains("crash") || name.contains("cymbal") || name.contains("ride") || name.contains("china") {
-                    egui::Color32::from_rgb(235, 140, 50)   // cymbals: orange
+                    theme::DRUM_CAT_CYMBALS
                 } else if name.contains("tom") {
-                    egui::Color32::from_rgb(90, 135, 225)   // toms: blue
+                    theme::DRUM_CAT_TOMS
                 } else if name.contains("kick") {
-                    egui::Color32::from_rgb(190, 65, 65)    // kick: red
+                    theme::DRUM_CAT_KICK
                 } else if name.contains("snare") {
-                    egui::Color32::from_rgb(85, 185, 95)    // snare: green
+                    theme::DRUM_CAT_SNARE
                 } else {
-                    egui::Color32::from_rgb(200, 95, 185)   // perc/clap/rim: magenta
+                    theme::DRUM_CAT_PERC
                 }
             };
 
