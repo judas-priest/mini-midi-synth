@@ -794,13 +794,17 @@ impl StepSequencer {
     /// Redo the last undone destructive op (single level, same Box pattern as
     /// undo_snapshot). undo() pushes the pre-restore state here; redo() swaps
     /// it back and re-arms undo.
-    pub fn redo(&mut self) {
+    /// Returns the RESTORED patterns (see undo()).
+    pub fn redo(&mut self) -> Option<Box<[DrumPattern; 8]>> {
+        let mut out = None;
         if let Some(snapshot) = self.redo_snapshot.take() {
             self.undo_snapshot = Some(Box::new(self.patterns));
             self.patterns = *snapshot;
+            out = Some(snapshot);
         }
         self.sync_undo_atom();
         self.sync_redo_atom();
+        out
     }
 
     /// A new destructive op invalidates redo: the saved state is stale and
@@ -833,13 +837,19 @@ impl StepSequencer {
 
     /// Undo last clear or restore pre-recording state. The pre-restore state
     /// goes to redo_snapshot so redo() can bring it back.
-    pub fn undo(&mut self) {
+    /// Returns the RESTORED patterns (the snapshot box) so the audio thread
+    /// can push them to the GUI without allocating — the GUI mirror otherwise
+    /// goes stale after an engine-side undo ("notes on screen, no sound").
+    pub fn undo(&mut self) -> Option<Box<[DrumPattern; 8]>> {
+        let mut out = None;
         if let Some(snapshot) = self.undo_snapshot.take() {
             self.redo_snapshot = Some(Box::new(self.patterns));
             self.patterns = *snapshot;
+            out = Some(snapshot);
         }
         self.sync_undo_atom();
         self.sync_redo_atom();
+        out
     }
 
     /// Save snapshot before destructive operation (e.g. recording start).

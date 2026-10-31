@@ -401,6 +401,17 @@ impl App {
                             self.drum_patterns[pattern as usize].steps[slot as usize][step as usize].velocity = velocity;
                         }
                     }
+                    ParamFeedback::DrumPatternsSync { patterns } => {
+                        // Engine-side undo/redo — the GUI mirror was stale
+                        // (notes on screen, silence on playback)
+                        self.drum_patterns = *patterns;
+                    }
+                    ParamFeedback::DrumCleared { pattern } => {
+                        if (pattern as usize) < self.drum_patterns.len() {
+                            self.drum_patterns[pattern as usize].steps =
+                                [[Default::default(); 16]; 16];
+                        }
+                    }
                     ParamFeedback::PickupPending { key, cc_position } => {
                         self.pickup_indicators.insert(key.to_string(), cc_position);
                     }

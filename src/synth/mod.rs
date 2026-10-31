@@ -371,6 +371,11 @@ pub enum ParamFeedback {
     CcReceived { cc: u8 },
     ProgramChanged { program: u8 },
     DrumStepRecorded { pattern: u8, slot: u8, step: u8, velocity: u8 },
+    /// Engine-side undo/redo restored patterns — GUI mirror must resync
+    /// (Box travels to the GUI thread for freeing; zero alloc on audio).
+    DrumPatternsSync { patterns: Box<[crate::synth::drum::DrumPattern; 8]> },
+    /// Engine-side clear of the current pattern — GUI zeroes its mirror slot.
+    DrumCleared { pattern: u8 },
     /// Pickup indicator: knob position (0-127) vs param for a CC that hasn't picked up yet.
     PickupPending { key: &'static str, cc_position: f32 },
     /// CC has picked up — clear the indicator.
@@ -1974,7 +1979,11 @@ impl SynthEngine {
                     // Pad bank 2 legacy undo (64, E4) lives here; 83/82/81
                     // moved above — master transport now, no target.
                     if channel == 9 && velocity > 0 && note == 64 {
-                        self.drum_engine.sequencer.undo();
+                        if let Some(restored) = self.drum_engine.sequencer.undo() {
+                            if let Some(ref mut tx) = self.feedback_tx {
+                                let _ = tx.push(ParamFeedback::DrumPatternsSync { patterns: restored });
+                            }
+                        }
                         return;
                     }
                     if velocity > 0 {
@@ -2488,12 +2497,25 @@ impl SynthEngine {
             }
             ControlEvent::DrumSeqClear => {
                 self.drum_engine.sequencer.clear_pattern();
+                if let Some(ref mut tx) = self.feedback_tx {
+                    let _ = tx.push(ParamFeedback::DrumCleared {
+                        pattern: self.drum_engine.sequencer.current_pattern,
+                    });
+                }
             }
             ControlEvent::DrumSeqUndo => {
-                self.drum_engine.sequencer.undo();
+                if let Some(restored) = self.drum_engine.sequencer.undo() {
+                    if let Some(ref mut tx) = self.feedback_tx {
+                        let _ = tx.push(ParamFeedback::DrumPatternsSync { patterns: restored });
+                    }
+                }
             }
             ControlEvent::DrumSeqRedo => {
-                self.drum_engine.sequencer.redo();
+                if let Some(restored) = self.drum_engine.sequencer.redo() {
+                    if let Some(ref mut tx) = self.feedback_tx {
+                        let _ = tx.push(ParamFeedback::DrumPatternsSync { patterns: restored });
+                    }
+                }
             }
             ControlEvent::DrumLoadKit { patterns, params, bpm, swing, volume } => {
                 self.drum_engine.sequencer.cancel_redo();

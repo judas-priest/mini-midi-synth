@@ -1458,6 +1458,14 @@ impl App {
                 self.load_sf2_drums(idx);
             }
         }
+
+        // Restore last performance (after SF2 load — part sf2_program applies
+        // to the loaded soundfont)
+        if let Some(name) = self.config.ui.last_performance.clone() {
+            if self.load_performance_by_name(&name) {
+                log::info!("[init] performance restored: {name}");
+            }
+        }
     }
 
     fn find_or_add_sf2(&mut self, sf2_path: &str) -> Option<usize> {
@@ -2132,6 +2140,9 @@ impl App {
                 .unwrap_or(60)
         });
         self.perf_name = perf.name.clone();
+        // Запомнить перф — восстановится при старте (юзер-репорт 2026-10-31)
+        self.config.ui.last_performance = Some(perf.name.clone());
+        self.save_config();
         for (i, part) in parts.iter().enumerate() {
             if i >= self.parts.len() { break; }
             let patch_idx = self.patches.iter()
