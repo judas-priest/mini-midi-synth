@@ -46,6 +46,17 @@ fn bench_block(c: &mut Criterion) {
         });
     }
 
+    // Baseline: engine loaded but no notes held — separates the fixed per-block
+    // cost from per-voice cost.
+    {
+        let mut engine = engine_with("Init", 0);
+        let mut l = [0.0f32; BLOCK_SIZE];
+        let mut r = [0.0f32; BLOCK_SIZE];
+        group.bench_function("idle", |b| {
+            b.iter(|| engine.tick_block(&mut l, &mut r));
+        });
+    }
+
     // A patch that exercises the effect chain, not just the oscillator.
     for name in ["Ambient Pad", "Grand Piano"] {
         let mut engine = engine_with(name, 8);

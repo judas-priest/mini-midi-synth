@@ -69,10 +69,11 @@ cpal = { version = "0.15" }
 
 [profile.release]
 opt-level = 3
-# fat LTO + codegen-units=1 removed for fast iteration builds (was: 50s+ per
-# release).  Re-enable for Android/ship builds:
-#   lto = "fat"
-#   codegen-units = 1
+# fat LTO + codegen-units=1: ship-профиль (аудит DSP 2026-11-01: кросс-крейт
+# инлайнинг oscillator→voice даёт заметный % на aarch64). Сборка ~50-80 c —
+# для итераций использовать `cargo check` / dev-профиль.
+lto = "fat"
+codegen-units = 1
 panic = "abort"
 # `debuginfo` rather than `symbols`: the function name table survives, so a
 # native crash in logcat is readable via ndk-stack, while the DWARF sections
