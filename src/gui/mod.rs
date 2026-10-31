@@ -1263,7 +1263,7 @@ impl App {
                     .hint_text("\u{1F50D} Search...")
                     .desired_width((w - 22.0).max(60.0)));
                 if !self.preset_search.is_empty()
-                    && ui.small_button("\u{2715}").clicked()
+                    && ui.small_button("\u{00D7}").clicked()
                 {
                     self.preset_search.clear();
                     r.request_focus();

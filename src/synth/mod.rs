@@ -3432,6 +3432,12 @@ impl SynthEngine {
                     let choke = self.drum_engine.sf2_choke_take(note);
                     if choke != 0 { self.sampler.drum_note_off(choke); }
                 }
+                // L/T действуют и на SF2-киты: velocity-scale + транспозиция
+                // (раунд 4 фидбека). P/D ограничением rustysynth — DSP-only.
+                let p = &self.drum_engine.params[slot as usize];
+                if p.level <= 0.0 { continue; }
+                let vel = ((vel as f32 * p.level).round() as u8).clamp(1, 127);
+                let note = (note as i32 + p.tune.round() as i32).clamp(0, 127) as u8;
                 self.sampler.drum_note_on(note, vel);
             }
 

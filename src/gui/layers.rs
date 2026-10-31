@@ -35,7 +35,7 @@ impl App {
         ui.horizontal(|ui| {
             let split_clicked = if split_on {
                 // Split active: show as an on-toggle with explicit remove hint
-                ui.small_button("Split: ON ✕")
+                ui.small_button("Split: ON ×")
                     .on_hover_text("Turn split off: remove right hand (zone B)")
                     .clicked()
             } else {
@@ -162,7 +162,7 @@ impl App {
             }
         });
 
-        // ── Middle-click / ✕ removal confirmation ────────────────────────
+        // ── Middle-click / × removal confirmation ────────────────────────
         if let Some(p) = self.pending_remove_part {
             let zone = if p < PARTS_PER_ZONE { "A" } else { "B" };
             let num = (p % PARTS_PER_ZONE) + 1;
@@ -309,7 +309,7 @@ impl App {
             let name_btn = egui::Button::new(label_text)
                 .fill(if is_active { part_color.gamma_multiply(0.30) } else { egui::Color32::TRANSPARENT })
                 .stroke(egui::Stroke::NONE);
-            if ui.add_sized([34.0, 0.0], name_btn)
+            if ui.add_sized([34.0, 22.0], name_btn)
                 .on_hover_text(format!("Select part {zone}{num} for editing (muted = gray + strikethrough)"))
                 .clicked()
             {
@@ -322,7 +322,7 @@ impl App {
             // Engine toggle (DSP/SF2)
             let sf2 = self.parts[i].sf2_mode;
             let eng_label = if sf2 { "SF2" } else { "DSP" };
-            if ui.add_sized([44.0, 0.0], egui::Button::new(eng_label).small()).on_hover_text(
+            if ui.add_sized([44.0, 22.0], egui::Button::new(eng_label).small()).on_hover_text(
                 if sf2 { "Switch to DSP engine" } else { "Switch to SF2 engine" }
             ).clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
@@ -344,14 +344,14 @@ impl App {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
                     let prog = self.parts[i].sf2_program;
                     let cur_name = GM_PROGRAM_NAMES.get(prog as usize).copied().unwrap_or("?");
-                    if ui.add_sized([170.0, 0.0], egui::Button::new(cur_name))
+                    if ui.add_sized([170.0, 22.0], egui::Button::new(cur_name))
                         .on_hover_text(format!("GM program {prog} — open instrument browser (search + categories)")).clicked()
                     {
                         self.preset_search.clear();
                         self.inst_browser_part = Some(i);
                     }
                 } else {
-                    ui.add_sized([170.0, 0.0], egui::Label::new(egui::RichText::new("---").weak()))
+                    ui.add_sized([170.0, 22.0], egui::Label::new(egui::RichText::new("---").weak()))
                         .on_hover_text("No SoundFont loaded (load one in Settings)");
                 }
             } else {
@@ -361,7 +361,7 @@ impl App {
                     self.patches.iter().map(|p| p.name.clone()).collect();
                 let cur_idx = self.parts[i].patch_idx;
                 let cur = patch_names.get(cur_idx).cloned().unwrap_or_else(|| "---".into());
-                if ui.add_sized([170.0, 0.0], egui::Button::new(&cur))
+                if ui.add_sized([170.0, 22.0], egui::Button::new(&cur))
                     .on_hover_text("Open patch browser (search + categories)").clicked()
                 {
                     self.preset_search.clear();
@@ -371,13 +371,13 @@ impl App {
 
             // Mute / Root — фиксированные ширины: колонки всех строк совпадают
             let mut m = self.parts[i].mute;
-            if ui.add_sized([52.0, 0.0], egui::Checkbox::new(&mut m, "Mute")).on_hover_text("Mute this part").changed() {
+            if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut m, "Mute")).on_hover_text("Mute this part").changed() {
                 self.parts[i].mute = m;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: m });
                 self.persist_parts_state();
             }
             let mut r = self.parts[i].root_only;
-            if ui.add_sized([52.0, 0.0], egui::Checkbox::new(&mut r, "Root")).on_hover_text(
+            if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut r, "Root")).on_hover_text(
                 "Root-only (bass split): this part sounds only the lowest held key")
                 .changed()
             {
@@ -393,7 +393,7 @@ impl App {
             // ширины вылезал из фикс-бокса и сдвигал хвост строки («криво»).
             ui.label("Pan:");
             let mut pan = self.parts[i].pan;
-            let pan_r = ui.add_sized([90.0, 0.0], egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false))
+            let pan_r = ui.add_sized([90.0, 22.0], egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false))
                 .on_hover_text(format!("Pan: {pan:+.2} — double-click to reset"));
             if pan_r.double_clicked() { pan = 0.0; }
             if pan_r.changed() || pan_r.double_clicked() {
@@ -404,7 +404,7 @@ impl App {
             // Tr
             ui.label("Tr:");
             let mut tr = self.parts[i].transpose as i32;
-            let tr_r = ui.add_sized([120.0, 0.0], egui::Slider::new(&mut tr, -24..=24).show_value(false))
+            let tr_r = ui.add_sized([120.0, 22.0], egui::Slider::new(&mut tr, -24..=24).show_value(false))
                 .on_hover_text(format!("Transpose: {tr:+} st — double-click to reset"));
             if tr_r.double_clicked() { tr = 0; }
             if tr_r.changed() || tr_r.double_clicked() {
@@ -416,9 +416,9 @@ impl App {
             ui.label("Vel:");
             let mut vmin = self.parts[i].vel_min as i32;
             let mut vmax = self.parts[i].vel_max as i32;
-            let c1 = ui.add_sized([46.0, 0.0], egui::DragValue::new(&mut vmin).range(1..=127).speed(1)).changed();
+            let c1 = ui.add_sized([46.0, 22.0], egui::DragValue::new(&mut vmin).range(1..=127).speed(1)).changed();
             ui.label("-");
-            let c2 = ui.add_sized([46.0, 0.0], egui::DragValue::new(&mut vmax).range(1..=127).speed(1)).changed();
+            let c2 = ui.add_sized([46.0, 22.0], egui::DragValue::new(&mut vmax).range(1..=127).speed(1)).changed();
             if c1 || c2 {
                 let vmin = (vmin as u8).max(1);
                 let vmax = (vmax as u8).max(vmin);
@@ -429,7 +429,7 @@ impl App {
 
             // Volume
             let mut vol = self.parts[i].volume;
-            let vol_r = ui.add_sized([90.0, 0.0], egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
+            let vol_r = ui.add_sized([90.0, 22.0], egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
                 .on_hover_text(format!("Volume: {vol:.2} — double-click to reset"));
             if vol_r.double_clicked() { vol = 0.8; }
             if vol_r.changed() || vol_r.double_clicked() {
@@ -439,7 +439,7 @@ impl App {
 
             // Remove (never for the first part of a zone)
             let is_zone_first = i.is_multiple_of(PARTS_PER_ZONE);
-            if !is_zone_first && ui.small_button("✕").on_hover_text("Remove this part").clicked() {
+            if !is_zone_first && ui.small_button("×").on_hover_text("Remove this part").clicked() {
                 self.pending_remove_part = Some(i);
             }
         });
