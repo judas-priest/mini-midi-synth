@@ -133,6 +133,7 @@ impl App {
                     self.draw_part_row(ui, i);
                 });
             }
+            ui.add_space(theme::SP_SM); // воздух над Add part (TECHDEBT #36)
             let a_count = ZONE_A.filter(|&i| self.parts[i].enabled).count();
             if a_count < PARTS_PER_ZONE
                 && ui.small_button("+ Add part").on_hover_text("Add part to Zone A").clicked()
@@ -153,6 +154,7 @@ impl App {
                         self.draw_part_row(ui, i);
                     });
                 }
+                ui.add_space(theme::SP_SM); // воздух над Add part (TECHDEBT #36)
                 let b_count = ZONE_B.filter(|&i| self.parts[i].enabled).count();
                 if b_count < PARTS_PER_ZONE
                     && ui.small_button("+ Add part").on_hover_text("Add part to Zone B").clicked()

@@ -124,11 +124,11 @@ pub const PAD_CYAN: Color32 = Color32::from_rgb(0, 200, 210);
 #[allow(dead_code)] // palette reference
 pub const PAD_PINK: Color32 = Color32::from_rgb(220, 60, 150);
 
-/// Pad-perf top-row accent.
-pub const PAD_PERF_TOP: Color32 = Color32::from_rgb(0, 160, 180);
+/// Pad-perf top-row accent (≥3:1 к BG_PAD_EMPTY; чёрный текст ≥4.5:1).
+pub const PAD_PERF_TOP: Color32 = Color32::from_rgb(0, 140, 160);
 
 /// Pad-perf bottom-row accent.
-pub const PAD_PERF_BOT: Color32 = Color32::from_rgb(180, 50, 120);
+pub const PAD_PERF_BOT: Color32 = Color32::from_rgb(220, 60, 150);
 
 // ── Waveform / scope ─────────────────────────────────────────────────────────
 
@@ -296,5 +296,17 @@ mod tests {
         assert_eq!(DRUM_CAT_CYMBALS, DRUM_COLORS[13]);
         assert_eq!(DRUM_CAT_TOMS, DRUM_COLORS[9]);
         assert_eq!(DRUM_CAT_PERC, DRUM_COLORS[3]);
+    }
+
+    /// Аудит UI п.5: пэды перфа видимы на пустом фоне (3:1), чёрное имя
+    /// читается (4.5:1) — раньше белый текст на бирюзовом был 3.14:1 при 11px.
+    #[test]
+    fn pad_perf_colors_meet_contrast() {
+        for (name, c) in [("TOP", PAD_PERF_TOP), ("BOT", PAD_PERF_BOT)] {
+            let ce = contrast(c, BG_PAD_EMPTY);
+            assert!(ce >= 3.0, "PAD_PERF_{name} vs BG_PAD_EMPTY: {ce:.2}:1 < 3:1");
+            let ct = contrast(Color32::BLACK, c);
+            assert!(ct >= 4.5, "BLACK on PAD_PERF_{name}: {ct:.2}:1 < 4.5:1");
+        }
     }
 }
