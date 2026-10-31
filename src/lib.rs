@@ -856,6 +856,7 @@ pub fn run_gui(
         pad_prev_state: [0u8; 16],
         last_config_save: std::time::Instant::now(),
         dsp_load: 0.0,
+        dsp_peak: 0.0,
         global_dirty: false,
         sf2_file_list: {
             let scan = gui::scan_sf2_files();

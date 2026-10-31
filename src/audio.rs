@@ -146,6 +146,10 @@ impl AudioBackend {
             device_sr,
         );
 
+        // Even 0 (Default fallback) is published: the GUI treats 0 as
+        // "negotiate fell back, show the requested size".
+        crate::metrics::METRICS.set_actual_buffer_size(actual_buf);
+
         let stream_config = cpal::StreamConfig {
             channels: supported.channels(),
             sample_rate: cpal::SampleRate(actual_sr),
