@@ -851,6 +851,7 @@ impl App {
             // Quantized master capture (#30): индикация, на каком цикле стоим
             let rec_state = self.master_rec_state.load(std::sync::atomic::Ordering::Relaxed);
             let rec_cycle = self.master_rec_cycle.load(std::sync::atomic::Ordering::Relaxed);
+            let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
             let (label, label_color) = match rec_state {
                 1 => ("ARMED".to_string(), egui::Color32::YELLOW),
                 2 => (format!("REC {}/{}", rec_cycle, self.looper_bars), egui::Color32::RED),
@@ -878,7 +879,6 @@ impl App {
             }
             // ＋такт / −такт — длина петли прямо во время записи
             let capturing = rec_state == 2;
-            let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
             if ui.add_enabled(capturing, egui::Button::new("+1 такт"))
                 .on_hover_text("Добавить такт к петле (запись продолжается)").clicked()
             {
