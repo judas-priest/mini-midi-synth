@@ -1072,7 +1072,9 @@ impl App {
 
                 // Solo button
                 let solo_color = if soloed { egui::Color32::YELLOW } else { egui::Color32::GRAY };
-                if ui.button(egui::RichText::new("S").color(solo_color)).on_hover_text("Solo layer").clicked() {
+                let mut s_text = egui::RichText::new("S").color(solo_color);
+                if soloed { s_text = s_text.strong(); }
+                if ui.button(s_text).on_hover_text("Solo layer").clicked() {
                     if soloed {
                         self.looper_solo_layer = None;
                         let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: None });
@@ -1084,7 +1086,9 @@ impl App {
 
                 // Mute button
                 let mute_color = if muted { egui::Color32::RED } else { egui::Color32::GRAY };
-                if ui.button(egui::RichText::new("M").color(mute_color)).on_hover_text("Mute layer").clicked() {
+                let mut m_text = egui::RichText::new("M").color(mute_color);
+                if muted { m_text = m_text.strong(); }
+                if ui.button(m_text).on_hover_text("Mute layer").clicked() {
                     let new_mute = !muted;
                     self.looper_layer_mute[*layer_id as usize] = new_mute;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: *layer_id, mute: new_mute });

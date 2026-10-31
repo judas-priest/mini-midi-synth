@@ -37,7 +37,9 @@ impl App {
             } else {
                 theme::MIDI_SEQ_LOOP_OFF
             };
-            if ui.button(egui::RichText::new("↻ Loop").color(loop_col)).clicked() {
+            let mut loop_text = egui::RichText::new("↻ Loop").color(loop_col);
+            if self.midi_seq_looping { loop_text = loop_text.strong(); }
+            if ui.button(loop_text).clicked() {
                 self.midi_seq_looping = !self.midi_seq_looping;
                 let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetLooping {
                     looping: self.midi_seq_looping,
@@ -156,13 +158,14 @@ impl App {
                         ui.label(egui::RichText::new(format!("{}", i + 1)).monospace().weak());
 
                         // Mute button
-                        let m_col = if track.muted {
-                            egui::Color32::YELLOW
+                        let mut m_text = egui::RichText::new("M").monospace();
+                        if track.muted {
+                            m_text = m_text.color(egui::Color32::YELLOW).strong();
                         } else {
-                            theme::MIDI_SEQ_MUTE_INACTIVE
-                        };
+                            m_text = m_text.color(theme::MIDI_SEQ_MUTE_INACTIVE);
+                        }
                         if ui
-                            .button(egui::RichText::new("M").color(m_col).monospace())
+                            .button(m_text)
                             .on_hover_text(if track.muted { "Unmute" } else { "Mute" })
                             .clicked()
                         {
