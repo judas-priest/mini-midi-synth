@@ -1549,7 +1549,16 @@ impl App {
                     let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
                 }
                 KeyAction::LooperClear => {
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
+                    // Тот же 2s-confirm, что у кнопки Clear (audit High п.2):
+                    // первое нажатие взводит, второе в течение окна — очищает.
+                    let armed = matches!(self.looper_clear_confirm, Some(t)
+                        if t.elapsed().as_secs_f32() < 2.0);
+                    if armed {
+                        let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
+                        self.looper_clear_confirm = None;
+                    } else {
+                        self.looper_clear_confirm = Some(Instant::now());
+                    }
                 }
                 KeyAction::DrumTogglePlay => {
                     self.drum_playing = !self.drum_playing;
