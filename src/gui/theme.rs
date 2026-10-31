@@ -61,9 +61,6 @@ pub const BG_PAD_PRESSED_EMPTY: Color32 = Color32::from_rgb(90, 90, 100);
 
 // ── Text ─────────────────────────────────────────────────────────────────────
 
-/// Dim / inactive text.
-pub const TEXT_DIM: Color32 = Color32::from_rgb(100, 100, 100);
-
 /// Secondary info text (restart notice, SF2 path hints).
 pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(140, 140, 140);
 

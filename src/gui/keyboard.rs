@@ -23,27 +23,40 @@ pub const PAD_BOT_NOTES: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
 
 impl App {
     pub fn draw_keyboard(&mut self, ui: &mut egui::Ui) {
-        // Active notes label above keyboard; detected chord in brackets, bold
+        // Active notes label above keyboard; detected chord in brackets.
+        // Строка ЗАРАНЕЕ фиксированной высоты и рисуется painter'ом одной
+        // строкой без переноса: раньше при аккорде текст удлинялся, ярлык
+        // переносился на вторую строку, высота панели менялась и весь
+        // центральный столб выше «прыгал».
         let held: Vec<u8> = (0..128u8)
             .filter(|i| self.note_state[*i as usize].load(Ordering::Relaxed) > 0)
             .collect();
         let active: Vec<String> = held.iter().map(|n| note_name(*n)).collect();
 
-        if active.is_empty() {
-            ui.colored_label(theme::TEXT_DIM, " ");
-        } else {
-            let chord = crate::chord::detect(&held);
-            match chord {
-                Some(c) => {
-                    // Chord-only bold: two widgets side by side
-                    ui.horizontal(|ui| {
-                        ui.label(active.join("  "));
-                        ui.label(egui::RichText::new(format!("({})", c)).strong());
-                    });
-                }
-                None => {
-                    ui.label(active.join("  "));
-                }
+        let line_h = ui.text_style_height(&egui::TextStyle::Body);
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), line_h), egui::Sense::hover());
+        let painter = ui.painter();
+        if !active.is_empty() {
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let color = ui.visuals().text_color();
+            let notes = active.join("  ");
+            painter.text(
+                egui::pos2(rect.left(), rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                &notes,
+                font.clone(),
+                color,
+            );
+            if let Some(c) = crate::chord::detect(&held) {
+                let w = painter.layout_no_wrap(notes.clone(), font.clone(), color).size().x;
+                painter.text(
+                    egui::pos2(rect.left() + w + 10.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    format!("({c})"),
+                    font,
+                    theme::CURVE_FILTER, // аккорд — акцентным цветом, без смены размера
+                );
             }
         }
 

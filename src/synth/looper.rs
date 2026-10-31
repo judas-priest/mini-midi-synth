@@ -186,6 +186,11 @@ pub struct MidiLooper {
     /// update_atoms every sample). position is cached as u16 because every
     /// u8 value is legal — u16::MAX is the "never written" sentinel.
     atom_cache: (u8, u16, u16, u8),
+    /// Квантованный захват: если задано, GUI-позиция = прогресс ТЕКУЩЕГО
+    /// цикла (playback_tick % N), а не доля всей петли. Во время capture
+    /// loop_length = ёмкость (N циклов), сырой frac полз бы десятки циклов.
+    /// Ставится движком на старте захвата, снимается при закрытии/стопе.
+    display_cycle_ticks: Option<u32>,
     display: Arc<Mutex<LooperDisplay>>,
 }
 
@@ -215,6 +220,7 @@ impl MidiLooper {
             part_mutes: [false; MAX_LOOP_PARTS],
             atoms: LooperAtoms::new(),
             atom_cache: (u8::MAX, u16::MAX, u16::MAX, u8::MAX),
+            display_cycle_ticks: None,
             display: LooperDisplay::new(),
         }
     }
@@ -225,6 +231,13 @@ impl MidiLooper {
 
     pub fn display(&self) -> Arc<Mutex<LooperDisplay>> {
         self.display.clone()
+    }
+
+    /// Публикация позиции как прогресса текущего цикла захвата.
+    /// `None` — обычный режим (доля всей петли). Вызывается движком
+    /// (audio thread) на границах захвата.
+    pub fn set_display_cycle_ticks(&mut self, ticks: Option<u32>) {
+        self.display_cycle_ticks = ticks;
     }
 
     #[allow(dead_code)]
@@ -742,7 +755,10 @@ impl MidiLooper {
     /// while Idle; the GUI reads at <= 60 Hz, so per-change publication is
     /// visually identical.
     fn update_atoms(&mut self) {
-        let pos = if self.loop_length_ticks > 0 {
+        let pos = if let Some(ct) = self.display_cycle_ticks {
+            // Прогресс внутри текущего цикла захвата (один оборот = один такт)
+            if ct > 0 { ((self.playback_tick % ct) as f64 / ct as f64 * 255.0) as u8 } else { 0 }
+        } else if self.loop_length_ticks > 0 {
             (self.playback_tick as f64 / self.loop_length_ticks as f64 * 255.0) as u8
         } else { 0 };
         // Реальная длина петли в 16-х шагах (для честного GUI: таймлайн и
