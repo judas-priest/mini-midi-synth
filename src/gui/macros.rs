@@ -129,11 +129,22 @@ impl App {
         let x_name = &macro_labels[xi];
         let y_name = &macro_labels[yi];
 
-        // Pad area
+        // Pad area + reserved strips for axis labels: раньше подписи рисовались
+        // за пределами widget-rect и клип-ректа (audit High п.4) и просто
+        // не были видны.
         let size = egui::vec2(200.0, 200.0);
-        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        let label_w = 16.0; // левая полоса под подпись Y
+        let label_h = 16.0; // нижняя полоса под подпись X
+        let (outer, response) = ui.allocate_exact_size(
+            egui::vec2(size.x + label_w, size.y + label_h),
+            egui::Sense::click_and_drag(),
+        );
         response.clone().on_hover_text("Drag to control two macros");
-        let painter = ui.painter_at(rect);
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(outer.left() + label_w, outer.top()),
+            egui::pos2(outer.right(), outer.bottom() - label_h),
+        );
+        let painter = ui.painter_at(outer);
 
         // Background
         painter.rect_filled(rect, 4.0, theme::BG_PANEL);
@@ -178,18 +189,22 @@ impl App {
         painter.circle_filled(dot_pos, 7.0, theme::CURVE_FILTER);
         painter.circle_stroke(dot_pos, 7.0, egui::Stroke::new(1.0, egui::Color32::WHITE));
 
-        // Axis labels
-        painter.text(
-            egui::pos2(rect.center().x, rect.bottom() + 10.0),
-            egui::Align2::CENTER_TOP,
+        // Axis labels — ui.painter() (full clip-rect), anchors centered in the
+        // reserved strips of `outer`. painter_at(outer) резал бы их: CENTER_TOP
+        // растёт вниз за нижний край, RIGHT_CENTER — влево за левый.
+        ui.painter().text(
+            egui::pos2(rect.center().x, outer.bottom() - label_h * 0.5),
+            egui::Align2::CENTER_CENTER,
             x_name,
             egui::FontId::proportional(11.0),
             theme::TEXT_OVERLAY,
         );
-        // Y label (rotated text not trivial in egui, place to the left)
-        painter.text(
-            egui::pos2(rect.left() - 4.0, rect.center().y),
-            egui::Align2::RIGHT_CENTER,
+        // Y label (rotated text not trivial in egui, place to the left).
+        // Длинные имена могут немного заходить на левый край пэда — это
+        // приемлемо; главное, что подпись видна.
+        ui.painter().text(
+            egui::pos2(outer.left() + label_w * 0.5, rect.center().y),
+            egui::Align2::CENTER_CENTER,
             y_name,
             egui::FontId::proportional(11.0),
             theme::TEXT_OVERLAY,
@@ -198,22 +213,24 @@ impl App {
         // Handle drag / click
         if response.dragged() || response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
-                let new_x = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-                let new_y = 1.0 - ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
+                if rect.contains(pos) {
+                    let new_x = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                    let new_y = 1.0 - ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
 
-                // Update X macro
-                self.parts[part].macro_vals[xi] = new_x;
-                self.parts[part].edited_params.insert(format!("macro_{xi}"), new_x);
-                let _ = self.ctrl_tx.push(ControlEvent::SetMacro {
-                    part, index: xi, value: new_x,
-                });
+                    // Update X macro
+                    self.parts[part].macro_vals[xi] = new_x;
+                    self.parts[part].edited_params.insert(format!("macro_{xi}"), new_x);
+                    let _ = self.ctrl_tx.push(ControlEvent::SetMacro {
+                        part, index: xi, value: new_x,
+                    });
 
-                // Update Y macro
-                self.parts[part].macro_vals[yi] = new_y;
-                self.parts[part].edited_params.insert(format!("macro_{yi}"), new_y);
-                let _ = self.ctrl_tx.push(ControlEvent::SetMacro {
-                    part, index: yi, value: new_y,
-                });
+                    // Update Y macro
+                    self.parts[part].macro_vals[yi] = new_y;
+                    self.parts[part].edited_params.insert(format!("macro_{yi}"), new_y);
+                    let _ = self.ctrl_tx.push(ControlEvent::SetMacro {
+                        part, index: yi, value: new_y,
+                    });
+                }
             }
         }
     }

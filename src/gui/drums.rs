@@ -717,15 +717,26 @@ impl App {
                     );
                     painter.rect_filled(bar_rect, 1.0, bar_color);
 
-                    // Pitch label
+                    // Pitch label. Clamped inside the allocation: при pitch=±24
+                    // бар доходит до края и подпись над ним клипается
+                    // (audit Medium п.11). Если подпись легла на бар — чёрный
+                    // цвет (7:1 на синем вместо 1.43:1 у gray(180)).
                     if pitch != 0.0 {
                         let label = format!("{:+}", step.pitch);
+                        let raw_y = if pitch > 0.0 { bar_top - 8.0 } else { bar_bottom + 8.0 };
+                        let y = raw_y.clamp(rect.top() + 6.0, rect.top() + bar_h - 6.0);
+                        let label_pos = egui::pos2(x + step_w * 0.5, y);
+                        let color = if bar_rect.contains(label_pos) {
+                            egui::Color32::BLACK
+                        } else {
+                            theme::TEXT_OVERLAY
+                        };
                         painter.text(
-                            egui::pos2(x + step_w * 0.5, if pitch > 0.0 { bar_top - 8.0 } else { bar_bottom + 8.0 }),
+                            label_pos,
                             egui::Align2::CENTER_CENTER,
                             &label,
                             egui::FontId::proportional(9.0),
-                            theme::TEXT_OVERLAY,
+                            color,
                         );
                     }
 
