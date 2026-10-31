@@ -187,7 +187,7 @@ pub const MIDI_SEQ_LOOP_ON: Color32 = Color32::from_rgb(80, 210, 100);
 /// Mute button inactive (text — ≥4.5:1 on BG_PANEL, WCAG 1.4.3; was gray(80) = 2.1:1).
 pub const MIDI_SEQ_MUTE_INACTIVE: Color32 = Color32::from_gray(140);
 
-/// Loop button inactive (text — ≥4.5:1; was egui DARK_GRAY = gray(40) ≈ 1.15:1).
+/// Loop button inactive (text — ≥4.5:1; was egui DARK_GRAY = gray(96) ≈ 2.6:1).
 pub const MIDI_SEQ_LOOP_OFF: Color32 = Color32::from_gray(140);
 
 // ── Looper ───────────────────────────────────────────────────────────────────
@@ -253,18 +253,19 @@ mod tests {
         (hi + 0.05) / (lo + 0.05)
     }
 
-    /// Audit Medium п.5: muted/inactive state tokens must meet WCAG 1.4.11 (≥3:1).
+    /// Audit Medium п.5: muted/inactive state tokens must meet WCAG — 3:1
+    /// non-text (1.4.11) для заливки, 4.5:1 текста (1.4.3) для букв-лейблов.
     #[test]
     fn muted_state_tokens_meet_non_text_contrast() {
-        let cases: [(&str, Color32, Color32); 4] = [
-            ("SEQ_GATE_OFF", SEQ_GATE_OFF, BG_PANEL),
-            ("LOOPER_LAYER_MUTED", LOOPER_LAYER_MUTED, BG_PANEL),
-            ("MIDI_SEQ_MUTE_INACTIVE", MIDI_SEQ_MUTE_INACTIVE, BG_PANEL),
-            ("MIDI_SEQ_LOOP_OFF", MIDI_SEQ_LOOP_OFF, BG_PANEL),
+        let non_text: [(&str, Color32, Color32, f64); 4] = [
+            ("SEQ_GATE_OFF", SEQ_GATE_OFF, BG_PANEL, 3.0),
+            ("LOOPER_LAYER_MUTED", LOOPER_LAYER_MUTED, BG_PANEL, 4.5),
+            ("MIDI_SEQ_MUTE_INACTIVE", MIDI_SEQ_MUTE_INACTIVE, BG_PANEL, 4.5),
+            ("MIDI_SEQ_LOOP_OFF", MIDI_SEQ_LOOP_OFF, BG_PANEL, 4.5),
         ];
-        for (name, fg, bg) in cases {
+        for (name, fg, bg, min) in non_text {
             let c = contrast(fg, bg);
-            assert!(c >= 3.0, "{name}: {c:.2}:1 < 3:1 (WCAG 1.4.11)");
+            assert!(c >= min, "{name}: {c:.2}:1 < {min}:1 (WCAG)");
         }
     }
 
