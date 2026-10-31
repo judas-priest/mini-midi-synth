@@ -53,8 +53,8 @@ impl App {
             }
             // Overdub (слой поверх готовой петли): старт/закрытие на границе
             let ovr_enabled = lstate == crate::synth::looper::LooperState::Playing;
-            if ui.add_enabled(ovr_enabled, egui::Button::new("Ovr"))
-                .on_hover_text("Layer: overdub поверх петли — старт на границе, ещё раз = закрыть").clicked()
+            if ui.add_enabled(ovr_enabled, egui::Button::new("Слой"))
+                .on_hover_text("Слой: дописать поверх петли — старт на границе, ещё раз = закрыть").clicked()
             {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterOverdub);
             }
@@ -871,10 +871,23 @@ impl App {
                 };
                 ui.add(egui::ProgressBar::new(bar_frac).desired_width(80.0))
                     .on_hover_text(if rec_state >= 2 {
-                        format!("Цикл {}/{}", rec_cycle, self.looper_bars)
+                        format!("Цикл {} ({} шагов в петле)", rec_cycle, loop_steps)
                     } else {
                         "Loop position".to_string()
                     });
+            }
+            // ＋такт / −такт — длина петли прямо во время записи
+            let capturing = rec_state == 2;
+            let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
+            if ui.add_enabled(capturing, egui::Button::new("+1 такт"))
+                .on_hover_text("Добавить такт к петле (запись продолжается)").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::CaptureCycleAdd);
+            }
+            if ui.add_enabled(capturing, egui::Button::new("−1 такт"))
+                .on_hover_text("Убрать последний такт (курсор записи откатывается — переиграй его)").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::CaptureCycleRemove);
             }
         });
 
