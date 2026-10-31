@@ -1168,51 +1168,55 @@ impl eframe::App for App {
                 });
             } else {
                 // Лупер переехал в единую docked-панель (#30); здесь остаётся
-                // питч-секвенсор и параметры активной части
-                self.draw_pitch_sequencer(ui);
-                ui.separator();
-                ui.add_space(theme::SP_MD);
-                let part = self.active_part;
-                let is_sf2 = self.parts[part].sf2_mode;
-                if is_sf2 && self.sf2_keys_soundfont.is_some() {
-                    use crate::synth::sampler::GM_PROGRAM_NAMES;
-                    let prog = self.parts[part].sf2_program;
-                    let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
-                    ui.colored_label(
-                        theme::TEXT_SF2_STATUS,
-                        format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_keys_loaded_name, prog, name),
-                    );
-                } else {
-                    // Header: patch name + Init/Rnd/Undo/Redo
-                    ui.horizontal(|ui| {
-                        let idx = self.parts[part].patch_idx;
-                        let name = self.patches.get(idx).map(|p| p.name.as_str()).unwrap_or("---");
-                        ui.strong(name);
-                        ui.separator();
-                        if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
-                            self.push_undo_snapshot();
-                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
-                            self.send_edited_params(part);
-                        }
-                        if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
-                            self.push_undo_snapshot();
-                            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                            self.parts[part].edited_params = crate::synth::PatchParams::random_map();
-                            self.send_edited_params(part);
-                        }
-                        ui.separator();
-                        if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
-                            self.undo();
-                        }
-                        if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
-                            self.redo();
-                        }
-                    });
-                    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                // питч-секвенсор и параметры активной части. ScrollArea как в
+                // остальных ветках, на ВСЮ ветку: без него секвенсор молча
+                // обрезается docked-панелью (audit High п.1), а оборачивать
+                // только секвенсор нельзя — auto_shrink(false) съел бы высоту
+                // параметров ниже. Вложенный ScrollArea параметров удалён.
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    self.draw_pitch_sequencer(ui);
+                    ui.separator();
+                    ui.add_space(theme::SP_MD);
+                    let part = self.active_part;
+                    let is_sf2 = self.parts[part].sf2_mode;
+                    if is_sf2 && self.sf2_keys_soundfont.is_some() {
+                        use crate::synth::sampler::GM_PROGRAM_NAMES;
+                        let prog = self.parts[part].sf2_program;
+                        let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
+                        ui.colored_label(
+                            theme::TEXT_SF2_STATUS,
+                            format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_keys_loaded_name, prog, name),
+                        );
+                    } else {
+                        // Header: patch name + Init/Rnd/Undo/Redo
+                        ui.horizontal(|ui| {
+                            let idx = self.parts[part].patch_idx;
+                            let name = self.patches.get(idx).map(|p| p.name.as_str()).unwrap_or("---");
+                            ui.strong(name);
+                            ui.separator();
+                            if ui.small_button("Init").on_hover_text("Reset to default patch").clicked() {
+                                self.push_undo_snapshot();
+                                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                                self.parts[part].edited_params = crate::synth::PatchParams::default().to_map();
+                                self.send_edited_params(part);
+                            }
+                            if ui.small_button("Rnd").on_hover_text("Randomize patch").clicked() {
+                                self.push_undo_snapshot();
+                                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                                self.parts[part].edited_params = crate::synth::PatchParams::random_map();
+                                self.send_edited_params(part);
+                            }
+                            ui.separator();
+                            if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
+                                self.undo();
+                            }
+                            if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+                                self.redo();
+                            }
+                        });
                         self.draw_params_editable(ui);
-                    });
-                }
+                    }
+                });
             }
         });
     }
