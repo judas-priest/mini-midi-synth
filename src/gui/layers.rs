@@ -386,11 +386,12 @@ impl App {
                 .small().weak()))
                 .on_hover_text("Key range");
 
-            // Pan
+            // Pan — значение в hover, не на полосе: текст значения переменной
+            // ширины вылезал из фикс-бокса и сдвигал хвост строки («криво»).
             ui.label("Pan:");
             let mut pan = self.parts[i].pan;
-            let pan_r = ui.add_sized([90.0, 0.0], egui::Slider::new(&mut pan, -1.0..=1.0).fixed_decimals(2))
-                .on_hover_text("Double-click to reset");
+            let pan_r = ui.add_sized([90.0, 0.0], egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false))
+                .on_hover_text(format!("Pan: {pan:+.2} — double-click to reset"));
             if pan_r.double_clicked() { pan = 0.0; }
             if pan_r.changed() || pan_r.double_clicked() {
                 self.parts[i].pan = pan;
@@ -400,8 +401,8 @@ impl App {
             // Tr
             ui.label("Tr:");
             let mut tr = self.parts[i].transpose as i32;
-            let tr_r = ui.add_sized([120.0, 0.0], egui::Slider::new(&mut tr, -24..=24).suffix(" st"))
-                .on_hover_text("Transpose in semitones. Double-click to reset");
+            let tr_r = ui.add_sized([120.0, 0.0], egui::Slider::new(&mut tr, -24..=24).show_value(false))
+                .on_hover_text(format!("Transpose: {tr:+} st — double-click to reset"));
             if tr_r.double_clicked() { tr = 0; }
             if tr_r.changed() || tr_r.double_clicked() {
                 self.parts[i].transpose = tr as i8;
@@ -425,8 +426,8 @@ impl App {
 
             // Volume
             let mut vol = self.parts[i].volume;
-            let vol_r = ui.add_sized([90.0, 0.0], egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
-                .on_hover_text("Double-click to reset");
+            let vol_r = ui.add_sized([90.0, 0.0], egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
+                .on_hover_text(format!("Volume: {vol:.2} — double-click to reset"));
             if vol_r.double_clicked() { vol = 0.8; }
             if vol_r.changed() || vol_r.double_clicked() {
                 self.parts[i].volume = vol;
