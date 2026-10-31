@@ -827,6 +827,8 @@ pub fn run_gui(
         looper_bars: 4,
         looper_quantize: 0,
         looper_clear_confirm: None,
+        drum_clear_confirm: None,
+        fx_reset_confirm: None,
         looper_layer_mute: [false; 256],
         looper_solo_layer: None,
         looper_source_mix: true,
@@ -836,6 +838,8 @@ pub fn run_gui(
         keybinds: gui::keybinds::Keybinds::from_config(&c.config.ui.keybinds),
         show_keybinds_window: false,
         keybind_capturing: None,
+        keybinds_reset_confirm: None,
+        unbind_confirm: None,
         perf_name: String::new(),
         perf_list: {
             let mut perf_list = preset::list_performances();

@@ -11,7 +11,7 @@ impl App {
             ui.strong("FX Chain");
             ui.label("— 16 slots, serial processing");
             ui.separator();
-            if ui.small_button("Reset").on_hover_text("Reset FX chain to defaults").clicked() {
+            if super::confirm::confirm_button(ui, "Reset", &mut self.fx_reset_confirm, true, "Reset FX chain to defaults") {
                 let chain = FxChain { active: true, ..FxChain::default() };
                 flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
                 self.send_edited_params(part);

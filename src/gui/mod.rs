@@ -14,6 +14,7 @@ mod macros;
 mod theme;
 pub mod keybinds;
 pub mod led_console;
+mod confirm;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -368,6 +369,8 @@ pub struct App {
     pub looper_bars: u8,
     pub looper_quantize: u8,
     pub looper_clear_confirm: Option<std::time::Instant>,
+    pub drum_clear_confirm: Option<std::time::Instant>,
+    pub fx_reset_confirm: Option<std::time::Instant>,
     pub looper_layer_mute: [bool; 256],
     pub looper_solo_layer: Option<u8>,
     /// Looper record source: true = Mix (all sounding parts, default),
@@ -384,6 +387,8 @@ pub struct App {
     pub keybinds: keybinds::Keybinds,
     pub show_keybinds_window: bool,
     pub keybind_capturing: Option<keybinds::KeyAction>,
+    pub keybinds_reset_confirm: Option<std::time::Instant>,
+    pub unbind_confirm: Option<(keybinds::KeyAction, std::time::Instant)>,
     // Performance save/load
     pub perf_name: String,
     pub perf_list: Vec<(String, std::path::PathBuf)>,
@@ -1556,7 +1561,7 @@ impl App {
                     // Тот же 2s-confirm, что у кнопки Clear (audit High п.2):
                     // первое нажатие взводит, второе в течение окна — очищает.
                     let armed = matches!(self.looper_clear_confirm, Some(t)
-                        if t.elapsed().as_secs_f32() < 2.0);
+                        if t.elapsed() < confirm::CONFIRM_WINDOW);
                     if armed {
                         let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
                         self.looper_clear_confirm = None;
@@ -1629,18 +1634,29 @@ impl App {
                         if ui.button(btn_text).clicked() {
                             self.keybind_capturing = Some(action.clone());
                         }
-                        if ui.small_button("x").clicked() {
-                            // Unbind
-                            if let Some(key) = self.keybinds.key_for_action(&action) {
-                                self.keybinds.binds_mut().retain(|(k, _)| *k != key);
-                                self.config.ui.keybinds = self.keybinds.to_config();
+                        // Unbind — тот же 2s-confirm, взвод на конкретное действие.
+                        // Expire через is_some_and: нельзя мутировать поле под &borrow.
+                        if self.unbind_confirm.as_ref().is_some_and(|(_, t)| t.elapsed() >= confirm::CONFIRM_WINDOW) {
+                            self.unbind_confirm = None;
+                        }
+                        let armed = matches!(&self.unbind_confirm, Some((a, _)) if a == &action);
+                        let ub_color = if armed { egui::Color32::RED } else { ui.visuals().text_color() };
+                        if ui.small_button(egui::RichText::new(if armed { "Sure?" } else { "x" }).color(ub_color)).clicked() {
+                            if armed {
+                                if let Some(key) = self.keybinds.key_for_action(&action) {
+                                    self.keybinds.binds_mut().retain(|(k, _)| *k != key);
+                                    self.config.ui.keybinds = self.keybinds.to_config();
+                                }
+                                self.unbind_confirm = None;
+                            } else {
+                                self.unbind_confirm = Some((action.clone(), Instant::now()));
                             }
                         }
                         ui.end_row();
                     }
                 });
                 ui.add_space(theme::SP_SM);
-                if ui.button("Reset Defaults").clicked() {
+                if confirm::confirm_button(ui, "Reset Defaults", &mut self.keybinds_reset_confirm, true, "Restore default keybindings (custom binds are lost)") {
                     self.keybinds = keybinds::Keybinds::defaults();
                     self.config.ui.keybinds = self.keybinds.to_config();
                     self.keybind_capturing = None;

@@ -69,7 +69,7 @@ impl App {
             if ui.button("Undo").on_hover_text("Undo last sequencer edit").clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqUndo);
             }
-            if ui.button("Clear").on_hover_text("Clear all steps").clicked() {
+            if super::confirm::confirm_button(ui, "Clear", &mut self.drum_clear_confirm, true, "Clear all steps") {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
             }
 
@@ -816,23 +816,14 @@ impl App {
 
         // --- Row 1: Transport + Status ---
         ui.horizontal(|ui| {
-            let clear_pending = self.looper_clear_confirm
-                .map(|t| t.elapsed().as_secs_f32() < 2.0).unwrap_or(false);
-            let clear_label = if clear_pending { "Sure?" } else { "Clear" };
-            let clear_color = if clear_pending { egui::Color32::RED } else { ui.visuals().text_color() };
-            if ui.add_enabled(
+            if super::confirm::confirm_button(
+                ui,
+                "Clear",
+                &mut self.looper_clear_confirm,
                 event_count > 0 || state != LooperState::Idle,
-                egui::Button::new(egui::RichText::new(clear_label).color(clear_color)),
-            ).clicked() {
-                if clear_pending {
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
-                    self.looper_clear_confirm = None;
-                } else {
-                    self.looper_clear_confirm = Some(std::time::Instant::now());
-                }
-            }
-            if self.looper_clear_confirm.map(|t| t.elapsed().as_secs_f32() >= 2.0).unwrap_or(false) {
-                self.looper_clear_confirm = None;
+                "Clear the whole looper (destructive)",
+            ) {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
             }
 
             // Undo layer: снимает последний overdub-слой целиком
