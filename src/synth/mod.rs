@@ -247,6 +247,13 @@ pub enum ControlEvent {
     MasterStop,
     /// Master transport: arm/disarm recording on drums + looper
     MasterRecord,
+    /// Master overdub (layer) toggle: quantized loop Playing -> Overdubbing
+    /// at the next boundary; again -> close at the next boundary
+    MasterOverdub,
+    /// Квантованный захват: добавить цикл к петле (+1)
+    CaptureCycleAdd,
+    /// Квантованный захват: убрать последний цикл (−1, откат курсора записи)
+    CaptureCycleRemove,
     SetSustain { on: bool },
     /// Static pedal-up release duration in seconds (None = patch release)
     SetSustainRelease { seconds: Option<f32> },
@@ -1223,6 +1230,10 @@ pub struct SynthEngine {
     looper_capture_quantized: bool,
     /// Previous drum step for boundary edge detection.
     looper_prev_step: u8,
+    /// Quantized overdub (layer): arm at the next boundary / close at the
+    /// next boundary (MasterOverdub toggle).
+    looper_overdub_pending: bool,
+    looper_overdub_active: bool,
     /// Cycle length (ticks) of the last quantized capture — drift-correction
     /// applies when the loop length still equals it.
     looper_cycle_ticks: u32,
@@ -1505,6 +1516,8 @@ impl SynthEngine {
             looper_arm_pending: false,
             looper_capture_quantized: false,
             looper_prev_step: 0,
+            looper_overdub_pending: false,
+            looper_overdub_active: false,
             looper_cycle_ticks: 0,
             looper_finish_pending: false,
             looper_rec_cycles: 0,
@@ -1540,6 +1553,15 @@ impl SynthEngine {
     fn set_master_rec_state(&self, state: u8, cycle: u8) {
         self.master_rec_state.store(state, std::sync::atomic::Ordering::Relaxed);
         self.master_rec_cycle.store(cycle, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Ёмкость лупера = логические циклы + 1 запасной: playback_tick не
+    /// доходит до конца — wrap'а (и локальных тиков) во время записи нет.
+    fn keep_capture_capacity(&mut self) {
+        let need = (self.looper_rec_cycles + 1).saturating_mul(self.looper_cycle_ticks);
+        if self.looper.loop_len_ticks() < need {
+            self.looper.set_loop_len_ticks(need);
+        }
     }
 
     pub fn active_part_atom(&self) -> std::sync::Arc<std::sync::atomic::AtomicU8> {
@@ -1755,6 +1777,8 @@ impl SynthEngine {
     pub fn master_stop(&mut self) {
         self.looper_arm_pending = false;
         self.looper_capture_quantized = false;
+        self.looper_overdub_pending = false;
+        self.looper_overdub_active = false;
         self.looper_finish_pending = false;
         self.looper_rec_cycles = 0;
         self.set_master_rec_state(0, 0);
@@ -1785,6 +1809,25 @@ impl SynthEngine {
             self.master_stop();
         } else {
             self.master_start();
+        }
+    }
+
+    /// Master overdub (layer): loop Playing (quantized) -> Overdubbing
+    /// starts at the NEXT pattern boundary; again -> closes at the next
+    /// boundary. Loop length never changes.
+    pub fn master_toggle_overdub(&mut self) {
+        match self.looper.state {
+            crate::synth::looper::LooperState::Playing
+                if self.looper_capture_quantized =>
+            {
+                self.looper_overdub_pending = true;
+            }
+            crate::synth::looper::LooperState::Overdubbing
+                if self.looper_overdub_active =>
+            {
+                self.looper_finish_pending = true;
+            }
+            _ => {}
         }
     }
 
@@ -2588,6 +2631,25 @@ impl SynthEngine {
             ControlEvent::MasterStop => {
                 self.master_stop();
             }
+            ControlEvent::MasterOverdub => {
+                self.master_toggle_overdub();
+            }
+            ControlEvent::CaptureCycleAdd => {
+                // +1 цикл: логическая длина растёт (записывать можно дальше);
+                // лупер держится с запасом — wrap'а во время записи нет
+                if self.looper_capture_quantized && self.looper_rec_cycles > 0 {
+                    self.looper_rec_cycles += 1;
+                    self.keep_capture_capacity();
+                }
+            }
+            ControlEvent::CaptureCycleRemove => {
+                // −1 цикл: логическая длина ужимается, курсор записи откатывается
+                if self.looper_capture_quantized && self.looper_rec_cycles > 1 {
+                    self.looper_rec_cycles -= 1;
+                    let kept = self.looper_rec_cycles.saturating_mul(self.looper_cycle_ticks);
+                    self.looper.trim_after(kept);
+                }
+            }
             ControlEvent::MasterRecord => {
                 self.master_toggle_record();
             }
@@ -2927,9 +2989,24 @@ impl SynthEngine {
             // закрывать надо и его.
             let capturing = lstate == crate::synth::looper::LooperState::Recording
                 || (lstate == crate::synth::looper::LooperState::Overdubbing
-                    && self.looper_capture_quantized);
+                    && self.looper_capture_quantized
+                    && !self.looper_overdub_active);
             let boundary = playing && step == 0 && prev != 0;
-            if boundary && self.looper_arm_pending {
+            if boundary && self.looper_overdub_pending && lstate == crate::synth::looper::LooperState::Playing {
+                // Слой: старт поверх петли на границе (длина петли не меняется)
+                self.looper_overdub_pending = false;
+                self.looper_overdub_active = true;
+                self.looper.toggle_record(); // Playing -> Overdubbing
+            } else if boundary
+                && lstate == crate::synth::looper::LooperState::Overdubbing
+                && self.looper_overdub_active
+            {
+                if self.looper_finish_pending {
+                    self.looper_finish_pending = false;
+                    self.looper_overdub_active = false;
+                    self.looper.toggle_record(); // Overdubbing -> Playing
+                }
+            } else if boundary && self.looper_arm_pending {
                 self.looper_arm_pending = false;
                 self.looper.toggle_record(); // Idle -> Recording (length = bars * bar)
                 // Boss RC-семантика: петля = Bars × цикл паттерна; авто-закрытие
@@ -2940,26 +3017,29 @@ impl SynthEngine {
                 let bpm = self.drum_engine.sequencer.bpm.max(1.0);
                 let samples_per_step = (self.sample_rate as f64 * 60.0) / (bpm as f64 * 4.0);
                 let cycle = (pattern_len as f64 * samples_per_step) as u32;
-                let bars = self.looper.bars.max(1) as u32;
-                self.looper.set_loop_len_ticks(cycle.saturating_mul(bars));
+                // Безостановочный захват: лупер с запасом (64 цикла максимум) —
+                // playback_tick НЕ оборачивается, тики событий глобальные.
+                // Реальная длина = looper_rec_cycles циклов; Rec закрывает.
+                self.looper.set_loop_len_ticks(cycle.saturating_mul(64));
                 self.looper_cycle_ticks = cycle;
-                self.looper_rec_cycles = 0;
-                self.set_master_rec_state(2, 1); // capturing, cycle 1/N
+                self.looper_rec_cycles = 1;
+                self.set_master_rec_state(2, 1); // capturing, cycle 1
             } else if boundary && capturing {
-                self.looper_rec_cycles += 1;
-                self.set_master_rec_state(
-                    if self.looper_finish_pending { 3 } else { 2 },
-                    (self.looper_rec_cycles + 1).min(255) as u8); // entering cycle k+1 (или закрывающий)
-                let bars = self.looper.bars.max(1) as u32;
-                // Досрочный Rec — тоже закрыть; Boss: конец выравнивается на такт
-                if self.looper_finish_pending || self.looper_rec_cycles >= bars {
-                    // Петля = сыгранные целые циклы (тики непрерывны — без релокации)
-                    self.looper.set_loop_len_ticks(
-                        self.looper_rec_cycles.saturating_mul(self.looper_cycle_ticks));
+                // Закрытие — ТОЛЬКО по Rec (finish_pending). Безостановочный режим.
+                if self.looper_finish_pending {
                     self.looper_finish_pending = false;
+                    let kept = self.looper_rec_cycles.saturating_mul(self.looper_cycle_ticks);
+                    self.looper.trim_after(kept);
+                    self.looper.set_loop_len_ticks(kept);
                     self.looper_rec_cycles = 0;
                     self.drum_engine.set_recording(false); // сетка тоже разармирована
                     self.looper.toggle_record(); // Recording/Overdubbing -> Playing
+                } else {
+                    // Новый цикл начался: логическая длина +1, ёмкость с запасом
+                    self.looper_rec_cycles += 1;
+                    self.set_master_rec_state(2,
+                        self.looper_rec_cycles.min(255) as u8);
+                    self.keep_capture_capacity();
                 }
             } else if boundary
                 && lstate == crate::synth::looper::LooperState::Playing

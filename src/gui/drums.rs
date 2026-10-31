@@ -51,6 +51,13 @@ impl App {
             {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
             }
+            // Overdub (слой поверх готовой петли): старт/закрытие на границе
+            let ovr_enabled = lstate == crate::synth::looper::LooperState::Playing;
+            if ui.add_enabled(ovr_enabled, egui::Button::new("Ovr"))
+                .on_hover_text("Layer: overdub поверх петли — старт на границе, ещё раз = закрыть").clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::MasterOverdub);
+            }
 
             // Downbeat flash indicator (lights ~150 ms after beat 1)
             let flashing = self.drum_beat_flash

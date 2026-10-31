@@ -355,6 +355,26 @@ impl MidiLooper {
         self.playback_cursor = 0;
     }
 
+    /// Capture hygiene (#30): отбросить события за `ticks` (убранный хвост
+    /// цикла), подрезать курсор записи. RT-safe: компактизация на месте.
+    pub fn trim_after(&mut self, ticks: u32) {
+        let n = self.len as usize;
+        let mut write = 0usize;
+        for read in 0..n {
+            if self.events[read].tick < ticks {
+                if write != read {
+                    self.events.swap(write, read);
+                }
+                write += 1;
+            }
+        }
+        self.len = write as u16;
+        self.playback_tick = self.playback_tick.min(ticks);
+        self.playback_cursor =
+            self.events[..write].partition_point(|e| e.tick < self.playback_tick);
+        self.update_display();
+    }
+
     /// Toggle play/stop.
     pub fn toggle_play(&mut self) {
         match self.state {
