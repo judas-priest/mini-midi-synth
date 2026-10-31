@@ -85,6 +85,7 @@ impl App {
                 self.save_global_to_config();
             }
         });
+        ui.add_space(theme::SP_MD); // ритм секций: транспорт | паттерн | грид
 
         // Pattern selector + length
         ui.horizontal(|ui| {
@@ -267,7 +268,19 @@ impl App {
                 // instead of silently doing nothing.
                 let dsp_kit = !(self.sf2_drums_enabled && self.sf2_drums_soundfont.is_some());
                 let dsp_hint = if dsp_kit { "" } else { " — DSP only, no effect in SF2 mode" };
+                if !dsp_kit {
+                    ui.label(egui::RichText::new("L T D P: DSP-engine only — no effect on SF2 kits")
+                        .small().weak());
+                }
                 ui.horizontal(|ui| {
+                    let mut sm = self.drum_slot_mutes_view[slot];
+                    if ui.add_sized([52.0, 0.0], egui::Checkbox::new(&mut sm, "Mute"))
+                        .on_hover_text("Mute this drum: sequencer and live hits are silent (recording continues)")
+                        .changed()
+                    {
+                        self.drum_slot_mutes_view[slot] = sm;
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetMute { slot: slot as u8, mute: sm });
+                    }
                     let mut level = self.drum_params[slot].level;
                     let mut tune = self.drum_params[slot].tune;
                     let mut decay = self.drum_params[slot].decay;
@@ -825,7 +838,7 @@ impl App {
         // Порядок Undo → Clear — как в транспорте драм-секвенсора (единый стандарт).
         ui.horizontal(|ui| {
             // Undo layer: снимает последний overdub-слой целиком
-            if ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new("Undo Layer"))
+            if ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new("Undo"))
                 .on_hover_text(format!("Undo last looper layer (L{layer_count})")).clicked()
             {
                 let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
@@ -1010,7 +1023,9 @@ impl App {
         }
 
         // --- Timeline ---
-        if event_count > 0 {
+        // Пустой лупер тоже рисуем: при WAIT/REC сетка и playhead должны
+        // быть видны (фидбек: «полоса записи не показывается, когда нот нет»).
+        if event_count > 0 || state != LooperState::Idle {
             self.draw_looper_timeline(ui, state, position, &part_colors);
         }
 
@@ -1130,7 +1145,8 @@ impl App {
                 Ok(d) => d,
                 Err(_) => return,
             };
-            if display.events.is_empty() { return; }
+            // Пустой список событий НЕ выход: при WAIT/REC таймлайн с сеткой
+            // и playhead должен быть виден даже без нот.
             (display.events.clone(), display.current_layer)
         };
 
@@ -1160,7 +1176,8 @@ impl App {
             );
         }
 
-        // Find note range for vertical mapping
+        // Find note range for vertical mapping; без нот (min>max) секцию
+        // точек пропускаем, но НЕ выходим — playhead ниже рисуется всегда.
         let (mut min_note, mut max_note) = (127u8, 0u8);
         for ev in &events {
             if ev.velocity > 0 {
@@ -1168,7 +1185,7 @@ impl App {
                 max_note = max_note.max(ev.note);
             }
         }
-        if min_note > max_note { return; }
+        if min_note <= max_note {
         // Add padding
         let range = (max_note - min_note).max(12) as f32;
         let mid = (min_note + max_note) as f32 / 2.0;
@@ -1198,6 +1215,7 @@ impl App {
                 egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(dot_w, dot_h)),
                 1.0, c,
             );
+        }
         }
 
         // Playhead

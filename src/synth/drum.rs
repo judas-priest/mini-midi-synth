@@ -952,6 +952,8 @@ pub struct DrumTriggers {
 pub struct DrumEngine {
     voices: [DrumVoice; NUM_DRUM_SLOTS],
     pub params: [DrumSlotParams; NUM_DRUM_SLOTS],
+    /// Mute слота: гасит и секвенсорные, и live-удары (но не запись в сетку).
+    pub slot_mutes: [bool; NUM_DRUM_SLOTS],
     pub sequencer: StepSequencer,
     pub volume: f32,
     pub enabled: bool,
@@ -1008,6 +1010,7 @@ impl DrumEngine {
         Self {
             voices,
             params: [DrumSlotParams::default(); NUM_DRUM_SLOTS],
+            slot_mutes: [false; NUM_DRUM_SLOTS],
             sequencer: StepSequencer::new(),
             volume: 0.8,
             enabled: true,
@@ -1252,6 +1255,7 @@ impl DrumEngine {
 
         for (slot, &(fire, vel)) in triggers.iter().enumerate() {
             if fire > 0 {
+                if self.slot_mutes[slot] { continue; } // mute: слот молчит
                 if self.sf2_mode {
                     sf2_triggers.triggers[sf2_triggers.count] = (slot as u8, vel);
                     sf2_triggers.count += 1;

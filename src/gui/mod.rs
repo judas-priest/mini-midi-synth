@@ -312,6 +312,8 @@ pub struct App {
     pub show_drums: bool,
     pub drum_patterns: [DrumPattern; 8],
     pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
+    /// GUI-зеркало mute слотов (источник истины — GUI, как drum_params).
+    pub drum_slot_mutes_view: [bool; NUM_DRUM_SLOTS],
     /// Drum note remap table: slot i plays mapped note drum_remap[i].
     pub drum_remap: [u8; 16],
     pub drum_pad_vel: [u8; 16],
@@ -1082,11 +1084,9 @@ impl eframe::App for App {
         // allocate_ui в horizontal сворачивает высоту и разваливает раскладку,
         // а ScrollArea без явных id_salt даёт коллизии ID.
         egui::TopBottomPanel::bottom("drum_seq_panel")
-            // Фиксированная высота: ресайз сбивал предсказуемость раскладки —
-            // транспорт записи должен быть всегда виден и всегда одинаков
-            // (обратная связь: «панель записи должна быть всегда видна и
-            // абсолютна, размер фиксированный»).
-            .exact_height(500.0)
+            .resizable(true)
+            .default_height(420.0)
+            .height_range(240.0..=760.0)
             .show(ctx, |ui| {
                 ui.columns(2, |cols| {
                     // ScrollArea::both: вертикальный скролл НЕ режет контент по
