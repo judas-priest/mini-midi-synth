@@ -1077,7 +1077,7 @@ impl Oscillator {
         match &mut self.state {
             OscState::Simple { phase } => {
                 let out = match self.osc_type {
-                    OscType::Sine => (*phase * TAU).sin(),
+                    OscType::Sine => super::lfo::sine_lut(*phase),
                     OscType::Saw => {
                         let mut out = 2.0 * *phase - 1.0;
                         out -= poly_blep(*phase, dt);
@@ -1109,8 +1109,8 @@ impl Oscillator {
                 let fm_index = self.fm_index;
                 let fm_ratio = self.fm_ratio;
                 let sample_rate = self.sample_rate;
-                let modulator = (*mod_phase * TAU).sin();
-                let out = ((*phase + fm_index * modulator) * TAU).sin();
+                let modulator = super::lfo::sine_lut(*mod_phase);
+                let out = super::lfo::sine_lut(*phase + fm_index * modulator);
                 *mod_phase += freq * fm_ratio / sample_rate;
                 *mod_phase -= mod_phase.floor();
                 *phase += dt;
@@ -2655,9 +2655,9 @@ impl Oscillator {
             let mod2_ratio = fm_ratio * 1.5;
             let mod2_index = fm_index * 0.4; // secondary modulation depth
 
-            let mod2 = (*mod2_phase * TAU).sin();
-            let mod1 = ((*mod1_phase + mod2_index * mod2) * TAU).sin();
-            let out = ((*carrier_phase + fm_index * mod1) * TAU).sin();
+            let mod2 = super::lfo::sine_lut(*mod2_phase);
+            let mod1 = super::lfo::sine_lut(*mod1_phase + mod2_index * mod2);
+            let out = super::lfo::sine_lut(*carrier_phase + fm_index * mod1);
 
             *mod2_phase += freq * mod2_ratio / sr;
             *mod2_phase -= mod2_phase.floor();

@@ -18,6 +18,12 @@ pub struct Metrics {
     pub stream_errors: AtomicU32,
     /// Longest callback duration seen since the last read, in microseconds.
     worst_callback_us: AtomicU32,
+    /// Rolling average accumulators (micros sum + callback count).
+    callback_us_sum: AtomicU64,
+    callback_count: AtomicU32,
+    /// Buffer size actually negotiated with the device (may differ from the
+    /// requested one — negotiate_config silently falls back).
+    actual_buffer_size: AtomicU32,
 }
 
 /// The one instance. See the module note on why this is global.
@@ -30,6 +36,9 @@ impl Metrics {
             ctrl_dropped: AtomicU64::new(0),
             stream_errors: AtomicU32::new(0),
             worst_callback_us: AtomicU32::new(0),
+            callback_us_sum: AtomicU64::new(0),
+            callback_count: AtomicU32::new(0),
+            actual_buffer_size: AtomicU32::new(0),
         }
     }
 
@@ -53,6 +62,8 @@ impl Metrics {
     #[inline]
     pub fn note_callback_time(&self, micros: u32) {
         self.worst_callback_us.fetch_max(micros, Ordering::Relaxed);
+        self.callback_us_sum.fetch_add(micros as u64, Ordering::Relaxed);
+        self.callback_count.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Reads and resets the peak, so the GUI shows a rolling worst case rather
@@ -60,6 +71,21 @@ impl Metrics {
     /// while the process is still warming up.
     pub fn take_worst_callback_us(&self) -> u32 {
         self.worst_callback_us.swap(0, Ordering::Relaxed)
+    }
+
+    /// Среднее время колбэка с последнего чтения (и сброс накопителей).
+    pub fn take_avg_callback_us(&self) -> u32 {
+        let sum = self.callback_us_sum.swap(0, Ordering::Relaxed);
+        let n = self.callback_count.swap(0, Ordering::Relaxed);
+        if n > 0 { (sum / n as u64) as u32 } else { 0 }
+    }
+
+    pub fn set_actual_buffer_size(&self, size: u32) {
+        self.actual_buffer_size.store(size, Ordering::Relaxed);
+    }
+
+    pub fn actual_buffer_size(&self) -> u32 {
+        self.actual_buffer_size.load(Ordering::Relaxed)
     }
 
     /// Events that never reached the engine, from either direction.

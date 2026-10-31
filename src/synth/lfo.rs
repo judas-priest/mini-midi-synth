@@ -21,9 +21,12 @@ pub fn warmup_sine_lut() {
     let _ = SINE_TABLE.get_or_init(build_sine_lut);
 }
 
-fn sine_lut(phase: f32) -> f32 {
+/// Nearest-sample sine lookup for a phase in turns (may be negative or > 1 —
+/// folded with `rem_euclid`, so FM-style signed modulation is safe).
+#[inline]
+pub(crate) fn sine_lut(phase: f32) -> f32 {
     let table = SINE_TABLE.get_or_init(build_sine_lut);
-    let idx = (phase * 2048.0) as usize & 2047;
+    let idx = (phase.rem_euclid(1.0) * 2048.0) as usize & 2047;
     table[idx]
 }
 
@@ -467,5 +470,29 @@ impl Lfo {
         self.loop_end = data.loop_end;
         self.trigmask_aeg = data.trigmask_aeg;
         self.trigmask_feg = data.trigmask_feg;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sine_lut_matches_libm() {
+        for i in 0..1000 {
+            let p = i as f32 / 1000.0;
+            assert!((sine_lut(p) - (p * std::f32::consts::TAU).sin()).abs() < 1e-2, "phase {p}");
+        }
+    }
+
+    #[test]
+    fn sine_lut_folds_negative_phase() {
+        for i in 0..1000 {
+            let p = i as f32 / 1000.0;
+            assert!(
+                (sine_lut(-p) - (-p * std::f32::consts::TAU).sin()).abs() < 1e-2,
+                "phase -{p}"
+            );
+        }
     }
 }

@@ -403,6 +403,8 @@ pub struct App {
     pub last_config_save: std::time::Instant,
     /// Smoothed DSP load percentage shown in the header.
     pub dsp_load: f32,
+    /// Decaying peak-hold of DSP load, shown next to `dsp_load`.
+    pub dsp_peak: f32,
     pub global_dirty: bool,
     // SF2 sampler
     pub sf2_file_list: Vec<(String, std::path::PathBuf)>,
@@ -889,27 +891,32 @@ impl eframe::App for App {
                 ui.label(format!("MIDI: {midi_status}"));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // DSP load against the callback budget: one buffer at the
-                    // current rate. Anything approaching 100% will glitch.
-                    let budget_us =
-                        self.config.audio.buffer_size as f32 / self.sample_rate as f32 * 1e6;
-                    let worst_us = crate::metrics::METRICS.take_worst_callback_us() as f32;
+                    // DSP load: avg (устойчивая) + peak-hold с медленным спадом
+                    // (практика REAPER). Бюджет — от ФАКТИЧЕСКОГО буфера:
+                    // negotiate может молча откатить запрошенный.
+                    let actual_buf = crate::metrics::METRICS.actual_buffer_size();
+                    let buf = if actual_buf > 0 { actual_buf } else { self.config.audio.buffer_size };
+                    let budget_us = buf as f32 / self.sample_rate as f32 * 1e6;
+                    let avg_us = crate::metrics::METRICS.take_avg_callback_us() as f32;
+                    let peak_us = crate::metrics::METRICS.take_worst_callback_us() as f32;
                     if budget_us > 0.0 {
-                        let load = worst_us / budget_us * 100.0;
-                        // Smoothed so the number does not flicker every frame.
-                        self.dsp_load = self.dsp_load * 0.8 + load * 0.2;
+                        let avg_load = avg_us / budget_us * 100.0;
+                        self.dsp_load = self.dsp_load * 0.8 + avg_load * 0.2;
+                        let peak_load = peak_us / budget_us * 100.0;
+                        self.dsp_peak = (self.dsp_peak * 0.98).max(peak_load);
                     }
 
                     ui.label(format!(
-                        "{} | {}Hz | buf {} | dsp {:.0}%",
+                        "{} | {}Hz | buf {} | dsp {:.0}% (peak {:.0}%)",
                         self.current_host,
                         self.sample_rate,
-                        self.config.audio.buffer_size,
+                        buf,
                         self.dsp_load,
+                        self.dsp_peak,
                     ))
                     .on_hover_text(
-                        "Worst audio callback time as a share of the buffer budget. \
-                         Approaching 100% means crackle — raise the buffer size.",
+                        "Audio callback time as a share of the buffer budget: \
+                         average and decaying peak. Peak approaching 100% means crackle.",
                     );
 
                     let dropped = crate::metrics::METRICS.total_dropped();
