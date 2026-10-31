@@ -822,7 +822,15 @@ impl App {
         let part_colors = theme::PART_COLORS;
 
         // --- Row 1: Transport + Status ---
+        // Порядок Undo → Clear — как в транспорте драм-секвенсора (единый стандарт).
         ui.horizontal(|ui| {
+            // Undo layer: снимает последний overdub-слой целиком
+            if ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new("Undo Layer"))
+                .on_hover_text(format!("Undo last looper layer (L{layer_count})")).clicked()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
+            }
+
             if super::confirm::confirm_button(
                 ui,
                 "Clear",
@@ -831,13 +839,6 @@ impl App {
                 "Clear the whole looper (destructive)",
             ) {
                 let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
-            }
-
-            // Undo layer: снимает последний overdub-слой целиком
-            if ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new("Undo Layer"))
-                .on_hover_text(format!("Undo last looper layer (L{layer_count})")).clicked()
-            {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
             }
 
             ui.separator();

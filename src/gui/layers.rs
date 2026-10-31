@@ -117,17 +117,11 @@ impl App {
             .auto_shrink(false)
             .max_height(max_h)
             .show(ui, |ui| {
-            let sp = self.split_point;
+            // Заголовки зон («Left hand (A) — 0..N» / «Right hand (B)») убраны:
+            // занимали две строки, диапазон и так виден в range-лейбле каждой
+            // парт-строки и в hover сплит-кнопки.
 
             // ── Zone A ───────────────────────────────────────────────────
-            let a_header = if split_on {
-                format!("◀ Left hand (A) — 0..{}", sp.saturating_sub(1))
-            } else {
-                "◀ Left hand (A)".to_string()
-            };
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(a_header).weak().small());
-            });
             for i in ZONE_A {
                 if !self.parts[i].enabled { continue; }
                 ui.push_id(format!("part_row_{i}"), |ui| {
@@ -144,9 +138,6 @@ impl App {
             // ── Zone B (visible only when split enabled) ─────────────────
             if split_on {
                 ui.add_space(theme::SP_XS);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("▶ Right hand (B) — {sp}..127")).weak().small());
-                });
                 for i in ZONE_B {
                     if !self.parts[i].enabled { continue; }
                     ui.push_id(format!("part_row_{i}"), |ui| {
@@ -312,7 +303,7 @@ impl App {
             } else {
                 egui::RichText::new(label).strong()
             };
-            if ui.selectable_label(is_active, label_text)
+            if ui.add_sized([34.0, 0.0], egui::SelectableLabel::new(is_active, label_text))
                 .on_hover_text(format!("Select part {zone}{num} for editing (M = muted)"))
                 .clicked()
             {
@@ -325,7 +316,7 @@ impl App {
             // Engine toggle (DSP/SF2)
             let sf2 = self.parts[i].sf2_mode;
             let eng_label = if sf2 { "SF2" } else { "DSP" };
-            if ui.small_button(eng_label).on_hover_text(
+            if ui.add_sized([44.0, 0.0], egui::Button::new(eng_label).small()).on_hover_text(
                 if sf2 { "Switch to DSP engine" } else { "Switch to SF2 engine" }
             ).clicked() {
                 let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
@@ -354,7 +345,7 @@ impl App {
                         self.inst_browser_part = Some(i);
                     }
                 } else {
-                    ui.label(egui::RichText::new("---").weak())
+                    ui.add_sized([170.0, 0.0], egui::Label::new(egui::RichText::new("---").weak()))
                         .on_hover_text("No SoundFont loaded (load one in Settings)");
                 }
             } else {
@@ -372,15 +363,15 @@ impl App {
                 }
             }
 
-            // Mute / Root
+            // Mute / Root — фиксированные ширины: колонки всех строк совпадают
             let mut m = self.parts[i].mute;
-            if ui.checkbox(&mut m, "M").on_hover_text("Mute this part").changed() {
+            if ui.add_sized([38.0, 0.0], egui::Checkbox::new(&mut m, "M")).on_hover_text("Mute this part").changed() {
                 self.parts[i].mute = m;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: m });
                 self.persist_parts_state();
             }
             let mut r = self.parts[i].root_only;
-            if ui.checkbox(&mut r, "R").on_hover_text(
+            if ui.add_sized([38.0, 0.0], egui::Checkbox::new(&mut r, "R")).on_hover_text(
                 "Root-only (bass split): this part sounds only the lowest held key")
                 .changed()
             {
@@ -390,15 +381,15 @@ impl App {
             }
 
             // Key range (derived from split — display only)
-            ui.label(egui::RichText::new(format!(
+            ui.add_sized([92.0, 0.0], egui::Label::new(egui::RichText::new(format!(
                 "{}–{}", note_name(self.parts[i].min_note), note_name(self.parts[i].max_note)))
-                .small().weak())
+                .small().weak()))
                 .on_hover_text("Key range");
 
             // Pan
             ui.label("Pan:");
             let mut pan = self.parts[i].pan;
-            let pan_r = ui.add(egui::Slider::new(&mut pan, -1.0..=1.0).fixed_decimals(2))
+            let pan_r = ui.add_sized([90.0, 0.0], egui::Slider::new(&mut pan, -1.0..=1.0).fixed_decimals(2))
                 .on_hover_text("Double-click to reset");
             if pan_r.double_clicked() { pan = 0.0; }
             if pan_r.changed() || pan_r.double_clicked() {
@@ -409,7 +400,7 @@ impl App {
             // Tr
             ui.label("Tr:");
             let mut tr = self.parts[i].transpose as i32;
-            let tr_r = ui.add(egui::Slider::new(&mut tr, -24..=24).suffix(" st"))
+            let tr_r = ui.add_sized([120.0, 0.0], egui::Slider::new(&mut tr, -24..=24).suffix(" st"))
                 .on_hover_text("Transpose in semitones. Double-click to reset");
             if tr_r.double_clicked() { tr = 0; }
             if tr_r.changed() || tr_r.double_clicked() {
@@ -421,9 +412,9 @@ impl App {
             ui.label("Vel:");
             let mut vmin = self.parts[i].vel_min as i32;
             let mut vmax = self.parts[i].vel_max as i32;
-            let c1 = ui.add(egui::DragValue::new(&mut vmin).range(1..=127).speed(1)).changed();
+            let c1 = ui.add_sized([46.0, 0.0], egui::DragValue::new(&mut vmin).range(1..=127).speed(1)).changed();
             ui.label("-");
-            let c2 = ui.add(egui::DragValue::new(&mut vmax).range(1..=127).speed(1)).changed();
+            let c2 = ui.add_sized([46.0, 0.0], egui::DragValue::new(&mut vmax).range(1..=127).speed(1)).changed();
             if c1 || c2 {
                 let vmin = (vmin as u8).max(1);
                 let vmax = (vmax as u8).max(vmin);
@@ -434,7 +425,7 @@ impl App {
 
             // Volume
             let mut vol = self.parts[i].volume;
-            let vol_r = ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
+            let vol_r = ui.add_sized([90.0, 0.0], egui::Slider::new(&mut vol, 0.0..=1.0).fixed_decimals(2))
                 .on_hover_text("Double-click to reset");
             if vol_r.double_clicked() { vol = 0.8; }
             if vol_r.changed() || vol_r.double_clicked() {

@@ -1082,9 +1082,11 @@ impl eframe::App for App {
         // allocate_ui в horizontal сворачивает высоту и разваливает раскладку,
         // а ScrollArea без явных id_salt даёт коллизии ID.
         egui::TopBottomPanel::bottom("drum_seq_panel")
-            .resizable(true)
-            .default_height(500.0)
-            .height_range(200.0..=760.0)
+            // Фиксированная высота: ресайз сбивал предсказуемость раскладки —
+            // транспорт записи должен быть всегда виден и всегда одинаков
+            // (обратная связь: «панель записи должна быть всегда видна и
+            // абсолютна, размер фиксированный»).
+            .exact_height(500.0)
             .show(ctx, |ui| {
                 ui.columns(2, |cols| {
                     // ScrollArea::both: вертикальный скролл НЕ режет контент по
