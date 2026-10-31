@@ -28,6 +28,7 @@ impl App {
     pub(super) fn draw_part_rows(&mut self, ui: &mut egui::Ui) {
         // ── Performance save/load (above Split) ──────────────────────────
         self.draw_perf_row(ui);
+        ui.add_space(theme::SP_MD); // отделить perf от split-ряда
 
         // ── Split row: toggle + point + view tabs ────────────────────────
         let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
@@ -109,19 +110,23 @@ impl App {
         });
 
         // ── Part rows (two zones) ────────────────────────────────────────
-        // Вся доступная высота минус карта зон — раньше 0.55 от остатка резал
-        // строки партов посередине и оставлял дыру над docked-панелью.
-        let max_h = (ui.available_height() - 36.0).max(120.0);
+        // Диапазон руки — один раз в заголовке зоны; карта зон внизу удалена
+        // (фидбек: дублировала диапазоны по строкам и занимала место).
+        let max_h = (ui.available_height() - theme::SP_LG).max(120.0);
         egui::ScrollArea::vertical()
             .id_salt("layers_parts_scroll")
             .auto_shrink(false)
             .max_height(max_h)
             .show(ui, |ui| {
-            // Заголовки зон («Left hand (A) — 0..N» / «Right hand (B)») убраны:
-            // занимали две строки, диапазон и так виден в range-лейбле каждой
-            // парт-строки и в hover сплит-кнопки.
-
             // ── Zone A ───────────────────────────────────────────────────
+            let a_header = if split_on {
+                format!("◀ Left hand (A) — 0..{}", self.split_point.saturating_sub(1))
+            } else {
+                "◀ Left hand (A) — 0..127".to_string()
+            };
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(a_header).weak().small());
+            });
             for i in ZONE_A {
                 if !self.parts[i].enabled { continue; }
                 ui.push_id(format!("part_row_{i}"), |ui| {
@@ -138,6 +143,10 @@ impl App {
             // ── Zone B (visible only when split enabled) ─────────────────
             if split_on {
                 ui.add_space(theme::SP_XS);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!(
+                        "▶ Right hand (B) — {}..127", self.split_point)).weak().small());
+                });
                 for i in ZONE_B {
                     if !self.parts[i].enabled { continue; }
                     ui.push_id(format!("part_row_{i}"), |ui| {
@@ -152,11 +161,6 @@ impl App {
                 }
             }
         });
-
-        // ── Keyboard zone map ────────────────────────────────────────────
-        if !self.show_drums && !self.show_midi_seq && !self.show_fx_chain {
-            draw_key_zone_map(ui, &self.parts, self.active_part);
-        }
 
         // ── Middle-click / ✕ removal confirmation ────────────────────────
         if let Some(p) = self.pending_remove_part {
@@ -293,18 +297,20 @@ impl App {
         let num = (i % PARTS_PER_ZONE) + 1;
 
         ui.horizontal(|ui| {
-            // Part label — click to select the part for the params editor below
+            // Part label — цвет парта = цвет руки на карте зон (identity);
+            // активный парт — тинт фоном (selection), без egui-selection-синевы
+            // и рамок (research: identity и selection — разные каналы).
             let label = format!("{zone}{num}");
             let muted = self.parts[i].mute;
-            let label_text = if muted {
-                // Зачёркивание — второй признак состояния помимо цвета (WCAG 1.4.1);
-                // GRAY(160) на BG_PANEL = 6.4:1.
-                egui::RichText::new(label).strong().strikethrough().color(egui::Color32::GRAY)
-            } else {
-                egui::RichText::new(label).strong()
-            };
-            if ui.add_sized([34.0, 0.0], egui::SelectableLabel::new(is_active, label_text))
-                .on_hover_text(format!("Select part {zone}{num} for editing (M = muted)"))
+            let part_color = theme::PART_COLORS[i % theme::PART_COLORS.len()];
+            let name_color = if muted { egui::Color32::GRAY } else { part_color };
+            let mut label_text = egui::RichText::new(label).strong().color(name_color);
+            if muted { label_text = label_text.strikethrough(); }
+            let name_btn = egui::Button::new(label_text)
+                .fill(if is_active { part_color.gamma_multiply(0.30) } else { egui::Color32::TRANSPARENT })
+                .stroke(egui::Stroke::NONE);
+            if ui.add_sized([34.0, 0.0], name_btn)
+                .on_hover_text(format!("Select part {zone}{num} for editing (muted = gray + strikethrough)"))
                 .clicked()
             {
                 self.set_active_part(i);
@@ -365,13 +371,13 @@ impl App {
 
             // Mute / Root — фиксированные ширины: колонки всех строк совпадают
             let mut m = self.parts[i].mute;
-            if ui.add_sized([38.0, 0.0], egui::Checkbox::new(&mut m, "M")).on_hover_text("Mute this part").changed() {
+            if ui.add_sized([52.0, 0.0], egui::Checkbox::new(&mut m, "Mute")).on_hover_text("Mute this part").changed() {
                 self.parts[i].mute = m;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: m });
                 self.persist_parts_state();
             }
             let mut r = self.parts[i].root_only;
-            if ui.add_sized([38.0, 0.0], egui::Checkbox::new(&mut r, "R")).on_hover_text(
+            if ui.add_sized([52.0, 0.0], egui::Checkbox::new(&mut r, "Root")).on_hover_text(
                 "Root-only (bass split): this part sounds only the lowest held key")
                 .changed()
             {
@@ -380,11 +386,8 @@ impl App {
                 self.persist_parts_state();
             }
 
-            // Key range (derived from split — display only)
-            ui.add_sized([92.0, 0.0], egui::Label::new(egui::RichText::new(format!(
-                "{}–{}", note_name(self.parts[i].min_note), note_name(self.parts[i].max_note)))
-                .small().weak()))
-                .on_hover_text("Key range");
+            // Key range убран из строки: диапазон руки — один раз в заголовке
+            // зоны (фидбек: «зачем к каждому парту, он один на руку»).
 
             // Pan — значение в hover, не на полосе: текст значения переменной
             // ширины вылезал из фикс-бокса и сдвигал хвост строки («криво»).
@@ -500,49 +503,4 @@ impl App {
         }
     }
 
-}
-
-fn draw_key_zone_map(ui: &mut egui::Ui, parts: &[super::PartState], active: usize) {
-    let colors = theme::PART_COLORS;
-    let total_w = ui.available_width().min(500.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(total_w, 8.0), egui::Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, theme::BG_PANEL);
-    for (i, part) in parts.iter().enumerate() {
-        if !part.enabled { continue; }
-        let c = colors[i % colors.len()];
-        // Полный цвет у всех зон: приглушённые неактивные зоны падали ниже
-        // 3:1 по фону (audit Medium п.5). Активная зона — белая обводка
-        // (неколоровый признак, WCAG 1.4.1), а не затемнение.
-        let lo = part.min_note as f32 / 127.0;
-        let hi = (part.max_note as f32 + 1.0) / 127.0;
-        let zone = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + lo * total_w, rect.top()),
-            egui::pos2((rect.left() + hi * total_w).min(rect.right()), rect.bottom()),
-        );
-        painter.rect_filled(zone, 0.0, c);
-    }
-    for oct in 0..11 {
-        let x = rect.left() + (oct * 12) as f32 / 127.0 * total_w;
-        painter.line_segment(
-            [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-            egui::Stroke::new(0.5, theme::STROKE_ZONE_DIV),
-        );
-    }
-    // Активная зона поверх октавных разделителей (иначе серые линии 0.5px
-    // прорезают белую обводку на границах, кратных 12).
-    for (i, part) in parts.iter().enumerate() {
-        if !part.enabled || i != active { continue; }
-        let lo = part.min_note as f32 / 127.0;
-        let hi = (part.max_note as f32 + 1.0) / 127.0;
-        let zone = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + lo * total_w, rect.top()),
-            egui::pos2((rect.left() + hi * total_w).min(rect.right()), rect.bottom()),
-        );
-        painter.rect_stroke(
-            zone, 0.0,
-            egui::Stroke::new(1.5, egui::Color32::WHITE),
-            egui::StrokeKind::Inside,
-        );
-    }
 }

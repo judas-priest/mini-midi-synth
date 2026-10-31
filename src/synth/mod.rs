@@ -203,6 +203,9 @@ pub enum ControlEvent {
     // Drum engine controls
     DrumSetStep { slot: u8, step: u8, velocity: u8 },
     DrumSetParam { slot: u8, param: DrumParam },
+    /// Mute слота ударных: гасит и секвенсорные, и живые удары (запись в
+    /// сетку продолжается — mute это решение микса).
+    DrumSetMute { slot: u8, mute: bool },
     DrumSetVolume { volume: f32 },
     DrumSeqPlay { playing: bool },
     DrumSeqBpm { bpm: f32 },
@@ -2080,11 +2083,14 @@ impl SynthEngine {
                         // Драмы пишутся ТОЛЬКО в сетку (кубики). В лупер не
                         // пишем: на реплее дублировали удары сетки (решение
                         // юзера 2026-10-31).
-                        if sampler_drums {
+                        // Mute слота гасит и живой удар (но не запись в сетку).
+                        let slot_muted = pad_note >= 36
+                            && self.drum_engine.slot_mutes[(pad_note - 36) as usize];
+                        if sampler_drums && !slot_muted {
                             let choke = self.drum_engine.sf2_choke_take(note);
                             if choke != 0 { self.sampler.drum_note_off(choke); }
                             self.sampler.drum_note_on(note, velocity);
-                        } else {
+                        } else if !slot_muted {
                             // DSP: слот = звук пэда; ремап-таргет вне 36..=51
                             // молчал бы в note_on — живой удар не должен
                             // зависеть от ремапа (remap = только SF2-сэмплы)
@@ -2525,6 +2531,11 @@ impl SynthEngine {
                     DrumParam::Pan(v) => self.drum_engine.params[s].pan = v,
                     DrumParam::Tune(v) => self.drum_engine.params[s].tune = v,
                     DrumParam::Decay(v) => self.drum_engine.params[s].decay = v,
+                }
+            }
+            ControlEvent::DrumSetMute { slot, mute } => {
+                if let Some(m) = self.drum_engine.slot_mutes.get_mut(slot as usize) {
+                    *m = mute;
                 }
             }
             ControlEvent::DrumSetVolume { volume } => {

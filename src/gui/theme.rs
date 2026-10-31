@@ -99,9 +99,6 @@ pub const STROKE_SUBTLE: Color32 = Color32::from_rgb(60, 60, 80);
 /// Timeline bar-line color.
 pub const STROKE_BAR_LINE: Color32 = Color32::from_gray(70);
 
-/// Key-zone octave separators, pitch-seq separator.
-pub const STROKE_ZONE_DIV: Color32 = Color32::from_gray(90);
-
 /// Piano key border.
 pub const STROKE_KEY_BORDER: Color32 = Color32::from_rgb(120, 120, 120);
 
@@ -280,9 +277,8 @@ mod tests {
         }
     }
 
-    /// Audit Medium п.5: every key-zone color must stay visible on the map
-    /// background. The map paints BG_PANEL (layers.rs:516), not BG_TIMELINE —
-    /// guard the pairing the code actually uses.
+    /// Audit Medium п.5 → фидбек: цвета PART_COLORS теперь имена партов в
+    /// списке настроек — должны быть читаемы на фоне панели (BG_PANEL).
     #[test]
     fn key_zone_colors_meet_non_text_contrast() {
         for (i, c) in PART_COLORS.iter().enumerate() {
