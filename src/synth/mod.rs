@@ -2007,7 +2007,10 @@ impl SynthEngine {
                             if choke != 0 { self.sampler.drum_note_off(choke); }
                             self.sampler.drum_note_on(note, velocity);
                         } else {
-                            self.drum_engine.note_on(note, velocity);
+                            // DSP: слот = звук пэда; ремап-таргет вне 36..=51
+                            // молчал бы в note_on — живой удар не должен
+                            // зависеть от ремапа (remap = только SF2-сэмплы)
+                            self.drum_engine.note_on(pad_note, velocity);
                         }
                     } else {
                         let note = self.drum_engine.remapped_note(note);
@@ -3275,7 +3278,10 @@ impl SynthEngine {
             out_l += drum_l; out_r += drum_r;
             for i in 0..drum_triggers.count {
                 let (slot, vel) = drum_triggers.triggers[i];
-                let note = drum::DRUM_NOTE_BASE + slot;
+                // Ремап кита применяется и на playback сетки (#22b-семейство):
+                // без него кубик играл сырую ноту слота — «подписано hi-hat,
+                // а звучит том» (SF2-киты с ремапом на сэмплы вне 36..=51).
+                let note = self.drum_engine.remapped_note(drum::DRUM_NOTE_BASE + slot);
                 if self.drum_engine.sf2_mode {
                     let choke = self.drum_engine.sf2_choke_take(note);
                     if choke != 0 { self.sampler.drum_note_off(choke); }
