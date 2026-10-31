@@ -1161,9 +1161,12 @@ impl App {
         let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
         let loop_steps = if loop_steps == 0 { self.looper_bars as u32 * 16 } else { loop_steps as u32 };
         let beats = loop_steps / 4;
+        // Сигнатура = сигнатура текущего паттерна (лупер пишется поверх него);
+        // раньше бар-линии были жёстко каждые 4 бита — в 3/4 врали (аудит #21).
+        let bpb = self.drum_patterns[self.drum_current_pattern as usize].beats_per_bar.max(1) as u32;
         for beat in 1..beats {
             let x = rect.left() + (beat as f32 / beats as f32) * total_w;
-            let color = if beat % 4 == 0 {
+            let color = if beat % bpb == 0 {
                 theme::STROKE_BAR_LINE
             } else {
                 theme::STROKE_GRID_DARK

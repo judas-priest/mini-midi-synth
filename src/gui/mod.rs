@@ -501,7 +501,7 @@ impl eframe::App for App {
                     font_id.size = size;
                 }
             }
-            style.spacing.slider_width = 250.0;
+            style.spacing.slider_width = theme::SLIDER_PRIMARY;
             style.spacing.item_spacing = egui::vec2(8.0, 5.0);
         });
 
