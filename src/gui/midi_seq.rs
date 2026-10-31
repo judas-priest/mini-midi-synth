@@ -35,7 +35,7 @@ impl App {
             let loop_col = if self.midi_seq_looping {
                 theme::MIDI_SEQ_LOOP_ON
             } else {
-                egui::Color32::DARK_GRAY
+                theme::MIDI_SEQ_LOOP_OFF
             };
             if ui.button(egui::RichText::new("↻ Loop").color(loop_col)).clicked() {
                 self.midi_seq_looping = !self.midi_seq_looping;

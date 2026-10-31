@@ -517,21 +517,38 @@ fn draw_key_zone_map(ui: &mut egui::Ui, parts: &[super::PartState], active: usiz
     for (i, part) in parts.iter().enumerate() {
         if !part.enabled { continue; }
         let c = colors[i % colors.len()];
-        let color = if i == active { c }
-            else { egui::Color32::from_rgba_premultiplied(c.r()/2, c.g()/2, c.b()/2, 180) };
+        // Полный цвет у всех зон: приглушённые неактивные зоны падали ниже
+        // 3:1 по фону (audit Medium п.5). Активная зона — белая обводка
+        // (неколоровый признак, WCAG 1.4.1), а не затемнение.
         let lo = part.min_note as f32 / 127.0;
         let hi = (part.max_note as f32 + 1.0) / 127.0;
         let zone = egui::Rect::from_min_max(
             egui::pos2(rect.left() + lo * total_w, rect.top()),
             egui::pos2((rect.left() + hi * total_w).min(rect.right()), rect.bottom()),
         );
-        painter.rect_filled(zone, 0.0, color);
+        painter.rect_filled(zone, 0.0, c);
     }
     for oct in 0..11 {
         let x = rect.left() + (oct * 12) as f32 / 127.0 * total_w;
         painter.line_segment(
             [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
             egui::Stroke::new(0.5, theme::STROKE_ZONE_DIV),
+        );
+    }
+    // Активная зона поверх октавных разделителей (иначе серые линии 0.5px
+    // прорезают белую обводку на границах, кратных 12).
+    for (i, part) in parts.iter().enumerate() {
+        if !part.enabled || i != active { continue; }
+        let lo = part.min_note as f32 / 127.0;
+        let hi = (part.max_note as f32 + 1.0) / 127.0;
+        let zone = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + lo * total_w, rect.top()),
+            egui::pos2((rect.left() + hi * total_w).min(rect.right()), rect.bottom()),
+        );
+        painter.rect_stroke(
+            zone, 0.0,
+            egui::Stroke::new(1.5, egui::Color32::WHITE),
+            egui::StrokeKind::Inside,
         );
     }
 }
