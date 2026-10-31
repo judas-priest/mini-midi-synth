@@ -429,6 +429,10 @@ pub struct App {
     pub preset_search: String,
     /// Some(part) = instrument browser modal is open for this part
     pub inst_browser_part: Option<usize>,
+    /// Keyboard nav (VS Code Quick Pick): highlighted row in the browser flat list
+    pub inst_browser_index: usize,
+    /// Search text at last index reset — detects filter changes
+    pub inst_browser_last_search: String,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
     // Split mode
@@ -1240,21 +1244,52 @@ impl App {
         let mut picked_patch: Option<usize> = None;
         let mut picked_program: Option<u8> = None;
         let mut toggled_cat: Option<String> = None;
+        // Клавиатурная навигация (VS Code Quick Pick): плоский список видимых
+        // элементов, виртуальный выделенный индекс (поля inst_browser_*).
+        let mut flat: Vec<(String, usize)> = Vec::new();
+
+        // Навигационный ввод — ДО окна: single-line поиск не использует ↑/↓,
+        // поэтому перехват безопасен при любом фокусе (egui 0.31: TextEdit
+        // не консьюмит стрелки/Enter/Esc).
+        let moved = ctx.input(|i| {
+            let mut d: i32 = 0;
+            if i.key_pressed(egui::Key::ArrowDown) { d += 1; }
+            if i.key_pressed(egui::Key::ArrowUp) { d -= 1; }
+            d
+        });
+        if moved != 0 {
+            let new_idx = self.inst_browser_index as i32 + moved;
+            self.inst_browser_index = new_idx.max(0) as usize;
+        }
+        if self.inst_browser_last_search != self.preset_search {
+            // Фильтр изменился — выделение на первый результат
+            self.inst_browser_index = 0;
+            self.inst_browser_last_search = self.preset_search.clone();
+        }
+        let enter_pressed = ctx.input(|i| i.key_pressed(egui::Key::Enter));
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.inst_browser_part = None;
+            return;
+        }
 
         // Немодальное окно: выбор инструмента обратим (клик по другому патчу
         // перекроет), полноэкранная модалка избыточна (audit Medium п.8).
+        // egui хранит позицию окна по Id, Id выводится из заголовка —
+        // константный заголовок = память позиции в сессии (TECHDEBT #34).
         let mut win_open = true;
         let title = if is_sf2 {
             format!("GM Instrument — Part {layer_label}")
         } else {
             format!("Patch — Part {layer_label}")
         };
-        let win = egui::Window::new(title)
+        let win = egui::Window::new("Instrument Browser")
             .open(&mut win_open)
             .resizable(true)
             .default_width(400.0)
             .default_height(540.0)
             .show(ctx, |ui| {
+            ui.label(egui::RichText::new(title).strong());
+            ui.add_space(theme::SP_XS);
             ui.add_space(theme::SP_XS);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
@@ -1315,8 +1350,13 @@ impl App {
                             if !is_collapsed {
                                 for i in matches {
                                     let name = GM_PROGRAM_NAMES[i];
+                                    flat.push((format!("  {name}"), i));
                                     let selected = current_program == i as u8;
-                                    if ui.selectable_label(selected, format!("  {name}")).clicked() && !selected {
+                                    let is_hi = self.inst_browser_index == flat.len() - 1;
+                                    let r = ui.selectable_label(selected || is_hi, format!("  {name}"));
+                                    if is_hi { r.scroll_to_me(Some(egui::Align::Center)); }
+                                    if r.clicked() && !selected {
+                                        self.inst_browser_index = flat.len() - 1;
                                         picked_program = Some(i as u8);
                                     }
                                 }
@@ -1361,7 +1401,12 @@ impl App {
                                 }
                             }
                             let selected = i == current_preset_idx;
-                            if ui.selectable_label(selected, format!("  {}", patch.name)).clicked() && !selected {
+                            flat.push((format!("  {}", patch.name), i));
+                            let is_hi = self.inst_browser_index == flat.len() - 1;
+                            let r = ui.selectable_label(selected || is_hi, format!("  {}", patch.name));
+                            if is_hi { r.scroll_to_me(Some(egui::Align::Center)); }
+                            if r.clicked() && !selected {
+                                self.inst_browser_index = flat.len() - 1;
                                 picked_patch = Some(i);
                             }
                         }
@@ -1370,6 +1415,15 @@ impl App {
         });
 
         // ── Post-closure handling (after .show, reads locals + modal) ────
+        // Зажим индекса: список мог пересобраться (фильтр/смена парта)
+        let flat_len = flat.len();
+        if self.inst_browser_index >= flat_len {
+            self.inst_browser_index = flat_len.saturating_sub(1);
+        }
+        if enter_pressed && flat_len > 0 {
+            let (_, idx) = &flat[self.inst_browser_index.min(flat_len - 1)];
+            if is_sf2 { picked_program = Some(*idx as u8); } else { picked_patch = Some(*idx); }
+        }
         if let Some(cat) = toggled_cat {
             if self.collapsed_categories.contains(&cat) {
                 self.collapsed_categories.remove(&cat);
