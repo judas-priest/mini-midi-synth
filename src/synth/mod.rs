@@ -3273,6 +3273,35 @@ impl SynthEngine {
         let fx = CachedFxParams::from_preset(ep, &self.global_params);
         let fx_chain = ep.map(|p| p.fx_chain).unwrap_or_default();
 
+        // Легаси-FX инстансы шарятся мастером и 16-слотовой цепочкой: слот
+        // ставит mix=1.0, но никто не сбрасывал — после первого использования
+        // Phaser/Flanger/Overdrive/Tremolo/Bitcrusher тот тикал на мастере
+        // вечно (аудит DSP 2026-11-01, находка 1). Полное разделение — S3.
+        {
+            use fx_chain::FxSlotType;
+            let (mut od, mut ph, mut fl, mut tr, mut bc) = (false, false, false, false, false);
+            if let Some(p) = ep {
+                for slot in &p.fx_chain.slots {
+                    // Гейт как в аплайере (mod.rs:3568): выключенный или
+                    // нулевой слот НЕ держит легаси-инстанс включённым.
+                    if !slot.enabled || slot.mix <= 0.001 { continue; }
+                    match slot.slot_type {
+                        FxSlotType::Overdrive => od = true,
+                        FxSlotType::Phaser => ph = true,
+                        FxSlotType::Flanger => fl = true,
+                        FxSlotType::Tremolo => tr = true,
+                        FxSlotType::Bitcrusher => bc = true,
+                        _ => {}
+                    }
+                }
+            }
+            if !od { self.overdrive.mix = 0.0; }
+            if !ph { self.phaser.mix = 0.0; }
+            if !fl { self.flanger.mix = 0.0; }
+            if !tr { self.tremolo.mix = 0.0; }
+            if !bc { self.bitcrusher.mix = 0.0; }
+        }
+
         // --- MIDI file sequencer: fire block-level events ---
         // (process_block clears midi_seq_buf itself before filling it)
         {
