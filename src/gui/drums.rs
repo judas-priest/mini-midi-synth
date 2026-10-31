@@ -441,8 +441,12 @@ impl App {
                     kit_names[(v - 30) as usize].clone()
                 } else { format!("note {}", v) }
             };
-            let dialog = egui::Modal::new(egui::Id::new("drum_remap_dialog")).show(ctx, |ui| {
-                ui.set_width(900.0);
+            let mut win_open = true;
+            let win = egui::Window::new("Pad Remap")
+                .open(&mut win_open)
+                .resizable(true)
+                .default_width(920.0)
+                .show(ctx, |ui| {
                 ui.strong("Pad Remap");
                 ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
                 ui.add_space(theme::SP_MD);
@@ -512,7 +516,7 @@ impl App {
                     self.save_drum_pad_vel();
                 }
             });
-            if dialog.should_close() {
+            if !win_open || win.is_none() {
                 self.show_drum_remap = false;
             }
         }
@@ -531,8 +535,12 @@ impl App {
             let sel_name = if (30..=55).contains(&sel) && !kit_names[(sel - 30) as usize].is_empty() {
                 kit_names[(sel - 30) as usize].clone()
             } else { format!("note {}", sel) };
-            let dialog = egui::Modal::new(egui::Id::new("remap_pad_dialog")).show(ctx, |ui| {
-                ui.set_width(300.0);
+            let mut win_open = true;
+            let win = egui::Window::new(format!("Pad {}", p + 1))
+                .open(&mut win_open)
+                .resizable(false)
+                .default_width(320.0)
+                .show(ctx, |ui| {
                 ui.strong(format!("Pad {}", p + 1));
                 ui.label("Instrument:");
                 ui.add_space(theme::SP_MD);
@@ -569,7 +577,7 @@ impl App {
                 self.push_drum_remap();
                 self.save_drum_remap();
             }
-            if dialog.should_close() {
+            if !win_open || win.is_none() {
                 self.remap_pad = None;
             }
         }

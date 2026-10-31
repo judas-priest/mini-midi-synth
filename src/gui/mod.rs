@@ -1239,13 +1239,20 @@ impl App {
         let mut picked_program: Option<u8> = None;
         let mut toggled_cat: Option<String> = None;
 
-        let modal = egui::Modal::new(egui::Id::new("inst_browser")).show(ctx, |ui| {
-            ui.set_width(360.0);
-            ui.strong(if is_sf2 {
-                format!("GM Instrument — Part {layer_label}")
-            } else {
-                format!("Patch — Part {layer_label}")
-            });
+        // Немодальное окно: выбор инструмента обратим (клик по другому патчу
+        // перекроет), полноэкранная модалка избыточна (audit Medium п.8).
+        let mut win_open = true;
+        let title = if is_sf2 {
+            format!("GM Instrument — Part {layer_label}")
+        } else {
+            format!("Patch — Part {layer_label}")
+        };
+        let win = egui::Window::new(title)
+            .open(&mut win_open)
+            .resizable(true)
+            .default_width(400.0)
+            .default_height(540.0)
+            .show(ctx, |ui| {
             ui.add_space(theme::SP_XS);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
@@ -1387,7 +1394,7 @@ impl App {
             self.save_config();
             close = true;
         }
-        if modal.should_close() {
+        if !win_open || win.is_none() {
             close = true;
         }
         if close {
