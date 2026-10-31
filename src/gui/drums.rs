@@ -53,8 +53,8 @@ impl App {
             }
             // Overdub (слой поверх готовой петли): старт/закрытие на границе
             let ovr_enabled = lstate == crate::synth::looper::LooperState::Playing;
-            if ui.add_enabled(ovr_enabled, egui::Button::new("Слой"))
-                .on_hover_text("Слой: дописать поверх петли — старт на границе, ещё раз = закрыть").clicked()
+            if ui.add_enabled(ovr_enabled, egui::Button::new("Layer"))
+                .on_hover_text("Layer: overdub over the loop — starts at the boundary, press again to close").clicked()
             {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterOverdub);
             }
@@ -879,13 +879,13 @@ impl App {
             }
             // ＋такт / −такт — длина петли прямо во время записи
             let capturing = rec_state == 2;
-            if ui.add_enabled(capturing, egui::Button::new("+1 такт"))
-                .on_hover_text("Добавить такт к петле (запись продолжается)").clicked()
+            if ui.add_enabled(capturing, egui::Button::new("+1 bar"))
+                .on_hover_text("Add a bar to the loop (recording continues)").clicked()
             {
                 let _ = self.ctrl_tx.push(ControlEvent::CaptureCycleAdd);
             }
-            if ui.add_enabled(capturing, egui::Button::new("−1 такт"))
-                .on_hover_text("Убрать последний такт (курсор записи откатывается — переиграй его)").clicked()
+            if ui.add_enabled(capturing, egui::Button::new("−1 bar"))
+                .on_hover_text("Remove the last bar (write cursor rewinds — replay it)").clicked()
             {
                 let _ = self.ctrl_tx.push(ControlEvent::CaptureCycleRemove);
             }
@@ -894,7 +894,7 @@ impl App {
         // --- Row 2: Bars + Quantize + BPM + Recording target ---
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Bars").weak().small())
-                .on_hover_text("Циклов паттерна в петле: запись сама закроется после них; досрочный Rec = сколько сыграл");
+                .on_hover_text("Pattern cycles in the loop: recording auto-closes after them; early Rec = keep what you played");
             for &b in &[1u8, 2, 4, 8] {
                 if ui.selectable_label(self.looper_bars == b, format!("{b}")).clicked() {
                     self.looper_bars = b;
@@ -909,7 +909,7 @@ impl App {
             ui.separator();
 
             ui.label(egui::RichText::new("Q").weak().small())
-                .on_hover_text("Квантование нот по сетке при записи (Boss Loop Quantize)");
+                .on_hover_text("Quantize notes to the grid while recording (Loop Quantize)");
             for (idx, &label) in ["Off", "1/4", "1/8", "1/16"].iter().enumerate() {
                 let idx = idx as u8;
                 if ui.selectable_label(self.looper_quantize == idx, label).clicked() {
