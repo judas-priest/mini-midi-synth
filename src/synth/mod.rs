@@ -1803,7 +1803,18 @@ impl SynthEngine {
         // Мультицикл-захват: второе нажатие = закрыть на следующей границе
         if looper_rec && self.looper_capture_quantized {
             self.looper_finish_pending = true;
+            self.set_master_rec_state(3, self.master_rec_cycle.load(std::sync::atomic::Ordering::Relaxed));
             return;
+        }
+        // DAW practice (Ableton Session: каждая запись = свежий клип):
+        // Rec после закрытой квантованной петли = НОВАЯ запись — старая петля
+        // стирается, свежий арм. Никакого наслоения на старый круг.
+        if !looper_rec
+            && self.looper_capture_quantized
+            && self.looper.state == crate::synth::looper::LooperState::Playing
+        {
+            self.looper.clear();
+            self.looper_cycle_ticks = 0;
         }
         // Снять арм (toggle-семантика ожидания границы)
         if self.looper_arm_pending {

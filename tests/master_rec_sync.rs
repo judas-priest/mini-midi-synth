@@ -171,3 +171,41 @@ fn tc9_multitrack_records_only_sounding_parts() {
     run(&mut e, steps(16));
     assert!(matches!(e.looper.state, LooperState::Playing));
 }
+
+#[test]
+fn tc10_rec_after_close_starts_fresh() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // старт
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    run(&mut e, steps(16)); // цикл 1 завершён
+    let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть
+    run(&mut e, steps(16)); // граница: Playing, петля = 1 цикл
+    assert!(matches!(e.looper.state, LooperState::Playing));
+    let old_len = e.looper.len();
+    assert!(old_len > 0);
+
+    // Rec после закрытия = НОВАЯ запись: петля стёрта, свежий арм
+    let _ = e.handle_control(ControlEvent::MasterRecord);
+    assert!(matches!(e.looper.state, LooperState::Idle), "old loop cleared");
+    assert_eq!(e.looper.len(), 0, "old events wiped");
+    run(&mut e, steps(16)); // граница: свежий захват
+    assert!(matches!(e.looper.state, LooperState::Recording));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 72 });
+    let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть свежий
+    run(&mut e, steps(16));
+    assert!(matches!(e.looper.state, LooperState::Playing));
+    // В петле только новая нота — старой 60 нет
+    {
+        let disp = e.looper.display();
+        let disp = disp.lock().unwrap();
+        let ons: Vec<_> = disp.events.iter().filter(|ev| ev.velocity > 0).collect();
+        assert!(ons.iter().any(|ev| ev.note == 72), "fresh capture recorded");
+        assert!(!ons.iter().any(|ev| ev.note == 60), "old loop content must be gone");
+    }
+}
