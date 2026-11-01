@@ -296,6 +296,11 @@ pub enum ControlEvent {
     SetSf2SampleOffset { ms: f32 },
     /// Global SF2 release multiplier (GM2 CC72 semantics, 1.0 = file defaults)
     SetSf2ReleaseScale { scale: f32 },
+    /// Per-engine loudness trim in dB (Settings → Audio). DSP trim scales the
+    /// DSP part bus + internal drum engine (NOT the SF2 sampler / looper, the
+    /// looper replays through parts); SF2 trim sits on top of SF2_CAL_GAIN.
+    SetDspTrim { db: f32 },
+    SetSf2Trim { db: f32 },
     // Pitch step sequencer
     SeqSetEnabled { part: usize, enabled: bool },
     SeqSetStep { part: usize, step: u8, pitch: i8, gate: bool, velocity: u8 },
@@ -1234,6 +1239,9 @@ pub struct SynthEngine {
     parts: Vec<Part>,
     pub drum_engine: DrumEngine,
     pub sampler: SamplerEngine,
+    /// DSP-bus trim in dB — scales the summed part outputs + internal drum
+    /// engine before the SF2 add (per-block linear gain, see tick_block).
+    pub dsp_trim_db: f32,
     pitch_bend_semitones: f32,
     mod_wheel: f32,
     vibrato_phase: f32,
@@ -1537,6 +1545,7 @@ impl SynthEngine {
         Self {
             parts, drum_engine: DrumEngine::new(sample_rate),
             sampler: SamplerEngine::new(sample_rate),
+            dsp_trim_db: 0.0,
             pitch_bend_semitones: 0.0, mod_wheel: 0.0, vibrato_phase: 0.0,
             aftertouch: 0.0, aftertouch_smooth: 0.0,
             cc_values: [0.0; 4], cc_numbers: [1, 2, 3, 4],
@@ -2899,6 +2908,12 @@ impl SynthEngine {
             ControlEvent::SetSf2ReleaseScale { scale } => {
                 self.sampler.set_release_time_scale(scale);
             }
+            ControlEvent::SetDspTrim { db } => {
+                self.dsp_trim_db = db.clamp(-24.0, 24.0);
+            }
+            ControlEvent::SetSf2Trim { db } => {
+                self.sampler.set_trim_db(db);
+            }
             ControlEvent::SetSf2SampleOffset { ms } => {
                 self.sampler.set_sample_offset_ms(ms);
             }
@@ -3409,6 +3424,12 @@ impl SynthEngine {
         let fx = CachedFxParams::from_preset(ep, &self.global_params);
         let fx_chain = ep.map(|p| p.fx_chain).unwrap_or_default();
 
+        // DSP-bus trim (Settings → Audio): applies to the summed part outputs
+        // and the internal drum engine — the same bus the looper replays
+        // through — but NOT to the SF2 sampler (it carries its own SF2_CAL_GAIN
+        // + sf2_trim_db). dB → linear, once per block.
+        let dsp_gain = 10.0_f32.powf(self.dsp_trim_db / 20.0);
+
         // Легаси-FX инстансы шарятся мастером и 16-слотовой цепочкой: слот
         // ставит mix=1.0, но никто не сбрасывал — после первого использования
         // Phaser/Flanger/Overdrive/Tremolo/Bitcrusher тот тикал на мастере
@@ -3581,12 +3602,14 @@ impl SynthEngine {
                 out_l += l * gain_l * fade;
                 out_r += r * gain_r * fade;
             }
+            out_l *= dsp_gain;
+            out_r *= dsp_gain;
 
             // SF2 + drums
             let (sf2_l, sf2_r) = self.sampler.tick();
             out_l += sf2_l; out_r += sf2_r;
             let ((drum_l, drum_r), drum_triggers) = self.drum_engine.tick();
-            out_l += drum_l; out_r += drum_r;
+            out_l += drum_l * dsp_gain; out_r += drum_r * dsp_gain;
             for i in 0..drum_triggers.count {
                 let (slot, vel) = drum_triggers.triggers[i];
                 // Ремап кита применяется и на playback сетки (#22b-семейство):

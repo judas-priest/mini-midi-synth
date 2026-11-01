@@ -72,6 +72,13 @@ pub struct AudioSettings {
     pub backend: String,
     pub sample_rate: u32,
     pub buffer_size: u32,
+    /// DSP-bus fine trim in dB (parts + internal drums; not SF2). 0.0 = unity.
+    /// Matching is carried by the measured SF2_CAL_GAIN, so both defaults are 0.
+    #[serde(default)]
+    pub dsp_trim_db: f32,
+    /// SF2 fine trim in dB on top of the measured SF2_CAL_GAIN.
+    #[serde(default)]
+    pub sf2_trim_db: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +208,12 @@ impl Default for Config {
                 backend: "JACK".to_string(),
                 sample_rate: 48000,
                 buffer_size: 256,
+                // 0.0 = engines already matched via the measured SF2_CAL_GAIN
+                // (DSP/SF2 RMS ratio 11.71 = 21.4 dB, FluidR3_GM piano C4 vs
+                // DSP Init C4, 2026-11-01). Old configs without these fields
+                // get the same defaults via serde → also matched.
+                dsp_trim_db: 0.0,
+                sf2_trim_db: 0.0,
             },
             midi: MidiSettings { port_name: None },
             cc_map: None,

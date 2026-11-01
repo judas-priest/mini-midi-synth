@@ -8,6 +8,21 @@ use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 const MAX_BLOCK_SIZE: usize = 64;
 const DEFAULT_BLOCK_SIZE: usize = 8;
 
+/// Measured DSP/SF2 loudness ratio (calibration reference).
+/// 2026-11-01: RMS over 2 s @ 48 kHz, piano C4 (note 60) vel 100 —
+/// FluidR3_GM via rustysynth (default master_volume 0.5, block 8, reverb and
+/// chorus off — same settings as `rebuild`) vs DSP "Init" patch at the engine
+/// sum: 0.015391 vs 0.180269 → ratio 11.71 (+21.4 dB). Residual level
+/// differences after the shared FX chain are dynamics-dependent (compressor)
+/// and are what the SF2 fine trim is for.
+pub const SF2_CAL_RATIO: f32 = 11.7127;
+
+/// Value pushed to rustysynth `set_master_volume` so SF2 output matches DSP.
+/// rustysynth's internal default is 0.5 and `set_master_volume` REPLACES it,
+/// so the gain is the measured ratio scaled by 0.5 (not the ratio itself —
+/// that would double the boost).
+pub const SF2_CAL_GAIN: f32 = SF2_CAL_RATIO * 0.5;
+
 /// GM program names (General MIDI Level 1).
 pub const GM_PROGRAM_NAMES: [&str; 128] = [
     // Piano (0-7)
@@ -217,6 +232,9 @@ pub struct SamplerEngine {
     /// Global SF2 release multiplier, re-applied after SF2 rebuilds (fresh
     /// rustysynth instances start at scale 1.0).
     release_scale: f32,
+    /// User fine trim in dB on top of SF2_CAL_GAIN. 0.0 = calibration alone.
+    /// Re-applied after SF2 rebuilds (fresh rustysynth instances start at 0.5).
+    pub sf2_trim_db: f32,
 }
 
 impl SamplerEngine {
@@ -237,7 +255,34 @@ impl SamplerEngine {
             sample_offset: 0,
             part_sustain: [true; 16],
             release_scale: 1.0,
+            sf2_trim_db: 0.0,
         }
+    }
+
+    /// Total master gain pushed to both rustysynth instances: the measured
+    /// calibration constant plus the user trim (dB → linear).
+    fn effective_master(trim_db: f32) -> f32 {
+        SF2_CAL_GAIN * 10.0_f32.powf(trim_db / 20.0)
+    }
+
+    /// Push the effective master volume to the current rustysynth instances.
+    /// Must be re-run after every rebuild — a fresh Synthesizer resets its
+    /// master volume to the rustysynth default (0.5). RT-safe: plain setter.
+    fn apply_master(&mut self) {
+        let gain = Self::effective_master(self.sf2_trim_db);
+        if let Some(synth) = &mut self.keys.synth {
+            synth.set_master_volume(gain);
+        }
+        if let Some(synth) = &mut self.drums.synth {
+            synth.set_master_volume(gain);
+        }
+    }
+
+    /// SF2 fine trim in dB (Settings → Audio). Applied on top of the measured
+    /// SF2_CAL_GAIN and re-applied on every rebuild.
+    pub fn set_trim_db(&mut self, db: f32) {
+        self.sf2_trim_db = db.clamp(-24.0, 24.0);
+        self.apply_master();
     }
 
     /// Load SF2 for keys (parts A/B). The returned `Displaced` holds the
@@ -254,13 +299,16 @@ impl SamplerEngine {
         if let Some(synth) = &mut self.keys.synth {
             synth.set_release_time_scale(self.release_scale);
         }
+        self.apply_master();
         displaced
     }
 
     /// Load SF2 for drums (ch9).
     #[must_use = "the displaced soundfont must be freed off the audio thread"]
     pub fn load_drums_soundfont(&mut self, sf: Arc<SoundFont>) -> Displaced {
-        self.drums.rebuild(Some(sf), self.sample_rate, self.block_size)
+        let displaced = self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
+        self.apply_master();
+        displaced
     }
 
     #[must_use = "the displaced soundfont must be freed off the audio thread"]
@@ -304,6 +352,7 @@ impl SamplerEngine {
             drums_displaced = self.drums.rebuild(Some(sf), self.sample_rate, self.block_size);
         }
         self.apply_sustain();
+        self.apply_master();
         (keys_displaced, drums_displaced)
     }
 

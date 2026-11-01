@@ -716,6 +716,35 @@ impl App {
                     }
                 }
 
+                ui.add_space(theme::SP_SM);
+                // Per-engine loudness trims. Matching out of the box is carried
+                // by the measured SF2 calibration gain (SF2_CAL_GAIN); these
+                // are the user's fine adjustments, persisted in config.audio.
+                egui::Grid::new("trim_settings")
+                    .num_columns(2)
+                    .spacing([12.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.label("DSP trim:");
+                        let mut dsp_db = self.config.audio.dsp_trim_db;
+                        if ui.add(egui::Slider::new(&mut dsp_db, -12.0..=12.0)
+                            .step_by(0.5).suffix(" dB")).changed() {
+                            self.config.audio.dsp_trim_db = dsp_db;
+                            let _ = self.ctrl_tx.push(ControlEvent::SetDspTrim { db: dsp_db });
+                            self.save_config();
+                        }
+                        ui.end_row();
+
+                        ui.label("SF2 trim:");
+                        let mut sf2_db = self.config.audio.sf2_trim_db;
+                        if ui.add(egui::Slider::new(&mut sf2_db, -12.0..=12.0)
+                            .step_by(0.5).suffix(" dB")).changed() {
+                            self.config.audio.sf2_trim_db = sf2_db;
+                            let _ = self.ctrl_tx.push(ControlEvent::SetSf2Trim { db: sf2_db });
+                            self.save_config();
+                        }
+                        ui.end_row();
+                    });
+
                 ui.add_space(theme::SP_LG);
                 ui.heading("MIDI");
 
