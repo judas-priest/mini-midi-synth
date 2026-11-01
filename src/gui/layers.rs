@@ -75,13 +75,13 @@ impl App {
             if split_on {
                 ui.label("Split point:");
                 let sp_name = note_name(self.split_point);
-                if ui.add(egui::Slider::new(&mut self.split_point, 0..=127)
+                let sp_r = ui.add(egui::Slider::new(&mut self.split_point, 0..=127)
                     .suffix(format!(" ({sp_name})")))
-                    .on_hover_text("Keyboard split note (zone B starts here)")
-                    .changed()
-                {
+                    .on_hover_text("Keyboard split note (zone B starts here)");
+                if sp_r.changed() {
                     self.apply_split_ranges();
                 }
+                self.knob_feedback(&sp_r, "Split", note_name(self.split_point));
             }
 
             // ── View tabs (Drums / MIDI Seq / FX Chain / Pads) ───────────
@@ -355,6 +355,7 @@ impl App {
                     {
                         self.preset_search.clear();
                         self.inst_browser_part = Some(i);
+                        self.inst_browser_scroll = true; // (#37) открытие центрирует выбор
                     }
                 } else {
                     ui.add_sized([170.0, 22.0], egui::Label::new(egui::RichText::new("---").weak()))
@@ -372,6 +373,7 @@ impl App {
                 {
                     self.preset_search.clear();
                     self.inst_browser_part = Some(i);
+                    self.inst_browser_scroll = true; // (#37) открытие центрирует выбор
                 }
             }
 
@@ -406,6 +408,19 @@ impl App {
                 self.parts[i].pan = pan;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
             }
+            self.knob_feedback(&pan_r, "Pan", format!("{pan:+.2}"));
+            // (#45) колесо над слайдером = шаг значения; глотаем smooth-дельту,
+            // чтобы ScrollArea не скроллил список под слайдером
+            if pan_r.hovered() {
+                let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                if dy != 0.0 {
+                    pan = (pan + dy * 0.0025).clamp(-1.0, 1.0);
+                    ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                    self.parts[i].pan = pan;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
+                    self.knob_feedback(&pan_r, "Pan", format!("{pan:+.2}"));
+                }
+            }
 
             // Tr
             ui.label("Tr:");
@@ -416,6 +431,18 @@ impl App {
             if tr_r.changed() || tr_r.double_clicked() {
                 self.parts[i].transpose = tr as i8;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
+            }
+            self.knob_feedback(&tr_r, "Tr", format!("{tr:+} st"));
+            // (#45) колесо: ~1 полутон на ~20px прокрутки
+            if tr_r.hovered() {
+                let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                if dy != 0.0 {
+                    tr = (tr + (dy * 0.05).round() as i32).clamp(-24, 24);
+                    ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                    self.parts[i].transpose = tr as i8;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
+                    self.knob_feedback(&tr_r, "Tr", format!("{tr:+} st"));
+                }
             }
 
             // Vel
@@ -441,6 +468,18 @@ impl App {
             if vol_r.changed() || vol_r.double_clicked() {
                 self.parts[i].volume = vol;
                 self.send_part_volume(i);
+            }
+            self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
+            // (#45) колесо над слайдером = шаг значения; см. Pan
+            if vol_r.hovered() {
+                let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                if dy != 0.0 {
+                    vol = (vol + dy * 0.0025).clamp(0.0, 1.0);
+                    ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                    self.parts[i].volume = vol;
+                    self.send_part_volume(i);
+                    self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
+                }
             }
 
             // Remove (never for the first part of a zone)

@@ -284,22 +284,80 @@ impl App {
                     let mut decay = self.drum_params[slot].decay;
 
                     ui.style_mut().spacing.slider_width = theme::SLIDER_DRUM;
-                    if ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text(format!("Level: {level:.2}")).changed() {
+                    let lvl_r = ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L"))
+                        .on_hover_text(format!("Level: {level:.2}"));
+                    if lvl_r.changed() {
                         self.drum_params[slot].level = level;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
                     }
-                    if ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).on_hover_text(format!("Tune: {tune:+.1} st")).changed() {
+                    self.knob_feedback(&lvl_r, "L", format!("{level:.2}"));
+                    // (#45) колесо над слайдером = шаг значения; глотаем smooth-дельту,
+                    // чтобы контейнер не скроллил (направление: колесо-вверх = больше)
+                    if lvl_r.hovered() {
+                        let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                        if dy != 0.0 {
+                            level = (level + dy * 0.0025).clamp(0.0, 1.0);
+                            ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                            self.drum_params[slot].level = level;
+                            let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
+                            self.knob_feedback(&lvl_r, "L", format!("{level:.2}"));
+                        }
+                    }
+                    let tune_r = ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T"))
+                        .on_hover_text(format!("Tune: {tune:+.1} st"));
+                    if tune_r.changed() {
                         self.drum_params[slot].tune = tune;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
                     }
-                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).on_hover_text(format!("Decay: {decay:.2} s{dsp_hint}")).changed() {
+                    self.knob_feedback(&tune_r, "T", format!("{tune:+.1} st"));
+                    // (#45) колесо: ~0.05 st/px (см. L)
+                    if tune_r.hovered() {
+                        let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                        if dy != 0.0 {
+                            tune = (tune + dy * 0.05).clamp(-24.0, 24.0);
+                            ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                            self.drum_params[slot].tune = tune;
+                            let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
+                            self.knob_feedback(&tune_r, "T", format!("{tune:+.1} st"));
+                        }
+                    }
+                    let dec_r = ui.add_enabled(dsp_kit, egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D"))
+                        .on_hover_text(format!("Decay: {decay:.2} s{dsp_hint}"));
+                    if dec_r.changed() {
                         self.drum_params[slot].decay = decay;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
                     }
+                    self.knob_feedback(&dec_r, "D", format!("{decay:.2} s"));
+                    // (#45) колесо: ~0.01 s/px (см. L); add_enabled-гейт оставлен:
+                    // у disabled-виджета hovered=false, колесо само мёртвое
+                    if dec_r.hovered() {
+                        let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                        if dy != 0.0 {
+                            decay = (decay + dy * 0.01).clamp(0.1, 4.0);
+                            ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                            self.drum_params[slot].decay = decay;
+                            let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
+                            self.knob_feedback(&dec_r, "D", format!("{decay:.2} s"));
+                        }
+                    }
                     let mut pan = self.drum_params[slot].pan;
-                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).on_hover_text(format!("Pan: {pan:+.2}{dsp_hint}")).changed() {
+                    let pan_r = ui.add_enabled(dsp_kit, egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P"))
+                        .on_hover_text(format!("Pan: {pan:+.2}{dsp_hint}"));
+                    if pan_r.changed() {
                         self.drum_params[slot].pan = pan;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
+                    }
+                    self.knob_feedback(&pan_r, "P", format!("{pan:+.2}"));
+                    // (#45) колесо: см. L
+                    if pan_r.hovered() {
+                        let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                        if dy != 0.0 {
+                            pan = (pan + dy * 0.0025).clamp(-1.0, 1.0);
+                            ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                            self.drum_params[slot].pan = pan;
+                            let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
+                            self.knob_feedback(&pan_r, "P", format!("{pan:+.2}"));
+                        }
                     }
                 });
             });

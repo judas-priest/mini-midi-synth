@@ -145,6 +145,9 @@ pub struct UiSettings {
     /// Keybindings: egui key name → action string.
     #[serde(default)]
     pub keybinds: std::collections::HashMap<String, String>,
+    /// (#44) Top-bar telemetry (host/SR/buf/dsp load, drops/errs). Hidden by default.
+    #[serde(default)]
+    pub show_telemetry: bool,
 }
 
 fn default_led_companion_cmd() -> String { "~/Projects/smk37_config/pad_console.py".to_string() }
@@ -206,6 +209,7 @@ impl Default for Config {
                 led_companion_cmd: default_led_companion_cmd(),
             parts_state: Vec::new(),
                 keybinds: std::collections::HashMap::new(),
+                show_telemetry: false,
             },
         }
     }

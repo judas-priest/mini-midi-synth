@@ -858,6 +858,7 @@ pub fn run_gui(
         dsp_load: 0.0,
         dsp_peak: 0.0,
         global_dirty: false,
+        active_knob: None,
         sf2_file_list: {
             let scan = gui::scan_sf2_files();
             for (dir, err) in &scan.unreadable {
@@ -886,6 +887,7 @@ pub fn run_gui(
         inst_browser_part: None,
         inst_browser_index: 0,
         inst_browser_last_search: String::new(),
+        inst_browser_scroll: false,
         scope_buf: c.scope_buf,
         split_point: c.config.ui.split_point.unwrap_or(60),
         show_fx_chain: false,

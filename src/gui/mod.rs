@@ -406,6 +406,9 @@ pub struct App {
     /// Decaying peak-hold of DSP load, shown next to `dsp_load`.
     pub dsp_peak: f32,
     pub global_dirty: bool,
+    /// (#39/#44) «Что сейчас крутят»: имя шкалы + отформатированное значение —
+    /// для индикатора в правом углу топ-бара. None = ничего не крутили.
+    pub active_knob: Option<(String, String)>,
     // SF2 sampler
     pub sf2_file_list: Vec<(String, std::path::PathBuf)>,
     pub sf2_keys_selected: Option<usize>,
@@ -435,6 +438,9 @@ pub struct App {
     pub inst_browser_index: usize,
     /// Search text at last index reset — detects filter changes
     pub inst_browser_last_search: String,
+    /// (#37) центрировать выделенную строку один раз (стрелки / открытие / сброс фильтра);
+    /// колесо мыши НЕ ставит флаг — список не прыгает при ручном скролле
+    pub inst_browser_scroll: bool,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
     // Split mode
@@ -891,12 +897,21 @@ impl eframe::App for App {
                 ui.label(format!("MIDI: {midi_status}"));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // (#44) индикатор редактируемой шкалы
+                    if let Some((name, val)) = &self.active_knob {
+                        ui.label(egui::RichText::new(format!("{name}: {val}")).strong());
+                        ui.separator();
+                    }
+
                     // DSP load: avg (устойчивая) + peak-hold с медленным спадом
                     // (практика REAPER). Бюджет — от ФАКТИЧЕСКОГО буфера:
                     // negotiate может молча откатить запрошенный.
                     let actual_buf = crate::metrics::METRICS.actual_buffer_size();
                     let buf = if actual_buf > 0 { actual_buf } else { self.config.audio.buffer_size };
                     let budget_us = buf as f32 / self.sample_rate as f32 * 1e6;
+                    // take_* читаем БЕЗУСЛОВНО каждый кадр: worst-пики копятся,
+                    // и если читать только при видимой телеметрии, при включении
+                    // выстрелит минутный максимум (#44).
                     let avg_us = crate::metrics::METRICS.take_avg_callback_us() as f32;
                     let peak_us = crate::metrics::METRICS.take_worst_callback_us() as f32;
                     if budget_us > 0.0 {
@@ -906,32 +921,34 @@ impl eframe::App for App {
                         self.dsp_peak = (self.dsp_peak * 0.98).max(peak_load);
                     }
 
-                    ui.label(format!(
-                        "{} | {}Hz | buf {} | dsp {:.0}% (peak {:.0}%)",
-                        self.current_host,
-                        self.sample_rate,
-                        buf,
-                        self.dsp_load,
-                        self.dsp_peak,
-                    ))
-                    .on_hover_text(
-                        "Audio callback time as a share of the buffer budget: \
-                         average and decaying peak. Peak approaching 100% means crackle.",
-                    );
-
-                    let dropped = crate::metrics::METRICS.total_dropped();
-                    let errors = crate::metrics::METRICS.stream_error_count();
-                    if dropped > 0 || errors > 0 {
-                        ui.separator();
-                        ui.colored_label(
-                            theme::TEXT_WARN,
-                            format!("drops {dropped} | errs {errors}"),
-                        )
+                    if self.config.ui.show_telemetry {
+                        ui.label(format!(
+                            "{} | {}Hz | buf {} | dsp {:.0}% (peak {:.0}%)",
+                            self.current_host,
+                            self.sample_rate,
+                            buf,
+                            self.dsp_load,
+                            self.dsp_peak,
+                        ))
                         .on_hover_text(
-                            "MIDI and control events that never reached the engine, and audio \
-                             stream errors. A lost NoteOff is a stuck note; non-zero here means \
-                             something is wrong.",
+                            "Audio callback time as a share of the buffer budget: \
+                             average and decaying peak. Peak approaching 100% means crackle.",
                         );
+
+                        let dropped = crate::metrics::METRICS.total_dropped();
+                        let errors = crate::metrics::METRICS.stream_error_count();
+                        if dropped > 0 || errors > 0 {
+                            ui.separator();
+                            ui.colored_label(
+                                theme::TEXT_WARN,
+                                format!("drops {dropped} | errs {errors}"),
+                            )
+                            .on_hover_text(
+                                "MIDI and control events that never reached the engine, and audio \
+                                 stream errors. A lost NoteOff is a stuck note; non-zero here means \
+                                 something is wrong.",
+                            );
+                        }
                     }
                 });
             });
@@ -993,6 +1010,21 @@ impl eframe::App for App {
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_tone", value: tone });
                     self.global_dirty = true;
                 }
+                self.knob_feedback(&tone_r, "Tone", format!("{tone:.0} Hz"));
+                // (#45) колесо над слайдером = шаг значения; глотаем smooth-дельту,
+                // чтобы контейнер не скроллил. Шкала логарифмическая — шаг кратный
+                // (колесо-вверх = увеличение).
+                if tone_r.hovered() {
+                    let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                    if dy != 0.0 {
+                        tone = (tone * (1.0 + dy * 0.0025)).clamp(200.0, 20000.0);
+                        ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                        self.global_params.insert("master_tone".into(), tone);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_tone", value: tone });
+                        self.global_dirty = true;
+                        self.knob_feedback(&tone_r, "Tone", format!("{tone:.0} Hz"));
+                    }
+                }
 
                 ui.separator();
 
@@ -1006,6 +1038,19 @@ impl eframe::App for App {
                     self.global_params.insert("reverb_mix".into(), reverb);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "reverb_mix", value: reverb });
                     self.global_dirty = true;
+                }
+                self.knob_feedback(&rev_r, "Reverb", format!("{reverb:.2}"));
+                // (#45) колесо: см. Tone (линейный шаг 0.0025/px)
+                if rev_r.hovered() {
+                    let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                    if dy != 0.0 {
+                        reverb = (reverb + dy * 0.0025).clamp(0.0, 1.0);
+                        ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                        self.global_params.insert("reverb_mix".into(), reverb);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "reverb_mix", value: reverb });
+                        self.global_dirty = true;
+                        self.knob_feedback(&rev_r, "Reverb", format!("{reverb:.2}"));
+                    }
                 }
 
                 ui.separator();
@@ -1021,6 +1066,19 @@ impl eframe::App for App {
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_volume", value: vol });
                     self.global_dirty = true;
                 }
+                self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
+                // (#45) колесо: см. Tone (линейный шаг 0.0025/px)
+                if vol_r.hovered() {
+                    let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                    if dy != 0.0 {
+                        vol = (vol + dy * 0.0025).clamp(0.0, 1.0);
+                        ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                        self.global_params.insert("master_volume".into(), vol);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_volume", value: vol });
+                        self.global_dirty = true;
+                        self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
+                    }
+                }
 
                 ui.separator();
 
@@ -1035,6 +1093,20 @@ impl eframe::App for App {
                     self.global_params.insert("pitch_bend_range".into(), val);
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "pitch_bend_range", value: val });
                     self.global_dirty = true;
+                }
+                self.knob_feedback(&pb_r, "PB", format!("{pbr} st"));
+                // (#45) колесо: ~1 шаг на ~20px прокрутки (как Tr)
+                if pb_r.hovered() {
+                    let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                    if dy != 0.0 {
+                        pbr = (pbr + (dy * 0.05).round() as i32).clamp(1, 24);
+                        ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                        let val = pbr as f32;
+                        self.global_params.insert("pitch_bend_range".into(), val);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "pitch_bend_range", value: val });
+                        self.global_dirty = true;
+                        self.knob_feedback(&pb_r, "PB", format!("{pbr} st"));
+                    }
                 }
 
                 ui.separator();
@@ -1241,6 +1313,14 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// Запомнить «что сейчас крутят» — для индикатора в правом углу топ-бара
+    /// (#39/#44: значение видно весь drag, тултип не обязателен).
+    pub(crate) fn knob_feedback(&mut self, r: &egui::Response, name: &str, value: String) {
+        if r.dragged() || r.changed() || r.hovered() {
+            self.active_knob = Some((name.to_string(), value));
+        }
+    }
+
     /// Instrument browser modal: search + category tree, applies to `inst_browser_part`.
     fn draw_instrument_browser_modal(&mut self, ctx: &egui::Context) {
         let Some(part) = self.inst_browser_part else { return };
@@ -1267,11 +1347,13 @@ impl App {
         if moved != 0 {
             let new_idx = self.inst_browser_index as i32 + moved;
             self.inst_browser_index = new_idx.max(0) as usize;
+            self.inst_browser_scroll = true; // (#37) скролл только по смене индекса
         }
         if self.inst_browser_last_search != self.preset_search {
             // Фильтр изменился — выделение на первый результат
             self.inst_browser_index = 0;
             self.inst_browser_last_search = self.preset_search.clone();
+            self.inst_browser_scroll = true; // (#37) сброс фильтра — к началу списка
         }
         let enter_pressed = ctx.input(|i| i.key_pressed(egui::Key::Enter));
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1296,6 +1378,9 @@ impl App {
             .default_height(540.0)
             .show(ctx, |ui| {
             ui.label(egui::RichText::new(title).strong());
+            // (#38) фикс-минимальная ширина: длинные строки поиска/результатов
+            // не распирают окно
+            ui.set_min_width(380.0);
             ui.add_space(theme::SP_XS);
             ui.add_space(theme::SP_XS);
             ui.horizontal(|ui| {
@@ -1360,8 +1445,13 @@ impl App {
                                     flat.push((format!("  {name}"), i));
                                     let selected = current_program == i as u8;
                                     let is_hi = self.inst_browser_index == flat.len() - 1;
-                                    let r = ui.selectable_label(selected || is_hi, format!("  {name}"));
-                                    if is_hi { r.scroll_to_me(Some(egui::Align::Center)); }
+                                    let r = ui.selectable_label(selected || is_hi,
+                                        format!("  {}", name.chars().take(30).collect::<String>())) // (#38)
+                                        .on_hover_text(name);
+                                    if is_hi && self.inst_browser_scroll {
+                                        r.scroll_to_me(Some(egui::Align::Center));
+                                        self.inst_browser_scroll = false; // (#37) один раз
+                                    }
                                     if r.clicked() && !selected {
                                         self.inst_browser_index = flat.len() - 1;
                                         picked_program = Some(i as u8);
@@ -1410,8 +1500,13 @@ impl App {
                             let selected = i == current_preset_idx;
                             flat.push((format!("  {}", patch.name), i));
                             let is_hi = self.inst_browser_index == flat.len() - 1;
-                            let r = ui.selectable_label(selected || is_hi, format!("  {}", patch.name));
-                            if is_hi { r.scroll_to_me(Some(egui::Align::Center)); }
+                            let r = ui.selectable_label(selected || is_hi,
+                                format!("  {}", patch.name.chars().take(30).collect::<String>())) // (#38)
+                                .on_hover_text(patch.name.clone());
+                            if is_hi && self.inst_browser_scroll {
+                                r.scroll_to_me(Some(egui::Align::Center));
+                                self.inst_browser_scroll = false; // (#37) один раз
+                            }
                             if r.clicked() && !selected {
                                 self.inst_browser_index = flat.len() - 1;
                                 picked_patch = Some(i);

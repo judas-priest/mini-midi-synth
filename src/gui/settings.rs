@@ -840,6 +840,10 @@ impl App {
                     let _ = self.config.save();
                 }
 
+                if ui.checkbox(&mut self.config.ui.show_telemetry, "Show telemetry (drops/errs, JACK, dsp load)").changed() {
+                    let _ = self.config.save();
+                }
+
                 if self.sf2_keys_soundfont.is_some() || self.sf2_drums_soundfont.is_some() {
                     ui.horizontal(|ui| {
                         ui.label("Block size:");
