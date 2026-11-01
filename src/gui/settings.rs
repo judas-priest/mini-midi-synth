@@ -693,6 +693,28 @@ impl App {
                         self.save_config();
                     }
                 }
+                ui.separator();
+                // Ручной реконнект: смена default-sink (наушники↔HDMI) в
+                // PipeWire не видна cpal-JACK-клиенту (перестройка графа вне
+                // клиента) — poller pactl ловит её, кнопка = страховка.
+                if ui.button("Reconnect Audio").on_hover_text(
+                    "Rebuild the audio stream (device switch, stuck sound)")
+                    .clicked()
+                {
+                    match self.reconnect_audio() {
+                        Ok(()) => {
+                            self.audio_watch.on_success();
+                            self.audio_device_name = self._audio_handle.as_ref()
+                                .and_then(|b| b.device_name.clone());
+                            if let Some(b) = self._audio_handle.as_ref() {
+                                self.audio_host_id = b.host_id;
+                            }
+                            self.audio_sink_name = None; // базлайн возьмёт poll
+                            self.show_toast("Audio reconnected", ToastKind::Success);
+                        }
+                        Err(e) => self.show_toast(format!("Reconnect failed: {e}"), ToastKind::Error),
+                    }
+                }
 
                 ui.add_space(theme::SP_LG);
                 ui.heading("MIDI");

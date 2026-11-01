@@ -908,6 +908,7 @@ pub fn run_gui(
         audio_host_id: c._audio_handle.host_id,
         audio_watch: crate::audio::ReconnectPolicy::default(),
         audio_poll_at: std::time::Instant::now(),
+        audio_sink_name: None, // базлайн возьмёт первый poll
         _audio_handle: Some(c._audio_handle),
         midi_tx_shared: c.midi_tx_shared.clone(),
         engine_trash_rx: c.engine_trash_rx,
