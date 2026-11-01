@@ -479,6 +479,9 @@ pub struct App {
     pub audio_watch: crate::audio::ReconnectPolicy,
     /// Next default-device name poll deadline (desktop hotplug poller).
     pub audio_poll_at: Instant,
+    /// Last known PipeWire default-sink name (`pactl get-default-sink`);
+    /// change = trigger audio reconnect (#18-резидуал: наушники↔HDMI).
+    pub audio_sink_name: Option<String>,
     pub _audio_handle: Option<crate::audio::AudioBackend>,
     pub midi_tx_shared: crate::midi::SharedMidiTx,
     /// Heap objects the engine and the audio callback handed back. Dropping
@@ -540,22 +543,31 @@ impl eframe::App for App {
         // a GUI-thread operation (rebuilds the stream); the audio callback
         // only ever sees the finished new stream.
         let now = Instant::now();
-        #[cfg(not(target_os = "android"))]
+        #[cfg(all(not(target_os = "android"), target_os = "linux"))]
         if now >= self.audio_poll_at {
             self.audio_poll_at = now + AUDIO_POLL_INTERVAL;
-            // Only poll the default-device name when the stream lives on the
-            // DEFAULT host (PR #9): the poller queries default_host(), so a
-            // JACK-host stream's name ("cpal_client_out") never matches a
-            // PipeWire default name ("default") and the comparison would
-            // fire a false reconnect on a healthy stream 1.5 s after startup.
-            // JACK hotplug is detected via the dead-stream/SR-error atom
-            // instead (commit 9bf717e).
-            if self.audio_host_id == cpal::default_host().id() {
-                if let Some(stored) = self.audio_device_name.as_deref() {
-                    let current = crate::audio::default_output_device_name(cpal::default_host().id());
-                    if crate::audio::ReconnectPolicy::device_changed(stored, current.as_deref()) {
-                        log::info!("[audio] default device changed: {stored:?} -> {current:?}");
-                        self.audio_disconnected.store(true, Ordering::Relaxed);
+            // Детект смены default-sink (наушники↔HDMI) через `pactl`:
+            // cpal имён не даёт (JACK-стрим = "cpal_client_out", ALSA =
+            // "default" — константы), а PipeWire при смене sink перестраивает
+            // граф ЗА пределами клиента — ни одной ошибки в error-callback
+            // (аудит 2026-11-01: старый poller был мёртв структурно).
+            // fork+exec ~1-2 мс в GUI-потоке, RT-зону не трогает.
+            if let Ok(out) = std::process::Command::new("pactl")
+                .args(["get-default-sink"])
+                .output()
+            {
+                if out.status.success() {
+                    let current = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    match &self.audio_sink_name {
+                        None => self.audio_sink_name = Some(current), // базлайн
+                        Some(stored) if *stored != current => {
+                            log::info!("[audio] default sink changed: {stored:?} -> {current:?}");
+                            self.audio_sink_name = Some(current);
+                            // Смена sink — триггер на перестройку стрима: после
+                            // reconnect клиент перелинкуется на новый sink.
+                            self.audio_disconnected.store(true, Ordering::Relaxed);
+                        }
+                        _ => {}
                     }
                 }
             }
