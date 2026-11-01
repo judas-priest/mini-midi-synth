@@ -405,7 +405,7 @@ impl App {
                 _ => crate::synth::NOTE_MODE_BASS,
             };
             if ui.add_sized([52.0, 22.0], egui::Button::new(mode_label).small())
-                .on_hover_text(format!("{mode_tip}"))
+                .on_hover_text(mode_tip.to_string())
                 .clicked()
             {
                 self.parts[i].note_mode = next_mode;
