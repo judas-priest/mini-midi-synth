@@ -1333,7 +1333,9 @@ impl App {
     /// (#39/#44: значение видно весь drag, тултип не обязателен). Каждый тик
     /// сбрасывает таймер авто-скрытия (2 с, как OSD volume).
     pub(crate) fn knob_feedback(&mut self, r: &egui::Response, name: &str, value: String) {
-        if r.dragged() || r.changed() || r.hovered() {
+        // Только ДЕЙСТВИЕ (drag/изменение): простое проведение мыши над
+        // слайдером индикатор не зажигает.
+        if r.dragged() || r.changed() {
             self.active_knob = Some((name.to_string(), value, std::time::Instant::now()));
         }
     }
@@ -1473,6 +1475,12 @@ impl App {
                                         self.inst_browser_index = flat.len() - 1;
                                         picked_program = Some(i as u8);
                                     }
+                                    // Двойной клик = применить + закрыть
+                                    // (Windows select-and-OK)
+                                    if r.double_clicked() {
+                                        picked_program = Some(i as u8);
+                                        close = true;
+                                    }
                                 }
                             }
                         }
@@ -1528,17 +1536,22 @@ impl App {
                                 self.inst_browser_index = flat.len() - 1;
                                 picked_patch = Some(i);
                             }
+                            if r.double_clicked() {
+                                picked_patch = Some(i);
+                                close = true;
+                            }
                         }
                     }
                 });
             // (#44-фидбек) Клик по инструменту = ПРИМЕНИТЬ и играть дальше —
-            // окно остаётся открытым; закрытие — OK / Esc / ✕.
-            ui.horizontal(|ui| {
-                if ui.button("OK").clicked() {
+            // окно остаётся открытым; закрытие — Done (trailing primary, M3),
+            // двойной клик по инструменту (Windows select-and-OK), Esc, ✕.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let done = ui.add_sized([80.0, 28.0], egui::Button::new("Done"))
+                    .on_hover_text("Close (double-click on an instrument applies & closes)");
+                if done.clicked() || done.double_clicked() {
                     close = true;
                 }
-                ui.label(egui::RichText::new(
-                    "клик = применить и играть · OK/Esc/✕ = закрыть").small().weak());
             });
         });
 
