@@ -181,6 +181,9 @@ pub enum ControlEvent {
     SetPartMute { part: usize, mute: bool },
     /// Root-note-only mode (bass split): part sounds only the lowest held key
     SetPartRootOnly { part: usize, on: bool },
+    /// Sustain pedal (CC64) affects this part (Sus checkbox). While the pedal
+    /// is down, turning it OFF also releases this part's pedal-held notes.
+    SetPartSustain { part: usize, on: bool },
     SetPartVolume { part: usize, volume: f32 },
     SetPartRange { part: usize, min_note: u8, max_note: u8 },
     SetPartVelRange { part: usize, vel_min: u8, vel_max: u8 },
@@ -530,6 +533,9 @@ struct Part {
     keys_down: [bool; 128],   // raw key physically held (pedal-up must spare these)
     /// Root-only mode (TECHDEBT #6): gate + per-part lowest-note tracking.
     root_only: bool,
+    /// Sustain pedal (CC64) affects this part. false: bass without sustain
+    /// while a pad part keeps sustaining.
+    pub sustain_enabled: bool,
     root_held: [bool; 128],   // keys currently physically held, for re-keying
     root_active: Option<u8>,  // raw note currently sounding as the root
     breath: f32,            // CC2, 0..1
@@ -577,6 +583,7 @@ impl Part {
             sustained_notes: [false; 128],
             keys_down: [false; 128],
             root_only: false, root_held: [false; 128], root_active: None,
+            sustain_enabled: true,
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
             cached_mod_sources: mod_matrix::ModSources {
@@ -890,7 +897,7 @@ impl Part {
 
         self.release_vel = 0.5; // default; would need MIDI note-off velocity from caller
 
-        if self.sustain_pedal > 0.5 {
+        if self.sustain_pedal > 0.5 && self.sustain_enabled {
             match self.params.sustain_mode as u32 {
                 0 => {
                     // Hold all notes — don't release while pedal is down
@@ -1589,10 +1596,11 @@ impl SynthEngine {
     fn set_sustain(&mut self, value: u8) {
         let on = value >= 64;
         self.sustain.store(on, std::sync::atomic::Ordering::Relaxed);
-        // SF2 voices: rustysynth applies hold-pedal per channel itself
-        self.sampler.sustain_pedal(on);
-        for part in &mut self.parts {
+        for (i, part) in self.parts.iter_mut().enumerate() {
             part.sustain_pedal = if on { 1.0 } else { 0.0 };
+            // SF2 voices: rustysynth applies hold-pedal per channel itself —
+            // per-part mask, disabled parts get CC64=0 (bass without sustain).
+            self.sampler.set_part_sustain(i, on && part.sustain_enabled);
             if !on {
                 // Latch voices are released unconditionally (as before): a
                 // latched note is defined by latch_held, not by a held key —
@@ -2430,6 +2438,55 @@ impl SynthEngine {
                     // toggle would re-key on the next unrelated note-off.
                     l.root_held = [false; 128];
                     l.root_active = None;
+                }
+            }
+            ControlEvent::SetPartSustain { part, on } => {
+                if let Some(l) = self.parts.get_mut(part) {
+                    l.sustain_enabled = on;
+                    if l.sustain_pedal > 0.5 {
+                        // Педаль внизу: немедленно применить маску к SF2-каналу
+                        // (re-enable тоже: канал должен получить CC64=127 again).
+                        self.sampler.set_part_sustain(part, on);
+                    }
+                    if !on && l.sustain_pedal > 0.5 {
+                        // Разжать pedal-held ноты этого парта — паттерн
+                        // pedal-up из set_sustain (включая latch-очистку,
+                        // sustain_release Some-ветку и !keys_down).
+                        for &n in &l.latch_held {
+                            l.keys_down[n as usize] = false;
+                        }
+                        if let Some(secs) = self.sustain_release {
+                            // Static pedal-up release (TECHDEBT #7): pedal-
+                            // released voices take `secs` instead of the patch
+                            // release. Key-held voices (`keys_down`) are
+                            // untouched. Two passes keep borrows disjoint.
+                            let mut needs = [false; 128];
+                            for voice in &l.voices {
+                                if voice.active && !voice.is_releasing()
+                                    && !l.keys_down[voice.src_note as usize]
+                                {
+                                    needs[voice.note as usize] = true;
+                                }
+                            }
+                            for (note, &held) in needs.iter().enumerate() {
+                                if held { l.note_off_for(note as u8, secs); }
+                            }
+                        } else {
+                            for voice in &mut l.voices {
+                                if voice.active && !voice.is_releasing()
+                                    && !l.keys_down[voice.src_note as usize]
+                                {
+                                    voice.note_off();
+                                }
+                            }
+                        }
+                        l.sustained_notes = [false; 128];
+                        // Pedal-only holds are gone; stale mono/latch entries
+                        // would resurrect on the next key press (mono
+                        // retrigger).
+                        l.note_stack.clear();
+                        l.latch_held.clear();
+                    }
                 }
             }
             ControlEvent::SetPartVolume { part, volume } => {
