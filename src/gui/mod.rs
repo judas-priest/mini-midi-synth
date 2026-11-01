@@ -2428,7 +2428,16 @@ impl App {
         // naturally (SF2 voices keep the old instrument), held keys keep
         // sustaining without re-attack; new notes use the new perf.
         // Legacy 8-part migration is centralized in preset::load_performance.
-        let parts = perf.parts;
+        self.apply_performance(&perf);
+        true
+    }
+
+    /// ЕДИНАЯ точка применения перфа (обе загрузки: по имени и панельный
+    /// «Load...»). История: пути разъезжались — панельный не восстанавливал
+    /// split_point и last_performance (#49: сплит «слетал» до C3/C4), by-name
+    /// не применял note_mode. Сюда добавлять новые поля PartConfig.
+    fn apply_performance(&mut self, perf: &crate::preset::Performance) {
+        let parts = &perf.parts;
         // Restore the stored split point; legacy perfs derive it from the
         // first enabled zone-B part's key_low (fallback: C4=60).
         self.split_point = perf.split_point.unwrap_or_else(|| {
@@ -2464,6 +2473,7 @@ impl App {
             self.parts[i].pan = part.pan;
             self.parts[i].transpose = part.transpose;
             self.parts[i].mute = part.mute;
+            self.parts[i].note_mode = part.note_mode;
             self.parts[i].sustain_enabled = part.sustain_enabled;
             self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
             self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
@@ -2474,6 +2484,7 @@ impl App {
             let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan: part.pan });
             let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: part.transpose });
             let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: part.mute });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode: part.note_mode });
             let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: part.sustain_enabled });
             let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange {
                 part: i, vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max });
@@ -2493,7 +2504,6 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
             }
         }
-        true
     }
 
     fn save_collapsed_categories(&mut self) {
