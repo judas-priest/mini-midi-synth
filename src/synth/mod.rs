@@ -167,6 +167,13 @@ pub struct LoadPatchEvent {
     pub wavetable: Option<(Arc<Vec<f32>>, usize, usize)>,
 }
 
+/// Per-part note mode (TECHDEBT #24-семейство): Poly — все ноты; Bass —
+/// нижняя зажатая (бывший root_only); Root — честный корень зажатого аккорда
+/// (chord::detect_root), фолбэк на Bass для некордовых наборов.
+pub const NOTE_MODE_POLY: u8 = 0;
+pub const NOTE_MODE_BASS: u8 = 1;
+pub const NOTE_MODE_ROOT: u8 = 2;
+
 /// Root-only gate decision for one note-on (TECHDEBT #6).
 pub(crate) enum RootDecision {
     /// Suppressed: an equal-or-lower key is already the sounding root.
@@ -179,8 +186,10 @@ pub enum ControlEvent {
     LoadPatch(Box<LoadPatchEvent>),
     SetPartEnabled { part: usize, enabled: bool },
     SetPartMute { part: usize, mute: bool },
-    /// Root-note-only mode (bass split): part sounds only the lowest held key
-    SetPartRootOnly { part: usize, on: bool },
+    /// Note mode per part: NOTE_MODE_POLY (all notes) / NOTE_MODE_BASS
+    /// (lowest held — the old root-only) / NOTE_MODE_ROOT (chord root).
+    /// Clears the root re-key tracking on EVERY change.
+    SetPartNoteMode { part: usize, mode: u8 },
     /// Sustain pedal (CC64) affects this part (Sus checkbox). While the pedal
     /// is down, turning it OFF also releases this part's pedal-held notes.
     SetPartSustain { part: usize, on: bool },
@@ -531,8 +540,10 @@ struct Part {
     release_vel: f32,       // last note-off velocity
     sustained_notes: [bool; 128], // notes held by sustain pedal
     keys_down: [bool; 128],   // raw key physically held (pedal-up must spare these)
-    /// Root-only mode (TECHDEBT #6): gate + per-part lowest-note tracking.
-    root_only: bool,
+    /// Note mode: NOTE_MODE_POLY / NOTE_MODE_BASS (the old root-only) /
+    /// NOTE_MODE_ROOT (chord root via detect_root). Gates note routing
+    /// through root_on/root_off unless Poly.
+    note_mode: u8,
     /// Sustain pedal (CC64) affects this part. false: bass without sustain
     /// while a pad part keeps sustaining.
     pub sustain_enabled: bool,
@@ -582,7 +593,7 @@ impl Part {
             alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
             sustained_notes: [false; 128],
             keys_down: [false; 128],
-            root_only: false, root_held: [false; 128], root_active: None,
+            note_mode: NOTE_MODE_POLY, root_held: [false; 128], root_active: None,
             sustain_enabled: true,
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
@@ -948,32 +959,79 @@ impl Part {
         self.voices.iter().any(|v| v.active && !v.is_releasing())
     }
 
-    /// Root-only gate, note-on side. Called for EVERY in-range note-on routed
+    /// Note-mode gate, note-on side. Called for EVERY in-range note-on routed
     /// to this part (both engines) via SynthEngine::route_note_on.
     fn root_on(&mut self, raw: u8) -> RootDecision {
         self.root_held[raw as usize] = true;
         // Latch mode is NOT gated: latch toggles on note-on and the gate would
         // break the toggle contract (tap-off suppressed under root-only).
-        if !self.root_only || self.params.play_mode as u8 == 3 {
+        if self.note_mode == NOTE_MODE_POLY || self.params.play_mode as u8 == 3 {
             return RootDecision::Sound { release: None, note: raw };
         }
+        // Стек-буфер вместо Vec: root_on на аудио-потоке — аллокации запрещены.
+        let mut buf = [0u8; 128];
+        let mut n = 0usize;
+        for (k, &held_flag) in self.root_held.iter().enumerate() {
+            if held_flag { buf[n] = k as u8; n += 1; }
+        }
+        let held = &buf[..n];
+        // Якорь корня — min_held (басовый корень), не последняя нажатая:
+        // корень звучит в басовой октаве и не прыгает вверх при добавлении
+        // верхних нот.
+        let min_held = held.iter().copied().min().unwrap_or(raw);
+        let target = match self.note_mode {
+            NOTE_MODE_ROOT => crate::chord::detect_root(held)
+                .map(|pc| {
+                    // i16-математика: `raw - pc` в u8 паникует при raw < pc;
+                    // delta затем saturating_sub — без паники и обёртки.
+                    let delta = (min_held as i16 - pc as i16).rem_euclid(12) as u8;
+                    min_held.saturating_sub(delta)
+                })
+                .unwrap_or(min_held), // фолбэк: некордовый набор = нижняя
+            _ => min_held, // Bass: нижняя зажатая
+        };
         match self.root_active {
-            None => { self.root_active = Some(raw); RootDecision::Sound { release: None, note: raw } }
-            Some(cur) if raw < cur => {
-                self.root_active = Some(raw);
-                RootDecision::Sound { release: Some(cur), note: raw }
+            Some(cur) if cur == target => RootDecision::Suppress, // дубликат/не-корневая нота
+            Some(cur) => {
+                self.root_active = Some(target);
+                RootDecision::Sound { release: Some(cur), note: target }
             }
-            Some(_) => RootDecision::Suppress, // duplicate or higher key
+            None => {
+                self.root_active = Some(target);
+                RootDecision::Sound { release: None, note: target }
+            }
         }
     }
 
-    /// Root-only gate, note-off side. Returns the next-lowest still-held key
-    /// to re-key to (Some only when `raw` WAS the sounding root).
+    /// Note-mode gate, note-off side. Returns the new root to re-key to
+    /// (Some only when the sounding root actually changed).
     fn root_off(&mut self, raw: u8) -> Option<u8> {
         self.root_held[raw as usize] = false;
-        if !self.root_only || self.root_active != Some(raw) { return None; }
-        self.root_active = (0u8..128).find(|&n| self.root_held[n as usize]);
-        self.root_active
+        if self.note_mode == NOTE_MODE_POLY { return None; }
+        // Пересчитать таргет по оставшимся held (тот же стек-буфер +
+        // i16/saturating-математика, что в root_on).
+        let mut buf = [0u8; 128];
+        let mut n = 0usize;
+        for (k, &held_flag) in self.root_held.iter().enumerate() {
+            if held_flag { buf[n] = k as u8; n += 1; }
+        }
+        let held = &buf[..n];
+        let min_held = match held.iter().copied().min() {
+            Some(m) => m,
+            None => { self.root_active = None; return None; } // ни одной зажатой
+        };
+        let target = match self.note_mode {
+            NOTE_MODE_ROOT => crate::chord::detect_root(held)
+                .map(|pc| {
+                    let delta = (min_held as i16 - pc as i16).rem_euclid(12) as u8;
+                    min_held.saturating_sub(delta)
+                })
+                .unwrap_or(min_held),
+            _ => min_held,
+        };
+        if self.root_active == Some(target) { return None; } // не изменился — нет re-key
+        self.root_active = Some(target);
+        Some(target)
     }
 
     /// Drains a part on state changes / panic: releases (or kills) DSP voices,
@@ -981,7 +1039,7 @@ impl Part {
     /// field — pedal-held notes, keys down, mono/latch stacks, and the
     /// root-only rekey state. Without the root clear a stale root_active
     /// ghost-suppresses the next note after MIDI-stop / AllNotesOff on
-    /// root_only patches (see root_on/root_off). `kill`: CC120 semantics
+    /// gated (Bass/Root) patches (see root_on/root_off). `kill`: CC120 semantics
     /// (immediate) vs release (CC123 / state change). Caller must have lifted
     /// engine-level sustain via set_sustain(0) first — this fn does not touch
     /// part.sustain_pedal. Zero-allocation (audio thread).
@@ -1661,8 +1719,9 @@ impl SynthEngine {
         }
     }
 
-    /// Shared part note-on dispatch: range/velocity gate, root-only gate
-    /// (TECHDEBT #6), DSP voice or SF2 sampler. The enabled/mute guards stay
+    /// Shared part note-on dispatch: range/velocity gate, note-mode gate
+    /// (root_on — Bass/Root re-keying, TECHDEBT #6/#24), DSP voice or SF2
+    /// sampler. The enabled/mute guards stay
     /// at the call sites, which intentionally differ (offs skip mute).
     /// Returns true only if the note actually SOUNDED in this part — the
     /// looper multitrack records just sounding parts (replay honours each
@@ -1693,13 +1752,14 @@ impl SynthEngine {
         true
     }
 
-    /// Shared part note-off dispatch with root-only re-keying. Offs skip the
+    /// Shared part note-off dispatch with note-mode re-keying. Offs skip the
     /// range check (matching today's behavior) so a range change mid-note
     /// cannot orphan a voice.
     fn route_note_off(&mut self, i: usize, raw: u8) {
-        let (sf2_mode, transpose, root_only, last_vel) = {
+        let (sf2_mode, transpose, gated, last_vel, old_root) = {
             let p = &self.parts[i];
-            (p.sf2_mode, p.transpose, p.root_only, p.last_velocity)
+            (p.sf2_mode, p.transpose, p.note_mode != NOTE_MODE_POLY,
+             p.last_velocity, p.root_active)
         };
         let next = self.parts[i].root_off(raw);
         let tr = |n: u8| (n as i16 + transpose as i16).clamp(0, 127) as u8;
@@ -1708,19 +1768,29 @@ impl SynthEngine {
             if let Some(n) = next { self.sampler.note_on(i, tr(n), (last_vel * 127.0) as u8); }
         } else {
             self.parts[i].note_off(raw);
-            if root_only {
+            if gated {
                 // Bass-split semantics (TECHDEBT #6): key-up = the note is DONE.
                 // Force-release the root voice even when the pedal holds it and
                 // clear its sustained_notes flag — the pedal must not resurrect
                 // a bass root whose key the player has already let go (that
                 // would drone the old root under the re-keyed one). Same for
-                // the replaced root in route_note_on above.
+                // the replaced root in route_note_on above. In Root mode the
+                // sounding root may be a synthesized target (not `raw`), so
+                // release the OLD root when the re-key moved it.
                 let part = &mut self.parts[i];
                 for v in &mut part.voices {
                     if v.active && v.src_note == raw { v.note_off(); }
                 }
                 part.sustained_notes[raw as usize] = false;
-                if let Some(n) = next { part.note_on(n, (last_vel * 127.0) as u8); }
+                if let (Some(n), Some(old)) = (next, old_root) {
+                    if old != raw {
+                        for v in &mut part.voices {
+                            if v.active && v.src_note == old { v.note_off(); }
+                        }
+                        part.sustained_notes[old as usize] = false;
+                    }
+                    part.note_on(n, (last_vel * 127.0) as u8);
+                }
             }
         }
     }
@@ -2431,11 +2501,14 @@ impl SynthEngine {
                     }
                 }
             }
-            ControlEvent::SetPartRootOnly { part, on } => {
+            ControlEvent::SetPartNoteMode { part, mode } => {
                 if let Some(l) = self.parts.get_mut(part) {
-                    l.root_only = on;
-                    // Reset tracking both ways: a stale root_active across the
-                    // toggle would re-key on the next unrelated note-off.
+                    l.note_mode = mode;
+                    // Reset tracking on EVERY change (включая повторный клик
+                    // по активному режиму — семантика старого SetPartRootOnly):
+                    // stale root_active across the change would re-key on the
+                    // next unrelated note-off; stale root_held would feed a
+                    // ghost chord into detect_root.
                     l.root_held = [false; 128];
                     l.root_active = None;
                 }
@@ -2867,7 +2940,7 @@ impl SynthEngine {
                 // The sequencer no longer owns any channel program
                 self.sampler.seq_channels_release();
                 // Full per-part drain: closes the root_held/root_active gap
-                // (ghost rekey on root_only patches after loading a new MIDI
+                // (ghost rekey on gated (Bass/Root) patches after loading a new MIDI
                 // file). The global all_notes_off above stays for drum/seq
                 // channels not mapped to parts; the per-part CC123 is
                 // redundant but idempotent.
@@ -2901,7 +2974,7 @@ impl SynthEngine {
                     // Playback stopped: give the shared channels back to the parts
                     self.sampler.seq_channels_release();
                     // Full per-part drain: closes the root_held/root_active gap
-                    // (ghost rekey on root_only patches after MIDI-stop).
+                    // (ghost rekey on gated (Bass/Root) patches after MIDI-stop).
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         part.drain_notes(&mut self.sampler, i, false);
                     }
@@ -3381,8 +3454,8 @@ impl SynthEngine {
                         }
                         midi_player::TrackInstrument::DspLayer0 => {
                             self.seq_route[ch as usize] = 0;
-                            if self.parts.first().map(|p| p.root_only).unwrap_or(false) {
-                                // Root-only gate (range/velocity checked inside)
+                            if self.parts.first().map(|p| p.note_mode != NOTE_MODE_POLY).unwrap_or(false) {
+                                // Note-mode gate (range/velocity checked inside)
                                 if !self.parts.is_empty() { self.route_note_on(0, note, velocity); }
                             } else if let Some(part) = self.parts.get_mut(0) {
                                 part.note_on(note, velocity);
@@ -3396,7 +3469,7 @@ impl SynthEngine {
                     },
                     midi_player::SeqEventData::NoteOff { note } => match self.seq_route[ch as usize] {
                         0 => {
-                            if self.parts.first().map(|p| p.root_only).unwrap_or(false) {
+                            if self.parts.first().map(|p| p.note_mode != NOTE_MODE_POLY).unwrap_or(false) {
                                 if !self.parts.is_empty() { self.route_note_off(0, note); }
                             } else if let Some(part) = self.parts.get_mut(0) {
                                 part.note_off(note);
@@ -3455,8 +3528,8 @@ impl SynthEngine {
                 if note == 0 && vel == 0 && part_id == 255 { break; }
                 let pi = part_id as usize;
                 if self.parts.get(pi).map(|p| !p.enabled).unwrap_or(true) { continue; }
-                if self.parts[pi].root_only {
-                    // Root-only gate (range/velocity checked inside)
+                if self.parts[pi].note_mode != NOTE_MODE_POLY {
+                    // Note-mode gate (range/velocity checked inside)
                     if vel > 0 { self.route_note_on(pi, note, vel); }
                     else { self.route_note_off(pi, note); }
                 } else if let Some(part) = self.parts.get_mut(pi) {

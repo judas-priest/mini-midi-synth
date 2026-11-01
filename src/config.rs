@@ -83,11 +83,27 @@ pub struct MidiSettings {
 pub struct PartUiState {
     #[serde(default)]
     pub mute: bool,
+    /// Note mode: 0=Poly, 1=Bass (the old root_only), 2=Root (chord root).
     #[serde(default)]
+    pub note_mode: u8,
+    /// Legacy flag (pre-note_mode configs). Never written anymore
+    /// (skip_serializing); kept so old files parse and can be mapped:
+    /// root_only=true + no explicit mode → Bass (see migrate_legacy_root_only).
+    #[serde(default, skip_serializing)]
     pub root_only: bool,
     /// Sustain pedal affects this part — default true (behaviour as before).
     #[serde(default = "default_true")]
     pub sustain_enabled: bool,
+}
+
+impl PartUiState {
+    /// Read-side legacy migration: root_only=true with no explicit note_mode
+    /// means the old bass split → NOTE_MODE_BASS. No-op otherwise.
+    pub fn migrate_legacy_root_only(&mut self) {
+        if self.root_only && self.note_mode == crate::synth::NOTE_MODE_POLY {
+            self.note_mode = crate::synth::NOTE_MODE_BASS;
+        }
+    }
 }
 
 fn default_true() -> bool { true }
@@ -270,8 +286,12 @@ impl Config {
             return Self::default();
         };
 
-        match serde_json::from_str(&contents) {
-            Ok(config) => config,
+        match serde_json::from_str::<Config>(&contents) {
+            Ok(mut config) => {
+                // Legacy root_only → note_mode read-side map (TC3).
+                for st in &mut config.ui.parts_state { st.migrate_legacy_root_only(); }
+                config
+            }
             Err(e) => {
                 // Keep the unparseable file. Autosave would overwrite it two
                 // seconds later and the user's settings would be gone for good.
@@ -319,5 +339,26 @@ mod tests {
         }"#;
         let cfg: Config = serde_json::from_str(json).expect("legacy config must parse");
         assert_eq!(cfg.audio.sample_rate, 48000);
+    }
+
+    #[test]
+    fn legacy_root_only_migrates_to_bass() {
+        // TC3: старый конфиг с root_only: true (без note_mode) → Bass;
+        // root_only: false → Poly. Новый конфиг пишет только note_mode.
+        let legacy_on: PartUiState =
+            serde_json::from_str(r#"{"root_only": true}"#).expect("legacy part state must parse");
+        let mut st = legacy_on;
+        st.migrate_legacy_root_only();
+        assert_eq!(st.note_mode, crate::synth::NOTE_MODE_BASS, "root_only:true must map to Bass");
+
+        let mut off: PartUiState =
+            serde_json::from_str(r#"{"root_only": false}"#).expect("legacy part state must parse");
+        off.migrate_legacy_root_only();
+        assert_eq!(off.note_mode, crate::synth::NOTE_MODE_POLY, "root_only:false must stay Poly");
+
+        // Round-trip: новый файл не содержит legacy-поля.
+        let saved = serde_json::to_string(&st).expect("serialize");
+        assert!(!saved.contains("root_only"), "legacy field must not be written: {saved}");
+        assert!(saved.contains(r#""note_mode":1"#), "Bass mode must persist: {saved}");
     }
 }

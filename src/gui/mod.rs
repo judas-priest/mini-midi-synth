@@ -155,8 +155,9 @@ pub struct PartState {
     pub vel_max: u8,
     pub pan: f32,        // -1..+1
     pub transpose: i8,   // semitones
-    /// Root-only (bass split): engine gates this part to the lowest held key
-    pub root_only: bool,
+    /// Note mode: NOTE_MODE_POLY (all notes) / NOTE_MODE_BASS (lowest held —
+    /// the old root-only) / NOTE_MODE_ROOT (chord root)
+    pub note_mode: u8,
     /// Sustain pedal (CC64) affects this part (Sus checkbox)
     pub sustain_enabled: bool,
     pub sf2_mode: bool,
@@ -177,7 +178,7 @@ impl PartState {
             patch_idx: 0, edited_params: Default::default(), params_dirty: false,
             enabled: false, mute: false, volume: 0.8,
             min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
-            pan: 0.0, transpose: 0, root_only: false, sustain_enabled: true,
+            pan: 0.0, transpose: 0, note_mode: crate::synth::NOTE_MODE_POLY, sustain_enabled: true,
             sf2_mode: false, sf2_program: 0,
             macro_vals: [0.0; 8],
             macro_names: (1..=8).map(|i| format!("Macro {i}")).collect(),
@@ -1617,10 +1618,10 @@ impl App {
         for (i, st) in self.config.ui.parts_state.iter().enumerate() {
             if let Some(part) = self.parts.get_mut(i) {
                 part.mute = st.mute;
-                part.root_only = st.root_only;
+                part.note_mode = st.note_mode;
                 part.sustain_enabled = st.sustain_enabled;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: st.mute });
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part: i, on: st.root_only });
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode: st.note_mode });
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: st.sustain_enabled });
             }
         }
@@ -1973,7 +1974,7 @@ impl App {
         let (vel_min, vel_max) = (p.vel_min, p.vel_max);
         let (pan, transpose) = (p.pan, p.transpose);
         let (sf2_mode, sf2_program) = (p.sf2_mode, p.sf2_program);
-        let root_only = p.root_only;
+        let note_mode = p.note_mode;
         let sustain_enabled = p.sustain_enabled;
 
         let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled });
@@ -1983,7 +1984,7 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange { part, vel_min, vel_max });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: transpose });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part, on: root_only });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part, mode: note_mode });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part, on: sustain_enabled });
         // Явный SetPartSf2Mode в ОБЕ стороны: слот движка наследует sf2_mode
         // прежнего жильца (remove не чистит) — фикс #40 (bug: «DSP, а звучит SF2»).
@@ -2014,7 +2015,7 @@ impl App {
         p.transpose = 0;
         p.vel_min = 1;
         p.vel_max = 127;
-        p.root_only = false;
+        p.note_mode = crate::synth::NOTE_MODE_POLY;
         p.enabled = enabled;
         self.load_edited_params(part);   // GUI: параметры патча 0
         self.send_edited_params(part);   // Движок: реальные параметры патча 0
@@ -2385,14 +2386,16 @@ impl App {
         }
     }
 
-    /// Persist live per-part toggles (mute / root-only) to config so they
+    /// Persist live per-part toggles (mute / note mode) to config so they
     /// survive restarts (they are NOT part of performance files' semantics).
     pub fn persist_parts_state(&mut self) {
         self.config.ui.parts_state = self
             .parts
             .iter()
             .map(|p| crate::config::PartUiState {
-                mute: p.mute, root_only: p.root_only, sustain_enabled: p.sustain_enabled,
+                mute: p.mute, note_mode: p.note_mode,
+                root_only: false, // legacy: больше не пишется (skip_serializing)
+                sustain_enabled: p.sustain_enabled,
             })
             .collect();
         self.save_global_to_config();

@@ -582,18 +582,27 @@ fn dispatch_arp_note_off_releases_dsp_voice_with_transpose_set() {
 
 // ── Root-only mode (TECHDEBT #6) ───────────────────────────────
 
-fn root_only_engine() -> SynthEngine {
+fn note_mode_engine(mode: u8) -> SynthEngine {
     let mut e = SynthEngine::new(48000.0);
     let patches = crate::preset::load_all_patches();
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
     let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
-    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    let _ = e.handle_control(ControlEvent::SetPartNoteMode { part: 0, mode });
     e
+}
+
+fn bass_engine() -> SynthEngine { note_mode_engine(NOTE_MODE_BASS) }
+
+fn root_engine() -> SynthEngine { note_mode_engine(NOTE_MODE_ROOT) }
+
+/// Count of sounding (active, not releasing) voices.
+fn sounding(part: &Part) -> usize {
+    part.voices.iter().filter(|v| v.active && !v.is_releasing()).count()
 }
 
 #[test]
 fn root_only_suppresses_higher_notes() {
-    let mut e = root_only_engine();
+    let mut e = bass_engine();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     for _ in 0..100 { e.tick(); }
     assert!(e.parts[0].voices.iter().any(|v| v.active), "lowest note did not sound");
@@ -609,7 +618,7 @@ fn root_only_suppresses_higher_notes() {
 
 #[test]
 fn root_only_rekeys_to_new_lowest() {
-    let mut e = root_only_engine();
+    let mut e = bass_engine();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
     for _ in 0..100 { e.tick(); }
     assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()));
@@ -624,7 +633,7 @@ fn root_only_rekeys_to_new_lowest() {
 
 #[test]
 fn root_only_release_of_root_rekeys_next_lowest() {
-    let mut e = root_only_engine();
+    let mut e = bass_engine();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
     for _ in 0..100 { e.tick(); }
@@ -637,11 +646,11 @@ fn root_only_release_of_root_rekeys_next_lowest() {
 
 #[test]
 fn root_only_toggle_resets_tracking() {
-    let mut e = root_only_engine();
+    let mut e = bass_engine();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     for _ in 0..100 { e.tick(); }
-    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: false });
-    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    let _ = e.handle_control(ControlEvent::SetPartNoteMode { part: 0, mode: NOTE_MODE_POLY });
+    let _ = e.handle_control(ControlEvent::SetPartNoteMode { part: 0, mode: NOTE_MODE_BASS });
     assert_eq!(e.parts[0].root_active, None, "toggle did not reset root_active");
     assert!(!e.parts[0].root_held.iter().any(|&h| h), "toggle did not reset root_held");
     // A stale root would have swallowed this note:
@@ -653,7 +662,7 @@ fn root_only_toggle_resets_tracking() {
 
 #[test]
 fn root_only_out_of_range_key_does_not_join_held_mask() {
-    let mut e = root_only_engine();
+    let mut e = bass_engine();
     let _ = e.handle_control(ControlEvent::SetPartRange { part: 0, min_note: 48, max_note: 70 });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 30, velocity: 100 }); // out of range
@@ -662,6 +671,102 @@ fn root_only_out_of_range_key_does_not_join_held_mask() {
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
     for _ in 0..100 { e.tick(); }
     assert_eq!(e.parts[0].root_active, None, "out-of-range key re-keyed after root off");
+}
+
+// ── Root mode (chord-root detection, note_mode = 2) ────────────
+
+#[test]
+fn root_mode_follows_chord_root_and_rekeys_back() {
+    // TC1: C(48)+E(52) = {0,4} — некордово, фолбэк на нижнюю → звучит C.
+    // +A(45): {9,0,4} = Am → корень A, прежний C отпускается (re-key).
+    // Снять A → остался C → рё-key на C.
+    let mut e = root_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 48, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 48),
+        "C did not sound");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 52, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(sounding(&e.parts[0]), 1, "E was not suppressed in C+E");
+    assert_eq!(e.parts[0].root_active, Some(48));
+
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 45, velocity: 100 }); // Am
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(45), "chord root A was not detected");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 45),
+        "root A did not sound");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && v.is_releasing() && v.src_note == 48),
+        "old root C was not released on re-key");
+
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 45 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(48), "did not re-key back to C");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 48),
+        "C did not re-sound after A release");
+}
+
+#[test]
+fn root_mode_low_octave_no_wrap_no_panic() {
+    // TC1b: root-pc выше raw (raw=1, pcs {9,1,4}). i16-математика +
+    // saturating_sub: без паники/обёртки, target = 1−4 → 0.
+    let mut e = root_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 1, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 1));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 9, velocity: 100 }); // {1,9} — некордово
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(1), "fallback target moved off the bass note");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 4, velocity: 100 }); // {9,1,4} = A
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(0), "saturating target expected (1−4 → 0)");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 0),
+        "root note 0 did not sound");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && v.is_releasing() && v.src_note == 1),
+        "old root 1 was not released");
+}
+
+#[test]
+fn root_mode_high_note_does_not_raise_root() {
+    // TC1c: верхняя нота не поднимает корень (якорь min_held).
+    let mut e = root_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 45, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(45), "high note raised the root");
+    assert_eq!(sounding(&e.parts[0]), 1, "high note was not suppressed");
+}
+
+#[test]
+fn root_mode_nonchord_set_falls_back_to_bass() {
+    // TC2: 2 ноты C+E без A — фолбэк на Bass, играет нижняя.
+    let mut e = root_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(60), "fallback did not anchor on the lowest");
+    assert_eq!(sounding(&e.parts[0]), 1, "more than one voice in fallback");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 60),
+        "lowest note did not sound in fallback");
+}
+
+#[test]
+fn root_mode_rekeys_on_chord_member_release_even_under_synthesized_root() {
+    // Корень может не совпадать ни с одной зажатой клавишей (Root-режим,
+    // синтезированный таргет): снятие члена аккорда обязано пересчитать корень.
+    // held {1,4,9} → A, target 0; снять 1 → {4,9} некордово → фолбэк 4.
+    let mut e = root_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 1, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 9, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 4, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(0));
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 1 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(4), "stale synthesized root after member release");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 4),
+        "re-keyed root 4 did not sound");
+    assert_eq!(sounding(&e.parts[0]), 1, "old synthesized root piled up with the new one");
 }
 
 // ── Per-part sustain (Sus checkbox, TC1) ───────────────────────
@@ -709,7 +814,7 @@ fn root_only_rekey_releases_old_root_even_under_pedal() {
     // route_note_off DSP path: root key-up force-releases the old root voice
     // (v.note_off(), sustained_notes cleared) even while the pedal holds it,
     // then re-keys to the next-lowest held key.
-    let mut e = root_only_engine();
+    let mut e = bass_engine();
     e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 }); // pedal down
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 }); // suppressed
@@ -734,7 +839,7 @@ fn root_only_key_up_kills_pedal_held_bass() {
     // Plain key release with no re-key target: the root voice is force-killed
     // at key-up even under the pedal (bass-split semantics: key-up = note
     // done, the pedal must not resurrect the bass).
-    let mut e = root_only_engine();
+    let mut e = bass_engine();
     e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 }); // pedal down
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     for _ in 0..100 { e.tick(); }
@@ -1046,7 +1151,7 @@ fn all_notes_off_clears_root_held_and_root_active() {
     let patches = crate::preset::load_all_patches();
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
     let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
-    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    let _ = e.handle_control(ControlEvent::SetPartNoteMode { part: 0, mode: NOTE_MODE_BASS });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 36, velocity: 100 });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 }); // suppressed
     for _ in 0..50 { e.tick(); }

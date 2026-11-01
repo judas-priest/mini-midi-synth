@@ -19,6 +19,7 @@ fn part(patch_name: &str, enabled: bool) -> PartConfig {
         mute: false,
         vel_min: 1,
         vel_max: 127,
+        note_mode: mini_midi_synth::synth::NOTE_MODE_POLY,
         root_only: false,
         sustain_enabled: true,
     }
@@ -62,7 +63,7 @@ fn legacy_8_part_performance_migrates_zone_b_to_8_12() {
 #[test]
 fn missing_optional_fields_get_defaults() {
     // Hand-written minimal JSON: vel_min/vel_max/mute/pan/transpose/
-    // sf2_*/root_only/category/split_point omitted.
+    // sf2_*/note_mode/root_only/category/split_point omitted.
     let json = r#"{
         "name": "minimal",
         "parts": [ { "patch_name": "Init", "enabled": true, "volume": 0.8,
@@ -81,6 +82,7 @@ fn missing_optional_fields_get_defaults() {
     assert!(!p.sf2_mode);
     assert_eq!(p.sf2_program, 0);
     assert!(!p.root_only);
+    assert_eq!(p.note_mode, mini_midi_synth::synth::NOTE_MODE_POLY);
 }
 
 #[test]
