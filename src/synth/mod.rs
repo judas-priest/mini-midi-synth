@@ -2205,8 +2205,9 @@ impl SynthEngine {
                             l.latch_held.clear();
                         }
                         l.params = params;
-                        l.min_note = params.min_note as u8;
-                        l.max_note = params.max_note as u8;
+                        // Диапазон парта — собственность SetPartRange/сплита:
+                        // ProgramChange не перетирает его (#41, резидуал —
+                        // LoadPatch уже перестал это делать)
                         if let Some(patch) = self.patches.get(program as usize) {
                             l.mod_matrix.load_from_params(&patch.params);
                             l.pitch_seq.load_from_params(&patch.params);
@@ -2345,8 +2346,6 @@ impl SynthEngine {
                         }
                         l.latch_held.clear();
                     }
-                    l.min_note = params.min_note as u8;
-                    l.max_note = params.max_note as u8;
                     // Sync macro values from preset into live part state
                     // Load wavetable data if provided. `replace` hands the
                     // previous Arc back into the event instead of dropping the
