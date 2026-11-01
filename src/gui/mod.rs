@@ -409,9 +409,10 @@ pub struct App {
     /// Decaying peak-hold of DSP load, shown next to `dsp_load`.
     pub dsp_peak: f32,
     pub global_dirty: bool,
-    /// (#39/#44) «Что сейчас крутят»: имя шкалы + отформатированное значение —
-    /// для индикатора в правом углу топ-бара. None = ничего не крутили.
-    pub active_knob: Option<(String, String)>,
+    /// (#39/#44) «Что сейчас крутят»: имя шкалы + отформатированное значение +
+    /// момент последнего тика — индикатор в правом углу топ-бара, авто-скрытие
+    /// через 2 с после последнего изменения (fade 300 мс; практика OSD HUD).
+    pub active_knob: Option<(String, String, std::time::Instant)>,
     // SF2 sampler
     pub sf2_file_list: Vec<(String, std::path::PathBuf)>,
     pub sf2_keys_selected: Option<usize>,
@@ -900,10 +901,22 @@ impl eframe::App for App {
                 ui.label(format!("MIDI: {midi_status}"));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // (#44) индикатор редактируемой шкалы
-                    if let Some((name, val)) = &self.active_knob {
-                        ui.label(egui::RichText::new(format!("{name}: {val}")).strong());
-                        ui.separator();
+                    // (#44) индикатор редактируемой шкалы: авто-скрытие через
+                    // 2 с после последнего тика, fade-out последние 300 мс
+                    // (практика OSD volume HUD — macOS/GNOME)
+                    if let Some((name, val, at)) = &self.active_knob {
+                        const HIDE_AFTER: f32 = 2.0;
+                        const FADE: f32 = 0.3;
+                        let age = at.elapsed().as_secs_f32();
+                        if age >= HIDE_AFTER {
+                            self.active_knob = None;
+                        } else {
+                            let alpha = (((HIDE_AFTER - age) / FADE).min(1.0) * 255.0) as u8;
+                            let color = ui.visuals().text_color().gamma_multiply(alpha as f32 / 255.0);
+                            ui.label(egui::RichText::new(format!("{name}: {val}"))
+                                .strong().color(color));
+                            ui.separator();
+                        }
                     }
 
                     // DSP load: avg (устойчивая) + peak-hold с медленным спадом
@@ -1317,10 +1330,11 @@ impl eframe::App for App {
 
 impl App {
     /// Запомнить «что сейчас крутят» — для индикатора в правом углу топ-бара
-    /// (#39/#44: значение видно весь drag, тултип не обязателен).
+    /// (#39/#44: значение видно весь drag, тултип не обязателен). Каждый тик
+    /// сбрасывает таймер авто-скрытия (2 с, как OSD volume).
     pub(crate) fn knob_feedback(&mut self, r: &egui::Response, name: &str, value: String) {
         if r.dragged() || r.changed() || r.hovered() {
-            self.active_knob = Some((name.to_string(), value));
+            self.active_knob = Some((name.to_string(), value, std::time::Instant::now()));
         }
     }
 
