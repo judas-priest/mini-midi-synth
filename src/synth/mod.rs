@@ -2909,7 +2909,7 @@ impl SynthEngine {
                 self.sampler.set_release_time_scale(scale);
             }
             ControlEvent::SetDspTrim { db } => {
-                self.dsp_trim_db = db;
+                self.dsp_trim_db = db.clamp(-24.0, 24.0);
             }
             ControlEvent::SetSf2Trim { db } => {
                 self.sampler.set_trim_db(db);
