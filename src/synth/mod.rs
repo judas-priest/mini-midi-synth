@@ -2345,8 +2345,6 @@ impl SynthEngine {
                         }
                         l.latch_held.clear();
                     }
-                    l.min_note = params.min_note as u8;
-                    l.max_note = params.max_note as u8;
                     // Sync macro values from preset into live part state
                     // Load wavetable data if provided. `replace` hands the
                     // previous Arc back into the event instead of dropping the
