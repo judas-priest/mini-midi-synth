@@ -203,7 +203,8 @@ impl App {
                         sf2_mode: l.sf2_mode, sf2_program: l.sf2_program,
                         pan: l.pan, transpose: l.transpose, mute: l.mute,
                         vel_min: l.vel_min, vel_max: l.vel_max,
-                        root_only: l.root_only,
+                        note_mode: l.note_mode,
+                        root_only: false, // legacy: больше не пишется
                         sustain_enabled: l.sustain_enabled,
                     }
                 }).collect();
@@ -267,7 +268,7 @@ impl App {
                         self.parts[i].pan = part.pan;
                         self.parts[i].transpose = part.transpose;
                         self.parts[i].mute = part.mute;
-                        self.parts[i].root_only = part.root_only;
+                        self.parts[i].note_mode = part.note_mode;
                         self.parts[i].sustain_enabled = part.sustain_enabled;
                         self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
                         self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
@@ -278,7 +279,7 @@ impl App {
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan: part.pan });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: part.transpose });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: part.mute });
-                        let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part: i, on: part.root_only });
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode: part.note_mode });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: part.sustain_enabled });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange {
                             part: i, vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max });
@@ -391,15 +392,30 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: m });
                 self.persist_parts_state();
             }
-            let mut r = self.parts[i].root_only;
-            if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut r, "Root")).on_hover_text(
-                "Root-only (bass split): this part sounds only the lowest held key")
-                .changed()
-            {
-                self.parts[i].root_only = r;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part: i, on: r });
-                self.persist_parts_state();
-            }
+            // Note mode: Poly | Bass | Root — сегмент 22px (взаимоисключающие
+            // режимы = сегмент, не чекбоксы; Nord POLY/LEGATO/MONO style)
+            let modes = [
+                ("P", crate::synth::NOTE_MODE_POLY, "Poly — all notes"),
+                ("B", crate::synth::NOTE_MODE_BASS, "Bass — only the lowest held note"),
+                ("R", crate::synth::NOTE_MODE_ROOT, "Root — the chord's root note"),
+            ];
+            ui.add_sized([110.0, 22.0], |ui: &mut egui::Ui| {
+                ui.horizontal(|ui| {
+                    for (label, mode, tip) in modes {
+                        let is_cur = self.parts[i].note_mode == mode;
+                        let r = ui.selectable_label(is_cur, label)
+                            .on_hover_text(tip);
+                        // Повторный клик по активному — no-op (handler чистит
+                        // root-состояние, рвать ноты на месте нельзя)
+                        if r.clicked() && !is_cur {
+                            self.parts[i].note_mode = mode;
+                            let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode });
+                            self.persist_parts_state();
+                        }
+                    }
+                })
+                .response // egui 0.31: horizontal -> InnerResponse, add_sized ждёт Response
+            });
             let mut s = self.parts[i].sustain_enabled;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut s, "Sus")).on_hover_text(
                 "Sustain pedal affects this part").changed()
@@ -529,12 +545,12 @@ impl App {
         self.parts[part].pan = 0.0;
         self.parts[part].transpose = 0;
         self.parts[part].sf2_mode = false;
-        self.parts[part].root_only = false;
+        self.parts[part].note_mode = crate::synth::NOTE_MODE_POLY;
         let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled: false });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: false });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan: 0.0 });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: 0 });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part, on: false });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part, mode: crate::synth::NOTE_MODE_POLY });
         self.set_active_part(if part >= PARTS_PER_ZONE { PARTS_PER_ZONE } else { 0 });
         // find first enabled in same zone
         let zone = if part >= 4 { ZONE_B } else { ZONE_A };

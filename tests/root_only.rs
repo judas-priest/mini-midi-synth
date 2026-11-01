@@ -45,7 +45,7 @@ fn root_only_key_ups_kill_pedal_held_roots_to_silence() {
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
     let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
     let _ = e.handle_control(ControlEvent::SetPartVolume { part: 0, volume: 1.0 });
-    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    let _ = e.handle_control(ControlEvent::SetPartNoteMode { part: 0, mode: mini_midi_synth::synth::NOTE_MODE_BASS });
 
     e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 }); // pedal down
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
@@ -75,7 +75,7 @@ fn root_only_suppressed_note_leaves_no_stuck_voice() {
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
     let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
     let _ = e.handle_control(ControlEvent::SetPartVolume { part: 0, volume: 1.0 });
-    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    let _ = e.handle_control(ControlEvent::SetPartNoteMode { part: 0, mode: mini_midi_synth::synth::NOTE_MODE_BASS });
 
     // Chord: only the lowest key must sound on this part.
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 127 });
@@ -103,7 +103,7 @@ fn root_only_engine() -> SynthEngine {
     let _ = e.handle_control(ControlEvent::load_patch_from(0, &patch));
     let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
     let _ = e.handle_control(ControlEvent::SetPartVolume { part: 0, volume: 1.0 });
-    let _ = e.handle_control(ControlEvent::SetPartRootOnly { part: 0, on: true });
+    let _ = e.handle_control(ControlEvent::SetPartNoteMode { part: 0, mode: mini_midi_synth::synth::NOTE_MODE_BASS });
     e
 }
 

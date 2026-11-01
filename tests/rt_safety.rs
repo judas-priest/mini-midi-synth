@@ -402,3 +402,30 @@ fn looper_bpm_regrid_does_not_allocate() {
         for _ in 0..4 { engine.tick_block(&mut l, &mut r); } // first block regrids
     });
 }
+
+/// Bass/Root re-keying (root_on/root_off) runs on the audio thread: the
+/// held-scan must use the stack buffer and chord detection must be
+/// allocation-free.
+#[test]
+fn note_mode_gates_do_not_allocate() {
+    let patches = preset::load_all_patches();
+    let patch = patches.first().expect("factory presets are compiled in").clone();
+    let mut engine = SynthEngine::new(SR);
+    engine.set_patches(patches);
+    let _ = engine.handle_control(ControlEvent::load_patch_from(0, &patch));
+    let _ = engine.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = engine.handle_control(
+        ControlEvent::SetPartNoteMode { part: 0, mode: mini_midi_synth::synth::NOTE_MODE_ROOT });
+
+    let mut l = [0.0f32; BLOCK_SIZE];
+    let mut r = [0.0f32; BLOCK_SIZE];
+    assert_no_alloc(|| {
+        engine.handle_event(MidiEvent::NoteOn { channel: 0, note: 48, velocity: 100 });
+        engine.handle_event(MidiEvent::NoteOn { channel: 0, note: 52, velocity: 100 });
+        for _ in 0..4 { engine.tick_block(&mut l, &mut r); }
+        engine.handle_event(MidiEvent::NoteOn { channel: 0, note: 45, velocity: 100 }); // Am → re-key
+        for _ in 0..4 { engine.tick_block(&mut l, &mut r); }
+        engine.handle_event(MidiEvent::NoteOff { channel: 0, note: 45 }); // re-key back to C
+        for _ in 0..4 { engine.tick_block(&mut l, &mut r); }
+    });
+}

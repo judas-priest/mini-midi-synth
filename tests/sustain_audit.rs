@@ -439,15 +439,17 @@ fn performance_part_config_roundtrip() {
         mute: true,
         vel_min: 40,
         vel_max: 100,
-        root_only: true,
+        note_mode: mini_midi_synth::synth::NOTE_MODE_BASS,
+        root_only: false, // legacy: больше не пишется (skip_serializing)
         sustain_enabled: false,
     };
     let json = serde_json::to_string(&orig).expect("serialize");
+    assert!(!json.contains("root_only"), "legacy field must not be written");
     let back: PartConfig = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back.pan, -0.5);
     assert_eq!(back.transpose, -12);
     assert!(back.mute);
-    assert!(back.root_only);
+    assert_eq!(back.note_mode, mini_midi_synth::synth::NOTE_MODE_BASS);
     assert!(!back.sustain_enabled, "sustain_enabled must round-trip");
     assert_eq!(back.vel_min, 40);
     assert_eq!(back.vel_max, 100);
@@ -457,7 +459,7 @@ fn performance_part_config_roundtrip() {
     assert_eq!(legacy.pan, 0.0);
     assert_eq!(legacy.transpose, 0);
     assert!(!legacy.mute);
-    assert!(!legacy.root_only);
+    assert_eq!(legacy.note_mode, mini_midi_synth::synth::NOTE_MODE_POLY);
     assert!(legacy.sustain_enabled, "legacy file without the field must default to sustain ON");
     assert_eq!(legacy.vel_min, 1);
     assert_eq!(legacy.vel_max, 127);

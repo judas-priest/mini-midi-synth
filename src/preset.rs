@@ -765,13 +765,27 @@ pub struct PartConfig {
     pub vel_min: u8,
     #[serde(default = "default_vel_max")]
     pub vel_max: u8,
-    /// Root-note-only mode (bass split): sounds only the lowest held key.
+    /// Note mode: 0=Poly, 1=Bass (the old root_only), 2=Root (chord root).
     #[serde(default)]
+    pub note_mode: u8,
+    /// Legacy flag (pre-note_mode perfs). Never written anymore
+    /// (skip_serializing); kept so old files parse and can be mapped:
+    /// root_only=true + no explicit mode → Bass (see migrate_legacy_root_only).
+    #[serde(default, skip_serializing)]
     pub root_only: bool,
     /// Sustain pedal (CC64) affects this part — default true (behaviour as
     /// before for perf files without the field).
     #[serde(default = "default_true")]
     pub sustain_enabled: bool,
+}
+
+impl PartConfig {
+    /// Read-side legacy migration (same rule as config::PartUiState).
+    pub fn migrate_legacy_root_only(&mut self) {
+        if self.root_only && self.note_mode == crate::synth::NOTE_MODE_POLY {
+            self.note_mode = crate::synth::NOTE_MODE_BASS;
+        }
+    }
 }
 
 fn default_vel_min() -> u8 { 1 }
@@ -801,6 +815,7 @@ pub fn save_performance(perf: &Performance) -> Result<PathBuf> {
 
 pub fn load_performance(path: &std::path::Path) -> Result<Performance> {
     let mut perf: Performance = load_json(path, "performance")?;
+    for part in &mut perf.parts { part.migrate_legacy_root_only(); }
     migrate_performance_parts(&mut perf.parts);
     Ok(perf)
 }
@@ -845,9 +860,46 @@ pub fn init_performance() -> Performance {
             mute: false,
             vel_min: 1,
             vel_max: 127,
+            note_mode: crate::synth::NOTE_MODE_POLY,
             root_only: false,
             sustain_enabled: true,
         }],
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_perf_root_only_migrates_to_bass() {
+        // TC3: перф со старым `root_only: true` (без note_mode) → Bass;
+        // `root_only: false` → Poly; новый файл пишет только note_mode.
+        let json = r#"{
+            "name": "legacy",
+            "parts": [{
+                "patch_name": "Init", "enabled": true, "volume": 0.8,
+                "key_low": 0, "key_high": 127,
+                "root_only": true
+            }]
+        }"#;
+        let mut perf: Performance = serde_json::from_str(json).expect("legacy perf must parse");
+        assert_eq!(perf.parts[0].note_mode, crate::synth::NOTE_MODE_POLY,
+            "serde default is Poly until the read-side map runs");
+        perf.parts[0].migrate_legacy_root_only();
+        assert_eq!(perf.parts[0].note_mode, crate::synth::NOTE_MODE_BASS,
+            "root_only:true must map to Bass");
+
+        let json_off = json.replace("\"root_only\": true", "\"root_only\": false");
+        let mut perf_off: Performance =
+            serde_json::from_str(&json_off).expect("legacy perf must parse");
+        perf_off.parts[0].migrate_legacy_root_only();
+        assert_eq!(perf_off.parts[0].note_mode, crate::synth::NOTE_MODE_POLY,
+            "root_only:false must stay Poly");
+
+        // Round-trip: сохранённый перф не содержит legacy-поля.
+        let saved = serde_json::to_string(&perf).expect("serialize");
+        assert!(!saved.contains("root_only"), "legacy field must not be written");
+    }
+}
