@@ -1640,6 +1640,9 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: self.sustain_release });
         let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale: self.sf2_release_scale });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
+        // Per-engine loudness trims (Settings → Audio, persisted in config.audio)
+        let _ = self.ctrl_tx.push(ControlEvent::SetDspTrim { db: self.config.audio.dsp_trim_db });
+        let _ = self.ctrl_tx.push(ControlEvent::SetSf2Trim { db: self.config.audio.sf2_trim_db });
         // Restore the internal-kit remap before the initial push (if an SF2 kit is
         // configured, load_sf2_drums below overwrites this with the per-kit table).
         if self.sf2_drums_loaded_name.is_empty() {

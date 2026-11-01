@@ -469,6 +469,8 @@ pub fn run_headless() -> Result<()> {
         }
     }
     let _ = c.ctrl_tx.push(synth::ControlEvent::DrumSetVolume { volume: c.config.ui.drum_volume });
+    let _ = c.ctrl_tx.push(synth::ControlEvent::SetDspTrim { db: c.config.audio.dsp_trim_db });
+    let _ = c.ctrl_tx.push(synth::ControlEvent::SetSf2Trim { db: c.config.audio.sf2_trim_db });
 
     // --- SF2 loading ---
     let keys_path = c.config.sf2.keys_file_path.clone()
