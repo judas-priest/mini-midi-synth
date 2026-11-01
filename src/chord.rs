@@ -27,18 +27,10 @@ const TEMPLATES: &[(&str, &[u8])] = &[
 
 const NOTE_NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
-/// Detect a chord name from held notes. Returns None for fewer than 3
-/// distinct pitch classes or when no template covers the set.
-pub fn detect(notes: &[u8]) -> Option<String> {
-    let mut pcs = [false; 12];
-    let mut count = 0;
-    let bass_pc = notes.iter().min().map(|n| n % 12)?;
-    for n in notes {
-        if !pcs[(*n % 12) as usize] { count += 1; }
-        pcs[(*n % 12) as usize] = true;
-    }
-    if count < 3 { return None; }
-
+/// Shared template scoring: root pitch class + suffix of the best template
+/// covering `pcs`. None when no template covers the set. `detect` builds the
+/// name from both; `detect_root` uses only the root.
+fn best_root(pcs: [bool; 12], bass_pc: u8) -> Option<(u8, &'static str)> {
     // Candidate roots, bass pitch class first (tie-break preference).
     let mut roots = [0u8; 12];
     let mut n_roots = 0;
@@ -70,6 +62,22 @@ pub fn detect(notes: &[u8]) -> Option<String> {
         }
     }
     let (_, root, sfx) = best?;
+    Some((root, sfx))
+}
+
+/// Detect a chord name from held notes. Returns None for fewer than 3
+/// distinct pitch classes or when no template covers the set.
+pub fn detect(notes: &[u8]) -> Option<String> {
+    let mut pcs = [false; 12];
+    let mut count = 0;
+    let bass_pc = notes.iter().min().map(|n| n % 12)?;
+    for n in notes {
+        if !pcs[(*n % 12) as usize] { count += 1; }
+        pcs[(*n % 12) as usize] = true;
+    }
+    if count < 3 { return None; }
+
+    let (root, sfx) = best_root(pcs, bass_pc)?;
     let name = NOTE_NAMES[root as usize];
     if (bass_pc + 12 - root) % 12 == 0 {
         Some(format!("{name}{sfx}"))
@@ -78,9 +86,23 @@ pub fn detect(notes: &[u8]) -> Option<String> {
     }
 }
 
+/// Root pitch-class of the held chord (по тому же скорингу, что detect).
+/// None: <3 distinct pcs или ни один шаблон не покрыл набор.
+pub fn detect_root(notes: &[u8]) -> Option<u8> {
+    let mut pcs = [false; 12];
+    let mut count = 0;
+    let bass_pc = notes.iter().min().map(|n| n % 12)?;
+    for n in notes {
+        if !pcs[(*n % 12) as usize] { count += 1; }
+        pcs[(*n % 12) as usize] = true;
+    }
+    if count < 3 { return None; }
+    best_root(pcs, bass_pc).map(|(root, _)| root)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::detect;
+    use super::{detect, detect_root};
     #[test]
     fn chord_major() { assert_eq!(detect(&[60, 64, 67]), Some("C".into())); }
     #[test]
@@ -101,4 +123,15 @@ mod tests {
     fn chord_empty_none() { assert_eq!(detect(&[]), None); }
     #[test]
     fn chord_unmatched_none() { assert_eq!(detect(&[60, 61, 62]), None); }
+
+    #[test]
+    fn root_c_major() { assert_eq!(detect_root(&[60, 64, 67]), Some(0)); }
+    #[test]
+    fn root_c_first_inversion() { assert_eq!(detect_root(&[64, 67, 72]), Some(0)); }
+    #[test]
+    fn root_a_minor() { assert_eq!(detect_root(&[57, 60, 64]), Some(9)); }
+    #[test]
+    fn root_two_notes_none() { assert_eq!(detect_root(&[60, 64]), None); }
+    #[test]
+    fn root_f_over_c() { assert_eq!(detect_root(&[60, 65, 69]), Some(5)); }
 }
