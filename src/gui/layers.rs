@@ -75,13 +75,13 @@ impl App {
             if split_on {
                 ui.label("Split point:");
                 let sp_name = note_name(self.split_point);
-                if ui.add(egui::Slider::new(&mut self.split_point, 0..=127)
+                let sp_r = ui.add(egui::Slider::new(&mut self.split_point, 0..=127)
                     .suffix(format!(" ({sp_name})")))
-                    .on_hover_text("Keyboard split note (zone B starts here)")
-                    .changed()
-                {
+                    .on_hover_text("Keyboard split note (zone B starts here)");
+                if sp_r.changed() {
                     self.apply_split_ranges();
                 }
+                self.knob_feedback(&sp_r, "Split", note_name(self.split_point));
             }
 
             // ── View tabs (Drums / MIDI Seq / FX Chain / Pads) ───────────
@@ -408,6 +408,7 @@ impl App {
                 self.parts[i].pan = pan;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
             }
+            self.knob_feedback(&pan_r, "Pan", format!("{pan:+.2}"));
 
             // Tr
             ui.label("Tr:");
@@ -419,6 +420,7 @@ impl App {
                 self.parts[i].transpose = tr as i8;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
             }
+            self.knob_feedback(&tr_r, "Tr", format!("{tr:+} st"));
 
             // Vel
             ui.label("Vel:");
@@ -444,6 +446,7 @@ impl App {
                 self.parts[i].volume = vol;
                 self.send_part_volume(i);
             }
+            self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
 
             // Remove (never for the first part of a zone)
             let is_zone_first = i.is_multiple_of(PARTS_PER_ZONE);

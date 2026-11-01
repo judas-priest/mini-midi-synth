@@ -406,6 +406,9 @@ pub struct App {
     /// Decaying peak-hold of DSP load, shown next to `dsp_load`.
     pub dsp_peak: f32,
     pub global_dirty: bool,
+    /// (#39/#44) «Что сейчас крутят»: имя шкалы + отформатированное значение —
+    /// для индикатора в правом углу топ-бара. None = ничего не крутили.
+    pub active_knob: Option<(String, String)>,
     // SF2 sampler
     pub sf2_file_list: Vec<(String, std::path::PathBuf)>,
     pub sf2_keys_selected: Option<usize>,
@@ -894,12 +897,21 @@ impl eframe::App for App {
                 ui.label(format!("MIDI: {midi_status}"));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // (#44) индикатор редактируемой шкалы
+                    if let Some((name, val)) = &self.active_knob {
+                        ui.label(egui::RichText::new(format!("{name}: {val}")).strong());
+                        ui.separator();
+                    }
+
                     // DSP load: avg (устойчивая) + peak-hold с медленным спадом
                     // (практика REAPER). Бюджет — от ФАКТИЧЕСКОГО буфера:
                     // negotiate может молча откатить запрошенный.
                     let actual_buf = crate::metrics::METRICS.actual_buffer_size();
                     let buf = if actual_buf > 0 { actual_buf } else { self.config.audio.buffer_size };
                     let budget_us = buf as f32 / self.sample_rate as f32 * 1e6;
+                    // take_* читаем БЕЗУСЛОВНО каждый кадр: worst-пики копятся,
+                    // и если читать только при видимой телеметрии, при включении
+                    // выстрелит минутный максимум (#44).
                     let avg_us = crate::metrics::METRICS.take_avg_callback_us() as f32;
                     let peak_us = crate::metrics::METRICS.take_worst_callback_us() as f32;
                     if budget_us > 0.0 {
@@ -909,32 +921,34 @@ impl eframe::App for App {
                         self.dsp_peak = (self.dsp_peak * 0.98).max(peak_load);
                     }
 
-                    ui.label(format!(
-                        "{} | {}Hz | buf {} | dsp {:.0}% (peak {:.0}%)",
-                        self.current_host,
-                        self.sample_rate,
-                        buf,
-                        self.dsp_load,
-                        self.dsp_peak,
-                    ))
-                    .on_hover_text(
-                        "Audio callback time as a share of the buffer budget: \
-                         average and decaying peak. Peak approaching 100% means crackle.",
-                    );
-
-                    let dropped = crate::metrics::METRICS.total_dropped();
-                    let errors = crate::metrics::METRICS.stream_error_count();
-                    if dropped > 0 || errors > 0 {
-                        ui.separator();
-                        ui.colored_label(
-                            theme::TEXT_WARN,
-                            format!("drops {dropped} | errs {errors}"),
-                        )
+                    if self.config.ui.show_telemetry {
+                        ui.label(format!(
+                            "{} | {}Hz | buf {} | dsp {:.0}% (peak {:.0}%)",
+                            self.current_host,
+                            self.sample_rate,
+                            buf,
+                            self.dsp_load,
+                            self.dsp_peak,
+                        ))
                         .on_hover_text(
-                            "MIDI and control events that never reached the engine, and audio \
-                             stream errors. A lost NoteOff is a stuck note; non-zero here means \
-                             something is wrong.",
+                            "Audio callback time as a share of the buffer budget: \
+                             average and decaying peak. Peak approaching 100% means crackle.",
                         );
+
+                        let dropped = crate::metrics::METRICS.total_dropped();
+                        let errors = crate::metrics::METRICS.stream_error_count();
+                        if dropped > 0 || errors > 0 {
+                            ui.separator();
+                            ui.colored_label(
+                                theme::TEXT_WARN,
+                                format!("drops {dropped} | errs {errors}"),
+                            )
+                            .on_hover_text(
+                                "MIDI and control events that never reached the engine, and audio \
+                                 stream errors. A lost NoteOff is a stuck note; non-zero here means \
+                                 something is wrong.",
+                            );
+                        }
                     }
                 });
             });
@@ -996,6 +1010,7 @@ impl eframe::App for App {
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_tone", value: tone });
                     self.global_dirty = true;
                 }
+                self.knob_feedback(&tone_r, "Tone", format!("{tone:.0} Hz"));
 
                 ui.separator();
 
@@ -1010,6 +1025,7 @@ impl eframe::App for App {
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "reverb_mix", value: reverb });
                     self.global_dirty = true;
                 }
+                self.knob_feedback(&rev_r, "Reverb", format!("{reverb:.2}"));
 
                 ui.separator();
 
@@ -1024,6 +1040,7 @@ impl eframe::App for App {
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_volume", value: vol });
                     self.global_dirty = true;
                 }
+                self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
 
                 ui.separator();
 
@@ -1039,6 +1056,7 @@ impl eframe::App for App {
                     let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "pitch_bend_range", value: val });
                     self.global_dirty = true;
                 }
+                self.knob_feedback(&pb_r, "PB", format!("{pbr} st"));
 
                 ui.separator();
 
@@ -1244,6 +1262,14 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// Запомнить «что сейчас крутят» — для индикатора в правом углу топ-бара
+    /// (#39/#44: значение видно весь drag, тултип не обязателен).
+    pub(crate) fn knob_feedback(&mut self, r: &egui::Response, name: &str, value: String) {
+        if r.dragged() || r.changed() || r.hovered() {
+            self.active_knob = Some((name.to_string(), value));
+        }
+    }
+
     /// Instrument browser modal: search + category tree, applies to `inst_browser_part`.
     fn draw_instrument_browser_modal(&mut self, ctx: &egui::Context) {
         let Some(part) = self.inst_browser_part else { return };

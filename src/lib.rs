@@ -858,6 +858,7 @@ pub fn run_gui(
         dsp_load: 0.0,
         dsp_peak: 0.0,
         global_dirty: false,
+        active_knob: None,
         sf2_file_list: {
             let scan = gui::scan_sf2_files();
             for (dir, err) in &scan.unreadable {

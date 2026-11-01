@@ -284,23 +284,35 @@ impl App {
                     let mut decay = self.drum_params[slot].decay;
 
                     ui.style_mut().spacing.slider_width = theme::SLIDER_DRUM;
-                    if ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L")).on_hover_text(format!("Level: {level:.2}")).changed() {
+                    let lvl_r = ui.add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false).text("L"))
+                        .on_hover_text(format!("Level: {level:.2}"));
+                    if lvl_r.changed() {
                         self.drum_params[slot].level = level;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
                     }
-                    if ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T")).on_hover_text(format!("Tune: {tune:+.1} st")).changed() {
+                    self.knob_feedback(&lvl_r, "L", format!("{level:.2}"));
+                    let tune_r = ui.add(egui::Slider::new(&mut tune, -24.0..=24.0).show_value(false).text("T"))
+                        .on_hover_text(format!("Tune: {tune:+.1} st"));
+                    if tune_r.changed() {
                         self.drum_params[slot].tune = tune;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
                     }
-                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D")).on_hover_text(format!("Decay: {decay:.2} s{dsp_hint}")).changed() {
+                    self.knob_feedback(&tune_r, "T", format!("{tune:+.1} st"));
+                    let dec_r = ui.add_enabled(dsp_kit, egui::Slider::new(&mut decay, 0.1..=4.0).show_value(false).text("D"))
+                        .on_hover_text(format!("Decay: {decay:.2} s{dsp_hint}"));
+                    if dec_r.changed() {
                         self.drum_params[slot].decay = decay;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
                     }
+                    self.knob_feedback(&dec_r, "D", format!("{decay:.2} s"));
                     let mut pan = self.drum_params[slot].pan;
-                    if ui.add_enabled(dsp_kit, egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P")).on_hover_text(format!("Pan: {pan:+.2}{dsp_hint}")).changed() {
+                    let pan_r = ui.add_enabled(dsp_kit, egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false).text("P"))
+                        .on_hover_text(format!("Pan: {pan:+.2}{dsp_hint}"));
+                    if pan_r.changed() {
                         self.drum_params[slot].pan = pan;
                         let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
                     }
+                    self.knob_feedback(&pan_r, "P", format!("{pan:+.2}"));
                 });
             });
         }
