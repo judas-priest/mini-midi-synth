@@ -861,3 +861,14 @@ response.scroll() / input raw_scroll_delta на hovered виджете, шаг =
 забирать колесо ТОЛЬКО когда hovered (иначе список под слайдером перестанет
 скроллиться — тестировать в кастомных гридах). UI-фича, в ближайший проход
 вместе с #39/#44.
+
+## 18а. Уточнение к #18 (аудит 2026-11-01): cpal-name poll на Linux мёртв by design
+
+Часть #18 «poller имени default-устройства» на Linux не работает структурно:
+JACK-стрим называется всегда «cpal_client_out», ALSA default — всегда «default»
+(константы vendored cpal), плюс guard по host выключал его на JACK-бэкенде.
+Смена default-sink в PipeWire вообще не доходит до клиента как ошибка — граф
+перестраивается вне клиента. Сделано (PR #34): poll `pactl get-default-sink`
+раз в 1.5 с (Linux desktop) → реконнект; кнопка «Reconnect Audio» в Settings.
+Осталось: pipe-wire нативная подписка (pw-rs) вместо pactl-poll; WASAPI-ветка
+поллера не тронута.
