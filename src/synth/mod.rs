@@ -1765,7 +1765,14 @@ impl SynthEngine {
         let tr = |n: u8| (n as i16 + transpose as i16).clamp(0, 127) as u8;
         if sf2_mode {
             self.sampler.note_off(i, tr(raw));
-            if let Some(n) = next { self.sampler.note_on(i, tr(n), (last_vel * 127.0) as u8); }
+            // Re-key в Root-режиме: синтезированный корень (old) может быть
+            // ≠ raw — отпустить и его, иначе дрон под новой нотой.
+            if let (Some(n), Some(old)) = (next, old_root) {
+                if old != raw { self.sampler.note_off(i, tr(old)); }
+                self.sampler.note_on(i, tr(n), (last_vel * 127.0) as u8);
+            } else if let Some(n) = next {
+                self.sampler.note_on(i, tr(n), (last_vel * 127.0) as u8);
+            }
         } else {
             self.parts[i].note_off(raw);
             if gated {
