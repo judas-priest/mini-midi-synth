@@ -434,7 +434,11 @@ impl SamplerEngine {
     /// Per-part hold-pedal: CC64 on ОДИН melodic-канал (drums структурно
     /// недостижим — part_channel только MELODIC_CHANNELS).
     pub fn set_part_sustain(&mut self, part: usize, on: bool) {
-        self.part_sustain[part] = on;
+        if let Some(m) = self.part_sustain.get_mut(part) {
+            *m = on;
+        } else {
+            return;
+        }
         let Some(ch) = self.part_channel_of(part) else { return; };
         let v = if on { 127 } else { 0 };
         self.keys.midi(ch as i32, 0xB0, 64, v);

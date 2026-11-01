@@ -142,6 +142,8 @@ fn wavetable_note_on_does_not_allocate() {
     patch.wavetable_data = None;                  // custom .wt path is already Arc-shared
 
     let mut engine = SynthEngine::new(SR);
+    let _ = engine.handle_control(ControlEvent::SetPartSustain { part: 0, on: false });
+    let _ = engine.handle_control(ControlEvent::SetPartSustain { part: 0, on: true });
     let spent = engine.handle_control(ControlEvent::load_patch_from(0, &patch));
     drop(spent);
     let _ = engine.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
