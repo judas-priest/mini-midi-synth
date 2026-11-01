@@ -327,6 +327,13 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                 self.parts[i].sf2_mode = !sf2;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: !sf2 });
+                if !sf2 && self.sf2_keys_soundfont.is_some() {
+                    // Канал rustysynth свежий (program 0) — выслать хранимую
+                    // программу, иначе звучит piano до перевыбора (#43b)
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                        part: i, program: self.parts[i].sf2_program, bank: 0,
+                    });
+                }
                 // Persist engine choice for parts 0/1 (seeds sf2_mode on startup)
                 if i == 0 {
                     self.config.sf2.layer_a_sf2 = !sf2;
