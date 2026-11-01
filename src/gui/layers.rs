@@ -64,12 +64,9 @@ impl App {
                         self.set_active_part(0);
                     }
                 } else {
-                    // Enable the first free B slot
+                    // Enable the first free B slot — полный сброс + пуш (#40/#42)
                     if let Some(i) = ZONE_B.into_iter().find(|&i| !self.parts[i].enabled) {
-                        self.parts[i].enabled = true;
-                        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: true });
-                        self.send_edited_params(i);
-                        self.send_part_volume(i);
+                        self.reset_and_push_part(i, true);
                     }
                     self.apply_split_ranges();
                 }
@@ -450,14 +447,7 @@ impl App {
     fn add_part_to_zone(&mut self, zone_b: bool) {
         let range = if zone_b { ZONE_B } else { ZONE_A };
         if let Some(i) = range.into_iter().find(|&i| !self.parts[i].enabled) {
-            self.parts[i].enabled = true;
-            self.parts[i].mute = false;
-            self.parts[i].volume = 0.8;
-            self.parts[i].patch_idx = 0;
-            self.parts[i].sf2_mode = false;
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: true });
-            self.send_edited_params(i);
-            self.send_part_volume(i);
+            self.reset_and_push_part(i, true);
             let split_on = self.parts[ZONE_B].iter().any(|p| p.enabled);
             if split_on {
                 self.apply_split_ranges();
@@ -475,7 +465,15 @@ impl App {
     fn remove_part(&mut self, part: usize) {
         self.parts[part].enabled = false;
         self.parts[part].mute = false;
+        self.parts[part].pan = 0.0;
+        self.parts[part].transpose = 0;
+        self.parts[part].sf2_mode = false;
+        self.parts[part].root_only = false;
         let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled: false });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: false });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan: 0.0 });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: 0 });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part, on: false });
         self.set_active_part(if part >= PARTS_PER_ZONE { PARTS_PER_ZONE } else { 0 });
         // find first enabled in same zone
         let zone = if part >= 4 { ZONE_B } else { ZONE_A };

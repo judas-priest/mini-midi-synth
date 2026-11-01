@@ -1812,31 +1812,65 @@ impl App {
     /// default ranges, no panning, no transposition and no SF2 assignments.
     pub(super) fn send_full_part_state(&mut self) {
         for i in 0..self.parts.len() {
-            let p = &self.parts[i];
-            let (enabled, mute, volume) = (p.enabled, p.mute, p.volume);
-            let (min_note, max_note) = (p.min_note, p.max_note);
-            let (vel_min, vel_max) = (p.vel_min, p.vel_max);
-            let (pan, transpose) = (p.pan, p.transpose);
-            let (sf2_mode, sf2_program) = (p.sf2_mode, p.sf2_program);
-            let macro_vals = p.macro_vals;
-
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartVolume { part: i, volume });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartRange { part: i, min_note, max_note });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange { part: i, vel_min, vel_max });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: transpose });
-            for (index, value) in macro_vals.iter().enumerate() {
-                let _ = self.ctrl_tx.push(ControlEvent::SetMacro { part: i, index, value: *value });
-            }
-            if sf2_mode {
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                    part: i, program: sf2_program, bank: 0,
-                });
-            }
+            self.push_full_part_state(i);
         }
+    }
+
+    /// Пуш полного состояния ОДНОГО парта в движок (enabled + все параметры).
+    /// Используется при спавне/включении парта и при аудио-реконнекте.
+    fn push_full_part_state(&mut self, part: usize) {
+        let p = &self.parts[part];
+        let (enabled, mute, volume) = (p.enabled, p.mute, p.volume);
+        let (min_note, max_note) = (p.min_note, p.max_note);
+        let (vel_min, vel_max) = (p.vel_min, p.vel_max);
+        let (pan, transpose) = (p.pan, p.transpose);
+        let (sf2_mode, sf2_program) = (p.sf2_mode, p.sf2_program);
+        let root_only = p.root_only;
+
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartVolume { part, volume });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartRange { part, min_note, max_note });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange { part, vel_min, vel_max });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: transpose });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part, on: root_only });
+        // Явный SetPartSf2Mode в ОБЕ стороны: слот движка наследует sf2_mode
+        // прежнего жильца (remove не чистит) — фикс #40 (bug: «DSP, а звучит SF2»).
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2_mode });
+        for (index, value) in p.macro_vals.iter().enumerate() {
+            let _ = self.ctrl_tx.push(ControlEvent::SetMacro { part, index, value: *value });
+        }
+        if sf2_mode {
+            // Фикс #43b: rustysynth-канал стартует с program 0 — высылаем хранимый.
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                part, program: sf2_program, bank: 0,
+            });
+        }
+    }
+
+    /// Сброс GUI-слота в дефолты + полный пуш в движок (фикс #40-43a:
+    /// прежние add_part_to_zone сбрасывал 5 полей из 11 и не пушил
+    /// sf2_mode/pan/transpose/vel_range; send_edited_params уходил БЕЗ
+    /// load_edited_params — движок получал параметры прежнего жильца).
+    fn reset_and_push_part(&mut self, part: usize, enabled: bool) {
+        let p = &mut self.parts[part];
+        p.mute = false;
+        p.volume = 0.8;
+        p.patch_idx = 0;
+        p.sf2_mode = false;
+        p.sf2_program = 0;
+        p.pan = 0.0;
+        p.transpose = 0;
+        p.vel_min = 1;
+        p.vel_max = 127;
+        p.root_only = false;
+        p.enabled = enabled;
+        self.load_edited_params(part);   // GUI: параметры патча 0
+        self.send_edited_params(part);   // Движок: реальные параметры патча 0
+                                         // (фикс #43a: раньше уходили параметры
+                                         // прежнего жильца или Default)
+        self.push_full_part_state(part);
     }
 
     /// Re-sends the MIDI CC mapping to a freshly created engine.
