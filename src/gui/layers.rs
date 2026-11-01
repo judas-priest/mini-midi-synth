@@ -409,6 +409,18 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
             }
             self.knob_feedback(&pan_r, "Pan", format!("{pan:+.2}"));
+            // (#45) колесо над слайдером = шаг значения; глотаем smooth-дельту,
+            // чтобы ScrollArea не скроллил список под слайдером
+            if pan_r.hovered() {
+                let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                if dy != 0.0 {
+                    pan = (pan + dy * 0.0025).clamp(-1.0, 1.0);
+                    ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                    self.parts[i].pan = pan;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
+                    self.knob_feedback(&pan_r, "Pan", format!("{pan:+.2}"));
+                }
+            }
 
             // Tr
             ui.label("Tr:");
@@ -421,6 +433,17 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
             }
             self.knob_feedback(&tr_r, "Tr", format!("{tr:+} st"));
+            // (#45) колесо: ~1 полутон на ~20px прокрутки
+            if tr_r.hovered() {
+                let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                if dy != 0.0 {
+                    tr = (tr + (dy * 0.05).round() as i32).clamp(-24, 24);
+                    ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                    self.parts[i].transpose = tr as i8;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
+                    self.knob_feedback(&tr_r, "Tr", format!("{tr:+} st"));
+                }
+            }
 
             // Vel
             ui.label("Vel:");
@@ -447,6 +470,17 @@ impl App {
                 self.send_part_volume(i);
             }
             self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
+            // (#45) колесо над слайдером = шаг значения; см. Pan
+            if vol_r.hovered() {
+                let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                if dy != 0.0 {
+                    vol = (vol + dy * 0.0025).clamp(0.0, 1.0);
+                    ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                    self.parts[i].volume = vol;
+                    self.send_part_volume(i);
+                    self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
+                }
+            }
 
             // Remove (never for the first part of a zone)
             let is_zone_first = i.is_multiple_of(PARTS_PER_ZONE);

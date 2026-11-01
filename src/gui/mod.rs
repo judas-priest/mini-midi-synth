@@ -1011,6 +1011,20 @@ impl eframe::App for App {
                     self.global_dirty = true;
                 }
                 self.knob_feedback(&tone_r, "Tone", format!("{tone:.0} Hz"));
+                // (#45) колесо над слайдером = шаг значения; глотаем smooth-дельту,
+                // чтобы контейнер не скроллил. Шкала логарифмическая — шаг кратный
+                // (колесо-вверх = увеличение).
+                if tone_r.hovered() {
+                    let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                    if dy != 0.0 {
+                        tone = (tone * (1.0 + dy * 0.0025)).clamp(200.0, 20000.0);
+                        ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                        self.global_params.insert("master_tone".into(), tone);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_tone", value: tone });
+                        self.global_dirty = true;
+                        self.knob_feedback(&tone_r, "Tone", format!("{tone:.0} Hz"));
+                    }
+                }
 
                 ui.separator();
 
@@ -1026,6 +1040,18 @@ impl eframe::App for App {
                     self.global_dirty = true;
                 }
                 self.knob_feedback(&rev_r, "Reverb", format!("{reverb:.2}"));
+                // (#45) колесо: см. Tone (линейный шаг 0.0025/px)
+                if rev_r.hovered() {
+                    let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                    if dy != 0.0 {
+                        reverb = (reverb + dy * 0.0025).clamp(0.0, 1.0);
+                        ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                        self.global_params.insert("reverb_mix".into(), reverb);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "reverb_mix", value: reverb });
+                        self.global_dirty = true;
+                        self.knob_feedback(&rev_r, "Reverb", format!("{reverb:.2}"));
+                    }
+                }
 
                 ui.separator();
 
@@ -1041,6 +1067,18 @@ impl eframe::App for App {
                     self.global_dirty = true;
                 }
                 self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
+                // (#45) колесо: см. Tone (линейный шаг 0.0025/px)
+                if vol_r.hovered() {
+                    let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                    if dy != 0.0 {
+                        vol = (vol + dy * 0.0025).clamp(0.0, 1.0);
+                        ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                        self.global_params.insert("master_volume".into(), vol);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "master_volume", value: vol });
+                        self.global_dirty = true;
+                        self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
+                    }
+                }
 
                 ui.separator();
 
@@ -1057,6 +1095,19 @@ impl eframe::App for App {
                     self.global_dirty = true;
                 }
                 self.knob_feedback(&pb_r, "PB", format!("{pbr} st"));
+                // (#45) колесо: ~1 шаг на ~20px прокрутки (как Tr)
+                if pb_r.hovered() {
+                    let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+                    if dy != 0.0 {
+                        pbr = (pbr + (dy * 0.05).round() as i32).clamp(1, 24);
+                        ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                        let val = pbr as f32;
+                        self.global_params.insert("pitch_bend_range".into(), val);
+                        let _ = self.ctrl_tx.push(ControlEvent::SetGlobalParam { key: "pitch_bend_range", value: val });
+                        self.global_dirty = true;
+                        self.knob_feedback(&pb_r, "PB", format!("{pbr} st"));
+                    }
+                }
 
                 ui.separator();
 
