@@ -1531,6 +1531,15 @@ impl App {
                         }
                     }
                 });
+            // (#44-фидбек) Клик по инструменту = ПРИМЕНИТЬ и играть дальше —
+            // окно остаётся открытым; закрытие — OK / Esc / ✕.
+            ui.horizontal(|ui| {
+                if ui.button("OK").clicked() {
+                    close = true;
+                }
+                ui.label(egui::RichText::new(
+                    "клик = применить и играть · OK/Esc/✕ = закрыть").small().weak());
+            });
         });
 
         // ── Post-closure handling (after .show, reads locals + modal) ────
@@ -1559,7 +1568,7 @@ impl App {
             if part == 0 { self.config.sf2.layer_a_program = prog; }
             else { self.config.sf2.layer_b_program = prog; }
             let _ = self.config.save();
-            close = true;
+            // Применили и играем дальше — окно не закрываем (фидбек 2026-11-01)
         }
         if let Some(idx) = picked_patch {
             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
@@ -1567,7 +1576,7 @@ impl App {
             self.load_edited_params(part);
             self.send_edited_params(part);
             self.save_config();
-            close = true;
+            // Применили и играем дальше — окно не закрываем
         }
         if !win_open || win.is_none() {
             close = true;
