@@ -392,16 +392,30 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: m });
                 self.persist_parts_state();
             }
-            let mut r = self.parts[i].note_mode != crate::synth::NOTE_MODE_POLY;
-            if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut r, "Root")).on_hover_text(
-                "Root-only (bass split): this part sounds only the lowest held key")
-                .changed()
-            {
-                let mode = if r { crate::synth::NOTE_MODE_BASS } else { crate::synth::NOTE_MODE_POLY };
-                self.parts[i].note_mode = mode;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode });
-                self.persist_parts_state();
-            }
+            // Note mode: Poly | Bass | Root — сегмент 22px (взаимоисключающие
+            // режимы = сегмент, не чекбоксы; Nord POLY/LEGATO/MONO style)
+            let modes = [
+                ("P", crate::synth::NOTE_MODE_POLY, "Poly — all notes"),
+                ("B", crate::synth::NOTE_MODE_BASS, "Bass — only the lowest held note"),
+                ("R", crate::synth::NOTE_MODE_ROOT, "Root — the chord's root note"),
+            ];
+            ui.add_sized([110.0, 22.0], |ui: &mut egui::Ui| {
+                ui.horizontal(|ui| {
+                    for (label, mode, tip) in modes {
+                        let is_cur = self.parts[i].note_mode == mode;
+                        let r = ui.selectable_label(is_cur, label)
+                            .on_hover_text(tip);
+                        // Повторный клик по активному — no-op (handler чистит
+                        // root-состояние, рвать ноты на месте нельзя)
+                        if r.clicked() && !is_cur {
+                            self.parts[i].note_mode = mode;
+                            let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode });
+                            self.persist_parts_state();
+                        }
+                    }
+                })
+                .response // egui 0.31: horizontal -> InnerResponse, add_sized ждёт Response
+            });
             let mut s = self.parts[i].sustain_enabled;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut s, "Sus")).on_hover_text(
                 "Sustain pedal affects this part").changed()
