@@ -440,6 +440,7 @@ fn performance_part_config_roundtrip() {
         vel_min: 40,
         vel_max: 100,
         root_only: true,
+        sustain_enabled: false,
     };
     let json = serde_json::to_string(&orig).expect("serialize");
     let back: PartConfig = serde_json::from_str(&json).expect("deserialize");
@@ -447,6 +448,7 @@ fn performance_part_config_roundtrip() {
     assert_eq!(back.transpose, -12);
     assert!(back.mute);
     assert!(back.root_only);
+    assert!(!back.sustain_enabled, "sustain_enabled must round-trip");
     assert_eq!(back.vel_min, 40);
     assert_eq!(back.vel_max, 100);
     // Old file without the new fields must deserialize to neutral defaults
@@ -456,6 +458,7 @@ fn performance_part_config_roundtrip() {
     assert_eq!(legacy.transpose, 0);
     assert!(!legacy.mute);
     assert!(!legacy.root_only);
+    assert!(legacy.sustain_enabled, "legacy file without the field must default to sustain ON");
     assert_eq!(legacy.vel_min, 1);
     assert_eq!(legacy.vel_max, 127);
 }

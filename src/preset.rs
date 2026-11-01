@@ -768,10 +768,15 @@ pub struct PartConfig {
     /// Root-note-only mode (bass split): sounds only the lowest held key.
     #[serde(default)]
     pub root_only: bool,
+    /// Sustain pedal (CC64) affects this part — default true (behaviour as
+    /// before for perf files without the field).
+    #[serde(default = "default_true")]
+    pub sustain_enabled: bool,
 }
 
 fn default_vel_min() -> u8 { 1 }
 fn default_vel_max() -> u8 { 127 }
+fn default_true() -> bool { true }
 
 /// A saved split/part configuration.
 #[derive(Clone, Serialize, Deserialize)]
@@ -841,6 +846,7 @@ pub fn init_performance() -> Performance {
             vel_min: 1,
             vel_max: 127,
             root_only: false,
+            sustain_enabled: true,
         }],
     }
 }
