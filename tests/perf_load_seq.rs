@@ -20,6 +20,7 @@ fn part(patch_name: &str, enabled: bool) -> PartConfig {
         vel_min: 1,
         vel_max: 127,
         root_only: false,
+        sustain_enabled: true,
     }
 }
 

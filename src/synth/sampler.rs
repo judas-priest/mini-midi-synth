@@ -210,9 +210,10 @@ pub struct SamplerEngine {
     /// Sample start offset in samples — skip this many samples after note-on
     /// to compensate for slow SF2 attack envelopes.
     sample_offset: usize,
-    /// Last sustain state, re-applied after SF2 rebuilds (fresh rustysynth
-    /// channels start with hold_pedal=false).
-    sustain: bool,
+    /// Last per-part sustain mask, re-applied after SF2 rebuilds (fresh
+    /// rustysynth channels start with hold_pedal=false). true = pedal affects
+    /// the part — until a SetPartSustain arrives, behaviour is as before.
+    part_sustain: [bool; 16],
     /// Global SF2 release multiplier, re-applied after SF2 rebuilds (fresh
     /// rustysynth instances start at scale 1.0).
     release_scale: f32,
@@ -234,7 +235,7 @@ impl SamplerEngine {
             seq_channel_program: [255; 16], // 255 = not yet initialised
             seq_channel_used: [false; 16],
             sample_offset: 0,
-            sustain: false,
+            part_sustain: [true; 16],
             release_scale: 1.0,
         }
     }
@@ -430,16 +431,17 @@ impl SamplerEngine {
         self.keys.midi(ch as i32, 0x80, note as i32, 0);
     }
 
-    /// Sustain pedal (CC64) for all part channels of the keys synth.
-    /// rustysynth implements hold-pedal per channel: note-offs received while
-    /// the pedal is down keep sounding until it is released. Drum channel 9
-    /// is intentionally not sustained.
-    pub fn sustain_pedal(&mut self, on: bool) {
-        self.sustain = on;
-        let val = if on { 127 } else { 0 };
-        for ch in self.part_channel.iter().flatten() {
-            self.keys.midi(*ch as i32, 0xB0, 64, val);
+    /// Per-part hold-pedal: CC64 on ОДИН melodic-канал (drums структурно
+    /// недостижим — part_channel только MELODIC_CHANNELS).
+    pub fn set_part_sustain(&mut self, part: usize, on: bool) {
+        if let Some(m) = self.part_sustain.get_mut(part) {
+            *m = on;
+        } else {
+            return;
         }
+        let Some(ch) = self.part_channel_of(part) else { return; };
+        let v = if on { 127 } else { 0 };
+        self.keys.midi(ch as i32, 0xB0, 64, v);
     }
 
     /// Global SF2 release multiplier (GM2 CC72 semantics). 1.0 = file defaults.
@@ -453,12 +455,13 @@ impl SamplerEngine {
     /// Current release-time scale (persists across rustysynth rebuilds).
     pub fn release_scale(&self) -> f32 { self.release_scale }
 
-    /// Re-send CC64 to the part channels after a rustysynth rebuild.
+    /// Re-send CC64 to the part channels after a rustysynth rebuild —
+    /// from the per-part mask (a disabled part stays pedal-free).
     fn apply_sustain(&mut self) {
-        let on = self.sustain;
-        let val = if on { 127 } else { 0 };
-        for ch in self.part_channel.iter().flatten() {
-            self.keys.midi(*ch as i32, 0xB0, 64, val);
+        for (part, &on) in self.part_sustain.iter().enumerate() {
+            let Some(ch) = self.part_channel[part] else { continue; };
+            let v = if on { 127 } else { 0 };
+            self.keys.midi(ch as i32, 0xB0, 64, v);
         }
     }
 
@@ -532,7 +535,7 @@ impl SamplerEngine {
     pub fn all_notes_off(&mut self) {
         // rustysynth defers note-offs while a channel hold pedal is down
         // (voice.rs RELEASE_REQUESTED); lift CC64 everywhere before CC123.
-        self.sustain = false;
+        self.part_sustain = [false; 16];
         for ch in 0..16 {
             self.keys.midi(ch, 0xB0, 64, 0);
             self.keys.midi(ch, 0xB0, 123, 0);
@@ -544,7 +547,7 @@ impl SamplerEngine {
     /// release tail. Pedal state is irrelevant (voices are cleared) but is
     /// still cleared so a later note-off is not swallowed.
     pub fn all_sound_off(&mut self) {
-        self.sustain = false;
+        self.part_sustain = [false; 16];
         if let Some(synth) = &mut self.keys.synth { synth.note_off_all(true); }
         if let Some(synth) = &mut self.drums.synth { synth.note_off_all(true); }
     }

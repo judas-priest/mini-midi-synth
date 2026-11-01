@@ -204,6 +204,7 @@ impl App {
                         pan: l.pan, transpose: l.transpose, mute: l.mute,
                         vel_min: l.vel_min, vel_max: l.vel_max,
                         root_only: l.root_only,
+                        sustain_enabled: l.sustain_enabled,
                     }
                 }).collect();
                 match preset::save_performance(&Performance {
@@ -243,6 +244,10 @@ impl App {
             if let Some(perf) = load_perf {
                 {
                     self.perf_name = perf.name.clone();
+                    // Анти-stuck: lift the pedal before applying the new parts
+                    // (NOT AllNotesOff — seamless tails keep ringing; latch
+                    // releases and the F1 pedal button shows OFF — accepted).
+                    let _ = self.ctrl_tx.push(ControlEvent::SetSustain { on: false });
                     for i in 0..self.parts.len() {
                         self.parts[i].enabled = false;
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
@@ -263,6 +268,7 @@ impl App {
                         self.parts[i].transpose = part.transpose;
                         self.parts[i].mute = part.mute;
                         self.parts[i].root_only = part.root_only;
+                        self.parts[i].sustain_enabled = part.sustain_enabled;
                         self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
                         self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
                         self.send_edited_params(i);
@@ -273,6 +279,7 @@ impl App {
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: part.transpose });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: part.mute });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part: i, on: part.root_only });
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: part.sustain_enabled });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange {
                             part: i, vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max });
                         let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: part.sf2_mode });
@@ -391,6 +398,14 @@ impl App {
             {
                 self.parts[i].root_only = r;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part: i, on: r });
+                self.persist_parts_state();
+            }
+            let mut s = self.parts[i].sustain_enabled;
+            if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut s, "Sus")).on_hover_text(
+                "Sustain pedal affects this part").changed()
+            {
+                self.parts[i].sustain_enabled = s;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: s });
                 self.persist_parts_state();
             }
 

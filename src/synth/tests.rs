@@ -664,6 +664,46 @@ fn root_only_out_of_range_key_does_not_join_held_mask() {
     assert_eq!(e.parts[0].root_active, None, "out-of-range key re-keyed after root off");
 }
 
+// ── Per-part sustain (Sus checkbox, TC1) ───────────────────────
+
+#[test]
+fn per_part_sustain_gate_holds_only_enabled_part() {
+    let mut e = SynthEngine::new(48000.0);
+    let patches = crate::preset::load_all_patches();
+    let _ = e.handle_control(ControlEvent::load_patch_from(0, &patches[0]));
+    let _ = e.handle_control(ControlEvent::load_patch_from(1, &patches[0]));
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 1, enabled: true });
+    // Part 0 = pad (Sus on by default), part 1 = bass (Sus off)
+    let _ = e.handle_control(ControlEvent::SetPartSustain { part: 1, on: false });
+
+    // One note-on sounds in every enabled part
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active), "part A did not start");
+    assert!(e.parts[1].voices.iter().any(|v| v.active), "part B did not start");
+
+    // Pedal down, then the key up
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    for _ in 0..100 { e.tick(); }
+
+    assert!(e.parts[1].voices.iter().all(|v| !v.active || v.is_releasing()),
+        "part with Sus=off kept ringing under the pedal");
+    assert!(!e.parts[1].sustained_notes.iter().any(|&s| s),
+        "part with Sus=off accumulated pedal-held notes");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing()),
+        "part with Sus=on was not held by the pedal");
+    assert!(e.parts[0].sustained_notes[60],
+        "part with Sus=on did not flag the note as pedal-held");
+
+    // Pedal up: the held part releases
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().all(|v| !v.active || v.is_releasing()),
+        "pedal-up did not release the part with Sus=on");
+}
+
 #[test]
 fn root_only_rekey_releases_old_root_even_under_pedal() {
     // route_note_off DSP path: root key-up force-releases the old root voice

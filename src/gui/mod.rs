@@ -157,6 +157,8 @@ pub struct PartState {
     pub transpose: i8,   // semitones
     /// Root-only (bass split): engine gates this part to the lowest held key
     pub root_only: bool,
+    /// Sustain pedal (CC64) affects this part (Sus checkbox)
+    pub sustain_enabled: bool,
     pub sf2_mode: bool,
     pub sf2_program: u8,
     /// Macro knob values (0..1) — live, sent to engine via SetMacro
@@ -175,7 +177,8 @@ impl PartState {
             patch_idx: 0, edited_params: Default::default(), params_dirty: false,
             enabled: false, mute: false, volume: 0.8,
             min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
-            pan: 0.0, transpose: 0, root_only: false, sf2_mode: false, sf2_program: 0,
+            pan: 0.0, transpose: 0, root_only: false, sustain_enabled: true,
+            sf2_mode: false, sf2_program: 0,
             macro_vals: [0.0; 8],
             macro_names: (1..=8).map(|i| format!("Macro {i}")).collect(),
             xy_macro_x: 0,
@@ -1567,8 +1570,10 @@ impl App {
             if let Some(part) = self.parts.get_mut(i) {
                 part.mute = st.mute;
                 part.root_only = st.root_only;
+                part.sustain_enabled = st.sustain_enabled;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: st.mute });
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part: i, on: st.root_only });
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: st.sustain_enabled });
             }
         }
         for i in 0..self.parts.len() {
@@ -1921,6 +1926,7 @@ impl App {
         let (pan, transpose) = (p.pan, p.transpose);
         let (sf2_mode, sf2_program) = (p.sf2_mode, p.sf2_program);
         let root_only = p.root_only;
+        let sustain_enabled = p.sustain_enabled;
 
         let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute });
@@ -1930,6 +1936,7 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: transpose });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartRootOnly { part, on: root_only });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part, on: sustain_enabled });
         // Явный SetPartSf2Mode в ОБЕ стороны: слот движка наследует sf2_mode
         // прежнего жильца (remove не чистит) — фикс #40 (bug: «DSP, а звучит SF2»).
         let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2_mode });
@@ -2336,7 +2343,9 @@ impl App {
         self.config.ui.parts_state = self
             .parts
             .iter()
-            .map(|p| crate::config::PartUiState { mute: p.mute, root_only: p.root_only })
+            .map(|p| crate::config::PartUiState {
+                mute: p.mute, root_only: p.root_only, sustain_enabled: p.sustain_enabled,
+            })
             .collect();
         self.save_global_to_config();
     }
@@ -2380,6 +2389,11 @@ impl App {
         // Запомнить перф — восстановится при старте (юзер-репорт 2026-10-31)
         self.config.ui.last_performance = Some(perf.name.clone());
         self.save_config();
+        // Анти-stuck: lift the pedal BEFORE applying the new parts, or notes
+        // held by the pedal of the previous perf would ring forever under the
+        // new one (NOT AllNotesOff — seamless tails keep ringing).
+        // Side effects: latch releases, F1 pedal button shows OFF — accepted.
+        let _ = self.ctrl_tx.push(ControlEvent::SetSustain { on: false });
         for (i, part) in parts.iter().enumerate() {
             if i >= self.parts.len() { break; }
             let patch_idx = self.patches.iter()
@@ -2396,6 +2410,7 @@ impl App {
             self.parts[i].pan = part.pan;
             self.parts[i].transpose = part.transpose;
             self.parts[i].mute = part.mute;
+            self.parts[i].sustain_enabled = part.sustain_enabled;
             self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
             self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
             self.send_edited_params(i);
@@ -2405,6 +2420,7 @@ impl App {
             let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan: part.pan });
             let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: part.transpose });
             let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: part.mute });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: part.sustain_enabled });
             let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange {
                 part: i, vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max });
             // Restore SF2 mode for this part

@@ -85,7 +85,12 @@ pub struct PartUiState {
     pub mute: bool,
     #[serde(default)]
     pub root_only: bool,
+    /// Sustain pedal affects this part — default true (behaviour as before).
+    #[serde(default = "default_true")]
+    pub sustain_enabled: bool,
 }
+
+fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
