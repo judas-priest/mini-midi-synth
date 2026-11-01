@@ -355,6 +355,7 @@ impl App {
                     {
                         self.preset_search.clear();
                         self.inst_browser_part = Some(i);
+                        self.inst_browser_scroll = true; // (#37) открытие центрирует выбор
                     }
                 } else {
                     ui.add_sized([170.0, 22.0], egui::Label::new(egui::RichText::new("---").weak()))
@@ -372,6 +373,7 @@ impl App {
                 {
                     self.preset_search.clear();
                     self.inst_browser_part = Some(i);
+                    self.inst_browser_scroll = true; // (#37) открытие центрирует выбор
                 }
             }
 

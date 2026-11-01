@@ -435,6 +435,9 @@ pub struct App {
     pub inst_browser_index: usize,
     /// Search text at last index reset — detects filter changes
     pub inst_browser_last_search: String,
+    /// (#37) центрировать выделенную строку один раз (стрелки / открытие / сброс фильтра);
+    /// колесо мыши НЕ ставит флаг — список не прыгает при ручном скролле
+    pub inst_browser_scroll: bool,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
     // Split mode
@@ -1267,11 +1270,13 @@ impl App {
         if moved != 0 {
             let new_idx = self.inst_browser_index as i32 + moved;
             self.inst_browser_index = new_idx.max(0) as usize;
+            self.inst_browser_scroll = true; // (#37) скролл только по смене индекса
         }
         if self.inst_browser_last_search != self.preset_search {
             // Фильтр изменился — выделение на первый результат
             self.inst_browser_index = 0;
             self.inst_browser_last_search = self.preset_search.clone();
+            self.inst_browser_scroll = true; // (#37) сброс фильтра — к началу списка
         }
         let enter_pressed = ctx.input(|i| i.key_pressed(egui::Key::Enter));
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1296,6 +1301,9 @@ impl App {
             .default_height(540.0)
             .show(ctx, |ui| {
             ui.label(egui::RichText::new(title).strong());
+            // (#38) фикс-минимальная ширина: длинные строки поиска/результатов
+            // не распирают окно
+            ui.set_min_width(380.0);
             ui.add_space(theme::SP_XS);
             ui.add_space(theme::SP_XS);
             ui.horizontal(|ui| {
@@ -1360,8 +1368,13 @@ impl App {
                                     flat.push((format!("  {name}"), i));
                                     let selected = current_program == i as u8;
                                     let is_hi = self.inst_browser_index == flat.len() - 1;
-                                    let r = ui.selectable_label(selected || is_hi, format!("  {name}"));
-                                    if is_hi { r.scroll_to_me(Some(egui::Align::Center)); }
+                                    let r = ui.selectable_label(selected || is_hi,
+                                        format!("  {}", name.chars().take(30).collect::<String>())) // (#38)
+                                        .on_hover_text(name);
+                                    if is_hi && self.inst_browser_scroll {
+                                        r.scroll_to_me(Some(egui::Align::Center));
+                                        self.inst_browser_scroll = false; // (#37) один раз
+                                    }
                                     if r.clicked() && !selected {
                                         self.inst_browser_index = flat.len() - 1;
                                         picked_program = Some(i as u8);
@@ -1410,8 +1423,13 @@ impl App {
                             let selected = i == current_preset_idx;
                             flat.push((format!("  {}", patch.name), i));
                             let is_hi = self.inst_browser_index == flat.len() - 1;
-                            let r = ui.selectable_label(selected || is_hi, format!("  {}", patch.name));
-                            if is_hi { r.scroll_to_me(Some(egui::Align::Center)); }
+                            let r = ui.selectable_label(selected || is_hi,
+                                format!("  {}", patch.name.chars().take(30).collect::<String>())) // (#38)
+                                .on_hover_text(patch.name.clone());
+                            if is_hi && self.inst_browser_scroll {
+                                r.scroll_to_me(Some(egui::Align::Center));
+                                self.inst_browser_scroll = false; // (#37) один раз
+                            }
                             if r.clicked() && !selected {
                                 self.inst_browser_index = flat.len() - 1;
                                 picked_patch = Some(i);
