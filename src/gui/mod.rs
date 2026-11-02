@@ -619,7 +619,10 @@ impl eframe::App for App {
         if has_active_notes || self.drum_playing || looper_active || midi_seq_active {
             ctx.request_repaint_after(Duration::from_millis(33));
         } else {
-            ctx.request_repaint_after(Duration::from_millis(100));
+            // Полная тишина: интерфейс статичен; egui сам репейнтит на мышь/клаву.
+            // 250 мс — компромисс: индикаторы клавиатуры из аудио-атомиков
+            // отображаются с задержкой до 250 мс (принято юзером 2026-11-02).
+            ctx.request_repaint_after(Duration::from_millis(250));
         }
 
         // Audio hotplug (TECHDEBT #18): (1) dead-stream flag from the cpal
