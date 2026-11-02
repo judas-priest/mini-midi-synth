@@ -532,7 +532,7 @@ impl App {
     /// Set key ranges for all parts based on split_point.
     /// Zone A: 0 .. split_point-1
     /// Zone B: split_point .. 127
-    fn apply_split_ranges(&mut self) {
+    pub(super) fn apply_split_ranges(&mut self) {
         let sp = self.split_point;
         for i in ZONE_A {
             if self.parts[i].enabled {
