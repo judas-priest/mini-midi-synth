@@ -1506,32 +1506,28 @@ impl App {
             self.inst_browser_scroll = true; // (#37) сброс фильтра — к началу списка
         }
         let enter_pressed = ctx.input(|i| i.key_pressed(egui::Key::Enter));
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.inst_browser_part = None;
-            return;
-        }
 
         // Немодальное окно: выбор инструмента обратим (клик по другому патчу
         // перекроет), полноэкранная модалка избыточна (audit Medium п.8).
-        // egui хранит позицию окна по Id, Id выводится из заголовка —
-        // константный заголовок = память позиции в сессии (TECHDEBT #34).
+        // Обёртка modal::ModalWindow: Esc-стек, константный Id окна (память
+        // позиции при динамическом заголовке — TECHDEBT #34), футер Done.
         let mut win_open = true;
         let title = if is_sf2 {
             format!("GM Instrument — Part {layer_label}")
         } else {
             format!("Patch — Part {layer_label}")
         };
-        let mut win = egui::Window::new("Instrument Browser")
-            .open(&mut win_open)
-            .resizable(true)
-            .default_width(400.0)
-            .default_height(540.0);
+        let mut builder = modal::ModalWindow::new(
+            ctx, "inst_browser", format!("Instrument Browser — {layer_label}"),
+            &mut win_open, 400.0,
+        )
+        .default_height(540.0);
         // #34: restore the position saved in a previous session (within a
-        // session egui remembers drags itself, keyed by the constant title).
+        // session egui remembers drags itself, keyed by the constant Id).
         if let Some([x, y]) = self.config.ui.inst_browser_pos {
-            win = win.default_pos(egui::pos2(x, y));
+            builder = builder.default_pos(egui::pos2(x, y));
         }
-        let win = win.show(ctx, |ui| {
+        let win = builder.show(|ui| {
             ui.label(egui::RichText::new(title).strong());
             // (#38) фикс-минимальная ширина: длинные строки поиска/результатов
             // не распирают окно
@@ -1696,15 +1692,8 @@ impl App {
                     }
                 });
             // (#44-фидбек) Клик по инструменту = ПРИМЕНИТЬ и играть дальше —
-            // окно остаётся открытым; закрытие — Done (trailing primary, M3),
-            // двойной клик по инструменту (Windows select-and-OK), Esc, ✕.
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let done = ui.add_sized([80.0, 28.0], egui::Button::new("Done"))
-                    .on_hover_text("Close (double-click on an instrument applies & closes)");
-                if done.clicked() || done.double_clicked() {
-                    close = true;
-                }
-            });
+            // окно остаётся открытым; закрытие — Done из shell, двойной клик
+            // по инструменту (Windows select-and-OK), Esc, ✕.
         });
 
         // ── Post-closure handling (after .show, reads locals + modal) ────

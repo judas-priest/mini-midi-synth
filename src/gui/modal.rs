@@ -9,8 +9,6 @@ use super::theme;
 use eframe::egui;
 
 /// Открыт ли какой-либо popup (ComboBox и т.п.) — Esc идёт ему, не окну.
-// TODO(Task 2): remove — temporary until first caller appears.
-#[allow(dead_code)]
 fn any_popup_open(ctx: &egui::Context) -> bool {
     ctx.memory(|m| m.any_popup_open())
 }
@@ -19,8 +17,6 @@ fn any_popup_open(ctx: &egui::Context) -> bool {
 /// `title` — динамический заголовок-отображение. `esc_closes(false)` — окно
 /// само обрабатывает Esc (внутренний режим). `footer_done` — футер с кнопкой
 /// Done 80×28 справа (клик = закрыть). `resizable` — окно ресайзится.
-// TODO(Task 2): remove — temporary until first caller appears.
-#[allow(dead_code)]
 pub struct ModalWindow<'a> {
     ctx: &'a egui::Context,
     id_salt: &'a str,
@@ -28,13 +24,12 @@ pub struct ModalWindow<'a> {
     win_open: &'a mut bool,
     default_width: f32,
     default_height: f32,
+    default_pos: Option<egui::Pos2>,
     esc_closes: bool,
     footer_done: bool,
     resizable: bool,
 }
 
-// TODO(Task 2): remove — temporary until first caller appears.
-#[allow(dead_code)]
 impl<'a> ModalWindow<'a> {
     pub fn new(
         ctx: &'a egui::Context,
@@ -50,24 +45,31 @@ impl<'a> ModalWindow<'a> {
             win_open,
             default_width,
             default_height: 540.0,
+            default_pos: None,
             esc_closes: true,
             footer_done: true,
             resizable: true,
         }
     }
 
+    // Пока не используются (браузер живёт на дефолтах true/true/true);
+    // `expect`, а не `allow`: при первом вызове в Tasks 3-6 ожидание
+    // станет невыполненным и -D warnings заставит тег убрать.
+    #[expect(dead_code)]
     #[must_use]
     pub fn esc_closes(mut self, on: bool) -> Self {
         self.esc_closes = on;
         self
     }
 
+    #[expect(dead_code)]
     #[must_use]
     pub fn footer_done(mut self, on: bool) -> Self {
         self.footer_done = on;
         self
     }
 
+    #[expect(dead_code)]
     #[must_use]
     pub fn resizable(mut self, on: bool) -> Self {
         self.resizable = on;
@@ -80,13 +82,23 @@ impl<'a> ModalWindow<'a> {
         self
     }
 
-    /// Показать окно. Возвращает `Some(Option<R>)`: внешняя Option — окно было
-    /// отрисовано, внутренняя — Some(R) из body (None = body вернул ()).
+    /// Начальная позиция окна (первое открытие — до того, как egui запомнит
+    /// позицию по Id). Сохранённую из config позицию задаёт вызывающий.
+    #[must_use]
+    pub fn default_pos(mut self, pos: egui::Pos2) -> Self {
+        self.default_pos = Some(pos);
+        self
+    }
+
+    /// Показать окно. `Some(resp)` — окно отрисовано в этом кадре
+    /// (`resp.response.rect` доступен для «запомнить позицию»; `resp.inner` —
+    /// результат body, `None` если окно свёрнуто); `None` — окно не показано
+    /// (закрыто Esc/Done/✕ или `*win_open == false` до вызова).
     /// После вызова: `!*win_open` = окно закрылось (Esc/Done/✕).
     pub fn show<R>(
         self,
         body: impl FnOnce(&mut egui::Ui) -> R,
-    ) -> Option<Option<R>> {
+    ) -> Option<egui::InnerResponse<Option<R>>> {
         if self.esc_closes
             && self.ctx.input(|i| i.key_pressed(egui::Key::Escape))
             && !any_popup_open(self.ctx)
@@ -96,12 +108,15 @@ impl<'a> ModalWindow<'a> {
         let footer_done = self.footer_done;
         let resizable = self.resizable;
         let mut done_clicked = false;
-        let win = egui::Window::new(egui::RichText::new(self.title).strong())
+        let mut win = egui::Window::new(egui::RichText::new(self.title).strong())
             .id(egui::Id::new(self.id_salt))
             .open(self.win_open)
             .resizable(resizable)
             .default_width(self.default_width)
             .default_height(self.default_height);
+        if let Some(pos) = self.default_pos {
+            win = win.default_pos(pos);
+        }
         let resp = win.show(self.ctx, |ui| {
             let r = body(ui);
             if footer_done {
@@ -118,6 +133,6 @@ impl<'a> ModalWindow<'a> {
         if done_clicked {
             *self.win_open = false;
         }
-        resp.map(|inner| inner.inner)
+        resp
     }
 }
