@@ -15,6 +15,7 @@ mod theme;
 pub mod keybinds;
 pub mod led_console;
 mod confirm;
+mod modal;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
