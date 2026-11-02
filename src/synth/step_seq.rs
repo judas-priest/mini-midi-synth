@@ -51,7 +51,7 @@ impl StepRate {
     }
 
     /// Steps per beat (quarter note).
-    fn steps_per_beat(self) -> f64 {
+    pub fn steps_per_beat(self) -> f64 {
         match self {
             Self::Quarter => 1.0,
             Self::Eighth => 2.0,
