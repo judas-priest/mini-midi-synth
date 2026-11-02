@@ -841,6 +841,7 @@ pub fn run_gui(
         looper_clear_confirm: None,
         drum_clear_confirm: None,
         fx_reset_confirm: None,
+        pad_remap_reset_confirm: None,
         looper_layer_mute: [false; 256],
         looper_solo_layer: None,
         looper_source_mix: true,

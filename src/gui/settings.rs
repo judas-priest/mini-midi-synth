@@ -24,11 +24,15 @@ impl App {
         const BOT_COLOR: egui::Color32 = theme::PAD_PERF_BOT;
         const EMPTY_COLOR: egui::Color32 = theme::BG_PAD_EMPTY;
 
-        egui::Window::new("Pad Performances")
-            .open(&mut open)
-            .resizable(false)
-            .default_width(700.0)
-            .show(ctx, |ui| {
+        // Обёртка modal::ModalWindow: Esc-стек (с гейтом popup'ов — здесь
+        // есть popup выбора перфа), константный Id окна.
+        // footer_done(false): окно закрывается Esc/✕.
+        super::modal::ModalWindow::new(
+            ctx, "pad_perf", "Pad Performances", &mut open, 700.0,
+        )
+        .footer_done(false)
+        .resizable(false)
+        .show(|ui| {
                 ui.label(egui::RichText::new("Tap pad to switch perf. Click cell to assign. Right-click to clear.")
                     .small().weak());
                 ui.add_space(theme::SP_SM);
@@ -121,7 +125,7 @@ impl App {
                 ui.add_space(theme::SP_XS);
             });
         if self.show_pad_perf && !open {
-            // Window closing — save pad map
+            // Window closing (✕ или Esc — один путь через shell) — save pad map
             self.save_global_to_config();
         }
         self.show_pad_perf = open;
@@ -129,15 +133,16 @@ impl App {
 
     pub(super) fn draw_help(&mut self, ctx: &egui::Context) {
         let mut open = self.show_help;
-        egui::Window::new("MIDI CC Mapping")
-            .open(&mut open)
-            .resizable(false)
-            .collapsible(false)
-            .default_width(420.0)
-            .show(ctx, |ui| {
-                ui.heading("SMK-37 Pro Controller Map");
-                ui.add_space(theme::SP_MD);
-
+        // Обёртка modal::ModalWindow: Esc-стек, константный Id окна.
+        // footer_done(false): окно закрывается Esc/✕. Заголовок окна = название
+        // карты; дубль-heading внутри убран.
+        super::modal::ModalWindow::new(
+            ctx, "cc_map", "SMK-37 Controller Map", &mut open, 420.0,
+        )
+        .footer_done(false)
+        .resizable(false)
+        .show(|ui| {
+            egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
                 // Preset-scoped bindings
                 ui.strong("Preset (reset on patch change, pickup mode)");
                 egui::Grid::new("cc_help_preset")
@@ -184,6 +189,7 @@ impl App {
                 ui.label("Preset knobs use pickup mode: after switching presets,");
                 ui.label("move the knob past the current value to start controlling.");
             });
+        });
         self.show_help = open;
     }
 
@@ -602,11 +608,12 @@ impl App {
 
     pub(super) fn draw_settings(&mut self, ctx: &egui::Context) {
         let mut open = self.show_settings;
-        egui::Window::new("Settings")
-            .open(&mut open)
+        // Обёртка modal::ModalWindow: Esc-стек (с гейтом popup'ов — здесь есть
+        // ComboBox'ы), константный Id окна. footer_done(false): закрывается Esc/✕.
+        super::modal::ModalWindow::new(ctx, "settings", "Settings", &mut open, 500.0)
+            .footer_done(false)
             .resizable(false)
-            .collapsible(false)
-            .show(ctx, |ui| {
+            .show(|ui| {
                 ui.heading("Audio");
 
                 if self.is_jack {
