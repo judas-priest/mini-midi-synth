@@ -915,9 +915,16 @@ impl App {
                     }
                 }
 
-                // Request repaint while playing for playhead animation
+                // Огонёк — пошаговый: repaint на смене шага, не каждый кадр.
+                // Длительность шага = 1/(bpm * steps_per_beat) — StepRate парта
+                // (32-е/триоли иначе пропускали шаги). Неограниченный
+                // request_repaint() гонял GUI на 60+ fps даже в паузе.
+                let steps_per_beat =
+                    crate::synth::step_seq::StepRate::from_index(self.pitch_seq_rate[part])
+                        .steps_per_beat();
+                let step_ms = (60000.0 / (self.drum_bpm.max(1.0) * steps_per_beat)).max(20.0);
                 if enabled {
-                    ui.ctx().request_repaint();
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(step_ms as u64));
                 }
             });
     }

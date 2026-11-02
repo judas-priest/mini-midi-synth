@@ -36,9 +36,6 @@ const LFO_WAVEFORM_NAMES: &[&str] = &["Sine", "Triangle", "Square", "Sample & Ho
 const PORTAMENTO_MODE_NAMES: &[&str] = &["Off", "Always", "Fingered (Legato)"];
 const PLAY_MODE_NAMES: &[&str] = &["Poly", "Mono", "Mono-ST", "Latch", "Poly-High", "Poly-Low", "Piano"];
 
-/// Hotplug poll cadence for the default-output-device name (TECHDEBT #18).
-const AUDIO_POLL_INTERVAL: Duration = Duration::from_millis(1500);
-
 const NOTE_NAMES: &[&str] = &[
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
 ];
@@ -534,6 +531,9 @@ pub struct App {
     pub inst_browser_scroll: bool,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
+    /// Последний виденный write-индекс scope_buf: не изменился = тишина
+    /// (аудио-гейт не пушит) — рисование осциллографа пропускается.
+    pub last_scope_write: usize,
     // Split mode
     pub split_point: u8,   // MIDI note where right zone starts (default 60 = C4)
     // FX Chain panel
@@ -565,11 +565,6 @@ pub struct App {
     pub audio_host_id: cpal::HostId,
     /// Hotplug reconnect retry state machine (TECHDEBT #18).
     pub audio_watch: crate::audio::ReconnectPolicy,
-    /// Next default-device name poll deadline (desktop hotplug poller).
-    pub audio_poll_at: Instant,
-    /// Last known PipeWire default-sink name (`pactl get-default-sink`);
-    /// change = trigger audio reconnect (#18-резидуал: наушники↔HDMI).
-    pub audio_sink_name: Option<String>,
     pub _audio_handle: Option<crate::audio::AudioBackend>,
     pub midi_tx_shared: crate::midi::SharedMidiTx,
     /// Heap objects the engine and the audio callback handed back. Dropping
@@ -619,47 +614,22 @@ impl eframe::App for App {
         if has_active_notes || self.drum_playing || looper_active || midi_seq_active {
             ctx.request_repaint_after(Duration::from_millis(33));
         } else {
-            ctx.request_repaint_after(Duration::from_millis(100));
+            // Полная тишина: интерфейс статичен; egui сам репейнтит на мышь/клаву.
+            // 250 мс — компромисс: индикаторы клавиатуры из аудио-атомиков
+            // отображаются с задержкой до 250 мс (принято юзером 2026-11-02).
+            ctx.request_repaint_after(Duration::from_millis(250));
         }
 
         // Audio hotplug (TECHDEBT #18): (1) dead-stream flag from the cpal
-        // error callback; (2) desktop poller — the system default output
-        // device name changed (a device swap does not error the old stream:
-        // cpal keeps "playing" into the dead device); (3) a failed reconnect
+        // error callback; (2) default-sink watch (`pactl get-default-sink`)
+        // lives in a background thread spawned in run_gui — a device swap
+        // does not error the old stream: cpal keeps "playing" into the dead
+        // device, it just sets audio_disconnected; (3) a failed reconnect
         // retries every RECONNECT_BACKOFF until the device returns. The first
         // failure of a streak toasts; retries are silent. reconnect_audio is
         // a GUI-thread operation (rebuilds the stream); the audio callback
         // only ever sees the finished new stream.
         let now = Instant::now();
-        #[cfg(all(not(target_os = "android"), target_os = "linux"))]
-        if now >= self.audio_poll_at {
-            self.audio_poll_at = now + AUDIO_POLL_INTERVAL;
-            // Детект смены default-sink (наушники↔HDMI) через `pactl`:
-            // cpal имён не даёт (JACK-стрим = "cpal_client_out", ALSA =
-            // "default" — константы), а PipeWire при смене sink перестраивает
-            // граф ЗА пределами клиента — ни одной ошибки в error-callback
-            // (аудит 2026-11-01: старый poller был мёртв структурно).
-            // fork+exec ~1-2 мс в GUI-потоке, RT-зону не трогает.
-            if let Ok(out) = std::process::Command::new("pactl")
-                .args(["get-default-sink"])
-                .output()
-            {
-                if out.status.success() {
-                    let current = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    match &self.audio_sink_name {
-                        None => self.audio_sink_name = Some(current), // базлайн
-                        Some(stored) if *stored != current => {
-                            log::info!("[audio] default sink changed: {stored:?} -> {current:?}");
-                            self.audio_sink_name = Some(current);
-                            // Смена sink — триггер на перестройку стрима: после
-                            // reconnect клиент перелинкуется на новый sink.
-                            self.audio_disconnected.store(true, Ordering::Relaxed);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
         if self.audio_disconnected.swap(false, Ordering::Relaxed) || self.audio_watch.retry_due(now) {
             match self.reconnect_audio() {
                 Ok(()) => {
@@ -1242,7 +1212,6 @@ impl eframe::App for App {
                 ui.separator();
 
                 // Oscilloscope
-                let scope_data = self.scope_buf.read();
                 let scope_w = 150.0_f32;
                 let scope_h = 40.0_f32;
                 let (resp, painter) = ui.allocate_painter(
@@ -1252,22 +1221,29 @@ impl eframe::App for App {
                 let r = resp.rect;
                 painter.rect_filled(r, 2.0, theme::BG_WIDGET);
                 let mid_y = r.center().y;
-                // Draw waveform
-                let n = scope_data.len();
-                let step = n as f32 / scope_w;
-                let points: Vec<egui::Pos2> = (0..scope_w as usize).map(|px| {
-                    let idx = (px as f32 * step) as usize;
-                    let s = scope_data[idx.min(n - 1)].clamp(-1.0, 1.0);
-                    egui::pos2(r.left() + px as f32, mid_y - s * scope_h * 0.45)
-                }).collect();
-                if points.len() >= 2 {
-                    painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, theme::SCOPE_WAVE)));
-                }
                 // Center line
                 painter.line_segment(
                     [egui::pos2(r.left(), mid_y), egui::pos2(r.right(), mid_y)],
                     egui::Stroke::new(0.5, theme::STROKE_SUBTLE),
                 );
+                // Freeze при тишине: write-индекс не изменился = аудио-гейт
+                // не пушит — пропускаем чтение 256 атомиков и построение Vec.
+                let wp = self.scope_buf.write_pos.load(Ordering::Relaxed);
+                if wp != self.last_scope_write {
+                    self.last_scope_write = wp;
+                    let scope_data = self.scope_buf.read();
+                    // Draw waveform
+                    let n = scope_data.len();
+                    let step = n as f32 / scope_w;
+                    let points: Vec<egui::Pos2> = (0..scope_w as usize).map(|px| {
+                        let idx = (px as f32 * step) as usize;
+                        let s = scope_data[idx.min(n - 1)].clamp(-1.0, 1.0);
+                        egui::pos2(r.left() + px as f32, mid_y - s * scope_h * 0.45)
+                    }).collect();
+                    if points.len() >= 2 {
+                        painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, theme::SCOPE_WAVE)));
+                    }
+                }
             });
             ui.add_space(theme::SP_SM);
         });

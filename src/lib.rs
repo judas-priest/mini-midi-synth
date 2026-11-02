@@ -704,6 +704,38 @@ pub fn run_gui(
 
     let c = init_common()?;
 
+    // #18-резидуал: watch default-sink в фоновом потоке (fork в GUI-потоке
+    // дорог на большом RSS; pactl сам по себе 10-50 мс). Смена sink =
+    // audio_disconnected → штатный reconnect-цикл.
+    #[cfg(all(not(target_os = "android"), target_os = "linux"))]
+    {
+        let disconnected = c.audio_disconnected.clone();
+        std::thread::Builder::new()
+            .name("audio-sink-watch".into())
+            .spawn(move || {
+                let mut last: Option<String> = None;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    let out = std::process::Command::new("pactl")
+                        .args(["get-default-sink"])
+                        .output();
+                    if let Ok(out) = out {
+                        if out.status.success() {
+                            let cur = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                            if let Some(prev) = &last {
+                                if *prev != cur {
+                                    log::info!("[audio] default sink changed: {prev:?} -> {cur:?}");
+                                    disconnected.store(true, Ordering::Relaxed);
+                                }
+                            }
+                            last = Some(cur);
+                        }
+                    }
+                }
+            })
+            .expect("spawn audio-sink-watch");
+    }
+
     let midi_handle: Arc<Mutex<Option<MidiInputConnection<()>>>> =
         Arc::new(Mutex::new(c.midi_conn));
 
@@ -902,6 +934,7 @@ pub fn run_gui(
         inst_browser_last_search: String::new(),
         inst_browser_scroll: false,
         scope_buf: c.scope_buf,
+        last_scope_write: 0,
         split_point: c.config.ui.split_point.unwrap_or(60),
         show_fx_chain: false,
         show_midi_seq: false,
@@ -920,8 +953,6 @@ pub fn run_gui(
         audio_device_name: c._audio_handle.device_name.clone(),
         audio_host_id: c._audio_handle.host_id,
         audio_watch: crate::audio::ReconnectPolicy::default(),
-        audio_poll_at: std::time::Instant::now(),
-        audio_sink_name: None, // базлайн возьмёт первый poll
         _audio_handle: Some(c._audio_handle),
         midi_tx_shared: c.midi_tx_shared.clone(),
         engine_trash_rx: c.engine_trash_rx,
