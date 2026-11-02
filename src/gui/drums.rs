@@ -922,7 +922,7 @@ impl App {
                 let steps_per_beat =
                     crate::synth::step_seq::StepRate::from_index(self.pitch_seq_rate[part])
                         .steps_per_beat();
-                let step_ms = (60000.0 / (self.drum_bpm.max(1.0) * steps_per_beat)).max(20.0);
+                let step_ms = (60000.0 / (self.drum_bpm.max(1.0) as f64 * steps_per_beat)).max(20.0) as f32;
                 if enabled {
                     ui.ctx().request_repaint_after(std::time::Duration::from_millis(step_ms as u64));
                 }
