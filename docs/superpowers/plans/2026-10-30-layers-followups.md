@@ -1,6 +1,6 @@
 # Layers Followups: Perf Row Above Parts + Remove Duplicate Mode Toggle
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Убрать два UX-дефекта после Layers-redesign: панель Perf Save/Load переносится НАД строками партов; дубль-переключатель «Mode: Synth | SF2» в правой панели удаляется (движок теперь выбирается кнопкой DSP/SF2 в строке парта).
 
@@ -36,7 +36,7 @@ Requirement (юзер, 2026-10-30): «Perf section should be ABOVE part rows»; 
 **Files:**
 - Modify: `src/gui/layers.rs` (draw_part_rows:28-279)
 
-- [ ] **Step 1: Вырезать блок в метод.** Текущий блок — строки 180-278 layers.rs: строка 180 — комментарий `// ── Performance save/load ──`, 181 — `ui.add_space(theme::SP_XS);`, 182 — `ui.horizontal(|ui| {`, 278 — закрывающая `});`; дальше сразу закрывающая скобка `draw_part_rows` (279). Вырезать 180-278 целиком и оформить как новый метод:
+- [x] **Step 1: Вырезать блок в метод.** Текущий блок — строки 180-278 layers.rs: строка 180 — комментарий `// ── Performance save/load ──`, 181 — `ui.add_space(theme::SP_XS);`, 182 — `ui.horizontal(|ui| {`, 278 — закрывающая `});`; дальше сразу закрывающая скобка `draw_part_rows` (279). Вырезать 180-278 целиком и оформить как новый метод:
 
 ```rust
     /// Performance save/load row (shown above part rows).
@@ -50,22 +50,22 @@ Requirement (юзер, 2026-10-30): «Perf section should be ABOVE part rows»; 
 
 Внимание: НЕ вставлять старую строку 182 (`ui.horizontal(|ui| {`) внутрь — иначе двойная вложенность. Ничего не переименовывать: `self.perf_name`, `self.perf_list`, `self.load_performance_by_name`, `preset::save_performance` и т.д.
 
-- [ ] **Step 2: Вызвать после split-строки.** В `draw_part_rows` сразу после закрытия первой `ui.horizontal(...)` (split + view tabs, сейчас строка 97) вставить:
+- [x] **Step 2: Вызвать после split-строки.** В `draw_part_rows` сразу после закрытия первой `ui.horizontal(...)` (split + view tabs, сейчас строка 97) вставить:
 
 ```rust
         // ── Performance save/load (above part rows) ──────────────────────
         self.draw_perf_row(ui);
 ```
 
-- [ ] **Step 3: Проверить, что дубликата внизу нет.** Grep `Performance save/load` в layers.rs — ровно ДВА вхождения: doc-комментарий нового метода + комментарий call-site из Step 2. Третьего вхождения в теле `draw_part_rows` быть не должно.
+- [x] **Step 3: Проверить, что дубликата внизу нет.** Grep `Performance save/load` в layers.rs — ровно ДВА вхождения: doc-комментарий нового метода + комментарий call-site из Step 2. Третьего вхождения в теле `draw_part_rows` быть не должно.
 
-- [ ] **Step 4: Гейты**
+- [x] **Step 4: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/gui/layers.rs
@@ -77,7 +77,7 @@ git commit -m "refactor: perf save/load row above part rows"
 **Files:**
 - Modify: `src/gui/mod.rs` (ветка `else` главного right-panel, строки 1355-1394)
 
-- [ ] **Step 1: Удалить горизонталь с «Mode:».** Вырезать строки 1363-1380 (`// Synth / SF2 toggle` + весь `if self.sf2_keys_soundfont.is_some() { ui.horizontal(...) }`). Оставить `let is_sf2 = self.parts[part].sf2_mode;` (используется дальше) и последующий блок статуса/params editor без изменений:
+- [x] **Step 1: Удалить горизонталь с «Mode:».** Вырезать строки 1363-1380 (`// Synth / SF2 toggle` + весь `if self.sf2_keys_soundfont.is_some() { ui.horizontal(...) }`). Оставить `let is_sf2 = self.parts[part].sf2_mode;` (используется дальше) и последующий блок статуса/params editor без изменений:
 
 ```rust
                 let part = self.active_part;
@@ -86,7 +86,7 @@ git commit -m "refactor: perf save/load row above part rows"
                     // статус-строка + скрытый params editor — как было
 ```
 
-- [ ] **Step 2: Перенести персист движка в part-row toggle.** Удалённый блок был единственным местом записи `config.sf2.layer_a_sf2/layer_b_sf2` — эти поля сидируют `sf2_mode` частей 0/1 при старте (src/lib.rs:713-714, headless 422-423). Без замены движок перестал бы переживать рестарт. В `src/gui/layers.rs`, в обработчике engine toggle (draw_part_row, сейчас строки 308-317), дополнить после `SetPartSf2Mode`:
+- [x] **Step 2: Перенести персист движка в part-row toggle.** Удалённый блок был единственным местом записи `config.sf2.layer_a_sf2/layer_b_sf2` — эти поля сидируют `sf2_mode` частей 0/1 при старте (src/lib.rs:713-714, headless 422-423). Без замены движок перестал бы переживать рестарт. В `src/gui/layers.rs`, в обработчике engine toggle (draw_part_row, сейчас строки 308-317), дополнить после `SetPartSf2Mode`:
 
 ```rust
                 // Persist engine choice for parts 0/1 (seeds sf2_mode on startup)
@@ -101,13 +101,13 @@ git commit -m "refactor: perf save/load row above part rows"
 
 (Маппинг part 0 → layer_a, part 1 → layer_b — исправляет баг старого кода, где любая часть кроме 0 писала в layer_b.) Поля конфига не удалять — обратно-совместимость config.json.
 
-- [ ] **Step 3: Гейты**
+- [x] **Step 3: Гейты**
 
 ```bash
 cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/gui/mod.rs src/gui/layers.rs
@@ -116,9 +116,9 @@ git commit -m "refactor: drop duplicate Mode Synth/SF2 toggle, persist engine in
 
 ### Task 3: Финальная верификация
 
-- [ ] **Step 1:** Полные гейты ещё раз после обоих коммитов.
+- [x] **Step 1:** Полные гейты ещё раз после обоих коммитов.
 
-- [ ] **Step 2: Ручной чеклист (юзер):**
+- [x] **Step 2: Ручной чеклист (юзер):**
 1. Layers: Perf (name/Save/Reset/Load) — первая строка под Split, парты ниже
 2. Save перформанса из нового места работает, Load поднимает сохранённое
 3. Правая панель для SF2-парта: нет строки «Mode: Synth | SF2» (в params editor DSP-парта лейблы «Mode:» у осцилляторов/фильтров остаются — это другое, не трогаем)

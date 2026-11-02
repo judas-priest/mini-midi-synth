@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Layers: две зоны, парты — все поля</title>
+<style>
+  body { background:#1a1a1e; color:#ddd; font:13px/1.3 system-ui,sans-serif; margin:16px; }
+  h2 { color:#9cf; margin:16px 0 8px; }
+  .zone { border:1px solid #444; border-radius:8px; padding:10px 14px; margin:8px 0; }
+  .zone h3 { margin:0 0 8px; color:#aaa; font-size:12px; text-transform:uppercase; letter-spacing:1px; }
+  .zone.left { border-left:3px solid #a65; }
+  .zone.right { border-left:3px solid #5a8; }
+  .row { display:flex; align-items:center; gap:6px; background:#26262c; border:1px solid #333;
+         border-radius:5px; padding:5px 8px; margin:3px 0; flex-wrap:wrap; }
+  .row.sel { border-color:#6af; background:#2a3038; }
+  .part { font-weight:bold; min-width:32px; }
+  .eng { background:#556; color:#cce; border-radius:3px; padding:1px 6px; font-size:11px; cursor:pointer; }
+  .inst { flex:1; min-width:140px; background:#111; color:#eee; border:1px solid #444; border-radius:3px; padding:2px 6px; font-size:12px; }
+  .tag { font-size:10px; padding:1px 5px; border-radius:2px; background:#333; color:#999; }
+  .mini { font-size:11px; padding:1px 6px; border-radius:3px; background:#333; border:1px solid #444; color:#bbb; cursor:pointer; }
+  .mini.on { background:#5a3; color:#031; border-color:#7c5; }
+  .mini.mut { background:#a33; color:#fcc; border-color:#c55; }
+  .mini.root { background:#45a; color:#cce; border-color:#67a; }
+  .slider { width:70px; }
+  .volslider { width:80px; }
+  .lbl { font-size:11px; color:#888; }
+  .range { font-size:11px; color:#888; }
+  .range input { width:36px; background:#111; color:#ccc; border:1px solid #444; border-radius:2px; padding:1px 3px; font-size:11px; }
+  .btn-del { background:none; border:none; color:#a55; cursor:pointer; font-size:14px; padding:0 4px; }
+  .note { color:#888; font-size:12px; margin-top:6px; }
+  .split-row { display:flex; align-items:center; gap:10px; padding:6px 8px; background:#222; border-radius:5px; margin:6px 0; }
+  .split-row input[type=range] { flex:1; }
+</style>
+</head>
+<body>
+
+<h2>Layers — все поля, две зоны</h2>
+
+<div class="split-row">
+  <label><input type="checkbox" checked> Split</label>
+  <span class="lbl">Split point:</span>
+  <input type="range" min="0" max="127" value="60" style="width:120px">
+  <span style="color:#9cf">C4 (60)</span>
+</div>
+
+<div class="zone left">
+  <h3>◀ Левая рука (A) — 0..59</h3>
+
+  <div class="row sel">
+    <span class="part">A1</span>
+    <span class="eng" title="SF2: SC-55">SF2</span>
+    <select class="inst"><option>Warm Upright Piano</option><option>Bright Acoustic Piano</option><option>DX7 Tubular Bell</option></select>
+    <span class="tag">prog 1</span>
+    <span class="mini">Mute</span>
+    <span class="mini root">Root</span>
+    <span class="range">Range: <input value="0" style="width:28px">–<input value="59" style="width:28px"></span>
+    <span class="lbl">Pan:</span><input class="slider" type="range" min="-100" max="100" value="0" style="width:60px">
+    <span class="lbl">Tr:</span><input class="slider" type="range" min="-24" max="24" value="0" style="width:60px">
+    <span class="lbl">Vel:</span><input value="1" style="width:26px">–<input value="127" style="width:26px">
+    <input class="volslider" type="range" min="0" max="100" value="75" style="width:70px">
+    <span class="btn-del" title="Remove">✕</span>
+  </div>
+
+  <div class="row">
+    <span class="part">A2</span>
+    <span class="eng" title="SF2: SC-55">SF2</span>
+    <select class="inst"><option>DX7 Tubular Bell v2 (Resonator)</option><option>FM Bell v3</option></select>
+    <span class="tag">prog 5</span>
+    <span class="mini">Mute</span>
+    <span class="mini root">Root</span>
+    <span class="range">Range: <input value="0" style="width:28px">–<input value="59" style="width:28px"></span>
+    <span class="lbl">Pan:</span><input class="slider" type="range" min="-100" max="100" value="20" style="width:60px">
+    <span class="lbl">Tr:</span><input class="slider" type="range" min="-24" max="24" value="12" style="width:60px">
+    <span class="lbl">Vel:</span><input value="1" style="width:26px">–<input value="127" style="width:26px">
+    <input class="volslider" type="range" min="0" max="100" value="60" style="width:70px">
+    <span class="btn-del" title="Remove">✕</span>
+  </div>
+</div>
+
+<div class="zone right">
+  <h3>▶ Правая рука (B) — 60..127</h3>
+
+  <div class="row">
+    <span class="part">B1</span>
+    <span class="eng" title="SF2: SC-55">SF2</span>
+    <select class="inst"><option>FM Bell v3</option><option>Tubular Bells</option></select>
+    <span class="tag">prog 9</span>
+    <span class="mini">Mute</span>
+    <span class="mini root">Root</span>
+    <span class="range">Range: <input value="60" style="width:28px">–<input value="127" style="width:28px"></span>
+    <span class="lbl">Pan:</span><input class="slider" type="range" min="-100" max="100" value="0" style="width:60px">
+    <span class="lbl">Tr:</span><input class="slider" type="range" min="-24" max="24" value="0" style="width:60px">
+    <span class="lbl">Vel:</span><input value="1" style="width:26px">–<input value="127" style="width:26px">
+    <input class="volslider" type="range" min="0" max="100" value="70" style="width:70px">
+    <span class="btn-del" title="Remove">✕</span>
+  </div>
+
+  <div class="row">
+    <span class="part">B2</span>
+    <span class="eng" title="DSP">DSP</span>
+    <select class="inst"><option>Blade Runner</option><option>Dark Pad</option></select>
+    <span class="tag">DSP</span>
+    <span class="mini">Mute</span>
+    <span class="mini root">Root</span>
+    <span class="range">Range: <input value="60" style="width:28px">–<input value="127" style="width:28px"></span>
+    <span class="lbl">Pan:</span><input class="slider" type="range" min="-100" max="100" value="-20" style="width:60px">
+    <span class="lbl">Tr:</span><input class="slider" type="range" min="-24" max="24" value="0" style="width:60px">
+    <span class="lbl">Vel:</span><input value="1" style="width:26px">–<input value="127" style="width:26px">
+    <input class="volslider" type="range" min="0" max="100" value="55" style="width:70px">
+    <span class="btn-del" title="Remove">✕</span>
+  </div>
+
+  <div class="row" style="border-style:dashed; opacity:0.6;">
+    <span class="btn" style="background:none; border:1px dashed #555; padding:2px 12px;">+ Add part</span>
+  </div>
+</div>
+
+<div class="note">Все поля текущего Layers сохранены: инструмент (DSP/SF2), Mute/Root, диапазон, Pan, Transpose, Velocity, Volume, Remove. Кнопка движка (DSP/SF2) — в начале строки. Разделитель зон — Split сверху.</div>
+
+</body>
+</html>
