@@ -1548,7 +1548,10 @@ impl App {
                     if part == 0 { self.config.sf2.layer_a_sf2 = !cur_sf2; }
                     else if part == 1 { self.config.sf2.layer_b_sf2 = !cur_sf2; }
                     self.persist_parts_state();
-                    self.inst_browser_seeded = false; // курсор пересеется в другую секцию
+                    // Курсор — на первую строку новой текущей секции
+                    self.inst_browser_index = 0;
+                    self.inst_browser_seeded = true;
+                    self.inst_browser_scroll = true;
                 }
                 ui.label(egui::RichText::new(if cur_sf2 {
                     "engine: SF2 (soundfont)"
@@ -1643,7 +1646,10 @@ impl App {
                                     // При открытии курсор садится на текущий
                                     // инструмент парта — seed только из секции
                                     // ТЕКУЩЕГО движка (#сож-class: «предлагает не то»)
-                                    if !self.inst_browser_seeded && is_sf2 && selected {
+                                    // Seed курсора: первая строка секции текущего
+                                    // движка (не selected-строка — она может быть
+                                    // свёрнута/скрыта; фидбек 2026-11-02)
+                                    if !self.inst_browser_seeded && is_sf2 {
                                         self.inst_browser_index = flat.len() - 1;
                                         self.inst_browser_seeded = true;
                                     }
@@ -1725,7 +1731,10 @@ impl App {
                             flat.push((format!("  {}", patch.name), i, false));
                             // Seed курсора на текущий патч — только из секции
                             // ТЕКУЩЕГО движка (первый кадр после открытия)
-                            if !self.inst_browser_seeded && !is_sf2 && selected {
+                            // Seed курсора: первая строка секции текущего
+                            // движка (не selected-строка — она может быть
+                            // свёрнута/скрыта; фидбек 2026-11-02)
+                            if !self.inst_browser_seeded && !is_sf2 {
                                 self.inst_browser_index = flat.len() - 1;
                                 self.inst_browser_seeded = true;
                             }
@@ -2723,11 +2732,6 @@ impl App {
         // Запомнить перф — восстановится при старте (юзер-репорт 2026-10-31)
         self.config.ui.last_performance = Some(perf.name.clone());
         self.save_config();
-        // Диапазоны партов пересчитываются из сплита ПЕРФОМАНСЕСА, а не из
-        // сохранённых key_low/key_high: они записались при разном положении
-        // сплита и разъезжались (#46/#49 — «SF2 не играет, DSP играет» на
-        // одном перфе).
-        self.apply_split_ranges();
         // Анти-stuck: lift the pedal BEFORE applying the new parts, or notes
         // held by the pedal of the previous perf would ring forever under the
         // new one (NOT AllNotesOff — seamless tails keep ringing).
@@ -2778,6 +2782,11 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
             }
         }
+        // Диапазоны партов пересчитываются из сплита ПЕРФОМАНСЕСА (вызов в
+        // КОНЦЕ: все парты уже enabled по перфу; вызов до цикла чинил только
+        // парт 0 — зона B оставалась 0..127 и молчала на низких нотах,
+        // #46/#49)
+        self.apply_split_ranges();
     }
 
     fn save_collapsed_categories(&mut self) {

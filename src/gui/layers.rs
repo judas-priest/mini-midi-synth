@@ -509,19 +509,18 @@ impl App {
     /// Zone B: split_point .. 127
     pub(super) fn apply_split_ranges(&mut self) {
         let sp = self.split_point;
+        // Всем партам (вкл. выключенным): диапазон — свойство зоны; иначе
+        // пере-включенный парт несёт stale-диапазон (0..127 по умолчанию) и
+        // молчит на нотах своей зоны (#46-семейство)
         for i in ZONE_A {
-            if self.parts[i].enabled {
-                self.parts[i].min_note = 0;
-                self.parts[i].max_note = sp.saturating_sub(1);
-                self.send_part_range(i);
-            }
+            self.parts[i].min_note = 0;
+            self.parts[i].max_note = sp.saturating_sub(1);
+            self.send_part_range(i);
         }
         for i in ZONE_B {
-            if self.parts[i].enabled {
-                self.parts[i].min_note = sp;
-                self.parts[i].max_note = 127;
-                self.send_part_range(i);
-            }
+            self.parts[i].min_note = sp;
+            self.parts[i].max_note = 127;
+            self.send_part_range(i);
         }
     }
 
