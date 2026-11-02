@@ -459,6 +459,8 @@ pub struct App {
     pub looper_clear_confirm: Option<std::time::Instant>,
     pub drum_clear_confirm: Option<std::time::Instant>,
     pub fx_reset_confirm: Option<std::time::Instant>,
+    /// Two-stage confirm for Pad Remap «Reset» (remap 1:1 + zero velocities)
+    pub pad_remap_reset_confirm: Option<std::time::Instant>,
     pub looper_layer_mute: [bool; 256],
     pub looper_solo_layer: Option<u8>,
     /// Looper record source: true = Mix (all sounding parts, default),

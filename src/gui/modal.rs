@@ -52,9 +52,9 @@ impl<'a> ModalWindow<'a> {
         }
     }
 
-    // Пока не используются (браузер живёт на дефолтах true/true/true);
-    // `expect`, а не `allow`: при первом вызове в Tasks 3-6 ожидание
-    // станет невыполненным и -D warnings заставит тег убрать.
+    // Ещё не используется (задействуется в Task 5, keybindings);
+    // `expect`, а не `allow`: при первом вызове ожидание станет
+    // невыполненным и -D warnings заставит тег убрать.
     #[expect(dead_code)]
     #[must_use]
     pub fn esc_closes(mut self, on: bool) -> Self {
@@ -62,14 +62,12 @@ impl<'a> ModalWindow<'a> {
         self
     }
 
-    #[expect(dead_code)]
     #[must_use]
     pub fn footer_done(mut self, on: bool) -> Self {
         self.footer_done = on;
         self
     }
 
-    #[expect(dead_code)]
     #[must_use]
     pub fn resizable(mut self, on: bool) -> Self {
         self.resizable = on;

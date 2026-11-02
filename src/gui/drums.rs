@@ -552,11 +552,15 @@ impl App {
                 } else { format!("note {}", v) }
             };
             let mut win_open = true;
-            let win = egui::Window::new("Pad Remap")
-                .open(&mut win_open)
-                .resizable(true)
-                .default_width(920.0)
-                .show(ctx, |ui| {
+            // Обёртка modal::ModalWindow: Esc-стек, константный Id окна.
+            // footer_done(false): отдельные кнопки Close/Done не нужны — окно
+            // закрывается Esc/✕.
+            let _resp = super::modal::ModalWindow::new(
+                ctx, "pad_remap", "Pad Remap", &mut win_open, 920.0,
+            )
+            .footer_done(false)
+            .resizable(true)
+            .show(|ui| {
                 ui.label("Which sound each physical pad plays. Top row = pads 1-8, bottom = 9-16.");
                 ui.add_space(theme::SP_MD);
                 let mut new_remap = self.drum_remap;
@@ -571,12 +575,15 @@ impl App {
                                 ui.label(format!("{}", p + 1));
                                 egui::ComboBox::from_id_salt(p)
                                     .width(120.0)
-                                    .selected_text(sel)
+                                    .selected_text(sel.clone())
                                     .show_ui(ui, |ui| {
                                         for (n, name) in kit_notes.iter() {
                                             ui.selectable_value(slot, *n, *name);
                                         }
-                                    });
+                                    })
+                                    // tooltip: полное имя инструмента (в
+                                    // кнопке комбобокса оно обрезано эллипсисом)
+                                    .response.on_hover_text(sel.clone());
                                 let mut vel = new_vels[(note - 36) as usize];
                                 ui.add_sized([60.0, 0.0], egui::DragValue::new(&mut vel)
                                     .range(0..=127)
@@ -589,7 +596,6 @@ impl App {
                 pad_row(ui, 0..8, "remap_top");
                 pad_row(ui, 8..16, "remap_bot");
                 ui.add_space(theme::SP_MD);
-                let mut reset_clicked = false;
                 ui.horizontal(|ui| {
                     if ui.button("Copy top to bottom").on_hover_text("Copy pads 1-8 mapping to pads 9-16").clicked() {
                         for i in 0..8 { new_remap[(PAD_BOT_NOTES[i] - 36) as usize] = new_remap[(PAD_TOP_NOTES[i] - 36) as usize]; }
@@ -597,23 +603,22 @@ impl App {
                     if ui.button("Copy bottom to top").on_hover_text("Copy pads 9-16 mapping to pads 1-8").clicked() {
                         for i in 0..8 { new_remap[(PAD_TOP_NOTES[i] - 36) as usize] = new_remap[(PAD_BOT_NOTES[i] - 36) as usize]; }
                     }
-                    if ui.button("Reset").clicked() {
-                        reset_clicked = true;
-                    }
-                    if ui.button("Close").clicked() {
-                        self.show_drum_remap = false;
+                    // Двухступенчатый Reset (красный «Sure?» 2 с) — оборачивает
+                    // весь блок: remap 1:1 + нулевые velocities + persist.
+                    if super::confirm::confirm_button(
+                        ui, "Reset", &mut self.pad_remap_reset_confirm, true,
+                        "Reset all 16 mappings to 1:1 and zero velocities",
+                    ) {
+                        for (i, v) in new_remap.iter_mut().enumerate() { *v = 36 + i as u8; }
+                        new_vels = [0u8; 16];
+                        self.drum_remap = new_remap;
+                        self.drum_pad_vel = new_vels;
+                        self.push_drum_remap();
+                        self.push_drum_pad_vel();
+                        self.save_drum_remap();
+                        self.save_drum_pad_vel();
                     }
                 });
-                if reset_clicked {
-                    for (i, v) in new_remap.iter_mut().enumerate() { *v = 36 + i as u8; }
-                    new_vels = [0u8; 16];
-                    self.drum_remap = new_remap;
-                    self.drum_pad_vel = new_vels;
-                    self.push_drum_remap();
-                    self.push_drum_pad_vel();
-                    self.save_drum_remap();
-                    self.save_drum_pad_vel();
-                }
                 if new_remap != self.drum_remap {
                     self.drum_remap = new_remap;
                     self.push_drum_remap();
@@ -625,7 +630,7 @@ impl App {
                     self.save_drum_pad_vel();
                 }
             });
-            if !win_open || win.is_none() {
+            if !win_open {
                 self.show_drum_remap = false;
             }
         }
