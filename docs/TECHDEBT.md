@@ -33,7 +33,7 @@ Layers (план docs/superpowers/plans/2026-10-29-metronome-init-perf.md).
 - `SetPartEnabled{false}` runs its cleanup block twice (drain + legacy graceful note-off) — collapse.
 - `cargo deny`: rtrb 0.3.3 advisory RUSTSEC-2026-0274 — `cargo update -p rtrb` (→ 0.3.5).
 
-## 5. Chord detection for recording — НЕ СДЕЛАНО (аудит 2026-10-31: detect только на дисплее keyboard.rs:51)
+## 5. Chord detection for recording — ЖДЁТ ФУТКОНТРОЛЛЕРА (заказан 2026-11-01, ~2 недели). Сценарий: педаль = hold-модификатор, пока зажата — играешьые аккорды пишутся в лупер (chord::detect уже есть). План: docs/superpowers/plans/2026-11-01-foot-controller.md
 - Problem: sequencer/looper records every played note; user wants to play a chord shape and have a single chord recorded (smart chord capture), not N separate notes.
 - Research when picked up: chord detection algorithms (pitch-class-set → chord name/midi chord), how Smart Chord on M-VAVE / DAW chord tracks capture; likely: detect simultaneously-pressed notes within a window, collapse to one chord event.
 
