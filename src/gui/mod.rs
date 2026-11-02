@@ -36,9 +36,6 @@ const LFO_WAVEFORM_NAMES: &[&str] = &["Sine", "Triangle", "Square", "Sample & Ho
 const PORTAMENTO_MODE_NAMES: &[&str] = &["Off", "Always", "Fingered (Legato)"];
 const PLAY_MODE_NAMES: &[&str] = &["Poly", "Mono", "Mono-ST", "Latch", "Poly-High", "Poly-Low", "Piano"];
 
-/// Hotplug poll cadence for the default-output-device name (TECHDEBT #18).
-const AUDIO_POLL_INTERVAL: Duration = Duration::from_millis(1500);
-
 const NOTE_NAMES: &[&str] = &[
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
 ];
@@ -568,11 +565,6 @@ pub struct App {
     pub audio_host_id: cpal::HostId,
     /// Hotplug reconnect retry state machine (TECHDEBT #18).
     pub audio_watch: crate::audio::ReconnectPolicy,
-    /// Next default-device name poll deadline (desktop hotplug poller).
-    pub audio_poll_at: Instant,
-    /// Last known PipeWire default-sink name (`pactl get-default-sink`);
-    /// change = trigger audio reconnect (#18-резидуал: наушники↔HDMI).
-    pub audio_sink_name: Option<String>,
     pub _audio_handle: Option<crate::audio::AudioBackend>,
     pub midi_tx_shared: crate::midi::SharedMidiTx,
     /// Heap objects the engine and the audio callback handed back. Dropping
@@ -629,43 +621,15 @@ impl eframe::App for App {
         }
 
         // Audio hotplug (TECHDEBT #18): (1) dead-stream flag from the cpal
-        // error callback; (2) desktop poller — the system default output
-        // device name changed (a device swap does not error the old stream:
-        // cpal keeps "playing" into the dead device); (3) a failed reconnect
+        // error callback; (2) default-sink watch (`pactl get-default-sink`)
+        // lives in a background thread spawned in run_gui — a device swap
+        // does not error the old stream: cpal keeps "playing" into the dead
+        // device, it just sets audio_disconnected; (3) a failed reconnect
         // retries every RECONNECT_BACKOFF until the device returns. The first
         // failure of a streak toasts; retries are silent. reconnect_audio is
         // a GUI-thread operation (rebuilds the stream); the audio callback
         // only ever sees the finished new stream.
         let now = Instant::now();
-        #[cfg(all(not(target_os = "android"), target_os = "linux"))]
-        if now >= self.audio_poll_at {
-            self.audio_poll_at = now + AUDIO_POLL_INTERVAL;
-            // Детект смены default-sink (наушники↔HDMI) через `pactl`:
-            // cpal имён не даёт (JACK-стрим = "cpal_client_out", ALSA =
-            // "default" — константы), а PipeWire при смене sink перестраивает
-            // граф ЗА пределами клиента — ни одной ошибки в error-callback
-            // (аудит 2026-11-01: старый poller был мёртв структурно).
-            // fork+exec ~1-2 мс в GUI-потоке, RT-зону не трогает.
-            if let Ok(out) = std::process::Command::new("pactl")
-                .args(["get-default-sink"])
-                .output()
-            {
-                if out.status.success() {
-                    let current = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    match &self.audio_sink_name {
-                        None => self.audio_sink_name = Some(current), // базлайн
-                        Some(stored) if *stored != current => {
-                            log::info!("[audio] default sink changed: {stored:?} -> {current:?}");
-                            self.audio_sink_name = Some(current);
-                            // Смена sink — триггер на перестройку стрима: после
-                            // reconnect клиент перелинкуется на новый sink.
-                            self.audio_disconnected.store(true, Ordering::Relaxed);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
         if self.audio_disconnected.swap(false, Ordering::Relaxed) || self.audio_watch.retry_due(now) {
             match self.reconnect_audio() {
                 Ok(()) => {

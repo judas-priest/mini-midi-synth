@@ -720,7 +720,6 @@ impl App {
                             if let Some(b) = self._audio_handle.as_ref() {
                                 self.audio_host_id = b.host_id;
                             }
-                            self.audio_sink_name = None; // базлайн возьмёт poll
                             self.show_toast("Audio reconnected", ToastKind::Success);
                         }
                         Err(e) => self.show_toast(format!("Reconnect failed: {e}"), ToastKind::Error),
