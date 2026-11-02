@@ -1585,7 +1585,7 @@ impl App {
                             if searching && matches.is_empty() { continue; }
                             let is_collapsed =
                                 !searching && self.collapsed_categories.contains(cat_name);
-                            let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                            let arrow = if is_collapsed { "\u{25B6} " } else { "" }; // ▼ отсутствует в шрифте (тофу) — раскрытая категория без стрелки
                             if !searching {
                                 if ui.selectable_label(false, format!("{arrow} {cat_name}")).clicked() {
                                     toggled_cat = Some(cat_name.to_string());
@@ -1607,9 +1607,9 @@ impl App {
                                     let is_hi = self.inst_browser_index == flat.len() - 1;
                                     // Одна подсветка — курсор клавиатуры (#37-класс);
                                     // активный инструмент помечен точкой, не заливкой
-                                    let r = ui.selectable_label(is_hi,
-                                        format!("{}{}", if selected { "\u{25CF} " } else { "  " },
-                                            name.chars().take(30).collect::<String>()))
+                                    let mut row_text = egui::RichText::new(format!("  {}", name.chars().take(30).collect::<String>()));
+                                    if selected { row_text = row_text.strong(); }
+                                    let r = ui.selectable_label(is_hi, row_text)
                                         .on_hover_text(name);
                                     if is_hi && self.inst_browser_scroll {
                                         r.scroll_to_me(Some(egui::Align::Center));
@@ -1657,7 +1657,7 @@ impl App {
                                 if cat_idx > 0 && categories[cat_idx - 1].1 == i {
                                     let cat = &categories[cat_idx - 1].0;
                                     let is_collapsed = self.collapsed_categories.contains(cat);
-                                    let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                                    let arrow = if is_collapsed { "\u{25B6} " } else { "" }; // ▼ отсутствует в шрифте (тофу) — раскрытая категория без стрелки
                                     if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
                                         toggled_cat = Some(cat.clone());
                                     }
@@ -1675,9 +1675,9 @@ impl App {
                             }
                             let is_hi = self.inst_browser_index == flat.len() - 1;
                             // Одна подсветка — курсор; активный патч — точкой
-                            let r = ui.selectable_label(is_hi,
-                                format!("{}{}", if selected { "\u{25CF} " } else { "  " },
-                                    patch.name.chars().take(30).collect::<String>())) // (#38)
+                            let mut row_text = egui::RichText::new(format!("  {}", patch.name.chars().take(30).collect::<String>()));
+                            if selected { row_text = row_text.strong(); }
+                            let r = ui.selectable_label(is_hi, row_text) // (#38)
                                 .on_hover_text(patch.name.clone());
                             if is_hi && self.inst_browser_scroll {
                                 r.scroll_to_me(Some(egui::Align::Center));
