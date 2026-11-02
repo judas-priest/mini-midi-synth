@@ -253,8 +253,12 @@ impl App {
             .map(|p| p.name.as_str())
             .unwrap_or("(none)");
 
-        let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
-        ui.strong(format!("{preset_name} (Layer {layer_label})"));
+        let layer_label = if part < super::PARTS_PER_ZONE {
+            format!("A{}", part + 1)
+        } else {
+            format!("B{}", part - super::PARTS_PER_ZONE + 1)
+        };
+        ui.strong(format!("{preset_name} ({layer_label})"));
         ui.add_space(theme::SP_MD);
 
         let mut changed = false;

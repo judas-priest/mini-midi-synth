@@ -524,7 +524,7 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part, mode: crate::synth::NOTE_MODE_POLY });
         self.set_active_part(if part >= PARTS_PER_ZONE { PARTS_PER_ZONE } else { 0 });
         // find first enabled in same zone
-        let zone = if part >= 4 { ZONE_B } else { ZONE_A };
+        let zone = if part >= PARTS_PER_ZONE { ZONE_B } else { ZONE_A };
         if let Some(i) = zone.into_iter().find(|&i| self.parts[i].enabled) {
             self.set_active_part(i);
         }
