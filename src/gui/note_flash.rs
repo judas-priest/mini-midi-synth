@@ -27,8 +27,6 @@ impl NoteFlashState {
     }
 
     /// Яркость хвоста 0..1; held (по атомику) всегда 1.0.
-    /// Используется отрисовкой клавиатуры (gui/keyboard.rs).
-    #[allow(dead_code)]
     pub fn brightness(&self, note: usize, atom_held: bool) -> f32 {
         if atom_held { return 1.0; }
         let left = self.until[note.min(127)]
