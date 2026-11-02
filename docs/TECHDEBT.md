@@ -2,12 +2,12 @@
 
 Recorded 2026-10-27. Ordered roughly by user-perceived impact.
 
-## 1. Metronome tied to sequencer BPM
+## 1. Metronome tied to sequencer BPM — ГОТОВО (аудит 2026-10-31: клик из такта секвенсора, drum.rs:1238)
 - Audible click (toggleable) synced to the drum-sequencer BPM; plus a visual click indicator in the GUI (step highlight already exists — add a downbeat accent + GUI flash).
 - Click sound: synthesize a short tick in the drum engine (accent on beat 1) — no sample needed.
 - Should follow the same BPM source as the sequencer + looper sync (`looper_sync_bpm`).
 
-## 2. Sequencer records only one layer, not the whole performance
+## 2. Sequencer records only one layer — ЗАКРЫТО решением юзера 2026-10-31 (аудит): драмы → сетка, остальное → лупер
 - Current: drum step sequencer records hits into the active drum pattern; part/looper recording targets a single layer (`active_part`). Expected: "record" captures the whole performance (all enabled parts), not just one layer.
 - Needs design: multi-layer capture is what the looper already does (audio). Decide: extend looper to capture all enabled layers, or make the sequencer/PitchSeq record across parts.
 
@@ -19,7 +19,7 @@ A1 = Init-пресет, полный диапазон, без SF2, split_point N
 тоже in-memory (load_all_patches). Добавлена кнопка Reset в perf-строке
 Layers (план docs/superpowers/plans/2026-10-29-metronome-init-perf.md).
 
-## 4. Panorama: works for DSP parts, not for SF2 parts
+## 4. Panorama: works for DSP parts, not for SF2 parts — ГОТОВО (аудит: SetPartPan → CC10 через set_channel_pan, применяется per-voice)
 - DSP: per-part pan applied in `tick_block` (constant-power, mod.rs ~2560).
 - SF2: `sampler.tick()` output is summed into the mix BEFORE the per-part pan? — verify actual routing; rustysynth has its own stereo field per preset and our pan likely never reaches SF2 channels.
 - Options: pan SF2 channels via rustysynth CC10 (check if vendor implements CC10 — likely not; vendor patch), or split sampler output per part channel and apply pan in the mix (rustysynth renders all channels mixed — needs per-channel render, expensive) — investigate before deciding.
@@ -33,7 +33,7 @@ Layers (план docs/superpowers/plans/2026-10-29-metronome-init-perf.md).
 - `SetPartEnabled{false}` runs its cleanup block twice (drain + legacy graceful note-off) — collapse.
 - `cargo deny`: rtrb 0.3.3 advisory RUSTSEC-2026-0274 — `cargo update -p rtrb` (→ 0.3.5).
 
-## 5. Chord detection for recording
+## 5. Chord detection for recording — ЖДЁТ ФУТКОНТРОЛЛЕРА (заказан 2026-11-01, ~2 недели). Сценарий: педаль = hold-модификатор, пока зажата — играешьые аккорды пишутся в лупер (chord::detect уже есть). План: docs/superpowers/plans/2026-11-01-foot-controller.md
 - Problem: sequencer/looper records every played note; user wants to play a chord shape and have a single chord recorded (smart chord capture), not N separate notes.
 - Research when picked up: chord detection algorithms (pitch-class-set → chord name/midi chord), how Smart Chord on M-VAVE / DAW chord tracks capture; likely: detect simultaneously-pressed notes within a window, collapse to one chord event.
 
@@ -57,7 +57,7 @@ docs/superpowers/plans/2026-10-29-console-gui-polish.md Tasks 2-3.
   (кнопка SR + слайдер, DragValue «SF2 rel»), персистенция в config.ui.
   План: docs/superpowers/plans/2026-10-29-console-gui-polish.md Tasks 4-5.
 
-## 8. Bank 2 (knobs/pads) config — MidiSuite под Wine не работает
+## 8. Bank 2 (knobs/pads) config — PARTIAL (аудит: закрыто обходным путём — python-конфиг ~/Projects/smk37_config; Wine-путь мёртв)
 - Fader bank 2 передаёт события из коробки; knob bank 2 и pad bank 2 молчат
   (проверено aseqdump: клава не шлёт ничего на этих банках — пустые назначения).
 - Назначения делаются только в MidiSuite (Win/Mac/Android). Под Wine приложение
@@ -66,7 +66,7 @@ docs/superpowers/plans/2026-10-29-console-gui-polish.md Tasks 2-3.
 - После назначения CC на кнобы банка 2 — забиндить через MIDI Learn; пэды банка 2
   (фактически шлют ноты 74/77/81/83/84 на канале 1) — нацелить транспорт секвенсора.
 
-## 8.1 Bank 2 config via SysEx — feasibility audit (repos cloned to ~/Projects/mvave-research)
+## 8.1 Bank 2 config via SysEx — НЕ АКТУАЛЬНО (аудит: конфиг не rides MIDI — vendor GATT; SysEx-writer в Rust не нужен) (repos cloned to ~/Projects/mvave-research)
 - Transport from Linux: POSSIBLE. M-VAVE SysEx header F0 00 32 45..., handshake
   F0 00 32 45 00 00 00 40 7F F7, proven over standard USB-MIDI ports by
   smk37-firmware-custom-mod/tools/smk_ota_win.py (winmm → maps 1:1 to ALSA).
@@ -87,7 +87,7 @@ docs/superpowers/plans/2026-10-29-console-gui-polish.md Tasks 2-3.
 Проверка юзера: F2 работает с тоном (DSP и SF2), pitch bend -> высота,
 mod wheel -> вибрато (на большинстве SF2). Проблемы нет — пункт устарел.
 
-## 10. Хай-хет: закрытый хет должен глушить открытый (choke)
+## 10. Хай-хет choke — ГОТОВО (аудит: DSP choke-группы drum.rs:1181 + SF2 sf2_choke_take, тесты drum_choke)
 - Сценарий: сыграл открытый хет → сыграл закрытый → открытый должен
   заглохнуть (естественное поведение живой ударки). Сейчас — не заглохает.
 - В drum.rs есть CHOKE_GROUPS (crash chokes on retrigger) — проверить группы
@@ -118,7 +118,7 @@ F0 00 32 45 00 00 00 40 7F F7 отвечает статичной identity-ст�
 Master (hw:2,0,1) — обычный MIDI; hw:2,0,2 — мёртв. Конфиг только GATT AE40
 по BLE (smk.py).
 
-## 13. Живой перформанс ударки: банк-2 пэды как пульт секвенсора
+## 13. Банк-2 пэды как пульт секвенсора — PARTIAL (аудит: транспорт ГОТОВО; паттерны без квантования; chain НЕТ; слот-мьюты не на пэдах)
 Заявка пользователя (2026-10-28): «набить большой много-тактовый бит ИЛИ несколько
 паттернов включать по банку 2 пэдов — нажал и включился другой; туда же запись
 с пэдов и клавиш». Отраслевая практика (TR-8S/Elektron/MPC, см. анализ в чате
@@ -171,7 +171,7 @@ Critical 1 (identity-remap 0..15 в gui/mod.rs:1099/1606/1641, drums.rs:221) и
 Critical 2 (set_sample_rate wipe, drum.rs:953) НЕ исправлены в master — чинить
 до/вместе с 13.x, т.к. п.13 активно трогает те же файлы.
 
-## 14. Живой перформанс синт-частей: сцены/мьюты/фейдеры с железа (2026-10-28, согласовано с пользователем)
+## 14. Сцены/мьюты/фейдеры с железа — PARTIAL (аудит: сцены+мьюты ГОТОВО через LED-консоль; solo НЕТ; фейдеры F5-F8 не забиндены)
 Пререквизит общий с п.13: банк-2 пэды конфигурируемы smk.py (карта в
 ~/Projects/smk37_config/PADS_NOTES.md), фейдеры — записи 2647+5*(n-1), CC-байт
 перезаписываем (заводские CC 64-71; 64 конфликтует с sustain — учесть!).
@@ -289,7 +289,7 @@ docs/superpowers/plans/2026-10-29-bank2-led-console.md (executed). Компон�
 банка 2, id=10). Кнопки Octave/Bank MIDI не шлют (локальные). Следствие: 123/124
 надо отмаршрутизировать из «ноты канала 1» в мастер-транспорт (ControlEvent).
 
-## 16. Компаньон LED-консоли: автозапуск из синта (заявка 2026-10-29)
+## 16. Автозапуск LED-консоли — ГОТОВО (аудит: spawn/kill/respawn c backoff, gui/mod.rs:664-713)
 РЕШЕНО (2026-10-29): автоспавн реализован, см. план
 docs/superpowers/plans/2026-10-29-companion-autospawn.md. Галка led_companion on →
 синт сам спавнит компаньона (respawn с backoff 5с), off → убивает только своего
@@ -311,7 +311,7 @@ child'а; дубликаты разруливает probe-guard в pad_console.p
   механизм socket-клиента как триггер респавна.
 - Не в v1: сейчас запуск вручную, это документировано.
 
-## 17. LED-консоль: автовосстановление при потере каналов (BT клавы, BT/USB синта)
+## 17. LED автовосстановление — PARTIAL (аудит: наивный reconnect-цикл работает; DBus-watch/backoff из спеки — нет, помечено «позже»)
 Сценарии разрыва (2026-10-29, заявка пользователя): отвалился BT клавиатуры (GATT
 для компаньона и/или BLE-MIDI для синта); отвалился BT/USB аудио-синта (движок
 пересобирается, ControlEvent-кольца и console_rx пересоздаются). Требуется:
@@ -329,7 +329,7 @@ reconnect-backoff, различать «клава off» vs «bluez stale cache�
 из CommonInit — проверить, что переподключение аудио не рвёт канал); (в) LED
 после восстановления: heartbeat 2s уже перекрашивает всё — сверить.
 
-## 18. Аудио-вывод: автореспавн при hotplug устройств (наушники ↔ колонки)
+## 18. Аудио автореспавн при hotplug — ГОТОВО (аудит: dead-stream detect + default-device poller + ReconnectPolicy backoff, тесты audio_hotplug)
 Сценарий (2026-10-29, заявка пользователя): отключил наушники → включил обратно —
 звука нет, помогает только рестарт приложения.
 
@@ -356,7 +356,7 @@ reconnect_audio не пересоздаёт console_rx/LED-socket. Остало�
 верификация hotplug по чеклисту плана; известное ограничение — ALSA-хост
 (константное имя «default») поллером не отслеживается.
 
-## 19. Аудит производительности: DSP клипует, CPU до ~80% при игре synth-частью
+## 19. DSP клипует / CPU 80% — ЗАКРЫТО решением юзера 2026-11-03 («норм»): после фоновых фиксов (PR #52/#53/#54) и калибровки DSP/SF2 не воспроизводится; flamegraph-аудит не потребовался
 Репорт пользователя (2026-10-29): DSP загрузка ~80% и клиппинг при игре
 synth-частью. УТОЧНЕНИЕ юзера: клиппинг был ЕЩЁ ДО метронома — это НЕ регресс
 батча PR #4/#5, а накопленная нагрузка движка (подозреваемые в порядке
@@ -375,7 +375,7 @@ flamegraph, criterion, RT-safety vs load; типовые причины клип
 аудит (#19: flamegraph/denormals/bisect) остаётся отдельной работой,
 (г) denormals flush-to-zero (MMFTZ) — включён ли.
 
-## 20. Ждёт пользовательской проверки (батч PR #5, 2026-10-29)
+## 20. Батч PR #5 (SR/Mono/Legato/ArpLatch) — всё реализовано и влито; зависло на юзер-проверке репортов с 2026-10-29
 - **SR (pedal-up release)**: F1 Sustain ON → нота → клавишу отпустить → SR вкл +
   слайдер 0.10 → F1 OFF → хвост ~0.1 с. Юзер: «вроде не работает» — проверить и
   разобрать (возможно: F1 фейдер/кнопка не шлёт CC64 на нужный канал, или
@@ -387,7 +387,7 @@ flamegraph, criterion, RT-safety vs load; типовые причины клип
   указать точное место (params части → арп-секция), проверить сценарий
   аккорд→отпустил→играет сам.
 
-## 21. Размерность: лупер и секвенсор не должны быть прибиты к 4/4
+## 21. Не прибиты к 4/4 — PARTIAL (аудит: сигнатуры+bars ГОТОВО; таймлайн лупера рисует бар-линии жёстко 4/4, drums.rs:1166)
 Заявка пользователя (2026-10-29): «лупер и секвенсор не должны быть обделены
 размерностью — например, чтобы 3/4 можно было делать».
 
@@ -413,7 +413,7 @@ flamegraph, criterion, RT-safety vs load; типовые причины клип
 Не сделано: bars-индикация таймлайна (`looper_bars * 4` битовых линий — чисто
 визуальный 4/4) и (опционально) bars-запрос длины при записи в не-4/4.
 
-## 22. Запись с клавиатуры: метроном глохнет, банк ударных не пишется (репорт 2026-10-29)
+## 22. Метроном при записи / банк ударных в сетку — ГОТОВО (аудит: тесты metronome tc6-10, drum_record_remap)
 Репорт пользователя: (a) включил секвенсор с клавы (Seq Rec) — начал писать,
 метроном затихает; (b) переключил банк ударных — звуки играют, но в секвенсор
 в реальном времени НЕ пишутся.
@@ -464,7 +464,7 @@ GUI не узнаёт о ручном банке, зеркало будет вр
   рассинкрон, помечен как известный; (b) стикер на корпус. Документировать.
 - Без компаньона — текущее поведение (статичные цвета по драм-категориям).
 
-## 24. Сустейн-педаль игнорирует root-only режим части (репорт 2026-10-29)
+## 24. Сустейн × root-only — PARTIAL (аудит: DSP ГОТОВО с тестом; SF2 — под педалью re-key держит старый рут до pedal-up)
 Репорт пользователя: при включённом root-only на части сустейн-педаль обходит
 режим — подавленные ноты всё равно звучат (или старый рут висит).
 
@@ -513,7 +513,7 @@ Instruments основное поле должно пере-позиционир
 ("mini_midi_synth" — WM_CLASS/persist eframe). План:
 docs/superpowers/plans/2026-10-29-ui-batch.md Task 3.
 
-## 28. Политика смены патча: seamless вместо kill-on-switch (2026-10-29, одобрено юзером)
+## 28. Seamless смена патча — ГОТОВО (аудит: LoadPatch без AllNotesOff, хвосты доигрывают; PR #6)
 Отменяет требование e91a37b «после смены патча/программы ни одна нота не
 звучит». Новая политика: хвосты доигрывают СТАРЫМ патчем (параметры скопированы
 в голос на note_on), зажатые клавиши сустейнятся без re-attack; pedal-up /
@@ -527,14 +527,13 @@ release-фазные. Известные компромиссы: DSP-хвост 
 docs/superpowers/plans/2026-10-29-seamless-patch-switch.md; аудит семантики —
 в диалоге 2026-10-29.
 
-## 29. Смена перфа на «совсем другой трек» обрывает хвосты — ОБСУДИТЬ ПОЗЖЕ (не делать сейчас)
+## 29. Смена перфа обрывает хвосты — ЗАКРЫТО решением юзера 2026-11-03 («норм»): текущая семантика финальная, crossfade не делаем
 Семантика: если в новом перфе часть на месте зажатой ноты другая (SF2→DSP/Init) —
 честный переход движка, дренаж по дизайну (обрыв). Если части совпадают — seamless.
-Возможное будущее: «переходные хвосты для несовпадающих частей» (crossfade/SSS-lite) —
-сложно, обсуждение с юзером, когда актуально. Записано 2026-10-29 после кейса
+Записано 2026-10-29 после кейса
 Carol→Halloween (SF2-колокольчики на part 5 → в Halloween part 5 = Init).
 
-## 30. Панель лупера — прижать к низу окна (аналог #25)
+## 30. Дог лупера — PARTIAL (аудит: единый dock ГОТОВО; тоггл docked/in-tab НЕТ; полный юнит не собран — Swing/Vol/Remap/Kit I/O на вкладке)
 СТАТУС (2026-10-31): объединённая docked-панель РЕАЛИЗОВАНА (драмы слева +
 лупер справа, ui.columns, ScrollArea::both); мастер-транспорт в панели.
 ОСТАЛОСЬ: тоггл docked/in-tab (config.ui), полный юнит (Swing/Vol/V127/Kit I/O
@@ -559,7 +558,7 @@ grep draw_drum_seq_docked / draw_drum_kit_controls в gui/drums.rs) + гугл
 bottom-panel patterns) → дизайн самодостаточной панели. Связано с toggle
 (docked/in-tab) из дополнения выше: обе раскладки показывают ПОЛНЫЙ набор.
 
-## 31. UX-консолидация (дизайн-концепт, 2026-10-29 — обсудили с юзером, принимается по череди)
+## 31. UX-консолидация — PARTIAL (аудит: Layers-redesign ГОТОВО; единое хранилище/undo живых действий/discoverability — нет)
 Пункт 1 ПРИНЯТ: единое хранилище состояния частей (mute/root/volume/transpose —
 один источник правды), Layers/консоль/перф = окна к нему + быстрые кнопки.
 Чинит класс конфликтов «перф затёр живой мьют». Технически — рефакторинг
@@ -600,7 +599,7 @@ bottom-panel patterns) → дизайн самодостаточной пане�
 Целевая структура: экран «живое» + экран «раскладка» + экран «звук» + LED-консоль
 как зеркало «живого». Объём ≈ большой батч.
 
-## 32. Мастер-транспорт + запись перформанса в секвенсоры (пересмотр 2026-10-29, юзер)
+## 32. Мастер-транспорт — почти ГОТОВО (аудит: Phases 1-4 сделаны; остался Phase 5 — смена паттернов на границе + чейнинг; отложены: вариант Б, MIDI-clock slave, half/×2)
 Юзер (ключевой инсайт): запись в СЕКВЕНСОРЫ почти бесплатна — пустота не пишется,
 всё ходит по сетке, выравнивание бесплатно. Аудио-квантование лупера НЕ НУЖНО.
 База: у нас уже есть драм-паттерны (16 слотов) И питч-секвенсор на каждую часть
@@ -734,7 +733,7 @@ Swing, слайдеры L/T/D/P (DSP-only), vel ranges, pan.
 Без потери функциональности: ничего не удаляется, раскладка по частоте
 использования. Дополнения #30 выше (looper docked, тоггл docked/in-tab, полный
 юнит) — входят в этот дизайн.
-## REFACTOR_AUDIT.md (2026-10-30, параллельная сессия) — полный аудит 36.7k LOC
+## REFACTOR_AUDIT (2026-10-30) — статусы по аудиту 2026-10-31: ГОТОВО QW1/QW2/QW3/QW6/QW8/QW9/QW10(код), S0, S1, S5; НЕ НАЧАТО QW4/QW5/QW7, S2/S3/S4/S6/S7/S8; QW10 хвост — carried-список не вычищен
 6 аудиторов + сверка 2-й итерацией. Quick wins (RT/GUI perf + латентные баги):
 QW1 wavetable alloc на каждый note-on (8KB+13k sin, CONFIRMED), QW2 LFO LUT
 ленивая аллокация на аудиопотоке, QW3 drain-хелпер + root_held ghost-rekey,
@@ -745,3 +744,194 @@ S1-S5), S1 RT-safe set_sample_rate (=старый #12), S2 реестр пара
 (ПЕРЕД #32), S6 dsp_utils dedup, S7 engine handles, S8 pitch-bend routing.
 Файл: REFACTOR_AUDIT.md (корень). Быстрые QW1/QW2 — кандидаты на причину
 клиппинга #19 (аллокации в колбэке = dropouts при игре wavetable-патчей).
+
+## 34. Окно instrument browser: одна позиция + запоминание (2026-10-31, юзер)
+
+Модалка выбора инструмента открывается «каждый раз как бог на душу положит» —
+позиция/размер окна каждый раз новые, непрактично. Хотелка: одно место
+открытия + запоминание позиции/размера (per-window egui state уже сохраняется
+автоматически, если не сбрасывать id; вероятно ломается тем, что окно
+пересоздаётся с другим title per-part — «GM Instrument — Part A1» vs «A2» —
+у каждого свой state). Сделать: стабильный Id окна (не зависящий от парта),
+одна общая позиция; опционально — персист позиции в конфиг. Позже, не в
+раунде 3.
+
+## 35. Клавиатурная навигация в модалках/настройках: стрелки + Enter (2026-10-31, юзер)
+
+В «Patch — Part 1» (и во ВСЕХ модалках и в настройках) выбор должен работать
+со стрелок и Enter: ↑/↓ — перемещение по списку, Enter — выбрать, Esc —
+закрыть. Сейчас только мышь. egui: memory().focus + Event::Key — сфокусировать
+первый selectable после открытия, двигать индекс, Enter → picked. Касается:
+instrument browser (DSP + GM деревья),
+ Pad Remap, combo-popups перфов, TextEdit-форм (Perf name, kit save).
+
+## 36. Отступ над «+ Add part» — ГОТОВО (раунд 5, 4ce2635)
+
+В списке партов кнопке «+ Add part» не хватает воздуха сверху — прижата к
+последней парт-строке зоны. Сделать: `ui.add_space(theme::SP_SM)` перед
+кнопкой (обе зоны, layers.rs draw_part_rows). Мелочь, в ближайший UI-раунд.
+
+## 37. Автоскролл браузера отбивает колесо — ГОТОВО (раунд 6: scroll только при смене индекса)
+
+После клавиатурной навигации (раунд 5): колесо мыши прокручивает список, но
+каждый кадр `scroll_to_me(Center)` на выделенной строке (индекс 0) возвращает
+вьюпорт наверх. Фикс: дергать `scroll_to_me` только при СМЕНЕ индекса
+(стрелки/Enter/фильтр), не каждый кадр — хранить флаг «нужен scroll» рядом с
+`inst_browser_index`, сбрасывать после первого прокрута. Мелочь, в ближайший
+UI-раунд.
+
+## 38. Окно браузера растягивается от поиска — ГОТОВО (раунд 6: min width 380 + truncate 30)
+
+Ввод фразы в поиск растягивает окно по ширине (egui Window автосайзится по
+контенту; TextEdit с desired_width от available_width + длинная строка
+результата «  {name}» распирают min-width). Фикс: зафиксировать ширину окна
+(`.min_width(400.0)` + resizable по вертикали, либо `.fixed_size`/clamp
+ внутренней ширины; длинные имена — truncate() c tooltip, см. #35-хвост).
+Связано с #34/#37 — чинить одним проходом.
+
+## 39. Тултип слайдера при drag — ГОТОВО иначе (раунд 6: индикатор active-knob в топ-баре, #44)
+
+On_hover_text на слайдерах виден только если СНАЧАЛА навести и держать; если
+сразу схватить ручку и тащить — тултипа нет (egui hover-семантика при
+захваченном drag). Хотелка: значение показывается ВЕСЬ drag на всех слайдерах
+(Pan/Tr/Vol парт-строк, L/T/D/P драмов, F1-F4 мастер-бара). Варианты:
+response.dragged() → показывать label рядом с курсором вручную, либо
+egui DragValue-стайл value поверх. В ближайший UI-проход.
+
+## 40. Спавн парта: DSP/SF2 рассинхрон — ГОТОВО (PR #28: reset_and_push_part)
+
+Создал парт с нуля: в строке выбран DSP, но звучит SF2; переключатель срабатывает
+только с нескольких нажатий. Похоже на рассинхрон UI-флага sf2_mode с движком:
+новый парт, вероятно, наследует/сеет sf2_mode из конфига (layer_a/b_sf2) или
+SetPartSf2Mode уходит до инициализации слота, а тумблер рисует локальный флаг.
+Копнуть: add_part_to_zone (layers.rs) — что ставится в sf2_mode при создании;
+нужен ли повторный push SetPartSf2Mode + send_edited_params после создания;
+сходится ли флаг движка с флагом GUI (feedback). БАГ, не косметика.
+
+## 41. Split «потрогать» — ГОТОВО (PR #28: LoadPatch/ProgramChange не перетирают диапазон)
+
+Split-шкала имеет дефолт (60 из конфига), но пока её не подвигаешь — часть
+партов играет не по сплиту. Похоже: apply_split_ranges() вызывается только на
+changed() слайдера; парты, созданные/включённые ПОСЛЕ включения сплита
+(add_part_to_zone вызывает её, но restore из конфига / повторное включение
+зоны B — не факт), остаются со старыми min/max. Копнуть: пути включения парта
+(add_part_to_zone, restore из config.ui.parts_state, toggle Split), везде ли
+send_part_range с актуальным split_point; убрать рассинхрон init-порядка
+(split_point читается из конфига ПОСЛЕ рассылки диапазонов?). БАГ.
+
+## 42. Спавн парта: pan завален — ГОТОВО (PR #28: полный пуш состояния)
+
+После спавна некоторых партов панорама сразу завалена в одну/другую сторону —
+или слайдер по центру, а по звку в стороне, пока не потрогаешь. Тот же класс,
+что #40/#41: init-десинхронизация GUI↔движок при создании парта — панорама не
+пушится (SetPartPan) при спавне, либо дефолт GUI (0.0) расходится с дефолтом
+движка/наследством слота. Объединить с #40/#41: один «парт-спавн фикс» —
+централизованный push всех стартовых параметров (pan/volume/range/sf2_mode)
+при создании парта, вместо россыпи по местам. БАГ.
+
+## 43. Инструмент звучит не тот — ГОТОВО (PR #28: load_edited_params+send при спавне, SF2 program при тоггле)
+
+Выбираешь патч/инструмент (в т.ч. у свежесозданного парта) — играет не тот;
+надо снова открыть браузер и перевыбрать. Тот же класс #40-42: patch_idx /
+sf2_program пишется в GUI-состояние, но push в движок (SetPartSf2Program /
+send_edited_params) не уходит или уходит до готовности слота; при спавне парта
+движок остаётся с программой другого парта. Решение — общий спавн-фикс #42
+(централизованный push стартового состояния парта: program + edited_params +
+range + pan + sf2_mode одним блоком). БАГ.
+
+## 44. Телеметрия → настройки + индикатор шкалы — ГОТОВО (раунд 6: show_telemetry + active-knob)
+
+Топ-бар замусорен «drops 0 | errs 0 JACK | 48000Hz | buf 48 | dsp 3% (peak 9%)».
+Сделать: по умолчанию скрыто; чекбокс в Settings («показывать телеметрию»);
+полная картина (дропы, ошибки, avg/peak, SR, фактический буфер) — в Settings-
+панели/модалке диагностики. Освободившийся правый угол топ-бара — дублировать
+СОСТОЯНИЕ РЕДАКТИРУЕМОЙ ШКАЛЫ: имя контрола + значение, которое крутится
+прямо сейчас (связать с #39 — тултипы при drag; это постоянный индикатор
+вместо/вместе с тултипом). UI-фича.
+
+## 45. Колесо меняет слайдеры — ГОТОВО (раунд 6, 11 сайтов; ComboBox-колесо отложено)
+
+Хотелка: hover над слайдером + колесо = изменить значение (с шагом шкалы;
+egui Slider не支持 колесо из коробки, DragValue —支持), hover над ComboBox —
+колесо листает выбранный элемент без открытия попапа. Реализация:
+response.scroll() / input raw_scroll_delta на hovered виджете, шаг = один
+квант шкалы ( для Pan/Tr/L/T/D/P — минимальный шаг; ComboBox — соседний
+элемент). Аккуратно с конфликтом: ScrollArea тоже ест колесо — виджет должен
+забирать колесо ТОЛЬКО когда hovered (иначе список под слайдером перестанет
+скроллиться — тестировать в кастомных гридах). UI-фича, в ближайший проход
+вместе с #39/#44.
+
+## 18а. Уточнение к #18 (аудит 2026-11-01): cpal-name poll на Linux мёртв by design
+
+Часть #18 «poller имени default-устройства» на Linux не работает структурно:
+JACK-стрим называется всегда «cpal_client_out», ALSA default — всегда «default»
+(константы vendored cpal), плюс guard по host выключал его на JACK-бэкенде.
+Смена default-sink в PipeWire вообще не доходит до клиента как ошибка — граф
+перестраивается вне клиента. Сделано (PR #34): poll `pactl get-default-sink`
+раз в 1.5 с (Linux desktop) → реконнект; кнопка «Reconnect Audio» в Settings.
+Осталось: pipe-wire нативная подписка (pw-rs) вместо pactl-poll; WASAPI-ветка
+поллера не тронута.
+
+## 46. Split point слетает — ГОТОВО (PR #41: единый apply_performance; корень — панельный Load не восстанавливал split)
+
+Значение сплита уезжает — то ли во время игры, то ли в настройках, то ли после
+save, то ли после load; юзер не локализовал. ВАЖНО: это НЕ #41 (тот фикс —
+диапазоны партов min/max, LoadPatch/ProgramChange больше не перетирают их);
+здесь уезжает сам `config.ui.split_point`/GUI-слайдер. Копнуть: (a) кто пишет
+config.ui.split_point (save_global_to_config mod.rs ~1505) и когда вызывается —
+не сохраняется ли промежуточное/дефолтное значение при autosave-дебаунсе;
+(b) restore-порядок на старте (split_point читается до/после отправки
+диапазонов); (c) перфы — PartConfig/perf не содержат split_point, но perf-load
+меняет состав партов (не он ли дергает apply_split_ranges с чужим split_point);
+(d) инструмент в браузере: рассинхрон из #43 не мог ли задеть. Логировать
+изменения split_point с бэктрейсом-маркером (log::info в сеттере слайдера и в
+save) — локализовать. БАГ.
+
+## 47. Per-part octave offset по пэду/хоткею — ОСОЗНАННО НЕ ДЕЛАЕМ СЕЙЧАС (2026-11-01, юзер)
+
+Боль: «ради одной басовой ноты не хватает октавы»; Octave-кнопка SMK-37 —
+локальный транспон (MIDI не шлёт) и ГЛОБАЛЬНАЯ (двигает обе руки). Решение:
+per-part octave offset (±12) на басовый парт, переключаемый пэдом/хоткеем
+(Z/X), параметр парта. Исследование 2026-11-01: индустрия — transpose парта
+(stage-синты), не key-range сдвиг и не второй слой. Записано, ждёт очереди
+(приоритет средний).
+
+## 48. GUI-кнопка октавы клавиатуры (smk.py wr 1 XX) — НЕ ДЕЛАЕМ (2026-11-01, юзер)
+
+Открыто (~/Projects/smk37_config/OCTAVE.md): октава SMK-37 = USR @1, пишется
+дистанционно через BlueZ GATT (smk.py wr 1 XX), но синт говорит USB-MIDI и
+GATT-канала не имеет — из синта недостижимо без BT-стека/спавна python-скрипта.
+Пользователь подтвердил работу +2 октавы дистанционно. Записано как «не делать»;
+если когда-нибудь понадобится — ControlEvent → spawn `smk.py wr 1 XX` (GUI-поток).
+
+## 49. Перфы теряются — ОСНОВНОЕ ГОТОВО (PR #41: apply_performance); хвосты: macro_vals не в перфах, patch_name-промах → патч 0, SF2 bank=0
+
+Аудит нашёл 4 механизма потерь (по вероятности):
+1. ДВА расходящихся load-пути: панельный Load (layers.rs:245-294) НЕ фиксирует
+   config.ui.last_performance и НЕ восстанавливает split_point;
+   load_performance_by_name (gui/mod.rs:2411-2494) НЕ применяет note_mode
+   (Sus/Bass/Root перфа молча теряется). Рестарт/audio-reconnect затем
+   автозагружает last_performance (mod.rs:1694) — откат к ДРУГОМУ перфу,
+   живые правки громкостей/панов стираются. Панельный Load → рестарт =
+   откат к старому перфу: главная цепочка «херится».
+2. patch_name не найден → unwrap_or(0): парт 0 играет чужой патч с чужими
+   edited_params (mod.rs:2450-2452, layers.rs:258).
+3. macro_vals не в PartConfig: load не шлёт SetMacro, движок держит макросы
+   прежнего перфа; после audio-reconnect уезжают дефолты GUI.
+4. sf2_program bank захардкожен 0 (bank>0 теряется); perf-restore key_low/high
+   (layers.rs:243-285) не согласован с apply_split_ranges.
+Фиксы: унифицировать load-пути (одна функция apply_performance),
+last_performance/split_point/note_mode/macro_vals — в оба пути; кнопку/лог
+при patch_name-промахе. ПЛАН ОТДЕЛЬНЫЙ (не начал).
+
+Хвост (revue 2026-11-01): undo патча не откатывает config.ui.last_preset — рестарт вернёт pre-undo патч (план-левел gap).
+
+## 19а. Фоновый CPU GUI — фиксы 2026-11-02 (PR #52/#53/#54)
+
+Pitch-seq repaint ограничен длительностью шага (StepRate-aware), idle 100→250 мс,
+осциллограф замерзает в тишине (гистерезис + skip redraw), убран покадровый клон
+имён патчей, pactl-watch → фоновый поток. Эффект (оценка аудита): Orange Pi
+idle 8-15% → 1-2% ядра. Хвосты: drum grid 256 клеток → один painter-пасс
+(большой выигрыш, требует переписывания ввода); hover format!-аллокации —
+замерить по остатку; Wrap-at-256 скоуп-каверка (write_pos & 255) — если
+заметен миганием линии, заменить write_pos на монотонный счётчик пушей.
