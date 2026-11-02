@@ -1468,7 +1468,12 @@ impl App {
     fn draw_instrument_browser_modal(&mut self, ctx: &egui::Context) {
         let Some(part) = self.inst_browser_part else { return };
         let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
-        let layer_label = LAYER_NAMES.get(part).unwrap_or(&"?");
+        // Зона/номер вместо LAYER_NAMES (8 имён): парты зоны B (8-15) давали «?»
+        let layer_label = if part < PARTS_PER_ZONE {
+            format!("A{}", part + 1)
+        } else {
+            format!("B{}", part - PARTS_PER_ZONE + 1)
+        };
 
         let mut close = false;
         let mut picked_patch: Option<usize> = None;
@@ -1593,8 +1598,11 @@ impl App {
                                     flat.push((format!("  {name}"), i));
                                     let selected = current_program == i as u8;
                                     let is_hi = self.inst_browser_index == flat.len() - 1;
-                                    let r = ui.selectable_label(selected || is_hi,
-                                        format!("  {}", name.chars().take(30).collect::<String>())) // (#38)
+                                    // Одна подсветка — курсор клавиатуры (#37-класс);
+                                    // активный инструмент помечен точкой, не заливкой
+                                    let r = ui.selectable_label(is_hi,
+                                        format!("{}{}", if selected { "\u{25CF} " } else { "  " },
+                                            name.chars().take(30).collect::<String>()))
                                         .on_hover_text(name);
                                     if is_hi && self.inst_browser_scroll {
                                         r.scroll_to_me(Some(egui::Align::Center));
@@ -1654,8 +1662,10 @@ impl App {
                             let selected = i == current_preset_idx;
                             flat.push((format!("  {}", patch.name), i));
                             let is_hi = self.inst_browser_index == flat.len() - 1;
-                            let r = ui.selectable_label(selected || is_hi,
-                                format!("  {}", patch.name.chars().take(30).collect::<String>())) // (#38)
+                            // Одна подсветка — курсор; активный патч — точкой
+                            let r = ui.selectable_label(is_hi,
+                                format!("{}{}", if selected { "\u{25CF} " } else { "  " },
+                                    patch.name.chars().take(30).collect::<String>())) // (#38)
                                 .on_hover_text(patch.name.clone());
                             if is_hi && self.inst_browser_scroll {
                                 r.scroll_to_me(Some(egui::Align::Center));
