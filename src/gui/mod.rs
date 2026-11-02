@@ -1624,6 +1624,21 @@ impl App {
                             ("Synth FX", 96, 104), ("Ethnic", 104, 112),
                             ("Percussive", 112, 120), ("Sound FX", 120, 128),
                         ];
+                        // Seed-курсор садится на текущий инструмент: если его
+                        // категория свёрнута — строка skipped и fallback
+                        // уводит курсор наверх. Раскрываем категорию.
+                        if !self.inst_browser_seeded && engine_now {
+                            for &(cat_name, start, end) in gm_categories.iter() {
+                                if (current_program as usize) >= start
+                                    && (current_program as usize) < end
+                                {
+                                    if self.collapsed_categories.remove(cat_name) {
+                                        self.save_collapsed_categories();
+                                    }
+                                    break;
+                                }
+                            }
+                        }
                         for &(cat_name, start, end) in gm_categories {
                             let matches: Vec<usize> = if searching {
                                 (start..end)
@@ -1705,6 +1720,15 @@ impl App {
                         };
                         ui.strong(dsp_hdr);
                         let current_preset_idx = self.parts[part].patch_idx;
+                        // Seed на текущий патч: раскрываем его свёрнутую
+                        // категорию (иначе строка skipped, курсор — наверху)
+                        if !self.inst_browser_seeded && !engine_now {
+                            if let Some(p) = self.patches.get(current_preset_idx) {
+                                if self.collapsed_categories.remove(&p.category) {
+                                    self.save_collapsed_categories();
+                                }
+                            }
+                        }
                         let categories: Vec<(String, usize)> = {
                             let mut cats = Vec::new();
                             let mut last = String::new();
