@@ -1208,28 +1208,32 @@ impl eframe::App for App {
         // main field reflow instead of being overlapped. Колонки — ui.columns:
         // allocate_ui в horizontal сворачивает высоту и разваливает раскладку,
         // а ScrollArea без явных id_salt даёт коллизии ID.
-        egui::TopBottomPanel::bottom("drum_seq_panel")
-            .resizable(true)
-            .default_height(420.0)
-            .height_range(240.0..=760.0)
-            .show(ctx, |ui| {
-                ui.columns(2, |cols| {
-                    // ScrollArea::both: вертикальный скролл НЕ режет контент по
-                    // горизонтали — сетка драмов вылезала под колонку лупера.
-                    // now: контент клипается по ширине колонки, избыток —
-                    // горизонтальный скролл, а не наложение.
-                    egui::ScrollArea::both().auto_shrink(false)
-                        .id_salt("dock_drums_scroll")
-                        .show(&mut cols[0], |ui| {
-                            self.draw_drum_seq_docked(ui);
-                        });
-                    egui::ScrollArea::both().auto_shrink(false)
-                        .id_salt("dock_looper_scroll")
-                        .show(&mut cols[1], |ui| {
-                            self.draw_looper(ui);
-                        });
+        // #30: флаг dock_bottom_unit исключает одновременный рендер дока и
+        // вкладки; при off юнит целиком живёт на вкладке Drums (ниже).
+        if self.config.ui.dock_bottom_unit {
+            egui::TopBottomPanel::bottom("drum_seq_panel")
+                .resizable(true)
+                .default_height(420.0)
+                .height_range(240.0..=760.0)
+                .show(ctx, |ui| {
+                    ui.columns(2, |cols| {
+                        // ScrollArea::both: вертикальный скролл НЕ режет контент по
+                        // горизонтали — сетка драмов вылезала под колонку лупера.
+                        // now: контент клипается по ширине колонки, избыток —
+                        // горизонтальный скролл, а не наложение.
+                        egui::ScrollArea::both().auto_shrink(false)
+                            .id_salt("dock_drums_scroll")
+                            .show(&mut cols[0], |ui| {
+                                self.draw_drum_seq_docked(ui);
+                            });
+                        egui::ScrollArea::both().auto_shrink(false)
+                            .id_salt("dock_looper_scroll")
+                            .show(&mut cols[1], |ui| {
+                                self.draw_looper(ui);
+                            });
+                    });
                 });
-            });
+        }
 
         // Settings window
         if self.show_settings {
@@ -1295,9 +1299,29 @@ impl eframe::App for App {
                     self.draw_midi_seq(ui);
                 });
             } else if self.show_drums {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                    self.draw_drum_kit_controls(ui);
-                });
+                if self.config.ui.dock_bottom_unit {
+                    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                        self.draw_drum_kit_controls(ui);
+                    });
+                } else {
+                    // #30, dock off: юнит ЦЕЛИКОМ на вкладке Drums — те же
+                    // колонки, что в доке (drums-юнит слева, лупер справа),
+                    // но в central. Рисуем через тот же код.
+                    ui.columns(2, |cols| {
+                        egui::ScrollArea::both().auto_shrink(false)
+                            .id_salt("tab_drums_scroll")
+                            .show(&mut cols[0], |ui| {
+                                self.draw_drum_seq_docked(ui);
+                                ui.add_space(theme::SP_MD);
+                                self.draw_drum_kit_controls(ui);
+                            });
+                        egui::ScrollArea::both().auto_shrink(false)
+                            .id_salt("tab_looper_scroll")
+                            .show(&mut cols[1], |ui| {
+                                self.draw_looper(ui);
+                            });
+                    });
+                }
             } else {
                 // Лупер переехал в единую docked-панель (#30); здесь остаётся
                 // питч-секвенсор и параметры активной части. ScrollArea как в

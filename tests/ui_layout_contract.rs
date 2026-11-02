@@ -41,8 +41,8 @@ fn frame() -> (egui::Rect, egui::Rect, egui::Rect) {
             });
         let seq = egui::TopBottomPanel::bottom("drum_seq_panel")
             .resizable(true)
-            .default_height(460.0)
-            .height_range(120.0..=640.0)
+            .default_height(420.0)
+            .height_range(240.0..=760.0)
             .show(ctx, |ui| {
                 // auto_shrink(false) fills the panel — same as mod.rs
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
@@ -70,7 +70,7 @@ fn panels_carve_no_overlap_seq_above_keyboard() {
     // sequencer stacked directly on top of the keyboard
     assert!((seq.max.y - kb.min.y).abs() < 0.5, "seq must sit directly above keyboard: seq={seq:?} kb={kb:?}");
     // default height honored
-    assert!((seq.height() - 460.0).abs() < 0.5, "seq height: {seq:?}");
+    assert!((seq.height() - 420.0).abs() < 0.5, "seq height: {seq:?}");
     // central field ends where the sequencer begins
     assert!(
         (central.max.y - seq.min.y).abs() < 0.5,

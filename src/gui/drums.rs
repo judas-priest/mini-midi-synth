@@ -84,6 +84,22 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
                 self.save_global_to_config();
             }
+
+            // #30:Dock/Tab toggle for the whole sequencer unit. Shown in the
+            // transport row so it is reachable in BOTH placements (the row is
+            // drawn docked and on the Drums tab alike).
+            let docked = self.config.ui.dock_bottom_unit;
+            if ui.small_button(if docked { "Dock" } else { "Tab" })
+                .on_hover_text(if docked {
+                    "Unit is docked to the window bottom — click to move it to the Drums tab"
+                } else {
+                    "Unit lives on the Drums tab — click to dock it to the window bottom"
+                })
+                .clicked()
+            {
+                self.config.ui.dock_bottom_unit = !docked;
+                self.save_global_to_config();
+            }
         });
         ui.add_space(theme::SP_MD); // ритм секций: транспорт | паттерн | грид
 
