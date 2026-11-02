@@ -123,7 +123,6 @@ const FILTER_NAMES: &[&str] = &[
 const FILTER_ROUTING_NAMES: &[&str] = &["Single", "Serial", "Parallel"];
 const FORMANT_VOICE_NAMES: &[&str] = &["Bass", "Tenor", "Alto", "Soprano"];
 const FORMANT_VOWEL_NAMES: &[&str] = &["A (ah)", "E (eh)", "I (ee)", "O (oh)", "U (oo)"];
-const LAYER_NAMES: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8"];
 
 /// Toast message severity
 #[derive(Clone)]
