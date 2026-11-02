@@ -1660,6 +1660,10 @@ impl App {
                                     if !self.inst_browser_seeded && engine_now && selected {
                                         self.inst_browser_index = flat.len() - 1;
                                         self.inst_browser_seeded = true;
+                                        // Флаг мог быть съеден ранней строкой
+                                        // со «старым» индексом — перевзводим,
+                                        // чтобы ТЕКУЩИЙ курсор прокрутился
+                                        self.inst_browser_scroll = true;
                                     }
                                     let is_hi = self.inst_browser_index == flat.len() - 1;
                                     // Одна подсветка — курсор клавиатуры (#37-класс);
@@ -1747,6 +1751,8 @@ impl App {
                             if !self.inst_browser_seeded && !engine_now && selected {
                                 self.inst_browser_index = flat.len() - 1;
                                 self.inst_browser_seeded = true;
+                                // Перевзвод scroll — см. GM-ветку выше
+                                self.inst_browser_scroll = true;
                             }
                             let is_hi = self.inst_browser_index == flat.len() - 1;
                             // Одна подсветка — курсор; активный патч — точкой
