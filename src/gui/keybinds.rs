@@ -63,7 +63,14 @@ impl Keybinds {
         &mut self.binds
     }
 
-    pub fn set_key_for_action(&mut self, action: &KeyAction, new_key: egui::Key) {
+    /// Assign `new_key` to `action`. Returns the label of the action whose
+    /// bind was stolen (reassigned away), if any — caller shows a warning.
+    pub fn set_key_for_action(&mut self, action: &KeyAction, new_key: egui::Key) -> Option<String> {
+        // Victim must be found BEFORE the overwrite; rebinding an action to
+        // its own key is not a steal.
+        let stolen = self.binds.iter()
+            .find(|(k, a)| *k == new_key && a != action)
+            .map(|(_, a)| a.label().to_string());
         // Remove any existing bind for this key
         self.binds.retain(|(k, _)| *k != new_key);
         // Update or add
@@ -72,6 +79,7 @@ impl Keybinds {
         } else {
             self.binds.push((new_key, action.clone()));
         }
+        stolen
     }
 
     pub fn key_for_action(&self, action: &KeyAction) -> Option<egui::Key> {

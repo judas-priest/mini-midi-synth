@@ -52,10 +52,6 @@ impl<'a> ModalWindow<'a> {
         }
     }
 
-    // Ещё не используется (задействуется в Task 5, keybindings);
-    // `expect`, а не `allow`: при первом вызове ожидание станет
-    // невыполненным и -D warnings заставит тег убрать.
-    #[expect(dead_code)]
     #[must_use]
     pub fn esc_closes(mut self, on: bool) -> Self {
         self.esc_closes = on;

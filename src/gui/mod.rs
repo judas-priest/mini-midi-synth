@@ -714,15 +714,25 @@ impl eframe::App for App {
             self.global_dirty = false;
         }
 
-        // Keybind processing (skip when text fields have focus or capturing a rebind)
+        // Keybind processing (skip when text fields have focus or capturing a rebind).
+        // Esc при capture НЕ обрабатывается здесь: update-loop выполняется ДО
+        // отрисовки окна — Esc-стек (отмена capture → закрытие окна) живёт
+        // в теле окна Keybindings, иначе первый Esc сделал бы и то и другое.
         let text_editing = ctx.memory(|m| m.focused().is_some());
         if self.keybind_capturing.is_some() {
             if let Some(key) = keybinds::detect_key_press(ctx) {
-                if key == egui::Key::Escape {
-                    self.keybind_capturing = None;
-                } else if let Some(action) = self.keybind_capturing.take() {
-                    self.keybinds.set_key_for_action(&action, key);
-                    self.config.ui.keybinds = self.keybinds.to_config();
+                if key != egui::Key::Escape {
+                    if let Some(action) = self.keybind_capturing.take() {
+                        let stolen = self.keybinds.set_key_for_action(&action, key);
+                        self.config.ui.keybinds = self.keybinds.to_config();
+                        if let Some(victim) = stolen {
+                            self.show_toast(
+                                format!("{}: key was reassigned from {}",
+                                    keybinds::key_to_str(key), victim),
+                                ToastKind::Info,
+                            );
+                        }
+                    }
                 }
             }
         } else if !text_editing {
@@ -1983,10 +1993,27 @@ impl App {
     pub(super) fn draw_keybinds_window(&mut self, ctx: &egui::Context) {
         use keybinds::{KeyAction, key_to_str};
         let mut open = self.show_keybinds_window;
-        egui::Window::new("Keybindings")
-            .open(&mut open)
+        // Обёртка modal::ModalWindow. esc_closes(false): у окна внутренний
+        // «временный режим» (capture клавиши), Esc-стек — свой, в теле:
+        // 1-й Esc отменяет capture, 2-й закрывает окно.
+        // esc_close — флаг внутри тела (win_open занят borrow'ом шелла),
+        // применяется после .show().
+        let mut esc_close = false;
+        modal::ModalWindow::new(ctx, "keybindings", "Keybindings", &mut open, 480.0)
+            .esc_closes(false)
+            .footer_done(false)
             .resizable(false)
-            .show(ctx, |ui| {
+            .show(|ui| {
+                // Esc-стек — ПЕРВАЯ строка тела: update-loop уже прошёл, окно
+                // рисуется после, иначе первое нажатие сделало бы оба шага.
+                let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+                if esc {
+                    if self.keybind_capturing.is_some() {
+                        self.keybind_capturing = None; // 1-й Esc: отменить capture
+                    } else {
+                        esc_close = true;              // 2-й Esc: закрыть окно
+                    }
+                }
                 egui::Grid::new("keybinds_grid").striped(true).show(ui, |ui| {
                     ui.strong("Action");
                     ui.strong("Key");
@@ -2000,7 +2027,10 @@ impl App {
                             .unwrap_or("---");
                         let is_capturing = self.keybind_capturing.as_ref() == Some(&action);
                         let btn_text = if is_capturing { "Press key..." } else { key_label };
-                        if ui.button(btn_text).clicked() {
+                        if ui.button(btn_text)
+                            .on_hover_text("Press Escape to cancel")
+                            .clicked()
+                        {
                             self.keybind_capturing = Some(action.clone());
                         }
                         // Unbind — тот же 2s-confirm, взвод на конкретное действие.
@@ -2010,7 +2040,10 @@ impl App {
                         }
                         let armed = matches!(&self.unbind_confirm, Some((a, _)) if a == &action);
                         let ub_color = if armed { egui::Color32::RED } else { ui.visuals().text_color() };
-                        if ui.small_button(egui::RichText::new(if armed { "Sure?" } else { "x" }).color(ub_color)).clicked() {
+                        let ub_btn = egui::Button::new(
+                            egui::RichText::new(if armed { "Sure?" } else { "×" }).color(ub_color),
+                        ).small();
+                        if ui.add(ub_btn).on_hover_text("Unbind").clicked() {
                             if armed {
                                 if let Some(key) = self.keybinds.key_for_action(&action) {
                                     self.keybinds.binds_mut().retain(|(k, _)| *k != key);
@@ -2031,6 +2064,14 @@ impl App {
                     self.keybind_capturing = None;
                 }
             });
+        if esc_close {
+            open = false;
+        }
+        if !open {
+            // Закрытие окна любым путём (Esc/✕) при активном capture —
+            // не оставлять capture висеть (Negative Matrix плана).
+            self.keybind_capturing = None;
+        }
         self.show_keybinds_window = open;
     }
 
