@@ -90,12 +90,37 @@ impl App {
         // Pattern selector + length
         ui.horizontal(|ui| {
             ui.label("Pattern:");
+            // #32 Phase 5: the GUI selector is QUANTIZED (queued to the next
+            // boundary). The visible pattern comes back through the atom
+            // mirror — the console SelectPattern/StepPattern pads stay
+            // IMMEDIATE on purpose (hardware transport path).
+            if ui.checkbox(&mut self.drum_chain_on, "Chain")
+                .on_hover_text("Chain: marked patterns play in order, one per bar")
+                .changed()
+            {
+                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqChain { on: self.drum_chain_on });
+                self.drum_chain_mask = if self.drum_chain_on {
+                    1 << self.drum_current_pattern
+                } else {
+                    0
+                };
+            }
             for p in 0..8u8 {
                 let selected = p == self.drum_current_pattern;
-                let label = format!("{}", p + 1);
-                if ui.selectable_label(selected, label).clicked() && !selected {
-                    self.drum_current_pattern = p;
-                    let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPattern { pattern: p });
+                let marked = self.drum_chain_on && self.drum_chain_mask & (1 << p) != 0;
+                let label = if marked { format!("\u{2713}{}", p + 1) } else { format!("{}", p + 1) };
+                let resp = ui.selectable_label(selected, if marked {
+                    egui::RichText::new(label).strong()
+                } else {
+                    egui::RichText::new(label)
+                });
+                if resp.clicked() {
+                    if self.drum_chain_on {
+                        self.drum_chain_mask ^= 1 << p;
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumSeqChainToggle { pattern: p });
+                    } else if !selected {
+                        let _ = self.ctrl_tx.push(ControlEvent::DrumSeqQueuePattern { pattern: p });
+                    }
                 }
             }
             ui.separator();

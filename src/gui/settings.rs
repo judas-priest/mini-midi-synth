@@ -270,6 +270,10 @@ impl App {
         self.drum_step_atom = engine.drum_engine.step_atom();
         self.drum_play_atom = engine.drum_engine.play_atom();
         self.drum_rec_atom = engine.drum_engine.rec_atom();
+        // Fresh engine: chain state is live-only (not persisted).
+        self.drum_pattern_atom = engine.drum_engine.pattern_atom();
+        self.drum_chain_on = false;
+        self.drum_chain_mask = 0;
         self.drum_undo_atom = engine.drum_engine.undo_atom();
         self.drum_redo_atom = engine.drum_engine.redo_atom();
         self.looper_atoms = engine.looper.atoms();

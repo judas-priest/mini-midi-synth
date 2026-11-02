@@ -337,6 +337,15 @@ pub struct App {
     pub drum_step_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_rec_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Live pattern from the engine (#32 Phase 5): the ONLY source of truth
+    /// for drum_current_pattern — the grid, console view and LED would lie
+    /// after a chain switch otherwise.
+    pub drum_pattern_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Chain mode (GUI toggle; the engine holds the authoritative mask).
+    pub drum_chain_on: bool,
+    /// GUI mirror of the chain mask for marking the selector (lossy under
+    /// ring overflow like every GUI→engine push).
+    pub drum_chain_mask: u8,
     pub drum_metronome: bool,
     /// Previous sequencer step (downbeat-flash edge detection)
     pub drum_prev_step: u8,
@@ -654,6 +663,10 @@ impl eframe::App for App {
         // Sync drum play/rec state from engine (for MIDI-triggered changes)
         self.drum_playing = self.drum_play_atom.load(Ordering::Relaxed) != 0;
         self.drum_recording = self.drum_rec_atom.load(Ordering::Relaxed) != 0;
+        // Pattern mirror (#32 Phase 5): the atom is the single source of
+        // truth — a queued switch applies at the boundary, and chain switches
+        // happen in the engine, so the GUI never assigns this field directly.
+        self.drum_current_pattern = self.drum_pattern_atom.load(Ordering::Relaxed);
         // Beat-1 flash: the step atom shows the NEXT step, so step 0 has just
         // sounded when the atom transitions 0 -> 1 while playing.
         let step_now = self.drum_step_atom.load(Ordering::Relaxed);

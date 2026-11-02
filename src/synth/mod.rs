@@ -223,6 +223,16 @@ pub enum ControlEvent {
     DrumSeqBpm { bpm: f32 },
     DrumSeqSwing { swing: f32 },
     DrumSeqPattern { pattern: u8 },
+    /// Quantized pattern switch (#32 Phase 5): queued by the GUI, applied at
+    /// the next pattern boundary. NOTE: DrumSeqPattern above stays IMMEDIATE
+    /// on purpose — it is the hardware console transport path; the GUI
+    /// selector is quantized (deliberate asymmetry).
+    DrumSeqQueuePattern { pattern: u8 },
+    /// Chain mode on/off: at each boundary the first marked pattern after the
+    /// current one plays (one pattern per bar).
+    DrumSeqChain { on: bool },
+    /// Toggle one pattern's membership in the chain.
+    DrumSeqChainToggle { pattern: u8 },
     DrumSeqLength { length: u8 },
     /// Time signature for the current pattern: sets `beats_per_bar` and
     /// `length = beats_per_bar * 4` (16th steps). Clamped to 2..=4 —
@@ -1306,6 +1316,10 @@ pub struct SynthEngine {
     looper_capture_quantized: bool,
     /// Previous drum step for boundary edge detection.
     looper_prev_step: u8,
+    /// Pattern cache for looper boundary resync (#32 Phase 5): when the
+    /// sequencer pattern changes at a boundary, the looper cycle is resized
+    /// to the new pattern length.
+    looper_prev_pattern: u8,
     /// Quantized overdub (layer): arm at the next boundary / close at the
     /// next boundary (MasterOverdub toggle).
     looper_overdub_pending: bool,
@@ -1593,6 +1607,7 @@ impl SynthEngine {
             looper_arm_pending: false,
             looper_capture_quantized: false,
             looper_prev_step: 0,
+            looper_prev_pattern: 0,
             looper_overdub_pending: false,
             looper_overdub_active: false,
             looper_cycle_ticks: 0,
@@ -2694,7 +2709,18 @@ impl SynthEngine {
             ControlEvent::DrumSeqBpm { bpm } => { self.drum_engine.sequencer.bpm = bpm; }
             ControlEvent::DrumSeqSwing { swing } => { self.drum_engine.sequencer.swing = swing; }
             ControlEvent::DrumSeqPattern { pattern } => {
-                self.drum_engine.sequencer.current_pattern = pattern;
+                // Immediate switch: hardware console transport path (see the
+                // DrumSeqQueuePattern note above for the asymmetry).
+                self.drum_engine.sequencer.set_pattern_immediate(pattern);
+            }
+            ControlEvent::DrumSeqQueuePattern { pattern } => {
+                self.drum_engine.sequencer.queue_pattern(pattern);
+            }
+            ControlEvent::DrumSeqChain { on } => {
+                self.drum_engine.sequencer.set_chain(on);
+            }
+            ControlEvent::DrumSeqChainToggle { pattern } => {
+                self.drum_engine.sequencer.chain_toggle(pattern);
             }
             ControlEvent::DrumSeqLength { length } => {
                 // Clamp: record_hit делит на len (drum.rs) — ноль из кольца
@@ -3133,6 +3159,8 @@ impl SynthEngine {
         let step = self.drum_engine.sequencer.current_step;
         let prev = self.looper_prev_step;
         self.looper_prev_step = step;
+        let playing = self.drum_engine.sequencer.playing;
+        let boundary = playing && step == 0 && prev != 0;
         let quantized_looping = self.looper_capture_quantized
             && matches!(
                 self.looper.state,
@@ -3140,11 +3168,38 @@ impl SynthEngine {
                     | crate::synth::looper::LooperState::Overdubbing
                     | crate::synth::looper::LooperState::Playing
             );
+        // #32 Phase 5: pattern switch at a boundary (quantized GUI queue or
+        // immediate console switch) resizes the looper cycle to the new
+        // pattern length — while capturing, or while a 1-cycle-of-old-pattern
+        // loop plays. Free (non-quantized) loops keep their length. Drift
+        // correction below keeps its own guard and needs no change here.
+        let cur_pat = self.drum_engine.sequencer.current_pattern;
+        let pat_switched = cur_pat != self.looper_prev_pattern;
+        if pat_switched { self.looper_prev_pattern = cur_pat; }
+        if boundary && pat_switched {
+            let one_cycle_of_old = self.looper_cycle_ticks > 0
+                && self.looper.loop_len_ticks() == self.looper_cycle_ticks;
+            if quantized_looping || one_cycle_of_old {
+                let pattern_len =
+                    self.drum_engine.sequencer.patterns[cur_pat as usize].length.max(1);
+                let bpm = self.drum_engine.sequencer.bpm.max(1.0);
+                let samples_per_step =
+                    (self.sample_rate as f64 * 60.0) / (bpm as f64 * 4.0);
+                let new_cycle = (pattern_len as f64 * samples_per_step) as u32;
+                self.looper_cycle_ticks = new_cycle;
+                self.keep_capture_capacity();
+                if self.looper_rec_cycles > 0 {
+                    self.looper.set_loop_len_ticks(
+                        self.looper_rec_cycles.saturating_mul(new_cycle));
+                } else {
+                    self.looper.set_loop_len_ticks(new_cycle);
+                }
+            }
+        }
         if self.looper_arm_pending
             || self.looper_finish_pending
             || quantized_looping
         {
-            let playing = self.drum_engine.sequencer.playing;
             let lstate = self.looper.state;
             // Квантованный захват может УЖЕ самообернуться в Overdubbing
             // (looper.tick() переключает Recording->Overdubbing по своей длине
@@ -3154,7 +3209,6 @@ impl SynthEngine {
                 || (lstate == crate::synth::looper::LooperState::Overdubbing
                     && self.looper_capture_quantized
                     && !self.looper_overdub_active);
-            let boundary = playing && step == 0 && prev != 0;
             if boundary && self.looper_overdub_pending && lstate == crate::synth::looper::LooperState::Playing {
                 // Слой: старт поверх петли на границе (длина петли не меняется)
                 self.looper_overdub_pending = false;
