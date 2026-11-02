@@ -28,6 +28,10 @@ pub struct ModalWindow<'a> {
     esc_closes: bool,
     footer_done: bool,
     resizable: bool,
+    /// Кнопка «свернуть» в заголовке. По умолчанию ВЫКЛ: свёрнутое окно не
+    /// исполняет body (у Keybindings зависает capture; у старых окон
+    /// `.collapsible(false)` был явно).
+    collapsible: bool,
 }
 
 impl<'a> ModalWindow<'a> {
@@ -49,6 +53,7 @@ impl<'a> ModalWindow<'a> {
             esc_closes: true,
             footer_done: true,
             resizable: true,
+            collapsible: false,
         }
     }
 
@@ -73,6 +78,12 @@ impl<'a> ModalWindow<'a> {
     #[must_use]
     pub fn default_height(mut self, h: f32) -> Self {
         self.default_height = h;
+        self
+    }
+
+    #[must_use]
+    pub fn collapsible(mut self, on: bool) -> Self {
+        self.collapsible = on;
         self
     }
 
@@ -106,6 +117,7 @@ impl<'a> ModalWindow<'a> {
             .id(egui::Id::new(self.id_salt))
             .open(self.win_open)
             .resizable(resizable)
+            .collapsible(self.collapsible)
             .default_width(self.default_width)
             .default_height(self.default_height);
         if let Some(pos) = self.default_pos {
