@@ -284,30 +284,18 @@ impl App {
                 self.seq_target_atom.store(1, Ordering::Relaxed);
             }
 
-            // Engine toggle (DSP/SF2)
+            // Кнопка движка: открывает браузер — движок следует за выбором звука
+            // (переключение переехало в post-closure браузера, layers-тоггл удалён)
             let sf2 = self.parts[i].sf2_mode;
             let eng_label = if sf2 { "SF2" } else { "DSP" };
-            if ui.add_sized([44.0, 22.0], egui::Button::new(eng_label).small()).on_hover_text(
-                if sf2 { "Switch to DSP engine" } else { "Switch to SF2 engine" }
-            ).clicked() {
-                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                self.parts[i].sf2_mode = !sf2;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: !sf2 });
-                if !sf2 && self.sf2_keys_soundfont.is_some() {
-                    // Канал rustysynth свежий (program 0) — выслать хранимую
-                    // программу, иначе звучит piano до перевыбора (#43b)
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                        part: i, program: self.parts[i].sf2_program, bank: 0,
-                    });
-                }
-                // Persist engine choice for parts 0/1 (seeds sf2_mode on startup)
-                if i == 0 {
-                    self.config.sf2.layer_a_sf2 = !sf2;
-                    let _ = self.config.save();
-                } else if i == 1 {
-                    self.config.sf2.layer_b_sf2 = !sf2;
-                    let _ = self.config.save();
-                }
+            if ui.add_sized([44.0, 22.0], egui::Button::new(eng_label).small())
+                .on_hover_text(format!("{} — open sound browser", if sf2 { "SF2 engine" } else { "DSP engine" }))
+                .clicked()
+            {
+                self.preset_search.clear();
+                self.inst_browser_part = Some(i);
+                self.inst_browser_scroll = true; // (#37) открытие центрирует выбор
+                self.inst_browser_seeded = false; // курсор пересеется на текущий звук
             }
 
             // Instrument select
