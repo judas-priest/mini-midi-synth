@@ -935,27 +935,47 @@ GATT-канала не имеет — из синта недостижимо б�
 Пользователь подтвердил работу +2 октавы дистанционно. Записано как «не делать»;
 если когда-нибудь понадобится — ControlEvent → spawn `smk.py wr 1 XX` (GUI-поток).
 
-## 49. Перфы теряются — ОСНОВНОЕ ГОТОВО (PR #41: apply_performance); хвосты: macro_vals не в перфах, patch_name-промах → патч 0, SF2 bank=0
+## 49. Перфы теряются — ОСНОВНОЕ ГОТОВО (PR #41: apply_performance); хвосты пересчитаны код-аудитом 2026-11-03
 
-Аудит нашёл 4 механизма потерь (по вероятности):
-1. ДВА расходящихся load-пути: панельный Load (layers.rs:245-294) НЕ фиксирует
-   config.ui.last_performance и НЕ восстанавливает split_point;
-   load_performance_by_name (gui/mod.rs:2411-2494) НЕ применяет note_mode
-   (Sus/Bass/Root перфа молча теряется). Рестарт/audio-reconnect затем
-   автозагружает last_performance (mod.rs:1694) — откат к ДРУГОМУ перфу,
-   живые правки громкостей/панов стираются. Панельный Load → рестарт =
-   откат к старому перфу: главная цепочка «херится».
-2. patch_name не найден → unwrap_or(0): парт 0 играет чужой патч с чужими
-   edited_params (mod.rs:2450-2452, layers.rs:258).
-3. macro_vals не в PartConfig: load не шлёт SetMacro, движок держит макросы
-   прежнего перфа; после audio-reconnect уезжают дефолты GUI.
-4. sf2_program bank захардкожен 0 (bank>0 теряется); perf-restore key_low/high
-   (layers.rs:243-285) не согласован с apply_split_ranges.
-Фиксы: унифицировать load-пути (одна функция apply_performance),
-last_performance/split_point/note_mode/macro_vals — в оба пути; кнопку/лог
-при patch_name-промахе. ПЛАН ОТДЕЛЬНЫЙ (не начал).
+ИСТОРИЧЕСКИЙ аудит (4 механизма) частично устарел: п.1 (два load-пути) закрыт
+PR #41; п.3 «macro_vals не в перфах» оказался НЕВЕРНЫМ наполовину — макросы
+пишутся в edited_params как `macro_{i}` и доезжают до движка (macros.rs:54,
+patch_params.rs:365, LoadPatch → macro_vals, mod.rs:2497). Текущий список
+хвостов (код-аудит 2026-11-03):
 
-Хвост (revue 2026-11-01): undo патча не откатывает config.ui.last_preset — рестарт вернёт pre-undo патч (план-левел gap).
+1. **GUI-зеркало macro_vals не синхронится при load перфа** (CONFIRMED, S):
+   `apply_performance` (gui/mod.rs:2770-2841) ставит edited_params, но НЕ
+   обновляет `parts[i].macro_vals`; движок получает верные значения, GUI
+   показывает 0/stale, а `push_full_part_state` (mod.rs:2325) при
+   audio-reconnect перезаписывает движок СТАРЫМИ зеркальными значениями через
+   SetMacro — исходный симптом «после reconnect уезжают дефолты». Фикс:
+   в apply_performance после edited_params —
+   `self.parts[i].macro_vals[k] = part.param_overrides.get(&format!("macro_{k}")).copied().unwrap_or(0.0)`.
+2. **patch_name-промах → тихий патч 0** (CONFIRMED, S):
+   gui/mod.rs:2793-2796 `position(|p| p.name == part.patch_name).unwrap_or(0)`
+   — чужой патч + ЧУЖИЕ param_overrides, без лога. Смежное на save-стороне:
+   layers.rs:197-198 `unwrap_or_default()` сохраняет `patch_name: ""`,
+   который никогда не сматчится (двойная потеря). Фикс: log::warn + тост при
+   промахе; на save — не сохранять пустое имя без варна.
+3. **Undo патча не откатывает config.ui.last_preset** (CONFIRMED, S):
+   save_config (mod.rs:2613) пишет last_preset только из parts[0]; undo
+   (restore_part_snapshot, mod.rs:2255) звaёт persist_parts_state, но не
+   save_config → A → B → undo → рестарт = B. Фикс: в restore_part_snapshot
+   при part==0 обновить last_preset (или вызвать save_config).
+4. **SF2 bank — латентное ограничение, НЕ потеря сегодня** (PARTIAL): в
+   PartConfig нет bank (preset.rs:756), все вызовы set_part_program хардкодят
+   bank 0 (mod.rs:1866/2331/2523/2824, lib.rs:466); UI выбора банка нет
+   вообще, CC0-форвардинга из MIDI не найдено. Делать только вместе с
+   bank-UI.
+5. **macro_names / xy_macro assignment НЕ персистятся нигде** (NEW, S/M):
+   комментарий macros.rs:44 «names saved in Performance» — ложь, в PartConfig
+   полей нет; имена макросов и XY-биндинги теряются на каждом рестарте.
+6. **key_low/high в перфе сознательно НЕ восстанавливаются** (by design,
+   #46): диапазоны ре-дерваятся из split_point через apply_split_ranges;
+   ручная правка диапазона парта до save тихо расширится при reload.
+   Записано как намеренное поведение.
+
+Четыре первых фикса — один маленький батч (S×3 + S/M). ПЛАН НЕ НАЧАТ.
 
 ## 19а. Фоновый CPU GUI — фиксы 2026-11-02 (PR #52/#53/#54)
 
