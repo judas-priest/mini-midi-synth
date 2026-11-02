@@ -1514,12 +1514,17 @@ impl App {
         } else {
             format!("Patch — Part {layer_label}")
         };
-        let win = egui::Window::new("Instrument Browser")
+        let mut win = egui::Window::new("Instrument Browser")
             .open(&mut win_open)
             .resizable(true)
             .default_width(400.0)
-            .default_height(540.0)
-            .show(ctx, |ui| {
+            .default_height(540.0);
+        // #34: restore the position saved in a previous session (within a
+        // session egui remembers drags itself, keyed by the constant title).
+        if let Some([x, y]) = self.config.ui.inst_browser_pos {
+            win = win.default_pos(egui::pos2(x, y));
+        }
+        let win = win.show(ctx, |ui| {
             ui.label(egui::RichText::new(title).strong());
             // (#38) фикс-минимальная ширина: длинные строки поиска/результатов
             // не распирают окно
@@ -1680,6 +1685,13 @@ impl App {
         });
 
         // ── Post-closure handling (after .show, reads locals + modal) ────
+        // #34: запоминаем позицию КАЖДЫЙ кадр, пока окно открыто — надёжнее,
+        // чем хук «при закрытии»: drag + quit позицию не теряет. egui 0.31:
+        // `Window::show` → Option<InnerResponse>; позиция = inner.response.rect.
+        if let Some(inner) = &win {
+            let min = inner.response.rect.min;
+            self.config.ui.inst_browser_pos = Some([min.x, min.y]);
+        }
         // Зажим индекса: список мог пересобраться (фильтр/смена парта)
         let flat_len = flat.len();
         if self.inst_browser_index >= flat_len {
@@ -1721,6 +1733,8 @@ impl App {
         }
         if close {
             self.inst_browser_part = None;
+            // #34: позиция уже в config.ui — persisted вместе с остальным.
+            self.save_global_to_config();
         }
     }
 
