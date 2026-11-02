@@ -1591,6 +1591,9 @@ impl App {
                     // Оба дерева всегда видны; секция ТЕКУЩЕГО движка парта —
                     // первой (план: DSP сверху по умолчанию, osc-парт).
                     let sections = if engine_now { [true, false] } else { [false, true] };
+                    // Первые строки секций (fallback-курсор, см. post-closure)
+                    let mut first_gm_row: Option<usize> = None;
+                    let mut first_dsp_row: Option<usize> = None;
                     for (si, section_sf2) in sections.into_iter().enumerate() {
                         if si > 0 {
                             ui.add_space(theme::SP_XS);
@@ -1644,6 +1647,7 @@ impl App {
                             if !is_collapsed {
                                 for i in matches {
                                     let name = GM_PROGRAM_NAMES[i];
+                                    if first_gm_row.is_none() { first_gm_row = Some(flat.len()); }
                                     flat.push((format!("  {name}"), i, true));
                                     let selected = current_program == i as u8;
                                     // При открытии курсор садится на текущий
@@ -1652,7 +1656,8 @@ impl App {
                                     // Seed курсора: первая строка секции текущего
                                     // движка (не selected-строка — она может быть
                                     // свёрнута/скрыта; фидбек 2026-11-02)
-                                    if !self.inst_browser_seeded && engine_now {
+                                    // Seed — на ТЕКУЩЕМ инструменте парта
+                                    if !self.inst_browser_seeded && engine_now && selected {
                                         self.inst_browser_index = flat.len() - 1;
                                         self.inst_browser_seeded = true;
                                     }
@@ -1730,6 +1735,7 @@ impl App {
                                     continue;
                                 }
                             }
+                            if first_dsp_row.is_none() { first_dsp_row = Some(flat.len()); }
                             let selected = i == current_preset_idx;
                             flat.push((format!("  {}", patch.name), i, false));
                             // Seed курсора на текущий патч — только из секции
@@ -1737,7 +1743,8 @@ impl App {
                             // Seed курсора: первая строка секции текущего
                             // движка (не selected-строка — она может быть
                             // свёрнута/скрыта; фидбек 2026-11-02)
-                            if !self.inst_browser_seeded && !engine_now {
+                            // Seed — на текущем патче парта
+                            if !self.inst_browser_seeded && !engine_now && selected {
                                 self.inst_browser_index = flat.len() - 1;
                                 self.inst_browser_seeded = true;
                             }
@@ -1762,6 +1769,17 @@ impl App {
                                 close = true;
                             }
                         }
+                    }
+                    // Fallback-курсор: seed не сработал (selected-строка
+                    // свёрнута/скрыта) — первая строка секции текущего движка;
+                    // scroll — чтобы курсор был виден и в следующем кадре
+                    if !self.inst_browser_seeded {
+                        self.inst_browser_index = match engine_now {
+                            true => first_gm_row.unwrap_or(0),
+                            false => first_dsp_row.unwrap_or(0),
+                        };
+                        self.inst_browser_seeded = true;
+                        self.inst_browser_scroll = true;
                     }
                     }
                 });
