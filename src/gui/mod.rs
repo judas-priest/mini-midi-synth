@@ -523,6 +523,8 @@ pub struct App {
     pub inst_browser_part: Option<usize>,
     /// Keyboard nav (VS Code Quick Pick): highlighted row in the browser flat list
     pub inst_browser_index: usize,
+    /// Курсор ещё не посажен на текущий инструмент парта (при открытии браузера)
+    pub inst_browser_seeded: bool,
     /// Search text at last index reset — detects filter changes
     pub inst_browser_last_search: String,
     /// (#37) центрировать выделенную строку один раз (стрелки / открытие / сброс фильтра);
@@ -1597,6 +1599,12 @@ impl App {
                                     let name = GM_PROGRAM_NAMES[i];
                                     flat.push((format!("  {name}"), i));
                                     let selected = current_program == i as u8;
+                                    // При открытии курсор садится на текущий
+                                    // инструмент парта (#сож-class: «предлагает не то»)
+                                    if !self.inst_browser_seeded && selected {
+                                        self.inst_browser_index = flat.len() - 1;
+                                        self.inst_browser_seeded = true;
+                                    }
                                     let is_hi = self.inst_browser_index == flat.len() - 1;
                                     // Одна подсветка — курсор клавиатуры (#37-класс);
                                     // активный инструмент помечен точкой, не заливкой
@@ -1661,6 +1669,11 @@ impl App {
                             }
                             let selected = i == current_preset_idx;
                             flat.push((format!("  {}", patch.name), i));
+                            // Seed курсора на текущий патч (первый кадр после открытия)
+                            if !self.inst_browser_seeded && selected {
+                                self.inst_browser_index = flat.len() - 1;
+                                self.inst_browser_seeded = true;
+                            }
                             let is_hi = self.inst_browser_index == flat.len() - 1;
                             // Одна подсветка — курсор; активный патч — точкой
                             let r = ui.selectable_label(is_hi,

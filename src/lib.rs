@@ -897,6 +897,7 @@ pub fn run_gui(
         preset_search: String::new(),
         inst_browser_part: None,
         inst_browser_index: 0,
+        inst_browser_seeded: false,
         inst_browser_last_search: String::new(),
         inst_browser_scroll: false,
         scope_buf: c.scope_buf,
