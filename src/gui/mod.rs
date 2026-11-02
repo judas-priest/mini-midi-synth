@@ -1533,6 +1533,29 @@ impl App {
         }
         let win = builder.show(|ui| {
             ui.label(egui::RichText::new(title).strong());
+            // Тоггл движка DSP ↔ SF2 — живое переключение прямо в браузере
+            ui.horizontal(|ui| {
+                let cur_sf2 = self.parts[part].sf2_mode;
+                let (label, tip) = if cur_sf2 {
+                    ("→ DSP", "Switch this part to the DSP engine")
+                } else {
+                    ("→ SF2", "Switch this part to the SF2 (soundfont) engine")
+                };
+                if ui.button(label).on_hover_text(tip).clicked() {
+                    let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                    self.parts[part].sf2_mode = !cur_sf2;
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: !cur_sf2 });
+                    if part == 0 { self.config.sf2.layer_a_sf2 = !cur_sf2; }
+                    else if part == 1 { self.config.sf2.layer_b_sf2 = !cur_sf2; }
+                    self.persist_parts_state();
+                    self.inst_browser_seeded = false; // курсор пересеется в другую секцию
+                }
+                ui.label(egui::RichText::new(if cur_sf2 {
+                    "engine: SF2 (soundfont)"
+                } else {
+                    "engine: DSP"
+                }).weak());
+            });
             // (#38) фикс-минимальная ширина: длинные строки поиска/результатов
             // не распирают окно
             ui.set_min_width(380.0);
