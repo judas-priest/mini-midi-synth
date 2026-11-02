@@ -902,6 +902,7 @@ pub fn run_gui(
         inst_browser_last_search: String::new(),
         inst_browser_scroll: false,
         scope_buf: c.scope_buf,
+        last_scope_write: 0,
         split_point: c.config.ui.split_point.unwrap_or(60),
         show_fx_chain: false,
         show_midi_seq: false,

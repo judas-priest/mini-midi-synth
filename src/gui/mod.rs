@@ -534,6 +534,9 @@ pub struct App {
     pub inst_browser_scroll: bool,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
+    /// Последний виденный write-индекс scope_buf: не изменился = тишина
+    /// (аудио-гейт не пушит) — рисование осциллографа пропускается.
+    pub last_scope_write: usize,
     // Split mode
     pub split_point: u8,   // MIDI note where right zone starts (default 60 = C4)
     // FX Chain panel
@@ -1245,7 +1248,6 @@ impl eframe::App for App {
                 ui.separator();
 
                 // Oscilloscope
-                let scope_data = self.scope_buf.read();
                 let scope_w = 150.0_f32;
                 let scope_h = 40.0_f32;
                 let (resp, painter) = ui.allocate_painter(
@@ -1255,22 +1257,29 @@ impl eframe::App for App {
                 let r = resp.rect;
                 painter.rect_filled(r, 2.0, theme::BG_WIDGET);
                 let mid_y = r.center().y;
-                // Draw waveform
-                let n = scope_data.len();
-                let step = n as f32 / scope_w;
-                let points: Vec<egui::Pos2> = (0..scope_w as usize).map(|px| {
-                    let idx = (px as f32 * step) as usize;
-                    let s = scope_data[idx.min(n - 1)].clamp(-1.0, 1.0);
-                    egui::pos2(r.left() + px as f32, mid_y - s * scope_h * 0.45)
-                }).collect();
-                if points.len() >= 2 {
-                    painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, theme::SCOPE_WAVE)));
-                }
                 // Center line
                 painter.line_segment(
                     [egui::pos2(r.left(), mid_y), egui::pos2(r.right(), mid_y)],
                     egui::Stroke::new(0.5, theme::STROKE_SUBTLE),
                 );
+                // Freeze при тишине: write-индекс не изменился = аудио-гейт
+                // не пушит — пропускаем чтение 256 атомиков и построение Vec.
+                let wp = self.scope_buf.write_pos.load(Ordering::Relaxed);
+                if wp != self.last_scope_write {
+                    self.last_scope_write = wp;
+                    let scope_data = self.scope_buf.read();
+                    // Draw waveform
+                    let n = scope_data.len();
+                    let step = n as f32 / scope_w;
+                    let points: Vec<egui::Pos2> = (0..scope_w as usize).map(|px| {
+                        let idx = (px as f32 * step) as usize;
+                        let s = scope_data[idx.min(n - 1)].clamp(-1.0, 1.0);
+                        egui::pos2(r.left() + px as f32, mid_y - s * scope_h * 0.45)
+                    }).collect();
+                    if points.len() >= 2 {
+                        painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, theme::SCOPE_WAVE)));
+                    }
+                }
             });
             ui.add_space(theme::SP_SM);
         });

@@ -101,6 +101,28 @@ use std::sync::Arc;
 /// Lock-free oscilloscope buffer shared between audio and GUI threads.
 /// Audio writes samples; GUI reads them for display. Uses atomic f32 encoding.
 pub const SCOPE_SIZE: usize = 256;
+/// Amplitude below which the oscilloscope is considered silent (freeze gate).
+const SCOPE_SILENCE: f32 = 1e-4;
+
+/// Freeze-гейт осциллографа с гистерезисом: возвращает true, когда сэмпл
+/// надо запушить в буфер. Состояние (`frozen`) живёт в SynthEngine
+/// (аудио-поток), НЕ в ScopeBuffer — тот шарится через Arc, push(&self).
+#[inline]
+fn scope_gate(frozen: &mut bool, sample: f32) -> bool {
+    if sample.abs() > SCOPE_SILENCE {
+        *frozen = false;
+        true
+    } else if *frozen {
+        // Затихли: линия уже доведена до нуля, дальше не пушим.
+        false
+    } else {
+        // Был сигнал, стал тихим: пушим этот тихий сэмпл (линия доходит
+        // до нуля) и защёлкиваем тишину — без мерцания на границе.
+        *frozen = true;
+        true
+    }
+}
+
 pub struct ScopeBuffer {
     pub data: [std::sync::atomic::AtomicU32; SCOPE_SIZE],
     pub write_pos: std::sync::atomic::AtomicUsize,
@@ -1350,6 +1372,8 @@ pub struct SynthEngine {
     /// Oscilloscope ring buffer: 256 mono samples shared with GUI via atomics
     scope_buf: std::sync::Arc<ScopeBuffer>,
     scope_write: usize,
+    /// Freeze-гистерезис осциллографа: true = тишина (пуш пропускается)
+    scope_frozen: bool,
     /// MIDI file sequencer player
     pub midi_player: midi_player::MidiPlayer,
     /// Reusable event buffer for midi_player.process_block (avoids per-block allocation)
@@ -1621,6 +1645,7 @@ impl SynthEngine {
             sustain_release: None,
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
             scope_write: 0,
+            scope_frozen: false,
             midi_player: midi_player::MidiPlayer::new(),
             midi_seq_buf: Vec::new(),
             seq_route: [0u8; 16],
@@ -3822,8 +3847,12 @@ impl SynthEngine {
             let vol = self.global_params.master_volume;
             buf_l[s] = tl * vol;
             buf_r[s] = tr * vol;
-            // Write mono mix to oscilloscope buffer
-            self.scope_buf.push((buf_l[s] + buf_r[s]) * 0.5, &mut self.scope_write);
+            // Write mono mix to oscilloscope buffer (freeze-гейт при тишине:
+            // write-индекс замирает — GUI не перерисовывает осциллограф)
+            let sample = (buf_l[s] + buf_r[s]) * 0.5;
+            if scope_gate(&mut self.scope_frozen, sample) {
+                self.scope_buf.push(sample, &mut self.scope_write);
+            }
         }
     }
 

@@ -1289,3 +1289,60 @@ fn absent_parts_are_disabled_by_tail_loop() {
     }
     assert!(e.parts[0].enabled);
 }
+
+// ── Oscilloscope freeze gate (TC-S) ────────────────────────────
+
+#[test]
+fn tc_s_scope_freeze_hysteresis() {
+    // Тишина → push пропущен (write pos не растёт); всплеск → пуш
+    // возобновился; пограничная амплитуда — без мерцания (гистерезис).
+    let buf = ScopeBuffer::new();
+    let mut pos = 0usize;
+    let mut frozen = false;
+
+    // Играл сигнал (иначе гейт ещё не защёлкнут)
+    assert!(scope_gate(&mut frozen, 0.5));
+    buf.push(0.5, &mut pos);
+    assert_eq!(pos, 1);
+
+    // Полная тишина: ровно один пуш (линия доходит до нуля), дальше — ноль
+    let mut pushes = 0;
+    for _ in 0..10 {
+        if scope_gate(&mut frozen, 0.0) {
+            buf.push(0.0, &mut pos);
+            pushes += 1;
+        }
+    }
+    assert_eq!(pushes, 1, "exactly one settling sample after signal->silence");
+    assert_eq!(
+        buf.write_pos.load(std::sync::atomic::Ordering::Relaxed),
+        2,
+        "shared write pos frozen after the settling sample"
+    );
+
+    // Всплеск: гейт снимается, пуш идёт
+    assert!(scope_gate(&mut frozen, 0.5), "signal resumes push");
+    buf.push(0.5, &mut pos);
+    assert_eq!(pos, 3);
+
+    // Затухание ниже порога: первый тихий сэмпл пушится (линия доходит
+    // до нуля), затем тишина защёлкивается
+    assert!(scope_gate(&mut frozen, 5e-5), "first sub-threshold sample still pushed");
+    buf.push(5e-5, &mut pos);
+    assert_eq!(pos, 4, "last audible->silent transition pushed once");
+
+    // Гистерезис: дальнейшая тишина не мерцает и не двигает позицию
+    for _ in 0..100 {
+        assert!(!scope_gate(&mut frozen, 0.0), "latched silence must not flicker");
+    }
+    assert_eq!(pos, 4);
+
+    // Сигнал снова пробивает защёлку
+    assert!(scope_gate(&mut frozen, 0.1));
+    buf.push(0.1, &mut pos);
+    assert_eq!(pos, 5, "write pos follows audio again");
+    assert_eq!(
+        buf.write_pos.load(std::sync::atomic::Ordering::Relaxed),
+        5
+    );
+}
