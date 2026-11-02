@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use midir::{MidiInput, MidiInputConnection};
 use rtrb::Producer;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use wmidi::MidiMessage;
 
 use crate::synth::MidiEvent;
@@ -22,6 +22,25 @@ pub type NoteState = Arc<[AtomicU8; 128]>;
 /// Undo note 75).
 pub type ConsoleTx = std::sync::Mutex<Option<std::sync::mpsc::Sender<(u8, bool)>>>;
 pub static CONSOLE_TX: std::sync::OnceLock<ConsoleTx> = std::sync::OnceLock::new();
+
+/// Событие затухания для GUI-клавиатуры (NoteOff / NoteOn vel==0).
+#[derive(Clone, Copy)]
+pub struct NoteFlash {
+    pub note: u8,
+}
+
+static NOTE_FLASH_TX: OnceLock<Mutex<Producer<NoteFlash>>> = OnceLock::new();
+
+/// Вызывается один раз в init_common (до подключения MIDI-инпута).
+pub fn init_note_flash(producer: Producer<NoteFlash>) {
+    let _ = NOTE_FLASH_TX.set(Mutex::new(producer));
+}
+
+fn push_note_flash(note: u8) {
+    if let Some(Ok(mut tx)) = NOTE_FLASH_TX.get().map(|m| m.lock()) {
+        let _ = tx.push(NoteFlash { note: note & 127 });
+    }
+}
 
 pub fn is_console_note(note: u8) -> bool {
     (60..=67).contains(&note) || (75..=80).contains(&note)
@@ -158,6 +177,7 @@ pub fn parse_and_push(
             let state = if *channel == 9 { pad_state } else { note_state };
             if *velocity == 0 {
                 state[*note as usize].store(0, Ordering::Relaxed);
+                push_note_flash(*note);
             } else {
                 state[*note as usize].store(*velocity, Ordering::Relaxed);
             }
@@ -165,6 +185,7 @@ pub fn parse_and_push(
         MidiEvent::NoteOff { channel, note } => {
             let state = if *channel == 9 { pad_state } else { note_state };
             state[*note as usize].store(0, Ordering::Relaxed);
+            push_note_flash(*note);
         }
         _ => {}
     }

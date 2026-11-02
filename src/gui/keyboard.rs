@@ -17,6 +17,14 @@ fn is_black_key(note: u8) -> bool {
     matches!(note % 12, 1 | 3 | 6 | 8 | 10)
 }
 
+fn blend(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
+    egui::Color32::from_rgb(
+        (a.r() as f32 + (b.r() as f32 - a.r() as f32) * t) as u8,
+        (a.g() as f32 + (b.g() as f32 - a.g() as f32) * t) as u8,
+        (a.b() as f32 + (b.b() as f32 - a.b() as f32) * t) as u8,
+    )
+}
+
 /// Pad notes in physical order: pads 1-8 (top row), 9-16 (bottom row).
 pub const PAD_TOP_NOTES: [u8; 8] = [40, 41, 42, 43, 48, 49, 50, 51];
 pub const PAD_BOT_NOTES: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
@@ -90,15 +98,13 @@ impl App {
             for note in start_note..end_note {
                 if is_black_key(note) { continue; }
                 let vel = self.note_state[note as usize].load(Ordering::Relaxed);
+                let held = vel > 0;
+                let tail = self.flash.brightness(note as usize, held);
                 let key_rect = egui::Rect::from_min_size(
                     rect.min + egui::vec2(wx, 0.0),
                     egui::vec2(key_w - 1.0, key_h),
                 );
-                let color = if vel > 0 {
-                    theme::KEY_WHITE_ACTIVE
-                } else {
-                    theme::KEY_WHITE_IDLE
-                };
+                let color = blend(theme::KEY_WHITE_IDLE, theme::KEY_WHITE_ACTIVE, tail);
                 painter.rect_filled(key_rect, 1.0, color);
                 painter.rect_stroke(key_rect, 1.0, egui::Stroke::new(0.5, theme::STROKE_KEY_BORDER), egui::StrokeKind::Outside);
                 wx += key_w;
@@ -109,16 +115,14 @@ impl App {
             for note in start_note..end_note {
                 if is_black_key(note) {
                     let vel = self.note_state[note as usize].load(Ordering::Relaxed);
+                    let held = vel > 0;
+                    let tail = self.flash.brightness(note as usize, held);
                     let bw = key_w * 0.65;
                     let key_rect = egui::Rect::from_min_size(
                         rect.min + egui::vec2(wx - bw * 0.5, 0.0),
                         egui::vec2(bw, black_h),
                     );
-                    let color = if vel > 0 {
-                        theme::KEY_BLACK_ACTIVE
-                    } else {
-                        theme::BG_BLACK_KEY
-                    };
+                    let color = blend(theme::BG_BLACK_KEY, theme::KEY_BLACK_ACTIVE, tail);
                     painter.rect_filled(key_rect, 1.0, color);
                 } else {
                     wx += key_w;

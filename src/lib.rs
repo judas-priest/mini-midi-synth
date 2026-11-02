@@ -97,6 +97,7 @@ struct CommonInit {
     midi_tx_shared: midi::SharedMidiTx,
     /// Bank-2 console pad notes, mirrored by the engine (Task 4).
     pub console_rx: std::sync::mpsc::Receiver<(u8, bool)>,
+    flash_rx: rtrb::Consumer<midi::NoteFlash>,
     ctrl_tx: metrics::CountingProducer<synth::ControlEvent>,
     feedback_rx: rtrb::Consumer<synth::ParamFeedback>,
     program_change_atom: Arc<AtomicU8>,
@@ -202,6 +203,10 @@ pub(crate) fn init_common() -> Result<CommonInit> {
 
     let (console_snd, console_rx) = std::sync::mpsc::channel::<(u8, bool)>();
     let _ = midi::CONSOLE_TX.set(std::sync::Mutex::new(Some(console_snd)));
+
+    // NoteFlash: затухающие следы нот на клавиатуре (см. src/gui/note_flash.rs)
+    let (flash_tx, flash_rx) = rtrb::RingBuffer::<midi::NoteFlash>::new(128);
+    midi::init_note_flash(flash_tx);
 
     let program_change_atom = Arc::new(AtomicU8::new(255));
 
@@ -339,6 +344,7 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         pad_state,
         midi_tx_shared,
         console_rx,
+        flash_rx,
         ctrl_tx: metrics::CountingProducer::new(ctrl_tx),
         feedback_rx,
         program_change_atom,
@@ -854,6 +860,8 @@ pub fn run_gui(
         drum_redo_atom: c.drum_redo_atom,
         console: gui::led_console::LedConsole::default(),
         console_rx: Some(c.console_rx),
+        flash: gui::note_flash::NoteFlashState::new(),
+        flash_rx: c.flash_rx,
         led_snapshot: [[0; 3]; 16],
         led_dirty: true,
         led_socket: None,

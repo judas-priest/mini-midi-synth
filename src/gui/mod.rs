@@ -14,6 +14,7 @@ mod macros;
 mod theme;
 pub mod keybinds;
 pub mod led_console;
+pub mod note_flash;
 mod confirm;
 mod modal;
 
@@ -429,6 +430,8 @@ pub struct App {
     // Bank-2 pad console
     pub console: led_console::LedConsole,
     pub console_rx: Option<std::sync::mpsc::Receiver<(u8, bool)>>,
+    pub flash: note_flash::NoteFlashState,
+    pub flash_rx: rtrb::Consumer<crate::midi::NoteFlash>,
     pub led_snapshot: [[u8; 3]; 16],
     pub led_dirty: bool,
     pub led_socket: Option<std::sync::mpsc::Sender<String>>,
@@ -618,6 +621,12 @@ impl eframe::App for App {
             // 250 мс — компромисс: индикаторы клавиатуры из аудио-атомиков
             // отображаются с задержкой до 250 мс (принято юзером 2026-11-02).
             ctx.request_repaint_after(Duration::from_millis(250));
+        }
+
+        // NoteFlash: быстрые ноты — атомик on→off в кадре, событие терялось
+        let seen = self.flash.drain(&mut self.flash_rx);
+        if self.flash.any_active() || seen {
+            ctx.request_repaint_after(Duration::from_millis(33));
         }
 
         // Audio hotplug (TECHDEBT #18): (1) dead-stream flag from the cpal
