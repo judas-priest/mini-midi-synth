@@ -2641,6 +2641,11 @@ impl App {
         // Запомнить перф — восстановится при старте (юзер-репорт 2026-10-31)
         self.config.ui.last_performance = Some(perf.name.clone());
         self.save_config();
+        // Диапазоны партов пересчитываются из сплита ПЕРФОМАНСЕСА, а не из
+        // сохранённых key_low/key_high: они записались при разном положении
+        // сплита и разъезжались (#46/#49 — «SF2 не играет, DSP играет» на
+        // одном перфе).
+        self.apply_split_ranges();
         // Анти-stuck: lift the pedal BEFORE applying the new parts, or notes
         // held by the pedal of the previous perf would ring forever under the
         // new one (NOT AllNotesOff — seamless tails keep ringing).
@@ -2654,8 +2659,6 @@ impl App {
             self.parts[i].patch_idx = patch_idx;
             self.parts[i].enabled = part.enabled;
             self.parts[i].volume = part.volume;
-            self.parts[i].min_note = part.key_low;
-            self.parts[i].max_note = part.key_high;
             self.parts[i].edited_params = part.param_overrides.clone();
             self.parts[i].sf2_mode = part.sf2_mode;
             self.parts[i].sf2_program = part.sf2_program;
