@@ -924,3 +924,5 @@ GATT-канала не имеет — из синта недостижимо б�
 Фиксы: унифицировать load-пути (одна функция apply_performance),
 last_performance/split_point/note_mode/macro_vals — в оба пути; кнопку/лог
 при patch_name-промахе. ПЛАН ОТДЕЛЬНЫЙ (не начал).
+
+Хвост (revue 2026-11-01): undo патча не откатывает config.ui.last_preset — рестарт вернёт pre-undo патч (план-левел gap).
