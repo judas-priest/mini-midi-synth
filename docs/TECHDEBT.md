@@ -318,16 +318,47 @@ child'а; дубликаты разруливает probe-guard в pad_console.p
 консоль самовосстанавливается во всех комбинациях без действий пользователя
 (автореспавн/переподключение, консоль продолжает работать слепо пока каналов нет).
 
-ЧТО ДЕЛАТЬ ПОЗЖЕ. Сначала — погуглить лучшие практики восстановления BLE-MIDI +
-GATT-коннектов в длинноживущих процессах (BlueZ reconnect patterns: коалесцcing
-reconnect, exponential backoff, watchdog по notify-таймауту, Device1.Connected
-properties-watch через DBus-signals вместо polling) и как это делают готовые
-инструменты (bluetoothd поведение, companion-процессы в проектах типа MidiBridge,
-Snoop37 editor). Затем спека: (a) компаньон: DBus-watch на Connected клавы,
-reconnect-backoff, различать «клава off» vs «bluez stale cache» (см. PROTOCOL.md);
-(б) синт: пересоздание console_rx/socket при reconnect_audio (сейчас console_rx
-из CommonInit — проверить, что переподключение аудио не рвёт канал); (в) LED
-после восстановления: heartbeat 2s уже перекрашивает всё — сверить.
+ЧТО ДЕЛАТЬ ПОЗЖЕ — спека уточнена гуглом практик 2026-11-03 (Tavily: BlueZ D-Bus
+docs, bluez issues #2485/#804/#2321, bleak-retry-connector #226, Android BLE
+foreground-service patterns):
+
+1. **DBus-watch (ускорение, не замена watchdog).** Канонический паттерн BlueZ:
+   подписка на `org.freedesktop.DBus.Properties.PropertiesChanged` объекта
+   Device1 (`/org/bluez/hci0/dev_D8_31_0D_19_D1_0C`) — мгновенный пуш при
+   connect/disconnect вместо слепого probe-цикла (сейчас `ble_connect` в
+   pad_console.py долбит WriteValue-пробу раз в 3 с). Дополнительно
+   `InterfacesAdded/Removed` (ObjectManager) — устройство появилось/исчезло.
+   По сигналу Connected=true → сразу probe + перекраска (heartbeat 2s сам
+   догонит цвета).
+2. **`Connected` НЕ доверять как источнику истины.** Известный баг-класс
+   bluetoothd (#2485, #804, #831): Connected=false при живом линке, висит
+   часами. Поэтому watchdog по трафику остаётся главным детектором: основная
+   семантика уже есть (paint failed → BLE умер → reconnect), добавить
+   активный проб: если Connected=true, но WriteValue падает N раз подряд →
+   full bounce.
+3. **Полумёртвый линк → Disconnect+Connect bounce.** Полный bounce устройства
+   — документированный надёжный стопгэп (#2321): точечный ConnectProfile не
+   спасает (br-connection-busy, протухший transport живёт). ATT-timeout по
+   спеке жёстко 30 с — свой watchdog должен быть быстрее (2–5 с безуспешных
+   записей при «подключённой» клаве).
+4. **Backoff экспоненциальный с ресетом на успех**, не фиксированные 3 с:
+   1→2→4→8→cap 30 с; успех (Connected=true + первый удачный WriteValue) —
+   сброс в 1 с. Ошибку `InProgress` классифицировать отдельно (bleak-retry-connector
+   #226) — не плодить параллельные попытки, подождать завершения текущей.
+5. **«Клава off» vs «stale cache»**: устройство исчезло из ObjectManager /
+   нет RSSI-обновлений → клава выключена, просто ждём по backoff. Устройство
+   есть, Connected=true, но bounce не помог 3 раза подряд → вероятен протухший
+   кэш BlueZ (/var/lib/bluetooth) — лог-хинт юзеру (RemoveDevice+re-pair —
+   тяжёлое средство, автоматом не делать).
+6. **Tooling**: компаньон — Python + raw dbus (уже есть glib-mainloop);
+   bluer (официальный Rust-binding) НЕ нужен. Референс реализаций:
+   bluetooth-autoconnect (Linux), bleak-retry-connector (классификация ошибок
+   Connect), Android foreground-service паттерн (exponential backoff, reset
+   on GATT_SUCCESS).
+
+Руст-сайд (б) и (в) без изменений: reconnect_audio не пересоздаёт
+console_rx/LED-socket (проверено в #18), heartbeat 2s перекрашивает после
+восстановления — сверить на экране.
 
 ## 18. Аудио автореспавн при hotplug — ГОТОВО (аудит: dead-stream detect + default-device poller + ReconnectPolicy backoff, тесты audio_hotplug)
 Сценарий (2026-10-29, заявка пользователя): отключил наушники → включил обратно —
