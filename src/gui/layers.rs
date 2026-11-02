@@ -329,12 +329,11 @@ impl App {
                         .on_hover_text("No SoundFont loaded (load one in Settings)");
                 }
             } else {
-                // DSP patch select. Copy patch names into locals first:
-                // self.patches (immutable) + self.parts (mutable) don't overlap.
-                let patch_names: Vec<String> =
-                    self.patches.iter().map(|p| p.name.clone()).collect();
-                let cur_idx = self.parts[i].patch_idx;
-                let cur = patch_names.get(cur_idx).cloned().unwrap_or_else(|| "---".into());
+                // DSP patch select: нужно только имя текущего патча.
+                // self.patches (immutable) + self.parts (mutable) не пересекаются.
+                let cur = self.patches.get(self.parts[i].patch_idx)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| "---".into());
                 if ui.add_sized([170.0, 22.0], egui::Button::new(&cur))
                     .on_hover_text("Open patch browser (search + categories)").clicked()
                 {
