@@ -1466,7 +1466,10 @@ impl App {
     /// Instrument browser modal: search + category tree, applies to `inst_browser_part`.
     fn draw_instrument_browser_modal(&mut self, ctx: &egui::Context) {
         let Some(part) = self.inst_browser_part else { return };
-        let is_sf2 = self.parts[part].sf2_mode && self.sf2_keys_soundfont.is_some();
+        // #браузер-фидбек: браузер показывает ОБОИХ дерева (DSP + GM). is_sf2 —
+        // ТЕКУЩИЙ движок парта: он задаёт только порядок секций (своя — первой)
+        // и источник seed-курсора; переключение движка следует за выбором.
+        let is_sf2 = self.parts[part].sf2_mode;
         // Зона/номер вместо LAYER_NAMES (8 имён): парты зоны B (8-15) давали «?»
         let layer_label = if part < PARTS_PER_ZONE {
             format!("A{}", part + 1)
@@ -1478,9 +1481,13 @@ impl App {
         let mut picked_patch: Option<usize> = None;
         let mut picked_program: Option<u8> = None;
         let mut toggled_cat: Option<String> = None;
+        // Some(true) = клик в GM-секции, Some(false) = клик в DSP-секции —
+        // движок парта следует за выбранным звуком (post-closure ниже).
+        let mut picked_switch_to_sf2: Option<bool> = None;
         // Клавиатурная навигация (VS Code Quick Pick): плоский список видимых
-        // элементов, виртуальный выделенный индекс (поля inst_browser_*).
-        let mut flat: Vec<(String, usize)> = Vec::new();
+        // элементов (имя, индекс, из GM-секции?), виртуальный выделенный
+        // индекс (поля inst_browser_*).
+        let mut flat: Vec<(String, usize, bool)> = Vec::new();
 
         // Навигационный ввод — ДО окна: single-line поиск не использует ↑/↓,
         // поэтому перехват безопасен при любом фокусе (egui 0.31: TextEdit
@@ -1552,10 +1559,28 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink(false)
                 .max_height(420.0)
                 .show(ui, |ui| {
-                    if is_sf2 {
+                    // Оба дерева всегда видны; секция ТЕКУЩЕГО движка парта —
+                    // первой (план: DSP сверху по умолчанию, osc-парт).
+                    let sections = if is_sf2 { [true, false] } else { [false, true] };
+                    for (si, section_sf2) in sections.into_iter().enumerate() {
+                        if si > 0 {
+                            ui.add_space(theme::SP_XS);
+                            ui.separator();
+                            ui.add_space(theme::SP_XS);
+                        }
+                    if section_sf2 {
+                        if self.sf2_keys_soundfont.is_some() {
                         // ── GM categories (перенос mod.rs:1141-1205: клик пишет
                         //    picked_program, коллапс — toggled_cat) ──
                         use crate::synth::sampler::GM_PROGRAM_NAMES;
+                        // Заголовок секции; маркер — у текущего движка парта
+                        // (U+26AB: шрифт без U+25CF — см. memory glyph-грабли)
+                        let gm_hdr = if section_sf2 == is_sf2 {
+                            "\u{26AB} SF2 — GM-инструменты"
+                        } else {
+                            "SF2 — GM-инструменты"
+                        };
+                        ui.strong(gm_hdr);
                         let current_program = self.parts[part].sf2_program;
                         let gm_categories: &[(&str, usize, usize)] = &[
                             ("Piano", 0, 8), ("Chromatic Perc", 8, 16),
@@ -1590,11 +1615,12 @@ impl App {
                             if !is_collapsed {
                                 for i in matches {
                                     let name = GM_PROGRAM_NAMES[i];
-                                    flat.push((format!("  {name}"), i));
+                                    flat.push((format!("  {name}"), i, true));
                                     let selected = current_program == i as u8;
                                     // При открытии курсор садится на текущий
-                                    // инструмент парта (#сож-class: «предлагает не то»)
-                                    if !self.inst_browser_seeded && selected {
+                                    // инструмент парта — seed только из секции
+                                    // ТЕКУЩЕГО движка (#сож-class: «предлагает не то»)
+                                    if !self.inst_browser_seeded && is_sf2 && selected {
                                         self.inst_browser_index = flat.len() - 1;
                                         self.inst_browser_seeded = true;
                                     }
@@ -1612,19 +1638,31 @@ impl App {
                                     if r.clicked() && !selected {
                                         self.inst_browser_index = flat.len() - 1;
                                         picked_program = Some(i as u8);
+                                        picked_switch_to_sf2 = Some(true);
                                     }
                                     // Двойной клик = применить + закрыть
                                     // (Windows select-and-OK)
                                     if r.double_clicked() {
                                         picked_program = Some(i as u8);
+                                        picked_switch_to_sf2 = Some(true);
                                         close = true;
                                     }
                                 }
                             }
                         }
+                        } else {
+                            // SF2 не загружен — GM-секция скрыта целиком, hint
+                            ui.label(egui::RichText::new("SF2: load a soundfont in Settings").weak());
+                        }
                     } else {
                         // ── DSP patch tree (перенос mod.rs:1216-1271: клик пишет
                         //    picked_patch) ──
+                        let dsp_hdr = if section_sf2 == is_sf2 {
+                            "\u{26AB} DSP — патчи"
+                        } else {
+                            "DSP — патчи"
+                        };
+                        ui.strong(dsp_hdr);
                         let current_preset_idx = self.parts[part].patch_idx;
                         let categories: Vec<(String, usize)> = {
                             let mut cats = Vec::new();
@@ -1661,9 +1699,10 @@ impl App {
                                 }
                             }
                             let selected = i == current_preset_idx;
-                            flat.push((format!("  {}", patch.name), i));
-                            // Seed курсора на текущий патч (первый кадр после открытия)
-                            if !self.inst_browser_seeded && selected {
+                            flat.push((format!("  {}", patch.name), i, false));
+                            // Seed курсора на текущий патч — только из секции
+                            // ТЕКУЩЕГО движка (первый кадр после открытия)
+                            if !self.inst_browser_seeded && !is_sf2 && selected {
                                 self.inst_browser_index = flat.len() - 1;
                                 self.inst_browser_seeded = true;
                             }
@@ -1680,12 +1719,15 @@ impl App {
                             if r.clicked() && !selected {
                                 self.inst_browser_index = flat.len() - 1;
                                 picked_patch = Some(i);
+                                picked_switch_to_sf2 = Some(false);
                             }
                             if r.double_clicked() {
                                 picked_patch = Some(i);
+                                picked_switch_to_sf2 = Some(false);
                                 close = true;
                             }
                         }
+                    }
                     }
                 });
             // (#44-фидбек) Клик по инструменту = ПРИМЕНИТЬ и играть дальше —
@@ -1707,8 +1749,14 @@ impl App {
             self.inst_browser_index = flat_len.saturating_sub(1);
         }
         if enter_pressed && flat_len > 0 {
-            let (_, idx) = &flat[self.inst_browser_index.min(flat_len - 1)];
-            if is_sf2 { picked_program = Some(*idx as u8); } else { picked_patch = Some(*idx); }
+            let (_, idx, entry_sf2) = &flat[self.inst_browser_index.min(flat_len - 1)];
+            if *entry_sf2 {
+                picked_program = Some(*idx as u8);
+                picked_switch_to_sf2 = Some(true);
+            } else {
+                picked_patch = Some(*idx);
+                picked_switch_to_sf2 = Some(false);
+            }
         }
         if let Some(cat) = toggled_cat {
             if self.collapsed_categories.contains(&cat) {
@@ -1717,6 +1765,17 @@ impl App {
                 self.collapsed_categories.insert(cat);
             }
             self.save_collapsed_categories();
+        }
+        // Движок следует за выбранным звуком (#браузер-фидбек)
+        if let Some(sf2) = picked_switch_to_sf2 {
+            if self.parts[part].sf2_mode != sf2 {
+                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
+                self.parts[part].sf2_mode = sf2;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2 });
+                if part == 0 { self.config.sf2.layer_a_sf2 = sf2; }
+                else if part == 1 { self.config.sf2.layer_b_sf2 = sf2; }
+                self.persist_parts_state();
+            }
         }
         if let Some(prog) = picked_program {
             self.parts[part].sf2_program = prog;
