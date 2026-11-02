@@ -712,6 +712,8 @@ impl Default for DrumSlotParams {
 
 const MAX_STEPS: usize = 16;
 const MAX_PATTERNS: usize = 8;
+/// "No pending pattern" sentinel (#32 Phase 5).
+const NO_PATTERN: u8 = 0xFF;
 
 #[derive(Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 pub struct StepData {
@@ -759,6 +761,14 @@ pub struct StepSequencer {
     redo_snapshot: Option<Box<[DrumPattern; MAX_PATTERNS]>>,
     /// Shared flag for the GUI LED (pad 32 white when armed).
     redo_atom: Arc<AtomicBool>,
+    /// Quantized switch (#32 Phase 5): pattern queued by the GUI, applied at
+    /// the next pattern boundary (wrap to step 0). NO_PATTERN = none.
+    pending_pattern: u8,
+    /// Chain members bitmask (bit i = pattern i plays in the chain).
+    chain_mask: u8,
+    /// Shared atom with the live pattern: the GUI mirror reads ONLY this, so
+    /// grid/console/LED stay truthful after chain switches.
+    pattern_atom: Arc<AtomicU8>,
 }
 
 impl StepSequencer {
@@ -776,7 +786,69 @@ impl StepSequencer {
             undo_atom: Arc::new(AtomicBool::new(false)),
             redo_snapshot: None,
             redo_atom: Arc::new(AtomicBool::new(false)),
+            pending_pattern: NO_PATTERN,
+            chain_mask: 0,
+            pattern_atom: Arc::new(AtomicU8::new(0)),
         }
+    }
+
+    pub fn pattern_atom(&self) -> Arc<AtomicU8> {
+        self.pattern_atom.clone()
+    }
+
+    /// Live pattern as the audio thread sees it (GUI mirror source of truth).
+    pub fn pattern(&self) -> u8 {
+        self.pattern_atom.load(Ordering::Relaxed)
+    }
+
+    fn sync_pattern_atom(&self) {
+        self.pattern_atom.store(self.current_pattern, Ordering::Relaxed);
+    }
+
+    /// Queue a quantized pattern switch: applied at the next pattern boundary.
+    /// Applies immediately when there is no observable boundary — sequencer
+    /// stopped (no clock at all) or current pattern length 1 (every step is a
+    /// boundary; the wrap-detect below never fires on length 1).
+    pub fn queue_pattern(&mut self, pattern: u8) {
+        if pattern as usize >= self.patterns.len() { return; }
+        if !self.playing || self.patterns[self.current_pattern as usize].length <= 1 {
+            self.current_pattern = pattern;
+            self.sync_pattern_atom();
+        } else {
+            self.pending_pattern = pattern;
+        }
+    }
+
+    /// Chain mode toggle. Enabling seeds the chain with the current pattern so
+    /// the chain is always well-defined; disabling clears all marks.
+    pub fn set_chain(&mut self, on: bool) {
+        self.chain_mask = if on { 1 << self.current_pattern } else { 0 };
+    }
+
+    /// Toggle one pattern's membership in the chain.
+    pub fn chain_toggle(&mut self, pattern: u8) {
+        if pattern as usize >= MAX_PATTERNS { return; }
+        self.chain_mask ^= 1 << pattern;
+    }
+
+    /// Immediate switch (hardware console transport path). Unlike the
+    /// quantized queue this must sync the atom here: while stopped tick()
+    /// never runs, and the stopped GUI would otherwise never learn about the
+    /// switch.
+    pub fn set_pattern_immediate(&mut self, pattern: u8) {
+        if pattern as usize >= self.patterns.len() { return; }
+        self.current_pattern = pattern;
+        self.sync_pattern_atom();
+    }
+
+    /// First chain member after `current` cyclically; nothing marked -> stay.
+    fn next_chain(&self) -> u8 {
+        let cur = self.current_pattern as usize;
+        for off in 1..=MAX_PATTERNS {
+            let idx = (cur + off) % MAX_PATTERNS;
+            if self.chain_mask & (1 << idx) != 0 { return idx as u8; }
+        }
+        self.current_pattern
     }
 
     pub fn undo_atom(&self) -> Arc<AtomicBool> {
@@ -889,12 +961,30 @@ impl StepSequencer {
                     }
                 }
             }
+            let prev_step = self.current_step;
             self.current_step = (self.current_step + 1) % pattern.length.max(1);
+            // #32 Phase 5: apply the queued pattern / advance the chain ONLY
+            // on a real wrap (prev != 0 && now == 0). Length-1 patterns never
+            // wrap here — chain does not cycle on them, and a queued switch
+            // was already applied immediately in queue_pattern().
+            if prev_step != 0 && self.current_step == 0 {
+                if self.pending_pattern != NO_PATTERN {
+                    self.current_pattern = self.pending_pattern;
+                    self.pending_pattern = NO_PATTERN;
+                } else if self.chain_mask != 0 {
+                    self.current_pattern = self.next_chain();
+                }
+                self.sync_pattern_atom();
+            }
         }
         triggers
     }
 
     /// Record a hit quantized to the nearest step.
+    /// NOTE (#32 Phase 5, deliberate): hits land in the CURRENT (audible)
+    /// pattern even if a switch is already queued or a chain is armed — what
+    /// you hear is what you record. A chain likewise scatters recorded hits
+    /// across its members: each bar belongs to its own pattern.
     /// `current_step` points to the NEXT step (already advanced after trigger),
     /// so we compute the nearest step using phase_acc:
     /// - phase_acc small → just advanced → nearest is previous step (the one that just played)
@@ -1051,6 +1141,12 @@ impl DrumEngine {
 
     pub fn undo_atom(&self) -> Arc<AtomicBool> {
         self.sequencer.undo_atom()
+    }
+
+    /// Probe for the live sequencer pattern (#32 Phase 5): the GUI mirror
+    /// reads this so it stays truthful after chain switches.
+    pub fn pattern_atom(&self) -> Arc<AtomicU8> {
+        self.sequencer.pattern_atom()
     }
 
     pub fn redo_atom(&self) -> Arc<AtomicBool> {
@@ -1356,5 +1452,116 @@ mod tests {
         assert!(s.redo_available());
         s.redo();
         assert!(!s.redo_available(), "redo consumed");
+    }
+
+    // -- #32 Phase 5: quantized pattern switch + chaining (TC-A1..A3) -------
+
+    const SR: f32 = 48000.0;
+
+    /// Advance exactly `n` step boundaries: bpm 60000 at 48 kHz means
+    /// 48000*60/(60000*4) = 12 samples per step.
+    fn advance(s: &mut StepSequencer, n: usize) {
+        for _ in 0..n * 12 { s.tick(SR); }
+    }
+
+    fn running() -> StepSequencer {
+        let mut s = seq();
+        s.playing = true;
+        s.bpm = 60000.0;
+        s
+    }
+
+    /// TC-A1: a pending pattern applies ONLY at the wrap to step 0, never
+    /// mid-bar.
+    #[test]
+    fn tc_a1_pending_pattern_applies_at_boundary_not_immediately() {
+        let mut s = running();
+        advance(&mut s, 3);
+        assert_eq!(s.current_step, 3, "sanity: mid-bar");
+        s.queue_pattern(1);
+        assert_eq!(s.current_pattern, 0, "queued, not applied immediately");
+        assert_eq!(s.pattern(), 0);
+        advance(&mut s, 1);
+        assert_eq!(s.current_pattern, 0, "mid-bar tick must not switch");
+        advance(&mut s, 12); // step 4 -> wrap 15 -> 0 on the 12th
+        assert_eq!(s.current_step, 0, "sanity: wrapped");
+        assert_eq!(s.current_pattern, 1, "applied at the wrap");
+        assert_eq!(s.pattern(), 1, "atom mirrors the switch (TC-A3 too)");
+    }
+
+    /// TC-A1 edge cases: no clock (stopped) and length-1 patterns have no
+    /// observable boundary, so the queue applies immediately — that still
+    /// counts as quantized.
+    #[test]
+    fn tc_a1_pending_applies_immediately_when_stopped_or_length1() {
+        let mut s = seq();
+        s.queue_pattern(2);
+        assert_eq!(s.current_pattern, 2, "stopped: no clock, no boundary");
+        let mut s = running();
+        s.patterns[0].length = 1; // current pattern has no real boundary
+        s.queue_pattern(2);
+        assert_eq!(s.current_pattern, 2, "length-1: wrap never fires, apply now");
+        assert_eq!(s.pattern(), 2);
+        // And a length-1 pattern never flips the chain either.
+        s.patterns[2].length = 1; // current pattern has no real boundary
+        s.chain_toggle(5);
+        advance(&mut s, 16);
+        assert_eq!(s.current_pattern, 2, "length-1: no wrap -> chain stays");
+    }
+
+    /// TC-A2: chain plays the marked patterns in order, cyclically.
+    #[test]
+    fn tc_a2_chain_plays_marked_patterns_in_order() {
+        let mut s = running();
+        s.chain_toggle(1);
+        s.chain_toggle(3);
+        advance(&mut s, 16);
+        assert_eq!(s.current_pattern, 1, "first marked after 0");
+        assert_eq!(s.pattern(), 1);
+        advance(&mut s, 16);
+        assert_eq!(s.current_pattern, 3, "next marked after 1");
+        advance(&mut s, 16);
+        assert_eq!(s.current_pattern, 1, "wraps around cyclically");
+    }
+
+    /// TC-A2 negative: chain enabled but empty (nothing marked) -> stay.
+    #[test]
+    fn tc_a2_empty_chain_stays_on_current() {
+        let mut s = running();
+        s.set_chain(true);
+        advance(&mut s, 16);
+        assert_eq!(s.current_pattern, 0, "no marked patterns -> stay");
+    }
+
+    /// A queued switch wins over the chain once, then the chain resumes from
+    /// the new current pattern.
+    #[test]
+    fn tc_a2_pending_wins_over_chain_once() {
+        let mut s = running();
+        s.chain_toggle(1);
+        advance(&mut s, 16);
+        assert_eq!(s.current_pattern, 1);
+        s.queue_pattern(6);
+        advance(&mut s, 16);
+        assert_eq!(s.current_pattern, 6, "pending beats chain");
+        advance(&mut s, 16);
+        assert_eq!(s.current_pattern, 1, "chain resumes: first marked after 6");
+    }
+
+    /// TC-A3: the atom never disagrees with current_pattern after chain
+    /// switches — the GUI mirror reads only the atom.
+    #[test]
+    fn tc_a3_pattern_atom_syncs_after_chain_switch() {
+        let mut s = running();
+        for _ in 0..20 {
+            advance(&mut s, 16);
+        }
+        assert_eq!(s.pattern(), s.current_pattern);
+        s.chain_toggle(5);
+        s.chain_toggle(7);
+        for _ in 0..10 {
+            advance(&mut s, 16);
+            assert_eq!(s.pattern(), s.current_pattern);
+        }
     }
 }

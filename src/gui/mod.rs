@@ -188,6 +188,79 @@ impl PartState {
     }
 }
 
+/// One undo step for a part (#31 minimal): a full snapshot of the live
+/// state — patch params + patch choice + mute/pan/transpose. Captured
+/// BEFORE the change it undoes. The undo stack is UNIFIED: parameter
+/// edits (push_undo_snapshot) and live part actions (mute/pan/transpose/
+/// patch click) share one stack, so Ctrl+Z works for both.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PartUndoSnapshot {
+    part: usize,
+    edited_params: std::collections::BTreeMap<String, f32>,
+    patch_idx: usize,
+    mute: bool,
+    pan: f32,
+    transpose: i8,
+}
+
+impl PartUndoSnapshot {
+    fn capture(part: usize, p: &PartState) -> Self {
+        Self {
+            part,
+            edited_params: p.edited_params.clone(),
+            patch_idx: p.patch_idx,
+            mute: p.mute,
+            pan: p.pan,
+            transpose: p.transpose,
+        }
+    }
+}
+
+/// No-duplicate push shared by all undo sources: a snapshot equal to the
+/// stack top (ALL fields) is skipped, any real change invalidates redo,
+/// depth capped. Pure function — unit-tested without an App.
+fn part_undo_push(
+    undo: &mut std::collections::VecDeque<PartUndoSnapshot>,
+    redo: &mut Vec<PartUndoSnapshot>,
+    snap: PartUndoSnapshot,
+) {
+    if undo.back() == Some(&snap) {
+        return; // no change since last snapshot
+    }
+    undo.push_back(snap);
+    redo.clear();
+    if undo.len() > App::MAX_UNDO {
+        undo.pop_front();
+    }
+}
+
+/// Ctrl+Z step: pop the newest snapshot; the CURRENT state of the same
+/// part is preserved for redo. None = empty stack (no-op).
+fn part_undo_step(
+    undo: &mut std::collections::VecDeque<PartUndoSnapshot>,
+    redo: &mut Vec<PartUndoSnapshot>,
+    current: PartUndoSnapshot,
+) -> Option<PartUndoSnapshot> {
+    let snap = undo.pop_back()?;
+    redo.push(current);
+    Some(snap)
+}
+
+/// Ctrl+Shift+Z step: pop the newest redo entry; current state goes back
+/// onto the undo stack. None = empty redo (no-op).
+fn part_redo_step(
+    undo: &mut std::collections::VecDeque<PartUndoSnapshot>,
+    redo: &mut Vec<PartUndoSnapshot>,
+    current: PartUndoSnapshot,
+) -> Option<PartUndoSnapshot> {
+    let snap = redo.pop()?;
+    undo.push_back(current);
+    if undo.len() > App::MAX_UNDO {
+        undo.pop_front();
+    }
+    Some(snap)
+}
+
 /// Result of scanning for .sf2 files, including directories that could not be
 /// read — so the UI can explain an empty list instead of just showing one.
 pub struct Sf2Scan {
@@ -337,6 +410,15 @@ pub struct App {
     pub drum_step_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub drum_rec_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Live pattern from the engine (#32 Phase 5): the ONLY source of truth
+    /// for drum_current_pattern — the grid, console view and LED would lie
+    /// after a chain switch otherwise.
+    pub drum_pattern_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Chain mode (GUI toggle; the engine holds the authoritative mask).
+    pub drum_chain_on: bool,
+    /// GUI mirror of the chain mask for marking the selector (lossy under
+    /// ring overflow like every GUI→engine push).
+    pub drum_chain_mask: u8,
     pub drum_metronome: bool,
     /// Previous sequencer step (downbeat-flash edge detection)
     pub drum_prev_step: u8,
@@ -463,9 +545,10 @@ pub struct App {
     pub midi_seq_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// Result of an async file picker (zenity/kdialog subprocess). None = no pending pick.
     pub midi_seq_file_pick: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
-    // Undo/redo for patch parameter editing
-    pub undo_stack: std::collections::VecDeque<std::collections::BTreeMap<String, f32>>,
-    pub redo_stack: Vec<std::collections::BTreeMap<String, f32>>,
+    // Undo/redo (#31): UNIFIED per-part snapshots — patch parameter editing
+    // AND live part actions (mute/pan/transpose/patch click) in one stack.
+    pub undo_stack: std::collections::VecDeque<PartUndoSnapshot>,
+    pub redo_stack: Vec<PartUndoSnapshot>,
     // Audio device disconnect detection + reconnect
     pub audio_disconnected: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Device name the current stream was built on (TECHDEBT #18). `None` =
@@ -654,6 +737,10 @@ impl eframe::App for App {
         // Sync drum play/rec state from engine (for MIDI-triggered changes)
         self.drum_playing = self.drum_play_atom.load(Ordering::Relaxed) != 0;
         self.drum_recording = self.drum_rec_atom.load(Ordering::Relaxed) != 0;
+        // Pattern mirror (#32 Phase 5): the atom is the single source of
+        // truth — a queued switch applies at the boundary, and chain switches
+        // happen in the engine, so the GUI never assigns this field directly.
+        self.drum_current_pattern = self.drum_pattern_atom.load(Ordering::Relaxed);
         // Beat-1 flash: the step atom shows the NEXT step, so step 0 has just
         // sounded when the atom transitions 0 -> 1 while playing.
         let step_now = self.drum_step_atom.load(Ordering::Relaxed);
@@ -1195,28 +1282,32 @@ impl eframe::App for App {
         // main field reflow instead of being overlapped. Колонки — ui.columns:
         // allocate_ui в horizontal сворачивает высоту и разваливает раскладку,
         // а ScrollArea без явных id_salt даёт коллизии ID.
-        egui::TopBottomPanel::bottom("drum_seq_panel")
-            .resizable(true)
-            .default_height(420.0)
-            .height_range(240.0..=760.0)
-            .show(ctx, |ui| {
-                ui.columns(2, |cols| {
-                    // ScrollArea::both: вертикальный скролл НЕ режет контент по
-                    // горизонтали — сетка драмов вылезала под колонку лупера.
-                    // now: контент клипается по ширине колонки, избыток —
-                    // горизонтальный скролл, а не наложение.
-                    egui::ScrollArea::both().auto_shrink(false)
-                        .id_salt("dock_drums_scroll")
-                        .show(&mut cols[0], |ui| {
-                            self.draw_drum_seq_docked(ui);
-                        });
-                    egui::ScrollArea::both().auto_shrink(false)
-                        .id_salt("dock_looper_scroll")
-                        .show(&mut cols[1], |ui| {
-                            self.draw_looper(ui);
-                        });
+        // #30: флаг dock_bottom_unit исключает одновременный рендер дока и
+        // вкладки; при off юнит целиком живёт на вкладке Drums (ниже).
+        if self.config.ui.dock_bottom_unit {
+            egui::TopBottomPanel::bottom("drum_seq_panel")
+                .resizable(true)
+                .default_height(420.0)
+                .height_range(240.0..=760.0)
+                .show(ctx, |ui| {
+                    ui.columns(2, |cols| {
+                        // ScrollArea::both: вертикальный скролл НЕ режет контент по
+                        // горизонтали — сетка драмов вылезала под колонку лупера.
+                        // now: контент клипается по ширине колонки, избыток —
+                        // горизонтальный скролл, а не наложение.
+                        egui::ScrollArea::both().auto_shrink(false)
+                            .id_salt("dock_drums_scroll")
+                            .show(&mut cols[0], |ui| {
+                                self.draw_drum_seq_docked(ui);
+                            });
+                        egui::ScrollArea::both().auto_shrink(false)
+                            .id_salt("dock_looper_scroll")
+                            .show(&mut cols[1], |ui| {
+                                self.draw_looper(ui);
+                            });
+                    });
                 });
-            });
+        }
 
         // Settings window
         if self.show_settings {
@@ -1282,9 +1373,29 @@ impl eframe::App for App {
                     self.draw_midi_seq(ui);
                 });
             } else if self.show_drums {
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                    self.draw_drum_kit_controls(ui);
-                });
+                if self.config.ui.dock_bottom_unit {
+                    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                        self.draw_drum_kit_controls(ui);
+                    });
+                } else {
+                    // #30, dock off: юнит ЦЕЛИКОМ на вкладке Drums — те же
+                    // колонки, что в доке (drums-юнит слева, лупер справа),
+                    // но в central. Рисуем через тот же код.
+                    ui.columns(2, |cols| {
+                        egui::ScrollArea::both().auto_shrink(false)
+                            .id_salt("tab_drums_scroll")
+                            .show(&mut cols[0], |ui| {
+                                self.draw_drum_seq_docked(ui);
+                                ui.add_space(theme::SP_MD);
+                                self.draw_drum_kit_controls(ui);
+                            });
+                        egui::ScrollArea::both().auto_shrink(false)
+                            .id_salt("tab_looper_scroll")
+                            .show(&mut cols[1], |ui| {
+                                self.draw_looper(ui);
+                            });
+                    });
+                }
             } else {
                 // Лупер переехал в единую docked-панель (#30); здесь остаётся
                 // питч-секвенсор и параметры активной части. ScrollArea как в
@@ -1403,12 +1514,17 @@ impl App {
         } else {
             format!("Patch — Part {layer_label}")
         };
-        let win = egui::Window::new("Instrument Browser")
+        let mut win = egui::Window::new("Instrument Browser")
             .open(&mut win_open)
             .resizable(true)
             .default_width(400.0)
-            .default_height(540.0)
-            .show(ctx, |ui| {
+            .default_height(540.0);
+        // #34: restore the position saved in a previous session (within a
+        // session egui remembers drags itself, keyed by the constant title).
+        if let Some([x, y]) = self.config.ui.inst_browser_pos {
+            win = win.default_pos(egui::pos2(x, y));
+        }
+        let win = win.show(ctx, |ui| {
             ui.label(egui::RichText::new(title).strong());
             // (#38) фикс-минимальная ширина: длинные строки поиска/результатов
             // не распирают окно
@@ -1569,6 +1685,13 @@ impl App {
         });
 
         // ── Post-closure handling (after .show, reads locals + modal) ────
+        // #34: запоминаем позицию КАЖДЫЙ кадр, пока окно открыто — надёжнее,
+        // чем хук «при закрытии»: drag + quit позицию не теряет. egui 0.31:
+        // `Window::show` → Option<InnerResponse>; позиция = inner.response.rect.
+        if let Some(inner) = &win {
+            let min = inner.response.rect.min;
+            self.config.ui.inst_browser_pos = Some([min.x, min.y]);
+        }
         // Зажим индекса: список мог пересобраться (фильтр/смена парта)
         let flat_len = flat.len();
         if self.inst_browser_index >= flat_len {
@@ -1597,6 +1720,7 @@ impl App {
             // Применили и играем дальше — окно не закрываем (фидбек 2026-11-01)
         }
         if let Some(idx) = picked_patch {
+            self.push_undo_snapshot_for(part); // #31: снимок ДО применения патча
             let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
             self.parts[part].patch_idx = idx;
             self.load_edited_params(part);
@@ -1609,6 +1733,8 @@ impl App {
         }
         if close {
             self.inst_browser_part = None;
+            // #34: позиция уже в config.ui — persisted вместе с остальным.
+            self.save_global_to_config();
         }
     }
 
@@ -1906,38 +2032,60 @@ impl App {
     /// Maximum undo depth for patch parameter editing.
     const MAX_UNDO: usize = 50;
 
-    /// Push a snapshot of the active part's edited_params onto the undo stack.
+    /// Push a snapshot of the active part's live state onto the undo stack.
     /// Safe to call multiple times — only pushes if state differs from top of stack.
     pub(super) fn push_undo_snapshot(&mut self) {
-        let current = &self.parts[self.active_part].edited_params;
-        if self.undo_stack.back() == Some(current) {
-            return; // no change since last snapshot
-        }
-        self.undo_stack.push_back(current.clone());
-        self.redo_stack.clear();
-        if self.undo_stack.len() > Self::MAX_UNDO {
-            self.undo_stack.pop_front();
-        }
+        let part = self.active_part;
+        self.push_undo_snapshot_for(part);
+    }
+
+    /// Same, for an ARBITRARY part: row widgets (mute/pan/transpose) and the
+    /// pad console act on parts that are not the active one (#31).
+    pub(super) fn push_undo_snapshot_for(&mut self, part: usize) {
+        let snap = PartUndoSnapshot::capture(part, &self.parts[part]);
+        part_undo_push(&mut self.undo_stack, &mut self.redo_stack, snap);
     }
 
     fn undo(&mut self) {
-        let part = self.active_part;
-        if let Some(snapshot) = self.undo_stack.pop_back() {
-            self.redo_stack.push(self.parts[part].edited_params.clone());
-            self.parts[part].edited_params = snapshot;
-            self.send_edited_params(part);
+        // The redo entry must hold the current state of the SAME part the
+        // popped snapshot belongs to — the stack is shared across parts.
+        let Some(top_part) = self.undo_stack.back().map(|s| s.part) else { return };
+        let current = PartUndoSnapshot::capture(top_part, &self.parts[top_part]);
+        if let Some(snapshot) = part_undo_step(&mut self.undo_stack, &mut self.redo_stack, current) {
+            self.restore_part_snapshot(snapshot);
             self.show_toast("Undo", ToastKind::Info);
         }
     }
 
     fn redo(&mut self) {
-        let part = self.active_part;
-        if let Some(snapshot) = self.redo_stack.pop() {
-            self.undo_stack.push_back(self.parts[part].edited_params.clone());
-            self.parts[part].edited_params = snapshot;
-            self.send_edited_params(part);
+        let Some(top_part) = self.redo_stack.last().map(|s| s.part) else { return };
+        let current = PartUndoSnapshot::capture(top_part, &self.parts[top_part]);
+        if let Some(snapshot) = part_redo_step(&mut self.undo_stack, &mut self.redo_stack, current) {
+            self.restore_part_snapshot(snapshot);
             self.show_toast("Redo", ToastKind::Info);
         }
+    }
+
+    /// Apply a popped snapshot to its part and re-sync everything downstream:
+    /// engine control events are inlined here — no mute/pan/transpose helper
+    /// exists to call (#31 review) — plus patch params, persistence and the
+    /// active-part switch so follow-up edits land on the restored part.
+    fn restore_part_snapshot(&mut self, s: PartUndoSnapshot) {
+        let PartUndoSnapshot { part, edited_params, patch_idx, mute, pan, transpose } = s;
+        {
+            let p = &mut self.parts[part];
+            p.edited_params = edited_params;
+            p.patch_idx = patch_idx;
+            p.mute = mute;
+            p.pan = pan;
+            p.transpose = transpose;
+        }
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: transpose });
+        self.send_edited_params(part);
+        self.persist_parts_state();
+        self.set_active_part(part);
     }
 
     fn send_edited_params(&mut self, part: usize) {
@@ -2312,9 +2460,10 @@ impl App {
             }
             led_console::Action::ToggleMute(i) => {
                 let part = self.mute_window + i; // i уже 0-based (slot-1 из консоли) // slot -> real part
-                if let Some(p) = self.parts.get_mut(part) {
-                    let mute = !p.mute;
-                    p.mute = mute;
+                let mute = self.parts.get(part).map(|p| !p.mute);
+                if let Some(mute) = mute {
+                    self.push_undo_snapshot_for(part); // #31: снимок ДО изменения
+                    self.parts[part].mute = mute;
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::SetPartMute { part, mute });
                     self.persist_parts_state();
                 }
@@ -2523,4 +2672,101 @@ impl App {
         }
     }
 
+}
+
+/// TC-C unit tests (#31): the pure stack ops behind the unified
+/// PartUndoSnapshot undo — mute/pan/transpose round-trips and the
+/// no-duplicate guard. App glue (restore + engine events) is a thin
+/// wrapper over exactly these functions.
+#[cfg(test)]
+mod part_undo_tests {
+    use super::*;
+
+    fn snap(mute: bool, pan: f32, transpose: i8) -> PartUndoSnapshot {
+        PartUndoSnapshot {
+            part: 0,
+            edited_params: Default::default(),
+            patch_idx: 0,
+            mute,
+            pan,
+            transpose,
+        }
+    }
+
+    /// TC-C1: mute → Ctrl+Z → unmuted. The snapshot taken BEFORE the
+    /// toggle restores the previous state; the current (muted) state
+    /// lands on the redo stack for re-application.
+    #[test]
+    fn mute_then_undo_restores() {
+        let mut undo = std::collections::VecDeque::new();
+        let mut redo = Vec::new();
+        let mut mute = false;
+        part_undo_push(&mut undo, &mut redo, snap(mute, 0.0, 0)); // до изменения
+        mute = true;
+        let restored = part_undo_step(&mut undo, &mut redo, snap(mute, 0.0, 0))
+            .expect("undo must pop the pre-change snapshot");
+        mute = restored.mute;
+        assert!(!mute, "undo must restore unmute");
+        assert_eq!(redo.len(), 1, "muted state preserved for redo");
+        // Redo re-applies the mute (повторное применение).
+        let redone = part_redo_step(&mut undo, &mut redo, snap(mute, 0.0, 0))
+            .expect("redo must pop the muted state");
+        assert!(redone.mute);
+    }
+
+    /// TC-C2: pan/transpose round-trip — undo restores the pre-drag value,
+    /// redo returns the dragged one.
+    #[test]
+    fn pan_transpose_undo_redo() {
+        let mut undo = std::collections::VecDeque::new();
+        let mut redo = Vec::new();
+        let (mut pan, mut tr) = (0.0_f32, 0_i8);
+        part_undo_push(&mut undo, &mut redo, snap(false, pan, tr)); // до drag'а
+        pan = -0.5;
+        tr = -3;
+        let restored = part_undo_step(&mut undo, &mut redo, snap(false, pan, tr)).unwrap();
+        assert_eq!(restored.pan, 0.0, "undo restores pan");
+        assert_eq!(restored.transpose, 0, "undo restores transpose");
+        let redone =
+            part_redo_step(&mut undo, &mut redo, snap(false, restored.pan, restored.transpose))
+                .unwrap();
+        assert_eq!(redone.pan, -0.5);
+        assert_eq!(redone.transpose, -3);
+    }
+
+    /// TC-C3: identical consecutive snapshots are not pushed (per-part
+    /// no-duplicate guard across ALL fields), a real change is.
+    #[test]
+    fn duplicates_skipped() {
+        let mut undo = std::collections::VecDeque::new();
+        let mut redo = Vec::new();
+        part_undo_push(&mut undo, &mut redo, snap(false, 0.0, 0));
+        part_undo_push(&mut undo, &mut redo, snap(false, 0.0, 0));
+        assert_eq!(undo.len(), 1, "duplicate of stack top must be skipped");
+        part_undo_push(&mut undo, &mut redo, snap(false, 0.25, 0));
+        assert_eq!(undo.len(), 2, "a real change must be pushed");
+        // Same fields but a DIFFERENT part is not a duplicate.
+        let mut other = snap(false, 0.25, 0);
+        other.part = 1;
+        part_undo_push(&mut undo, &mut redo, other);
+        assert_eq!(undo.len(), 3);
+    }
+
+    /// Negative matrix: undo on an empty stack is a no-op; repeated Ctrl+Z
+    /// walks down the stack entry by entry.
+    #[test]
+    fn empty_stack_noop_and_repeated_undo() {
+        let mut undo = std::collections::VecDeque::new();
+        let mut redo = Vec::new();
+        assert!(part_undo_step(&mut undo, &mut redo, snap(false, 0.0, 0)).is_none());
+        assert!(redo.is_empty(), "no-op must not touch redo");
+
+        part_undo_push(&mut undo, &mut redo, snap(false, 0.0, 0));
+        part_undo_push(&mut undo, &mut redo, snap(false, 0.1, 0));
+        let first = part_undo_step(&mut undo, &mut redo, snap(false, 0.2, 0)).unwrap();
+        assert_eq!(first.pan, 0.1);
+        let second = part_undo_step(&mut undo, &mut redo, snap(false, 0.1, 0)).unwrap();
+        assert_eq!(second.pan, 0.0, "second Ctrl+Z walks to the next entry");
+        assert!(part_undo_step(&mut undo, &mut redo, snap(false, 0.0, 0)).is_none());
+    }
 }

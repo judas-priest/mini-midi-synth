@@ -112,6 +112,8 @@ struct CommonInit {
     #[cfg(feature = "gui")]
     drum_rec_atom: Arc<AtomicU8>,
     #[cfg(feature = "gui")]
+    drum_pattern_atom: Arc<AtomicU8>,
+    #[cfg(feature = "gui")]
     drum_undo_atom: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(feature = "gui")]
     drum_redo_atom: Arc<std::sync::atomic::AtomicBool>,
@@ -220,6 +222,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     let drum_play_atom = engine.drum_engine.play_atom();
     #[cfg(feature = "gui")]
     let drum_rec_atom = engine.drum_engine.rec_atom();
+    #[cfg(feature = "gui")]
+    let drum_pattern_atom = engine.drum_engine.pattern_atom();
     #[cfg(feature = "gui")]
     let drum_undo_atom = engine.drum_engine.undo_atom();
     #[cfg(feature = "gui")]
@@ -350,6 +354,8 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         drum_play_atom,
         #[cfg(feature = "gui")]
         drum_rec_atom,
+        #[cfg(feature = "gui")]
+        drum_pattern_atom,
         drum_undo_atom,
         #[cfg(feature = "gui")]
         drum_redo_atom,
@@ -803,6 +809,9 @@ pub fn run_gui(
         drum_step_atom: c.drum_step_atom,
         drum_play_atom: c.drum_play_atom,
         drum_rec_atom: c.drum_rec_atom,
+        drum_pattern_atom: c.drum_pattern_atom,
+        drum_chain_on: false,
+        drum_chain_mask: 0,
         drum_metronome: c.config.ui.drum_metronome,
         drum_prev_step: 0,
         drum_beat_flash: None,

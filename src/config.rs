@@ -176,6 +176,14 @@ pub struct UiSettings {
     /// (#44) Top-bar telemetry (host/SR/buf/dsp load, drops/errs). Hidden by default.
     #[serde(default)]
     pub show_telemetry: bool,
+    /// (#30) Drum sequencer + looper unit docked to the window bottom (true,
+    /// as before) or drawn as a whole on the Drums tab (false).
+    #[serde(default = "default_true")]
+    pub dock_bottom_unit: bool,
+    /// (#34) Last top-left corner of the Instrument Browser window; None =
+    /// egui default. Written every frame while the window is open.
+    #[serde(default)]
+    pub inst_browser_pos: Option<[f32; 2]>,
 }
 
 fn default_led_companion_cmd() -> String { "~/Projects/smk37_config/pad_console.py".to_string() }
@@ -244,6 +252,8 @@ impl Default for Config {
             parts_state: Vec::new(),
                 keybinds: std::collections::HashMap::new(),
                 show_telemetry: false,
+                dock_bottom_unit: true,
+                inst_browser_pos: None,
             },
         }
     }

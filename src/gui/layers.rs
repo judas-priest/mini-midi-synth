@@ -346,6 +346,7 @@ impl App {
             // Mute / Root — фиксированные ширины: колонки всех строк совпадают
             let mut m = self.parts[i].mute;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut m, "Mute")).on_hover_text("Mute this part").changed() {
+                self.push_undo_snapshot_for(i); // #31: снимок ДО изменения
                 self.parts[i].mute = m;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: m });
                 self.persist_parts_state();
@@ -388,7 +389,13 @@ impl App {
             let mut pan = self.parts[i].pan;
             let pan_r = ui.add_sized([90.0, 22.0], egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false))
                 .on_hover_text(format!("Pan: {pan:+.2} — double-click to reset"));
-            if pan_r.double_clicked() { pan = 0.0; }
+            // #31: снимок ДО изменения — один на drag (drag_started), до
+            // clamp'а у колеса и до сброса двойным кликом.
+            if pan_r.drag_started() { self.push_undo_snapshot_for(i); }
+            if pan_r.double_clicked() {
+                self.push_undo_snapshot_for(i);
+                pan = 0.0;
+            }
             if pan_r.changed() || pan_r.double_clicked() {
                 self.parts[i].pan = pan;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
@@ -399,6 +406,7 @@ impl App {
             if pan_r.hovered() {
                 let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
                 if dy != 0.0 {
+                    self.push_undo_snapshot_for(i); // #31: до clamp'а
                     pan = (pan + dy * 0.0025).clamp(-1.0, 1.0);
                     ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
                     self.parts[i].pan = pan;
@@ -412,7 +420,13 @@ impl App {
             let mut tr = self.parts[i].transpose as i32;
             let tr_r = ui.add_sized([120.0, 22.0], egui::Slider::new(&mut tr, -24..=24).show_value(false))
                 .on_hover_text(format!("Transpose: {tr:+} st — double-click to reset"));
-            if tr_r.double_clicked() { tr = 0; }
+            // #31: оба пути слайдера — drag_started и до clamp'а у колеса,
+            // плюс сброс двойным кликом.
+            if tr_r.drag_started() { self.push_undo_snapshot_for(i); }
+            if tr_r.double_clicked() {
+                self.push_undo_snapshot_for(i);
+                tr = 0;
+            }
             if tr_r.changed() || tr_r.double_clicked() {
                 self.parts[i].transpose = tr as i8;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
@@ -422,6 +436,7 @@ impl App {
             if tr_r.hovered() {
                 let dy = ui.ctx().input(|i| i.smooth_scroll_delta.y);
                 if dy != 0.0 {
+                    self.push_undo_snapshot_for(i); // #31: до clamp'а
                     tr = (tr + (dy * 0.05).round() as i32).clamp(-24, 24);
                     ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
                     self.parts[i].transpose = tr as i8;
