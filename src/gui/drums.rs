@@ -650,12 +650,13 @@ impl App {
                 kit_names[(sel - 30) as usize].clone()
             } else { format!("note {}", sel) };
             let mut win_open = true;
-            let win = egui::Window::new(format!("Pad {}", p + 1))
-                .open(&mut win_open)
-                .resizable(false)
-                .default_width(320.0)
-                .show(ctx, |ui| {
-                ui.strong(format!("Pad {}", p + 1));
+            // Обёртка modal::ModalWindow: константный Id («pad_remap_single») —
+            // позиция окна помнится при смене пэда, заголовок динамический.
+            let _resp = super::modal::ModalWindow::new(
+                ctx, "pad_remap_single", format!("Pad {}", p + 1), &mut win_open, 320.0,
+            )
+            .resizable(false)
+            .show(|ui| {
                 ui.label("Instrument:");
                 ui.add_space(theme::SP_MD);
                 egui::ComboBox::from_id_salt("remap_instrument")
@@ -677,10 +678,6 @@ impl App {
                     self.push_drum_pad_vel();
                     self.save_drum_pad_vel();
                 }
-                ui.add_space(theme::SP_MD);
-                if ui.button("Close").clicked() {
-                    self.remap_pad = None;
-                }
             });
             if sel != self.drum_remap[idx] {
                 // detach any other pad mapped to this instrument, then attach this pad
@@ -691,7 +688,7 @@ impl App {
                 self.push_drum_remap();
                 self.save_drum_remap();
             }
-            if !win_open || win.is_none() {
+            if !win_open {
                 self.remap_pad = None;
             }
         }
