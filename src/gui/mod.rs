@@ -1470,6 +1470,9 @@ impl App {
         // ТЕКУЩИЙ движок парта: он задаёт только порядок секций (своя — первой)
         // и источник seed-курсора; переключение движка следует за выбором.
         let is_sf2 = self.parts[part].sf2_mode;
+        // Свежее состояние движка парта: после тоггла в том же кадре порядок
+        // секций и seed следуют за НОВЫМ движком
+        let engine_now = self.parts[part].sf2_mode;
         // Зона/номер вместо LAYER_NAMES (8 имён): парты зоны B (8-15) давали «?»
         let layer_label = if part < PARTS_PER_ZONE {
             format!("A{}", part + 1)
@@ -1587,7 +1590,7 @@ impl App {
                 .show(ui, |ui| {
                     // Оба дерева всегда видны; секция ТЕКУЩЕГО движка парта —
                     // первой (план: DSP сверху по умолчанию, osc-парт).
-                    let sections = if is_sf2 { [true, false] } else { [false, true] };
+                    let sections = if engine_now { [true, false] } else { [false, true] };
                     for (si, section_sf2) in sections.into_iter().enumerate() {
                         if si > 0 {
                             ui.add_space(theme::SP_XS);
@@ -1601,7 +1604,7 @@ impl App {
                         use crate::synth::sampler::GM_PROGRAM_NAMES;
                         // Заголовок секции; маркер — у текущего движка парта
                         // (U+26AB: шрифт без U+25CF — см. memory glyph-грабли)
-                        let gm_hdr = if section_sf2 == is_sf2 {
+                        let gm_hdr = if section_sf2 == engine_now {
                             "\u{26AB} SF2 — GM-инструменты"
                         } else {
                             "SF2 — GM-инструменты"
@@ -1649,7 +1652,7 @@ impl App {
                                     // Seed курсора: первая строка секции текущего
                                     // движка (не selected-строка — она может быть
                                     // свёрнута/скрыта; фидбек 2026-11-02)
-                                    if !self.inst_browser_seeded && is_sf2 {
+                                    if !self.inst_browser_seeded && engine_now {
                                         self.inst_browser_index = flat.len() - 1;
                                         self.inst_browser_seeded = true;
                                     }
@@ -1686,7 +1689,7 @@ impl App {
                     } else {
                         // ── DSP patch tree (перенос mod.rs:1216-1271: клик пишет
                         //    picked_patch) ──
-                        let dsp_hdr = if section_sf2 == is_sf2 {
+                        let dsp_hdr = if section_sf2 == engine_now {
                             "\u{26AB} DSP — патчи"
                         } else {
                             "DSP — патчи"
@@ -1734,7 +1737,7 @@ impl App {
                             // Seed курсора: первая строка секции текущего
                             // движка (не selected-строка — она может быть
                             // свёрнута/скрыта; фидбек 2026-11-02)
-                            if !self.inst_browser_seeded && !is_sf2 {
+                            if !self.inst_browser_seeded && !engine_now {
                                 self.inst_browser_index = flat.len() - 1;
                                 self.inst_browser_seeded = true;
                             }
