@@ -3,6 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 anchor-checked: 2026-11-03 (база = ~/Projects/smk37_config master f4966db + незакоммиченный рабочий фикс pad_console.py; spec = TECHDEBT #17 в mini_midi_synth, PR #66)
+status: executed 2026-11-03 (smk37_config: 1614aa3, 631841b, d6df0f0, f943e0f, 3906fc9, e57fcd5 + полиш; экран-верификация юзером «все отлично» 2026-11-03)
 
 **ВАЖНО — другой репозиторий.** Код живёт в `~/Projects/smk37_config`
 (отдельный git-репо, branch master). План лежит в mini_midi_synth, но ВСЕ
@@ -84,7 +85,7 @@ backoff/bounce/hint) и классификация ошибок Connect. Экр�
 **Files:** Modify: `~/Projects/smk37_config/pad_console.py` (уже правлен в
 рабочем дереве — probe.settimeout(1) + listen(16); см. git diff)
 
-- [ ] Step 1: коммит
+- [x] Step 1: коммит
 
 ```bash
 cd ~/Projects/smk37_config
@@ -100,7 +101,7 @@ git commit -m "fix: probe timeout 1s + accept backlog 16 + timeout-tolerant guar
 - Create: `~/Projects/smk37_config/tests/__init__.py` (пустой, чтобы unittest
   находил пакет)
 
-- [ ] Step 1: падающий тест
+- [x] Step 1: падающий тест
 
 ```python
 # tests/test_reconnect.py
@@ -174,7 +175,7 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] Step 2: прогнать, убедиться в падении (AttributeError: ReconnectPolicy)
+- [x] Step 2: прогнать, убедиться в падении (AttributeError: ReconnectPolicy)
 
 ```bash
 cd ~/Projects/smk37_config && python3 -m unittest tests.test_reconnect -v
@@ -182,7 +183,7 @@ cd ~/Projects/smk37_config && python3 -m unittest tests.test_reconnect -v
 
 Expected: ImportError/AttributeError — класса нет.
 
-- [ ] Step 3: минимальная реализация — в `pad_console.py` после `import socket, os, sys, time` (:15):
+- [x] Step 3: минимальная реализация — в `pad_console.py` после `import socket, os, sys, time` (:15):
 
 ```python
 class ReconnectPolicy:
@@ -234,7 +235,7 @@ class ReconnectPolicy:
         return "wait"
 ```
 
-- [ ] Step 4: прогнать — 7 тестов зелёные
+- [x] Step 4: прогнать — 7 тестов зелёные
 
 ```bash
 cd ~/Projects/smk37_config && python3 -m unittest tests.test_reconnect -v
@@ -243,7 +244,7 @@ cd ~/Projects/smk37_config && python3 -m unittest tests.test_reconnect -v
 Expected: `OK` (7 tests). Замечание: импорт pad_console исполняет
 `DBusGMainLoop(set_as_default=True)` — на машине с dbus это безопасно.
 
-- [ ] Step 5: коммит
+- [x] Step 5: коммит
 
 ```bash
 cd ~/Projects/smk37_config && git add pad_console.py tests/
@@ -255,14 +256,14 @@ git commit -m "feat: ReconnectPolicy — exponential backoff + bounce/hint decis
 **Files:** Modify: `~/Projects/smk37_config/pad_console.py` (новые функции перед
 `ble_connect`; `import threading` + `from gi.repository import GLib` в шапке)
 
-- [ ] Step 1: импорты в шапке (после `import socket, os, sys, time`):
+- [x] Step 1: импорты в шапке (после `import socket, os, sys, time`):
 
 ```python
 import threading
 from gi.repository import GLib
 ```
 
-- [ ] Step 2: хелперы перед `def ble_connect`:
+- [x] Step 2: хелперы перед `def ble_connect`:
 
 ```python
 def device_iface(bus):
@@ -308,7 +309,7 @@ def start_connected_watch():
     return evt
 ```
 
-- [ ] Step 3: smoke — скрипт стартует, watch-поток жив
+- [x] Step 3: smoke — скрипт стартует, watch-поток жив
 
 ```bash
 cd ~/Projects/smk37_config && python3 -c "
@@ -325,7 +326,7 @@ Expected: `watch alive: True`, `connected_now: True` без трейсбеков
 подключена; если False при подключённой клаве — НЕ глотать, разбираться:
 правильность Properties.Get критична для bounce/hint).
 
-- [ ] Step 4: коммит
+- [x] Step 4: коммит
 
 ```bash
 cd ~/Projects/smk37_config && git add pad_console.py
@@ -337,7 +338,7 @@ git commit -m "feat: Device1.PropertiesChanged watch on private bus — instant 
 **Files:** Modify: `~/Projects/smk37_config/pad_console.py` — заменить
 `ble_connect` (:48-59) и вызов в main (:89)
 
-- [ ] Step 1: добавить bounce перед ble_connect:
+- [x] Step 1: добавить bounce перед ble_connect:
 
 ```python
 def bounce_device(bus):
@@ -356,7 +357,7 @@ def bounce_device(bus):
             print("connect failed:", e)
 ```
 
-- [ ] Step 2: заменить ble_connect целиком:
+- [x] Step 2: заменить ble_connect целиком:
 
 ```python
 def ble_connect(bus, connected_evt):
@@ -402,7 +403,7 @@ def ble_connect(bus, connected_evt):
 явный Connect() вместо ожидания чужой инициативы; bounce/hint по политике.
 `last = [None] * 16` в main остаётся — сброс кэша цветов при новом iface.)
 
-- [ ] Step 3: в main (:88-89) — старт watch и передача события:
+- [x] Step 3: в main (:88-89) — старт watch и передача события:
 
 ```python
     connected_evt = start_connected_watch()
@@ -410,7 +411,7 @@ def ble_connect(bus, connected_evt):
         iface = ble_connect(bus, connected_evt)
 ```
 
-- [ ] Step 4: selftest + юнит-тесты зелёные
+- [x] Step 4: selftest + юнит-тесты зелёные
 
 ```bash
 cd ~/Projects/smk37_config && python3 pad_console.py --selftest && python3 -m unittest tests.test_reconnect -v
@@ -418,7 +419,7 @@ cd ~/Projects/smk37_config && python3 pad_console.py --selftest && python3 -m un
 
 Expected: `selftest ok`, `OK (7 tests)`.
 
-- [ ] Step 5: коммит
+- [x] Step 5: коммит
 
 ```bash
 cd ~/Projects/smk37_config && git add pad_console.py
@@ -431,7 +432,7 @@ git commit -m "feat: reconnect loop — explicit Connect, exponential backoff, h
 `led_socket_failed_at.is_some()` + backoff 5s (gui/mod.rs:791-830) — новый
 компаньон подхватится сам после перезапуска старого.
 
-- [ ] Step 1: убить старый компаньон, убедиться что синт заспавнит новый
+- [x] Step 1: убить старый компаньон, убедиться что синт заспавнит новый
 
 ```bash
 pkill -f pad_console.py; sleep 8; pgrep -af pad_console.py
@@ -444,15 +445,15 @@ Expected: процесс появился (синт переспавнил) ли
 python3 ~/Projects/smk37_config/pad_console.py &
 ```
 
-- [ ] Step 2: юзер рисует на пэдах — LED красятся как раньше.
+- [x] Step 2: юзер рисует на пэдах — LED красятся как раньше.
 
 ### Task 5: Ручная верификация (экран, из требования)
 
-- [ ] BT клавы OFF → LED замирают, в логе компаньона backoff-цикл, синт работает
-- [ ] BT клавы ON → перекраска в течение ~1-2 с (DBus-watch пуш, не 3 с поллинг)
-- [ ] быстрый OFF/ON x3 подряд — восстановление каждый раз, без дублей компаньона
-- [ ] (если воспроизводим) полумёртвый линк: лог `link half-dead -> bounce` и восстановление
-- [ ] цветов/гейта без изменений: прежние паттерны, 60 ms pacing не тронут
+- [x] BT клавы OFF → LED замирают, в логе компаньона backoff-цикл, синт работает
+- [x] BT клавы ON → перекраска в течение ~1-2 с (DBus-watch пуш, не 3 с поллинг)
+- [x] быстрый OFF/ON x3 подряд — восстановление каждый раз, без дублей компаньона
+- [x] (если воспроизводим) полумёртвый линк: лог `link half-dead -> bounce` и восстановление
+- [x] цветов/гейта без изменений: прежние паттерны, 60 ms pacing не тронут
 
 ## Out of scope
 

@@ -311,7 +311,7 @@ child'а; дубликаты разруливает probe-guard в pad_console.p
   механизм socket-клиента как триггер респавна.
 - Не в v1: сейчас запуск вручную, это документировано.
 
-## 17. LED автовосстановление — PARTIAL (аудит: наивный reconnect-цикл работает; DBus-watch/backoff из спеки — нет, помечено «позже»)
+## 17. LED автовосстановление — ГОТОВО (2026-11-03, план docs/superpowers/plans/2026-11-03-led-reconnect.md; компаньон pad_console.py в smk37_config: DBus-watch Device1.Connected на приватном bus, экспоненциальный backoff с ресетом, Disconnect+Connect bounce полумёртвого линка, stale-cache hint, ReconnectPolicy с 9 юнит-тестами; экран-верификация юзером «все отлично»). Rust-сайд не менялся.
 Сценарии разрыва (2026-10-29, заявка пользователя): отвалился BT клавиатуры (GATT
 для компаньона и/или BLE-MIDI для синта); отвалился BT/USB аудио-синта (движок
 пересобирается, ControlEvent-кольца и console_rx пересоздаются). Требуется:
