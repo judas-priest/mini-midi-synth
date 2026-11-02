@@ -284,21 +284,8 @@ impl App {
                 self.seq_target_atom.store(1, Ordering::Relaxed);
             }
 
-            // Кнопка движка: открывает браузер — движок следует за выбором звука
-            // (переключение переехало в post-closure браузера, layers-тоггл удалён)
+            // Instrument select (кнопка открывает браузер; тоггл движка — в браузере)
             let sf2 = self.parts[i].sf2_mode;
-            let eng_label = if sf2 { "SF2" } else { "DSP" };
-            if ui.add_sized([44.0, 22.0], egui::Button::new(eng_label).small())
-                .on_hover_text(format!("{} — open sound browser", if sf2 { "SF2 engine" } else { "DSP engine" }))
-                .clicked()
-            {
-                self.preset_search.clear();
-                self.inst_browser_part = Some(i);
-                self.inst_browser_scroll = true; // (#37) открытие центрирует выбор
-                self.inst_browser_seeded = false; // курсор пересеется на текущий звук
-            }
-
-            // Instrument select
             if sf2 {
                 if self.sf2_keys_soundfont.is_some() {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
