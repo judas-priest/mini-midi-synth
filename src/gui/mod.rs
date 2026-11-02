@@ -1585,7 +1585,7 @@ impl App {
                             if searching && matches.is_empty() { continue; }
                             let is_collapsed =
                                 !searching && self.collapsed_categories.contains(cat_name);
-                            let arrow = if is_collapsed { "\u{25B6} " } else { "" }; // ▼ отсутствует в шрифте (тофу) — раскрытая категория без стрелки
+                            let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
                             if !searching {
                                 if ui.selectable_label(false, format!("{arrow} {cat_name}")).clicked() {
                                     toggled_cat = Some(cat_name.to_string());
@@ -1657,7 +1657,7 @@ impl App {
                                 if cat_idx > 0 && categories[cat_idx - 1].1 == i {
                                     let cat = &categories[cat_idx - 1].0;
                                     let is_collapsed = self.collapsed_categories.contains(cat);
-                                    let arrow = if is_collapsed { "\u{25B6} " } else { "" }; // ▼ отсутствует в шрифте (тофу) — раскрытая категория без стрелки
+                                    let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
                                     if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
                                         toggled_cat = Some(cat.clone());
                                     }
