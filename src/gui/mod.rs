@@ -135,6 +135,19 @@ pub struct Toast {
     pub created: Instant,
 }
 
+/// GUI-зеркало macro_vals из edited_params (источник правды — params,
+/// зеркало синхронизируется при load перфа и undo; #49: без этого
+/// push_full_part_state при audio-reconnect перезаписывал движок stale-миром).
+pub(crate) fn macro_vals_from_params(
+    params: &std::collections::BTreeMap<String, f32>,
+) -> [f32; 8] {
+    let mut out = [0.0f32; 8];
+    for (i, slot) in out.iter_mut().enumerate() {
+        *slot = params.get(&format!("macro_{i}")).copied().unwrap_or(0.0);
+    }
+    out
+}
+
 fn buffer_label(size: u32) -> String {
     if size == 0 { "Default".to_string() } else { format!("{size}") }
 }
@@ -2953,5 +2966,26 @@ mod part_undo_tests {
         let second = part_undo_step(&mut undo, &mut redo, snap(false, 0.1, 0)).unwrap();
         assert_eq!(second.pan, 0.0, "second Ctrl+Z walks to the next entry");
         assert!(part_undo_step(&mut undo, &mut redo, snap(false, 0.0, 0)).is_none());
+    }
+}
+
+#[cfg(test)]
+mod macro_mirror_tests {
+    use super::*;
+
+    #[test]
+    fn tc1_macro_mirror_from_params() {
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("macro_0".to_string(), 0.25);
+        params.insert("macro_3".to_string(), 0.9);
+        params.insert("unrelated".to_string(), 5.0);
+        assert_eq!(
+            macro_vals_from_params(&params),
+            [0.25, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            macro_vals_from_params(&std::collections::BTreeMap::new()),
+            [0.0f32; 8]
+        );
     }
 }
