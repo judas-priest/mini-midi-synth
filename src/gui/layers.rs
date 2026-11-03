@@ -193,9 +193,20 @@ impl App {
             ui.add(egui::TextEdit::singleline(&mut self.perf_name)
                 .desired_width(110.0).hint_text("name"));
             if ui.button("Save").on_hover_text("Save performance").clicked() && !self.perf_name.trim().is_empty() {
-                let parts: Vec<PartConfig> = self.parts.iter().map(|l| {
+                let parts: Vec<PartConfig> = self.parts.iter().enumerate().map(|(i, l)| {
                     let patch_name = self.patches.get(l.patch_idx)
                         .map(|p| p.name.clone()).unwrap_or_default();
+                    if patch_name.is_empty() {
+                        // #49: пустое имя (unwrap_or_default) никогда не
+                        // сматчится при load — сохранение невосстановимо.
+                        // Load-сторона warn-ует только на НЕпустые промахи
+                        // (guard !is_empty — legacy/disabled парты без спама),
+                        // поэтому здесь сообщение самодостаточное
+                        log::warn!(
+                            "perf save '{}': part {} patch_idx {} out of range — saved with empty patch_name",
+                            self.perf_name, i, l.patch_idx
+                        );
+                    }
                     PartConfig {
                         patch_name, enabled: l.enabled, volume: l.volume,
                         key_low: l.min_note, key_high: l.max_note,

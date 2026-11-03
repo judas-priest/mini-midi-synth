@@ -2812,8 +2812,17 @@ impl App {
         for (i, part) in parts.iter().enumerate() {
             if i >= self.parts.len() { break; }
             let patch_idx = self.patches.iter()
-                .position(|p| p.name == part.patch_name)
-                .unwrap_or(0);
+                .position(|p| p.name == part.patch_name);
+            if patch_idx.is_none() && !part.patch_name.is_empty() {
+                // #49: тихий fallback на патч 0 = «партия играет чужое» без
+                // единого следа в логе; поведение сохраняем (патч 0), но
+                // диагностируем
+                log::warn!(
+                    "perf '{}': part {}: patch '{}' not found — falling back to patch 0",
+                    perf.name, i, part.patch_name
+                );
+            }
+            let patch_idx = patch_idx.unwrap_or(0);
             self.parts[i].patch_idx = patch_idx;
             self.parts[i].enabled = part.enabled;
             self.parts[i].volume = part.volume;
