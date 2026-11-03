@@ -80,15 +80,23 @@ macro_vals (главный симптом «после reconnect уезжает�
   приложение не падает, парт играет патч 0 (осознанно); save парта с
   битым patch_idx — warn.
 - TC5 (хвост 1, экран): загрузить перф с сохранёнными макросами — слайдеры
-  макросов показывают сохранённые значения; после undo — значения до правки.
-- TC6 (хвост 3, экран): A → B (патч парта 0) → Ctrl+Z → рестарт → парт 0 = A.
+  макросов показывают сохранённые значения; подвигать макро-слайдер/XY (drag)
+  → Ctrl+Z — откат к значению до жеста (undo-снапшот на drag_started,
+  Task 2 Step 4; без него undo — no-op и пункт бессмыслен).
+- TC6 (хвост 3, экран, регрессионный): A → B (патч парта 0) → Ctrl+Z →
+  ПРОВЕРИТЬ конфиг: `grep last_preset ~/.config/mini_midi_synth/config.json`
+  → "A" (до фикса было "B"). Затем ПЕРЕИМЕНОВАТЬ файл активного перфа в
+  performances/ (иначе рестарт восстанавливает патч ИЗ ПЕРФА, минуя
+  last_preset — фикс ненаблюдаем) → рестарт → парт 0 = A.
 
 ## Negative Matrix
 
-- пустой `macro_names` в PartConfig — skip_serializing_if, загрузка = дефолты
-  Part::new (не пустые строки).
+- пустой `macro_names` в PartConfig — skip_serializing_if, restore
+  регенерирует дефолты «Macro 1..8» (как PartState::new_empty), не пустые строки.
+- macro_names короче 8 из рукописного JSON — безопасно: все чтения через
+  `.get()` (macros.rs:25, 39, 81).
 - xy-индекс ≥8 в битом JSON — clamp `.min(7)` при restore (иначе panic при
-  индексации).
+  прямом индексе `macro_labels[xy_macro_x]`, macros.rs:94/109).
 - перф длиннее 16 партов — существующий guard `if i >= self.parts.len() { break; }`.
 - undo НЕ парта 0 — last_preset не трогается (он зеркалит только parts[0] by design).
 - last_preset указывает на несуществующий патч — существующий `unwrap_or(0)`
@@ -169,10 +177,11 @@ Expected: `test result: ok` (на этом коммите функция ещё 
 git add src/gui/mod.rs && git commit -m "feat: macro_vals_from_params — pure mirror derivation for #49"
 ```
 
-### Task 2: синхронизация зеркала в load и undo + last_preset при undo (хвосты 1+3)
+### Task 2: синхронизация зеркала в load и undo + undo-снапшот макро-драга + last_preset при undo (хвосты 1+3)
 
-**Files:** Modify: `src/gui/mod.rs` — apply_performance (~:2802),
-restore_part_snapshot (~:2259-2275)
+**Files:** Modify: `src/gui/mod.rs` — apply_performance (~:2799),
+restore_part_snapshot (~:2255-2271); `src/gui/macros.rs` — слайдер (~:48),
+XY-пад (~:213)
 
 - [ ] **Step 1: apply_performance** — после строки
   `self.parts[i].edited_params = part.param_overrides.clone();` вставить:
@@ -184,8 +193,9 @@ restore_part_snapshot (~:2259-2275)
             self.parts[i].macro_vals = macro_vals_from_params(&self.parts[i].edited_params);
 ```
 
-- [ ] **Step 2: restore_part_snapshot** — в блоке восстановления поле
-  `macro_vals` дописать после существующих полей:
+- [ ] **Step 2: restore_part_snapshot** — ИТОГОВОЕ СОСТОЯНИЕ блока показано
+  ниже; единственная ДОБАВЛЯЕМАЯ строка — `p.macro_vals = ...` (остальное —
+  существующий код :2256-2264, НЕ дублировать):
 
 ```rust
         let PartUndoSnapshot { part, edited_params, patch_idx, mute, pan, transpose } = s;
@@ -214,15 +224,60 @@ restore_part_snapshot (~:2259-2275)
         }
 ```
 
-- [ ] **Step 4: clippy + тесты**
+- [ ] **Step 4: undo-снапшот на макро-драг** — сейчас макро-панель не пушит
+  undo-снимок ВООБЩЕ (в macros.rs нет push_undo_snapshot*): TC5 «после undo —
+  значения до правки» невыполним (стек пуст → undo no-op). Канон кодбазы —
+  снимок на drag_started (params.rs:299/349/601...); no-duplicate guard
+  уже есть (mod.rs:2218-2228). В `src/gui/macros.rs`:
+
+  Слайдер (:48-53) — сохранить response и добавить пуш; было:
+
+```rust
+                        let mut v = val;
+                        if ui.add(
+                            egui::Slider::new(&mut v, 0.0..=1.0)
+                                .show_value(true)
+                                .text("")
+                        ).on_hover_text("Macro modulation value").changed() {
+```
+
+  стало:
+
+```rust
+                        let mut v = val;
+                        let resp = ui.add(
+                            egui::Slider::new(&mut v, 0.0..=1.0)
+                                .show_value(true)
+                                .text("")
+                        ).on_hover_text("Macro modulation value");
+                        // undo-канон кодбазы: один шаг на жест, снимок на старте
+                        if resp.drag_started() {
+                            self.push_undo_snapshot_for(part);
+                        }
+                        if resp.changed() {
+```
+
+  XY-пад (:213-215) — перед `if response.dragged() || response.clicked() {`
+  вставить:
+
+```rust
+        // undo-снимок на старте жеста (один шаг на драг; guard от дублей в
+        // part_undo_push)
+        if response.drag_started() {
+            self.push_undo_snapshot_for(part);
+        }
+        if response.dragged() || response.clicked() {
+```
+
+- [ ] **Step 5: clippy + тесты**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2 && cargo test --lib 2>&1 | tail -3`
 Expected: чисто, тесты зелёные.
 
-- [ ] **Step 5: коммит**
+- [ ] **Step 6: коммит**
 
 ```bash
-git add src/gui/mod.rs && git commit -m "fix: macro mirror sync on perf load/undo + last_preset rollback on undo of part 0 (#49)"
+git add src/gui/mod.rs src/gui/macros.rs && git commit -m "fix: macro mirror sync on perf load/undo, undo snapshot on macro drag, last_preset rollback on undo of part 0 (#49)"
 ```
 
 ### Task 3: warn при patch_name-промахе (load и save) — хвост 2
@@ -271,8 +326,11 @@ git add src/gui/mod.rs && git commit -m "fix: macro mirror sync on perf load/und
                     let patch_name = self.patches.get(l.patch_idx)
                         .map(|p| p.name.clone()).unwrap_or_default();
                     if patch_name.is_empty() {
-                        // #49: пустое имя никогда не сматчится при load
-                        // (там warn) — сохранение становится невосстановимым
+                        // #49: пустое имя (unwrap_or_default) никогда не
+                        // сматчится при load — сохранение невосстановимо.
+                        // Load-сторона warn-ует только на НЕпустые промахи
+                        // (guard !is_empty — legacy/disabled парты без спама),
+                        // поэтому здесь сообщение самодостаточное
                         log::warn!(
                             "perf save '{}': part {} patch_idx {} out of range — saved with empty patch_name",
                             self.perf_name, i, l.patch_idx
@@ -414,11 +472,11 @@ git commit -m "feat: persist per-part macro names and XY bindings in performance
 - [ ] Полный гейт: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety`
 - [ ] `cargo run --release` — экран TC4/TC5/TC6:
   - загрузить перф с макросами → слайдеры макросов показывают сохранённое;
-  - выключить звук (audio-reconnect невозможен вручную — проверить хотя бы
-    что значение на слайдере = значение после load);
-  - переименовать файл перфа (patch_name-промах проверить правкой JSON:
-    вписать несуществующее имя патча) → в stderr warn, приложение живо;
-  - A → B (патч парта 0) → Ctrl+Z → выйти → запустить → парт 0 = A;
+  - макро-драг → Ctrl+Z → откат (TC5);
+  - patch_name-промах (правкой JSON вписать несуществующее имя) → warn в
+    stderr, приложение живо (TC4);
+  - TC6 по шагам из секции Test Cases (grep last_preset + переименовать
+    перф-файл перед рестартом);
   - сохранить перф с переименованным макросом → перезапуск → имя на месте.
 - [ ] PR → squash merge → перезапуск release из main checkout
 - [ ] TECHDEBT #49: пометить хвосты 1/2/3/5 ГОТОВО (4 — out of scope, 6 — by
@@ -429,6 +487,14 @@ git commit -m "feat: persist per-part macro names and XY bindings in performance
 - SF2 bank в перфах (хвост 4) — нет bank-UI, потерь нет; делать вместе с bank-UI.
 - Undo имён макросов/XY (PartUndoSnapshot не несёт macro_names/xy) — осознанное
   упрощение: Ctrl+Z откатывает значения макросов, но не их переименования.
+- Известная морщина вне скоупа: apply_performance:2785 зовёт save_config() ДО
+  цикла — в конфиг уходит last_preset до-лоад патча. Не баг (успешный перф-рестор
+  перекрывает last_preset на старте), но персист производного состояния после
+  изменений был бы чище — при случае.
+- Дебаунс config-записей: undo парта 0 вызывает save_config() синхронно на
+  каждый Ctrl+Z (в т.ч. mute/pan/transpose-undo). Существующий global_dirty +
+  flush 2s (mod.rs:691) save_config обходит. Терпимо (клик патча уже пишет так
+  же); унификация дебаунса — отдельная работа.
 - key_low/high в перфах (хвост 6) — by design (#46), не баг.
 - Toast-уведомления при patch_name-промахе — log::warn достаточно (тост-инфра
   в GUI для этого пути не заведена).
