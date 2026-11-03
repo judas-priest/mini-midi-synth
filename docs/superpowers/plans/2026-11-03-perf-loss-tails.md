@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+status: executed 2026-11-03 (PR #69; экран-верификация TC4/TC5/TC6 — после запуска юзером)
+
 anchor-checked: 2026-11-03 (база = master c671957 = origin/master; все «было»-сниппеты вычитаны из текущего кода в этом сеансе; аудит #49 от 2026-11-03 в docs/TECHDEBT.md §49)
 
 **Scope (из код-аудита #49):** хвосты 1, 2, 3, 5. Хвост 4 (SF2 bank) — Out of scope
@@ -119,7 +121,7 @@ macro_vals (главный симптом «после reconnect уезжает�
 - Modify: `src/gui/mod.rs` (free fn рядом с App, тесты в `#[cfg(test)]`-модуле
   внизу файла — рядом с `part_undo_tests`)
 
-- [ ] **Step 1: падающий тест** — в `src/gui/mod.rs` добавить новый
+- [x] **Step 1: падающий тест** — в `src/gui/mod.rs` добавить новый
   `#[cfg(test)] mod macro_mirror_tests { ... }` на уровне модуля (рядом с
   существующим `mod part_undo_tests` в конце файла):
 
@@ -146,12 +148,12 @@ mod macro_mirror_tests {
 }
 ```
 
-- [ ] **Step 2: прогнать, убедиться в падении**
+- [x] **Step 2: прогнать, убедиться в падении**
 
 Run: `cargo test --lib tc1_macro_mirror 2>&1 | tail -5`
 Expected: FAIL — `macro_vals_from_params` не существует.
 
-- [ ] **Step 3: реализация** — в `src/gui/mod.rs` на уровне модуля (вне impl
+- [x] **Step 3: реализация** — в `src/gui/mod.rs` на уровне модуля (вне impl
   App, например сразу после импортов):
 
 ```rust
@@ -169,14 +171,14 @@ pub(crate) fn macro_vals_from_params(
 }
 ```
 
-- [ ] **Step 4: прогнать — зелёный**
+- [x] **Step 4: прогнать — зелёный**
 
 Run: `cargo test --lib tc1_macro_mirror 2>&1 | tail -3`
 Expected: `test result: ok` (на этом коммите функция ещё не используется вне
 тестов — не-clippy-clean промежуточное состояние допустимо; Task 2
 подключит её и закроет clippy-гейт)
 
-- [ ] **Step 5: коммит**
+- [x] **Step 5: коммит**
 
 ```bash
 git add src/gui/mod.rs && git commit -m "feat: macro_vals_from_params — pure mirror derivation for #49"
@@ -188,7 +190,7 @@ git add src/gui/mod.rs && git commit -m "feat: macro_vals_from_params — pure m
 restore_part_snapshot (~:2255-2271); `src/gui/macros.rs` — слайдер (~:48),
 XY-пад (~:213)
 
-- [ ] **Step 1: apply_performance** — после строки
+- [x] **Step 1: apply_performance** — после строки
   `self.parts[i].edited_params = part.param_overrides.clone();` вставить:
 
 ```rust
@@ -198,7 +200,7 @@ XY-пад (~:213)
             self.parts[i].macro_vals = macro_vals_from_params(&self.parts[i].edited_params);
 ```
 
-- [ ] **Step 2: restore_part_snapshot** — ИТОГОВОЕ СОСТОЯНИЕ блока показано
+- [x] **Step 2: restore_part_snapshot** — ИТОГОВОЕ СОСТОЯНИЕ блока показано
   ниже; единственная ДОБАВЛЯЕМАЯ строка — `p.macro_vals = ...` (остальное —
   существующий код :2256-2264, НЕ дублировать):
 
@@ -217,7 +219,7 @@ XY-пад (~:213)
         }
 ```
 
-- [ ] **Step 3: last_preset при undo парта 0** — в конце
+- [x] **Step 3: last_preset при undo парта 0** — в конце
   `restore_part_snapshot`, после `self.persist_parts_state();` и ДО
   `self.set_active_part(part);` вставить:
 
@@ -229,7 +231,7 @@ XY-пад (~:213)
         }
 ```
 
-- [ ] **Step 4: undo-снапшот на макро-драг** — сейчас макро-панель не пушит
+- [x] **Step 4: undo-снапшот на макро-драг** — сейчас макро-панель не пушит
   undo-снимок ВООБЩЕ (в macros.rs нет push_undo_snapshot*): TC5 «после undo —
   значения до правки» невыполним (стек пуст → undo no-op). Канон кодбазы —
   снимок на drag_started (params.rs:299/338/601...); no-duplicate guard
@@ -274,12 +276,12 @@ XY-пад (~:213)
         if response.dragged() || response.clicked() {
 ```
 
-- [ ] **Step 5: clippy + тесты**
+- [x] **Step 5: clippy + тесты**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2 && cargo test --lib 2>&1 | tail -3`
 Expected: чисто, тесты зелёные.
 
-- [ ] **Step 6: коммит**
+- [x] **Step 6: коммит**
 
 ```bash
 git add src/gui/mod.rs src/gui/macros.rs && git commit -m "fix: macro mirror sync on perf load/undo, undo snapshot on macro drag, last_preset rollback on undo of part 0 (#49)"
@@ -289,7 +291,7 @@ git add src/gui/mod.rs src/gui/macros.rs && git commit -m "fix: macro mirror syn
 
 **Files:** Modify: `src/gui/mod.rs` (~:2793), `src/gui/layers.rs` (~:196-199)
 
-- [ ] **Step 1: load-сторона** — заменить
+- [x] **Step 1: load-сторона** — заменить
 
 ```rust
             let patch_idx = self.patches.iter()
@@ -314,7 +316,7 @@ git add src/gui/mod.rs src/gui/macros.rs && git commit -m "fix: macro mirror syn
             let patch_idx = patch_idx.unwrap_or(0);
 ```
 
-- [ ] **Step 2: save-сторона** — в `draw_perf_row` (gui/layers.rs) цепочка
+- [x] **Step 2: save-сторона** — в `draw_perf_row` (gui/layers.rs) цепочка
   `.iter().map(|l| { ... })` НЕ имеет индекса — заменить на `.enumerate()` и
   добавить warn. Было:
 
@@ -343,12 +345,12 @@ git add src/gui/mod.rs src/gui/macros.rs && git commit -m "fix: macro mirror syn
                     }
 ```
 
-- [ ] **Step 3: clippy + тесты**
+- [x] **Step 3: clippy + тесты**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2 && cargo test 2>&1 | grep -cE "test result: ok"`
 Expected: clippy чисто, счётчик ok-строк > 0, ни одной строки `failed` без ` 0 failed`.
 
-- [ ] **Step 4: коммит**
+- [x] **Step 4: коммит**
 
 ```bash
 git add src/gui/mod.rs src/gui/layers.rs && git commit -m "fix: warn on patch_name miss in perf load and save (#49) — silent wrong-patch fallback is now diagnosable"
@@ -362,7 +364,7 @@ git add src/gui/mod.rs src/gui/layers.rs && git commit -m "fix: warn on patch_na
 - Modify: `src/gui/mod.rs` — restore в apply_performance
 - Test: `tests/perf_load_seq.rs` — TC2/TC3
 
-- [ ] **Step 1: падающие тесты** — в `tests/perf_load_seq.rs`. Файл уже
+- [x] **Step 1: падающие тесты** — в `tests/perf_load_seq.rs`. Файл уже
   импортирует `PartConfig` (`use mini_midi_synth::preset::{self, PartConfig, Performance};`)
   и имеет локальный хелпер `fn part(patch_name, enabled) -> PartConfig` —
   КОМПИЛЯТОР заставит дополнить его тремя новыми полями (PartConfig без
@@ -396,12 +398,12 @@ fn legacy_part_without_macro_fields_gets_defaults() {
 }
 ```
 
-- [ ] **Step 2: прогнать, убедиться в падении** (E0560/unknown field)
+- [x] **Step 2: прогнать, убедиться в падении** (E0560/unknown field)
 
 Run: `cargo test --test perf_load_seq 2>&1 | tail -5`
 Expected: FAIL — полей нет.
 
-- [ ] **Step 3: поля в PartConfig** (preset.rs, после `sustain_enabled`):
+- [x] **Step 3: поля в PartConfig** (preset.rs, после `sustain_enabled`):
 
 ```rust
     /// GUI-side macro labels for this part (global App-level in older code).
@@ -433,7 +435,7 @@ fn default_xy_y() -> usize { 1 }
 
 serde_json в тестах доступен (Cargo.toml:35; perf_load_seq.rs:30 уже юзает).
 
-- [ ] **Step 4: save** — литерал PartConfig в `draw_perf_row` (gui/layers.rs)
+- [x] **Step 4: save** — литерал PartConfig в `draw_perf_row` (gui/layers.rs)
   дополнить:
 
 ```rust
@@ -442,7 +444,7 @@ serde_json в тестах доступен (Cargo.toml:35; perf_load_seq.rs:30 
                         xy_macro_y: l.xy_macro_y,
 ```
 
-- [ ] **Step 5: restore** — в apply_performance (gui/mod.rs), рядом с
+- [x] **Step 5: restore** — в apply_performance (gui/mod.rs), рядом с
   зеркалом макросов из Task 2:
 
 ```rust
@@ -460,12 +462,12 @@ serde_json в тестах доступен (Cargo.toml:35; perf_load_seq.rs:30 
             self.parts[i].xy_macro_y = part.xy_macro_y.min(7);
 ```
 
-- [ ] **Step 6: прогнать — зелёный, полный гейт**
+- [x] **Step 6: прогнать — зелёный, полный гейт**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2 && cargo test --test perf_load_seq 2>&1 | tail -3`
 Expected: `test result: ok`, оба новых теста зелёные.
 
-- [ ] **Step 7: коммит**
+- [x] **Step 7: коммит**
 
 ```bash
 git add src/preset.rs src/gui/layers.rs src/gui/mod.rs tests/perf_load_seq.rs tests/sustain_audit.rs
@@ -474,8 +476,8 @@ git commit -m "feat: persist per-part macro names and XY bindings in performance
 
 ### Task 5: Верификация
 
-- [ ] Полный гейт: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety`
-- [ ] `cargo run --release` — экран TC4/TC5/TC6:
+- [x] Полный гейт: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety`
+- [ ] `cargo run --release` — экран TC4/TC5/TC6 (юзер):
   - загрузить перф с макросами → слайдеры макросов показывают сохранённое;
   - макро-драг → Ctrl+Z → откат (TC5);
   - patch_name-промах (правкой JSON вписать несуществующее имя) → warn в
@@ -483,8 +485,8 @@ git commit -m "feat: persist per-part macro names and XY bindings in performance
   - TC6 по шагам из секции Test Cases (grep last_preset + переименовать
     перф-файл перед рестартом);
   - сохранить перф с переименованным макросом → перезапуск → имя на месте.
-- [ ] PR → squash merge → перезапуск release из main checkout
-- [ ] TECHDEBT #49: пометить хвосты 1/2/3/5 ГОТОВО (4 — out of scope, 6 — by
+- [x] PR → squash merge → перезапуск release из main checkout
+- [x] TECHDEBT #49: пометить хвосты 1/2/3/5 ГОТОВО (4 — out of scope, 6 — by
   design), план status: executed
 
 ## Out of scope
