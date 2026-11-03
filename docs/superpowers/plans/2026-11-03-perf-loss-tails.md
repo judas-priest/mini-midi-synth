@@ -94,7 +94,12 @@ macro_vals (главный симптом «после reconnect уезжает�
 - пустой `macro_names` в PartConfig — skip_serializing_if, restore
   регенерирует дефолты «Macro 1..8» (как PartState::new_empty), не пустые строки.
 - macro_names короче 8 из рукописного JSON — безопасно: все чтения через
-  `.get()` (macros.rs:25, 39, 81).
+  `.get()` (macros.rs:25, 39, 81). Длиннее 8 — тоже безопасно: XY-комбо
+  итерируют macro_labels (ровно 8 из .get()), лишние игнорируются.
+- macro-драг БЕЗ движения (клик по XY-паду) — `clicked()` без `drag_started()`
+  (egui 0.31: drag_started требует сдвиг) — прыжок значений без undo-снимка;
+  следующий Ctrl+Z откатит к снимку ПРЕДЫДУЩЕГО жеста. Осознанный зазор, как
+  и keyboard-edit слайдеров в params.rs-каноне.
 - xy-индекс ≥8 в битом JSON — clamp `.min(7)` при restore (иначе panic при
   прямом индексе `macro_labels[xy_macro_x]`, macros.rs:94/109).
 - перф длиннее 16 партов — существующий guard `if i >= self.parts.len() { break; }`.
@@ -227,7 +232,7 @@ XY-пад (~:213)
 - [ ] **Step 4: undo-снапшот на макро-драг** — сейчас макро-панель не пушит
   undo-снимок ВООБЩЕ (в macros.rs нет push_undo_snapshot*): TC5 «после undo —
   значения до правки» невыполним (стек пуст → undo no-op). Канон кодбазы —
-  снимок на drag_started (params.rs:299/349/601...); no-duplicate guard
+  снимок на drag_started (params.rs:299/338/601...); no-duplicate guard
   уже есть (mod.rs:2218-2228). В `src/gui/macros.rs`:
 
   Слайдер (:48-53) — сохранить response и добавить пуш; было:
@@ -487,6 +492,10 @@ git commit -m "feat: persist per-part macro names and XY bindings in performance
 - SF2 bank в перфах (хвост 4) — нет bank-UI, потерь нет; делать вместе с bank-UI.
 - Undo имён макросов/XY (PartUndoSnapshot не несёт macro_names/xy) — осознанное
   упрощение: Ctrl+Z откатывает значения макросов, но не их переименования.
+- Undo одиночного КЛИКА по XY-паду (без движения) — значений коснулся click,
+  а снимок берётся только на drag_started; следующий Ctrl+Z откатывает
+  предыдущий жест. Тот же зазор существует в params.rs-каноне (keyboard-edit
+  слайдеров) — принимаем единообразно.
 - Известная морщина вне скоупа: apply_performance:2785 зовёт save_config() ДО
   цикла — в конфиг уходит last_preset до-лоад патча. Не баг (успешный перф-рестор
   перекрывает last_preset на старте), но персист производного состояния после
