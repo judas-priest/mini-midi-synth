@@ -135,6 +135,19 @@ pub struct Toast {
     pub created: Instant,
 }
 
+/// GUI-зеркало macro_vals из edited_params (источник правды — params,
+/// зеркало синхронизируется при load перфа и undo; #49: без этого
+/// push_full_part_state при audio-reconnect перезаписывал движок stale-миром).
+pub(crate) fn macro_vals_from_params(
+    params: &std::collections::BTreeMap<String, f32>,
+) -> [f32; 8] {
+    let mut out = [0.0f32; 8];
+    for (i, slot) in out.iter_mut().enumerate() {
+        *slot = params.get(&format!("macro_{i}")).copied().unwrap_or(0.0);
+    }
+    out
+}
+
 fn buffer_label(size: u32) -> String {
     if size == 0 { "Default".to_string() } else { format!("{size}") }
 }
@@ -2261,12 +2274,20 @@ impl App {
             p.mute = mute;
             p.pan = pan;
             p.transpose = transpose;
+            // #49: undo откатывает и macro_{i} в edited_params — зеркало
+            // обязано последовать, иначе последующий push перезапишет откат
+            p.macro_vals = macro_vals_from_params(&p.edited_params);
         }
         let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: transpose });
         self.send_edited_params(part);
         self.persist_parts_state();
+        // #49: last_preset зеркалит parts[0]; undo патча парта 0 иначе
+        // оставляет конфиг на до-undo патче — рестарт вернёт откаченное
+        if part == 0 {
+            self.save_config();
+        }
         self.set_active_part(part);
     }
 
@@ -2791,12 +2812,37 @@ impl App {
         for (i, part) in parts.iter().enumerate() {
             if i >= self.parts.len() { break; }
             let patch_idx = self.patches.iter()
-                .position(|p| p.name == part.patch_name)
-                .unwrap_or(0);
+                .position(|p| p.name == part.patch_name);
+            if patch_idx.is_none() && !part.patch_name.is_empty() {
+                // #49: тихий fallback на патч 0 = «партия играет чужое» без
+                // единого следа в логе; поведение сохраняем (патч 0), но
+                // диагностируем
+                log::warn!(
+                    "perf '{}': part {}: patch '{}' not found — falling back to patch 0",
+                    perf.name, i, part.patch_name
+                );
+            }
+            let patch_idx = patch_idx.unwrap_or(0);
             self.parts[i].patch_idx = patch_idx;
             self.parts[i].enabled = part.enabled;
             self.parts[i].volume = part.volume;
             self.parts[i].edited_params = part.param_overrides.clone();
+            // #49: зеркало макросов следует за params, иначе GUI показывает
+            // stale, а push_full_part_state (audio-reconnect) перезапишет
+            // движок старыми значениями через SetMacro
+            self.parts[i].macro_vals = macro_vals_from_params(&self.parts[i].edited_params);
+            // #49: имена макросов и XY-биндинги — GUI-стейт парта.
+            // Пустой список (Init/legacy-перф) = дефолты «Macro 1..8»,
+            // НЕ унаследованные имена от ПРЕДЫДУЩЕГО перфа
+            self.parts[i].macro_names = if part.macro_names.is_empty() {
+                (1..=8).map(|k| format!("Macro {k}")).collect()
+            } else {
+                part.macro_names.clone()
+            };
+            // clamp: битый JSON с индексом ≥8 не должен паниковать при
+            // индексации macro_vals/макро-лейблов
+            self.parts[i].xy_macro_x = part.xy_macro_x.min(7);
+            self.parts[i].xy_macro_y = part.xy_macro_y.min(7);
             self.parts[i].sf2_mode = part.sf2_mode;
             self.parts[i].sf2_program = part.sf2_program;
             self.parts[i].pan = part.pan;
@@ -2953,5 +2999,26 @@ mod part_undo_tests {
         let second = part_undo_step(&mut undo, &mut redo, snap(false, 0.1, 0)).unwrap();
         assert_eq!(second.pan, 0.0, "second Ctrl+Z walks to the next entry");
         assert!(part_undo_step(&mut undo, &mut redo, snap(false, 0.0, 0)).is_none());
+    }
+}
+
+#[cfg(test)]
+mod macro_mirror_tests {
+    use super::*;
+
+    #[test]
+    fn tc1_macro_mirror_from_params() {
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("macro_0".to_string(), 0.25);
+        params.insert("macro_3".to_string(), 0.9);
+        params.insert("unrelated".to_string(), 5.0);
+        assert_eq!(
+            macro_vals_from_params(&params),
+            [0.25, 0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            macro_vals_from_params(&std::collections::BTreeMap::new()),
+            [0.0f32; 8]
+        );
     }
 }

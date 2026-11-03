@@ -46,11 +46,16 @@ impl App {
 
                         // Value slider (vertical feel via horizontal progress)
                         let mut v = val;
-                        if ui.add(
+                        let resp = ui.add(
                             egui::Slider::new(&mut v, 0.0..=1.0)
                                 .show_value(true)
                                 .text("")
-                        ).on_hover_text("Macro modulation value").changed() {
+                        ).on_hover_text("Macro modulation value");
+                        // undo-канон кодбазы: один шаг на жест, снимок на старте
+                        if resp.drag_started() {
+                            self.push_undo_snapshot_for(part);
+                        }
+                        if resp.changed() {
                             self.parts[part].macro_vals[i] = v;
                             // Update edited_params so it's saved in patch
                             self.parts[part].edited_params.insert(
@@ -211,6 +216,11 @@ impl App {
         );
 
         // Handle drag / click
+        // undo-снимок на старте жеста (один шаг на драг; guard от дублей в
+        // part_undo_push)
+        if response.drag_started() {
+            self.push_undo_snapshot_for(part);
+        }
         if response.dragged() || response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
                 if rect.contains(pos) {

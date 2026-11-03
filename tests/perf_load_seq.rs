@@ -22,6 +22,9 @@ fn part(patch_name: &str, enabled: bool) -> PartConfig {
         note_mode: mini_midi_synth::synth::NOTE_MODE_POLY,
         root_only: false,
         sustain_enabled: true,
+        macro_names: Vec::new(),
+        xy_macro_x: 0,
+        xy_macro_y: 1,
     }
 }
 
@@ -104,4 +107,27 @@ fn sixteen_part_performance_passes_through_unchanged() {
         assert_eq!(loaded.parts[i].enabled, i % 2 == 0, "order and flags preserved");
     }
     assert_eq!(loaded.split_point, Some(60));
+}
+
+#[test]
+fn macro_names_and_xy_roundtrip() {
+    let mut p = part("Init", true);
+    p.macro_names = vec!["Kick".into(), "Snare".into()];
+    p.xy_macro_x = 2;
+    p.xy_macro_y = 3;
+    let json = serde_json::to_string(&p).unwrap();
+    let back: PartConfig = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.macro_names, vec!["Kick".to_string(), "Snare".to_string()]);
+    assert_eq!(back.xy_macro_x, 2);
+    assert_eq!(back.xy_macro_y, 3);
+}
+
+#[test]
+fn legacy_part_without_macro_fields_gets_defaults() {
+    // часть валидного PartConfig без новых ключей (как старые перфы)
+    let legacy = r#"{"patch_name":"Init","enabled":true,"volume":0.8,"key_low":0,"key_high":127}"#;
+    let p: PartConfig = serde_json::from_str(legacy).unwrap();
+    assert!(p.macro_names.is_empty());
+    assert_eq!(p.xy_macro_x, 0);
+    assert_eq!(p.xy_macro_y, 1); // y-дефолт = 1, как PartState::new_empty (ось Y = Macro 2)
 }
