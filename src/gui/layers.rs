@@ -217,6 +217,9 @@ impl App {
                         note_mode: l.note_mode,
                         root_only: false, // legacy: больше не пишется
                         sustain_enabled: l.sustain_enabled,
+                        macro_names: l.macro_names.clone(),
+                        xy_macro_x: l.xy_macro_x,
+                        xy_macro_y: l.xy_macro_y,
                     }
                 }).collect();
                 match preset::save_performance(&Performance {

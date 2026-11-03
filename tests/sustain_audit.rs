@@ -442,6 +442,9 @@ fn performance_part_config_roundtrip() {
         note_mode: mini_midi_synth::synth::NOTE_MODE_BASS,
         root_only: false, // legacy: больше не пишется (skip_serializing)
         sustain_enabled: false,
+        macro_names: Vec::new(),
+        xy_macro_x: 0,
+        xy_macro_y: 1,
     };
     let json = serde_json::to_string(&orig).expect("serialize");
     assert!(!json.contains("root_only"), "legacy field must not be written");

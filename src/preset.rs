@@ -777,6 +777,16 @@ pub struct PartConfig {
     /// before for perf files without the field).
     #[serde(default = "default_true")]
     pub sustain_enabled: bool,
+    /// GUI-side macro labels for this part. Empty = client falls back to
+    /// "Macro 1..8" defaults.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub macro_names: Vec<String>,
+    /// XY-pad X macro index (0-7). Default 0 = Macro 1.
+    #[serde(default, skip_serializing_if = "usize_is_zero")]
+    pub xy_macro_x: usize,
+    /// XY-pad Y macro index (0-7). Default 1 = Macro 2.
+    #[serde(default = "default_xy_y", skip_serializing_if = "usize_is_one")]
+    pub xy_macro_y: usize,
 }
 
 impl PartConfig {
@@ -791,6 +801,9 @@ impl PartConfig {
 fn default_vel_min() -> u8 { 1 }
 fn default_vel_max() -> u8 { 127 }
 fn default_true() -> bool { true }
+fn usize_is_zero(v: &usize) -> bool { *v == 0 }
+fn usize_is_one(v: &usize) -> bool { *v == 1 }
+fn default_xy_y() -> usize { 1 }
 
 /// A saved split/part configuration.
 #[derive(Clone, Serialize, Deserialize)]
@@ -863,6 +876,9 @@ pub fn init_performance() -> Performance {
             note_mode: crate::synth::NOTE_MODE_POLY,
             root_only: false,
             sustain_enabled: true,
+            macro_names: Vec::new(),
+            xy_macro_x: 0,
+            xy_macro_y: 1,
         }],
     }
 }

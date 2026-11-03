@@ -2831,6 +2831,18 @@ impl App {
             // stale, а push_full_part_state (audio-reconnect) перезапишет
             // движок старыми значениями через SetMacro
             self.parts[i].macro_vals = macro_vals_from_params(&self.parts[i].edited_params);
+            // #49: имена макросов и XY-биндинги — GUI-стейт парта.
+            // Пустой список (Init/legacy-перф) = дефолты «Macro 1..8»,
+            // НЕ унаследованные имена от ПРЕДЫДУЩЕГО перфа
+            self.parts[i].macro_names = if part.macro_names.is_empty() {
+                (1..=8).map(|k| format!("Macro {k}")).collect()
+            } else {
+                part.macro_names.clone()
+            };
+            // clamp: битый JSON с индексом ≥8 не должен паниковать при
+            // индексации macro_vals/макро-лейблов
+            self.parts[i].xy_macro_x = part.xy_macro_x.min(7);
+            self.parts[i].xy_macro_y = part.xy_macro_y.min(7);
             self.parts[i].sf2_mode = part.sf2_mode;
             self.parts[i].sf2_program = part.sf2_program;
             self.parts[i].pan = part.pan;
