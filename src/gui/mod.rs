@@ -2274,12 +2274,20 @@ impl App {
             p.mute = mute;
             p.pan = pan;
             p.transpose = transpose;
+            // #49: undo откатывает и macro_{i} в edited_params — зеркало
+            // обязано последовать, иначе последующий push перезапишет откат
+            p.macro_vals = macro_vals_from_params(&p.edited_params);
         }
         let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: transpose });
         self.send_edited_params(part);
         self.persist_parts_state();
+        // #49: last_preset зеркалит parts[0]; undo патча парта 0 иначе
+        // оставляет конфиг на до-undo патче — рестарт вернёт откаченное
+        if part == 0 {
+            self.save_config();
+        }
         self.set_active_part(part);
     }
 
@@ -2810,6 +2818,10 @@ impl App {
             self.parts[i].enabled = part.enabled;
             self.parts[i].volume = part.volume;
             self.parts[i].edited_params = part.param_overrides.clone();
+            // #49: зеркало макросов следует за params, иначе GUI показывает
+            // stale, а push_full_part_state (audio-reconnect) перезапишет
+            // движок старыми значениями через SetMacro
+            self.parts[i].macro_vals = macro_vals_from_params(&self.parts[i].edited_params);
             self.parts[i].sf2_mode = part.sf2_mode;
             self.parts[i].sf2_program = part.sf2_program;
             self.parts[i].pan = part.pan;
