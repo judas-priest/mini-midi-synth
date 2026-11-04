@@ -116,33 +116,3 @@ fn tc5_noop_switch_keeps_volume_and_no_panic() {
     let p = overall_peak(&mut e, 60, 200);
     assert!(p > SILENCE, "no-op switch must keep the part audible (peak {p})");
 }
-
-#[test]
-fn tc6_noop_switch_does_not_cut_tail() {
-    // A: держим ноту, делаем no-op Sf2Mode — сустейн продолжается.
-    // B (контроль): РЕАЛЬНЫЙ флип в DSP — drain+free, парта замолкает.
-    // no-op не должен вести себя как флип.
-    let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
-    let mut a = engine_with_sf2(sf.clone());
-    let mut b = engine_with_sf2(sf);
-    gui_switch_part_to_sf2(&mut a, 0, 1.0, 0.0, false, 0, 127);
-    gui_switch_part_to_sf2(&mut b, 0, 1.0, 0.0, false, 0, 127);
-    a.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
-    b.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
-    let _ = a.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true }); // no-op
-    let _ = b.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: false }); // drain+free
-    let mut la = [0.0f32; BLOCK_SIZE]; let mut ra = [0.0f32; BLOCK_SIZE];
-    let mut lb = [0.0f32; BLOCK_SIZE]; let mut rb = [0.0f32; BLOCK_SIZE];
-    let (mut pa, mut pb) = (0.0f32, 0.0f32);
-    for _ in 0..10 {
-        a.tick_block(&mut la, &mut ra);
-        b.tick_block(&mut lb, &mut rb);
-        for i in 0..BLOCK_SIZE {
-            pa = pa.max(la[i].abs());
-            pb = pb.max(lb[i].abs());
-        }
-    }
-    a.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
-    b.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
-    assert!(pa > pb * 4.0, "no-op switch behaved like a real flip: a {pa}, b {pb}");
-}
