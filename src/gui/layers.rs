@@ -27,7 +27,6 @@ const ZONE_B: std::ops::Range<usize> = PARTS_PER_ZONE..PARTS_PER_ZONE * 2;
 /// Честные диапазоны зон по РЕАЛЬНОСТИ сплита (#51): сплит активен только
 /// при живой правой руке — иначе все парты 0..=127, как бы перф ни хранил
 /// split_point. Единственный источник диапазонов для движка и заголовков.
-#[allow(dead_code)] // снимается в Task 2
 pub(super) fn zone_range_pair(split_point: u8, split_active: bool) -> ([u8; 2], [u8; 2]) {
     if split_active {
         ([0, split_point.saturating_sub(1)], [split_point, 127])
@@ -128,11 +127,9 @@ impl App {
             .max_height(max_h)
             .show(ui, |ui| {
             // ── Zone A ───────────────────────────────────────────────────
-            let a_header = if split_on {
-                format!("◀ Left hand (A) — 0..{}", self.split_point.saturating_sub(1))
-            } else {
-                "◀ Left hand (A) — 0..127".to_string()
-            };
+            let split_active = self.parts[ZONE_B].iter().any(|p| p.enabled);
+            let (a_r, _) = zone_range_pair(self.split_point, split_active);
+            let a_header = format!("◀ Left hand (A) — {}..={}", a_r[0], a_r[1]);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(a_header).weak().small());
             });
@@ -154,8 +151,9 @@ impl App {
             if split_on {
                 ui.add_space(theme::SP_XS);
                 ui.horizontal(|ui| {
+                    let (_, b_r) = zone_range_pair(self.split_point, split_active);
                     ui.label(egui::RichText::new(format!(
-                        "▶ Right hand (B) — {}..127", self.split_point)).weak().small());
+                        "▶ Right hand (B) — {}..={}", b_r[0], b_r[1])).weak().small());
                 });
                 for i in ZONE_B {
                     if !self.parts[i].enabled { continue; }
@@ -528,24 +526,36 @@ impl App {
         if let Some(i) = zone.into_iter().find(|&i| self.parts[i].enabled) {
             self.set_active_part(i);
         }
+        // #51: удаление последнего B-парта = сплит исчез; предикат внутри
+        // сам развернёт зону A в 0..=127 (раньше движок оставался
+        // порезанным до следующего триггера apply_split_ranges)
+        if part >= PARTS_PER_ZONE {
+            self.apply_split_ranges();
+        }
     }
 
     /// Set key ranges for all parts based on split_point.
     /// Zone A: 0 .. split_point-1
     /// Zone B: split_point .. 127
     pub(super) fn apply_split_ranges(&mut self) {
-        let sp = self.split_point;
+        // TECHDEBT #51: сплит реален только при живой правой руке. Перф
+        // хранит split_point даже при выключенном сплите и безусловный
+        // сплит резал зону A до sp-1 («Organ играет до C3» при выключенном
+        // сплите; Reset и рестарт — те же грабли). Юзер-модель: нет B —
+        // нет сплита.
+        let split_active = self.parts[ZONE_B].iter().any(|p| p.enabled);
+        let (a, b) = zone_range_pair(self.split_point, split_active);
         // Всем партам (вкл. выключенным): диапазон — свойство зоны; иначе
         // пере-включенный парт несёт stale-диапазон (0..127 по умолчанию) и
         // молчит на нотах своей зоны (#46-семейство)
         for i in ZONE_A {
-            self.parts[i].min_note = 0;
-            self.parts[i].max_note = sp.saturating_sub(1);
+            self.parts[i].min_note = a[0];
+            self.parts[i].max_note = a[1];
             self.send_part_range(i);
         }
         for i in ZONE_B {
-            self.parts[i].min_note = sp;
-            self.parts[i].max_note = 127;
+            self.parts[i].min_note = b[0];
+            self.parts[i].max_note = b[1];
             self.send_part_range(i);
         }
     }
