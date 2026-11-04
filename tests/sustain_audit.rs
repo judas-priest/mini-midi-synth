@@ -445,6 +445,8 @@ fn performance_part_config_roundtrip() {
         macro_names: Vec::new(),
         xy_macro_x: 0,
         xy_macro_y: 1,
+        ignore_pb: false,
+        ignore_mw: false,
     };
     let json = serde_json::to_string(&orig).expect("serialize");
     assert!(!json.contains("root_only"), "legacy field must not be written");

@@ -171,6 +171,10 @@ pub struct PartState {
     pub note_mode: u8,
     /// Sustain pedal (CC64) affects this part (Sus checkbox)
     pub sustain_enabled: bool,
+    /// Part ignores Pitch Bend (PB checkbox, TECHDEBT #55)
+    pub ignore_pb: bool,
+    /// Part ignores Mod Wheel (MW checkbox, TECHDEBT #55)
+    pub ignore_mw: bool,
     pub sf2_mode: bool,
     pub sf2_program: u8,
     /// Macro knob values (0..1) — live, sent to engine via SetMacro
@@ -190,6 +194,7 @@ impl PartState {
             enabled: false, mute: false, volume: 0.8,
             min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
             pan: 0.0, transpose: 0, note_mode: crate::synth::NOTE_MODE_POLY, sustain_enabled: true,
+            ignore_pb: false, ignore_mw: false,
             sf2_mode: false, sf2_program: 0,
             macro_vals: [0.0; 8],
             macro_names: (1..=8).map(|i| format!("Macro {i}")).collect(),
@@ -1930,9 +1935,13 @@ impl App {
                 part.mute = st.mute;
                 part.note_mode = st.note_mode;
                 part.sustain_enabled = st.sustain_enabled;
+                part.ignore_pb = st.ignore_pb;
+                part.ignore_mw = st.ignore_mw;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: st.mute });
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode: st.note_mode });
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: st.sustain_enabled });
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnorePb { part: i, on: st.ignore_pb });
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnoreMw { part: i, on: st.ignore_mw });
             }
         }
         for i in 0..self.parts.len() {
@@ -2350,6 +2359,7 @@ impl App {
         let (sf2_mode, sf2_program) = (p.sf2_mode, p.sf2_program);
         let note_mode = p.note_mode;
         let sustain_enabled = p.sustain_enabled;
+        let (ignore_pb, ignore_mw) = (p.ignore_pb, p.ignore_mw);
 
         let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute });
@@ -2360,6 +2370,10 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: transpose });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part, mode: note_mode });
         let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part, on: sustain_enabled });
+        // #55: без этих пушей аудио-реконнект молча откатывал бы флаги в false
+        // (класс stale-бага #40)
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnorePb { part, on: ignore_pb });
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnoreMw { part, on: ignore_mw });
         // Явный SetPartSf2Mode в ОБЕ стороны: слот движка наследует sf2_mode
         // прежнего жильца (remove не чистит) — фикс #40 (bug: «DSP, а звучит SF2»).
         let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2_mode });
@@ -2390,6 +2404,8 @@ impl App {
         p.vel_min = 1;
         p.vel_max = 127;
         p.note_mode = crate::synth::NOTE_MODE_POLY;
+        p.ignore_pb = false;
+        p.ignore_mw = false;
         p.enabled = enabled;
         self.load_edited_params(part);   // GUI: параметры патча 0
         self.send_edited_params(part);   // Движок: реальные параметры патча 0
@@ -2760,6 +2776,8 @@ impl App {
                 mute: p.mute, note_mode: p.note_mode,
                 root_only: false, // legacy: больше не пишется (skip_serializing)
                 sustain_enabled: p.sustain_enabled,
+                ignore_pb: p.ignore_pb,
+                ignore_mw: p.ignore_mw,
             })
             .collect();
         self.save_global_to_config();
@@ -2859,6 +2877,8 @@ impl App {
             self.parts[i].mute = part.mute;
             self.parts[i].note_mode = part.note_mode;
             self.parts[i].sustain_enabled = part.sustain_enabled;
+            self.parts[i].ignore_pb = part.ignore_pb;
+            self.parts[i].ignore_mw = part.ignore_mw;
             self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
             self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
             self.send_edited_params(i);
@@ -2870,6 +2890,11 @@ impl App {
             let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: part.mute });
             let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode: part.note_mode });
             let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: part.sustain_enabled });
+            // #55: при включении игнора SF2-каналу немедленно сбрасывается
+            // PB/MW (центр/ноль) — обработчик события; при выключении
+            // пересылаются текущие значения движка
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnorePb { part: i, on: part.ignore_pb });
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnoreMw { part: i, on: part.ignore_mw });
             let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange {
                 part: i, vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max });
             // Restore SF2 mode for this part

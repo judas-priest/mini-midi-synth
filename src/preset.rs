@@ -787,6 +787,12 @@ pub struct PartConfig {
     /// XY-pad Y macro index (0-7). Default 1 = Macro 2.
     #[serde(default = "default_xy_y", skip_serializing_if = "usize_is_one")]
     pub xy_macro_y: usize,
+    /// Part ignores Pitch Bend (TECHDEBT #55).
+    #[serde(default, skip_serializing_if = "bool_is_false")]
+    pub ignore_pb: bool,
+    /// Part ignores Mod Wheel (TECHDEBT #55).
+    #[serde(default, skip_serializing_if = "bool_is_false")]
+    pub ignore_mw: bool,
 }
 
 impl PartConfig {
@@ -801,6 +807,7 @@ impl PartConfig {
 fn default_vel_min() -> u8 { 1 }
 fn default_vel_max() -> u8 { 127 }
 fn default_true() -> bool { true }
+fn bool_is_false(v: &bool) -> bool { !*v }
 fn usize_is_zero(v: &usize) -> bool { *v == 0 }
 fn usize_is_one(v: &usize) -> bool { *v == 1 }
 fn default_xy_y() -> usize { 1 }
@@ -879,6 +886,8 @@ pub fn init_performance() -> Performance {
             macro_names: Vec::new(),
             xy_macro_x: 0,
             xy_macro_y: 1,
+            ignore_pb: false,
+            ignore_mw: false,
         }],
     }
 }
