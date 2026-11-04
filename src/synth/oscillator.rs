@@ -1044,7 +1044,7 @@ impl Oscillator {
     pub fn tick(&mut self, freq: f32, env: f32) -> f32 {
         // `env` = уже оттиканное значение амп-огибающей голоса (voice.rs):
         // только физ-модели с дыханием (Brass) используют его как давление.
-        match self.osc_type {            OscType::KarplusStrong => self.tick_ks(),
+        let out = match self.osc_type {            OscType::KarplusStrong => self.tick_ks(),
             OscType::Organ => self.tick_organ(freq),
             OscType::Noise => self.next_noise(),
             OscType::FmPiano => self.tick_fm_piano(freq),
@@ -1070,7 +1070,10 @@ impl Oscillator {
             OscType::Fm3 => self.tick_fm3(freq),
             OscType::Twist => self.tick_twist(freq),
             _ => self.tick_standard(freq),
-        }
+        };
+        // Non-finite shield: физ-модели с внутренними состояниями не должны
+        // пропускать inf/NaN в микс даже при residual blowup.
+        if out.is_finite() { out } else { 0.0 }
     }
 
     fn tick_standard(&mut self, freq: f32) -> f32 {
@@ -1554,9 +1557,25 @@ impl Oscillator {
 
         let bow_vel = velocity * 0.3;
 
+        // KS-канон: шумовой сид delay-линий — без него excitation starvation
+        // (bow_velocity 0.3 в хвосте friction-кривой, f≈3e-5 → тишина на C3).
+        // Тот же xorshift-идиом, что в init_brass bore-сиде.
+        let mut nut_delay = Self::take_buf(&mut self.pool_a, n_nut);
+        let mut bridge_delay = Self::take_buf(&mut self.pool_b, n_bridge);
+        let seed = 0.005 * velocity; // сим-верифицировано: ±0.005 достаточно
+        let mut rng = 0xDEADBEEFu32;
+        for s in nut_delay.iter_mut() {
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            *s = seed * (rng as f32 / u32::MAX as f32 - 0.5) * 2.0;
+        }
+        for s in bridge_delay.iter_mut() {
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            *s = seed * (rng as f32 / u32::MAX as f32 - 0.5) * 2.0;
+        }
+
         self.state = OscState::BowedString {
-            nut_delay: Self::take_buf(&mut self.pool_a, n_nut),
-            bridge_delay: Self::take_buf(&mut self.pool_b, n_bridge),
+            nut_delay,
+            bridge_delay,
             nut_pos: 0,
             bridge_pos: 0,
             nut_filter: 0.0,
@@ -1604,28 +1623,45 @@ impl Oscillator {
             let a = 100.0; // friction curve steepness
             let friction = *bow_pressure * v_rel * fast_exp(-a * v_rel * v_rel + 0.5);
 
+            // Питч-компенсация: per-period loop gain не зависит от питча →
+            // lock-время в периодах (77 периодов = 0.59 c на C3). k делает
+            // его константным в секундах (Brass-аналог, #53).
+            let n_total = (n_nut + n_bridge) as f32;
+            let k = (n_total / 183.0).clamp(1.0, 3.0);
+            let friction = friction * k;
+
             // Reflected waves = incoming + friction contribution
             let to_nut = incoming_bridge + friction;
             let to_bridge = incoming_nut + friction;
+
+            // Анти-blowup: внутренние состояния улетали в inf (3.09 c) / NaN
+            // (1.94 c) — клампы + денормал-флэши при записи.
+            const BOWED_CLAMP: f32 = 4.0;
+            let flush = |x: f32| if x.abs() < 1e-20 { 0.0 } else { x };
 
             // Nut reflection: invert + lowpass
             let nut_reflected = -to_nut;
             let nut_lp_coeff = 0.85;
             *nut_filter += nut_lp_coeff * (nut_reflected - *nut_filter);
+            *nut_filter = flush(nut_filter.clamp(-BOWED_CLAMP, BOWED_CLAMP));
             nut_delay[*nut_pos] = *nut_filter;
             *nut_pos = (*nut_pos + 1) % n_nut;
 
             // Bridge side: body filter (one-pole LP + bandpass resonance)
             let bridge_lp_coeff = 0.7;
             *bridge_lp += bridge_lp_coeff * (to_bridge - *bridge_lp);
+            *bridge_lp = flush(bridge_lp.clamp(-BOWED_CLAMP, BOWED_CLAMP));
 
             // Body bandpass resonance
             let f_norm = *body_freq / sample_rate;
             let w = (PI * f_norm).sin() * 2.0;
             let q_inv = 1.0 / *body_q;
-            *bridge_bp = *bridge_lp - *bridge_bp * q_inv;
-            let body_out = *bridge_bp;
-            *bridge_bp += w * body_out;
+            // Канонический Chamberlin: bp накапливает w*hp ПОВЕРХ bp_old,
+            // иначе (1+w)·hp + утечка lp с единичным DC-гейном в петлю
+            let hp = *bridge_lp - *bridge_bp * q_inv;
+            *bridge_bp += w * hp;
+            *bridge_bp = flush(bridge_bp.clamp(-BOWED_CLAMP, BOWED_CLAMP));
+            let body_out = hp;
 
             // Allpass fractional delay on bridge output
             let ap_in = *bridge_lp + body_out * 0.15;
@@ -1634,7 +1670,7 @@ impl Oscillator {
             *allpass_prev_in = ap_in;
             *allpass_prev_out = ap_out;
 
-            bridge_delay[*bridge_pos] = ap_out * 0.995; // slight loss
+            bridge_delay[*bridge_pos] = (ap_out * 0.995).clamp(-BOWED_CLAMP, BOWED_CLAMP); // slight loss
             *bridge_pos = (*bridge_pos + 1) % n_bridge;
 
             // Output from bridge side
