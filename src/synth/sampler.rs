@@ -572,6 +572,7 @@ impl SamplerEngine {
     }
 
     pub fn set_pitch_bend_range(&mut self, semitones: u8) {
+        log::debug!("[sampler] set_pitch_bend_range({}) synth_present={}", semitones, self.keys.synth.is_some());
         if let Some(synth) = &mut self.keys.synth {
             synth.set_pitch_bend_range(semitones as i32);
         }

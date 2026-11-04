@@ -2752,6 +2752,7 @@ impl SynthEngine {
             ControlEvent::SetGlobalParam { key, value } => {
                 self.global_params.set(key, value);
                 if key == "pitch_bend_range" {
+                    log::debug!("[engine] SetGlobalParam pitch_bend_range={}", value);
                     self.sampler.set_pitch_bend_range(value.clamp(1.0, 24.0) as u8);
                 }
             }
