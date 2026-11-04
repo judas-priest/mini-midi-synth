@@ -226,22 +226,25 @@ fn tc5_noop_switch_keeps_volume_and_no_panic() {
 
 #[test]
 fn tc6_noop_switch_does_not_cut_tail() {
-    // A: держим ноту, делаем no-op Sf2Mode — сустейн продолжается.
-    // B (контроль): РЕАЛЬНЫЙ флип в DSP — drain+free, парта замолкает.
-    // no-op не должен вести себя как флип.
+    // A: держим ноту (Drawbar Organ — бесконечный сустейн, умеренный релиз),
+    // делаем no-op Sf2Mode — сустейн продолжается.
+    // B (контроль): РЕАЛЬНЫЙ флип в DSP — drain(release)+free — релиз затухает.
+    // ОКНО 100 блоков (~69ms): в 10-блочном релиз не успевает отлиочь от
+    // сустейна (урок исполнения 2026-11-03: red pre-fix при pa≈pb).
     let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
     let mut a = engine_with_sf2(sf.clone());
     let mut b = engine_with_sf2(sf);
-    gui_switch_part_to_sf2(&mut a, 0, 1.0, 0.0, false, 0, 127);
-    gui_switch_part_to_sf2(&mut b, 0, 1.0, 0.0, false, 0, 127);
-    a.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
-    b.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    for e in [&mut a, &mut b] {
+        gui_switch_part_to_sf2(e, 0, 1.0, 0.0, false, 0, 127);
+        let _ = e.handle_control(ControlEvent::SetPartSf2Program { part: 0, program: 16, bank: 0 });
+        e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    }
     let _ = a.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true }); // no-op
-    let _ = b.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: false }); // drain+free
+    let _ = b.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: false }); // drain(release)+free
     let mut la = [0.0f32; BLOCK_SIZE]; let mut ra = [0.0f32; BLOCK_SIZE];
     let mut lb = [0.0f32; BLOCK_SIZE]; let mut rb = [0.0f32; BLOCK_SIZE];
     let (mut pa, mut pb) = (0.0f32, 0.0f32);
-    for _ in 0..10 {
+    for _ in 0..100 {
         a.tick_block(&mut la, &mut ra);
         b.tick_block(&mut lb, &mut rb);
         for i in 0..BLOCK_SIZE {
@@ -274,6 +277,13 @@ git add tests/sf2_channel_gain.rs && git commit -m "test: SF2 channel gain regre
 
 **Files:**
 - Modify: `src/synth/mod.rs` (~:2925-2943)
+
+- [ ] **Step 0: амение tc6 (урок исполнения, red-коммит 4489e41)** — в
+tests/sf2_channel_gain.rs заменить тело tc6 на версию из секции Test Cases /
+Task 1 Step 1 ЭТОЙ версии плана (Drawbar Organ program 16, окно 100 блоков;
+в 10-блочном окне релиз неотличим от сустейна — pa≈pb). Прогнать
+`cargo test --test sf2_channel_gain tc6` — tc6 теперь ЗЕЛЁНЫЙ на красном
+коммите. Коммит: `git add tests/sf2_channel_gain.rs && git commit -m "test: tc6 — organ sustain, 100-block window (10-block window can't tell release from sustain)"`.
 
 - [ ] **Step 1: переписать обработчик** — заменить ПЛЕЧО `SetPartSf2Mode`
 в `handle_control` (src/synth/mod.rs ~:2925-2943) целиком на:
