@@ -437,6 +437,7 @@ git add src/synth/oscillator.rs && git commit -m "fix: BowedString — noise see
         } else {
             0.0
         };
+```
 
 - [ ] **Step 3: клик** (:361): `velocity * 0.5` → `velocity * 0.15` с
   комментарием (STK-канон: эксайтер маскируется телом ноты).
