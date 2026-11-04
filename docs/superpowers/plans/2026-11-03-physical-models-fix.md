@@ -261,17 +261,20 @@ git add tests/physical_models.rs && git commit -m "test: physical-model regressi
     pressure_env: f32, // текущее давление мундштука (рампа к цели)
 ```
 
-в `init_brass` — `pressure_env: 0.0`; в tick_brass (функция :1733-1788)
-заменить прямое использование `self.blowing_pressure` (:1757) на рампу с
-коэффициентом, выведенным из SR (τ ≈ 5 мс):
+в `init_brass` — `pressure_env: 0.0` (поле в деструктуризации
+`if let OscState::Brass { .. } = &mut self.state` — мутации через
+`*pressure_env`); в tick_brass (функция :1733-1788) заменить прямое
+использование `self.blowing_pressure` (:1757) на рампу с коэффициентом,
+выведенным из SR (τ ≈ 5 мс; `self.sample_rate` — поле `Oscillator`,
+доступно рядом с `&mut self.state` — disjoint borrow):
 
 ```rust
         // STK-канон: breathPressure = maxPressure * adsr.tick() — давление
         // мундштука под огибающей, иначе DC-ступенька бьёт в бору щелчком.
         // Однополюсная рампа с τ=5мс: coeff = 1 - exp(-1/(0.005*sr))
         let coeff = 1.0 - (-1.0 / (0.005 * self.sample_rate)).exp();
-        self.pressure_env += coeff * (self.blowing_pressure * env - self.pressure_env);
-        let blowing = self.pressure_env;
+        *pressure_env += coeff * (self.blowing_pressure * env - *pressure_env);
+        let blowing = *pressure_env;
 ```
 
 (`env` — аргумент tick_brass; `self.sample_rate` — поле OscState, проверить
@@ -382,12 +385,13 @@ usize даёт термы до ±600 — НЕ использовать). `veloci
 ```
 
 плюс флэш `if x.abs() < 1e-20 { 0.0 }` на `nut_filter`, `bridge_lp`,
-`bridge_bp` при записи; плюс в диспетчере осциллятора (функция, которая
-возвращает сэмпл осциллятора голосу — найти по вызову tick_bowed_string)
-общий щит:
+`bridge_bp` при записи; плюс в диспетчере `Oscillator::tick` (oscillator.rs:1042 — плечи match
+возвращают выражение напрямую, привязать `let out = match ...;` перед
+возвратом) общий щит:
 
 ```rust
-    if !out.is_finite() { out = 0.0; }
+    let out = if out.is_finite() { out } else { 0.0 };
+    out
 ```
 
 - [ ] **Step 5: зелёный Bowed + 5s-finite**
