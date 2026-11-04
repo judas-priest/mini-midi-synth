@@ -2697,17 +2697,6 @@ impl App {
             led_console::Action::Redo => {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqRedo);
             }
-            led_console::Action::StepPerf(dir) => {
-                let n = self.perf_list.len();
-                if n == 0 { return; }
-                let cur = self.active_perf_console().unwrap_or(0);
-                let next = (cur as i32 + dir).rem_euclid(n as i32) as usize;
-                if let Some((name, _)) = self.perf_list.get(next) {
-                    let name = name.clone();
-                    self.load_performance_by_name(&name);
-                }
-                self.follow_window(next, true);
-            }
             led_console::Action::PageBack => {
                 self.page_window(-7);
                 // perf-follow только в HOME: в Pattern/Mute стрелки листают
