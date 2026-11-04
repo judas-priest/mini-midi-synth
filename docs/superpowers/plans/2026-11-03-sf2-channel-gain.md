@@ -32,7 +32,7 @@ anchor-checked: 2026-11-03 (база = master 0622aa4; все сниппеты �
   CC10 (`set_channel_pan`) — ДО `set_part_mode` (:2942), т.е. для свежего
   свитчера канал ещё None и CC10 ТЕРЯЕТСЯ; CC7 (громкость) и мьют-гейт
   (`set_layer_volume`) не посылаются ВООБЩЕ.
-- Push-порядок GUI: apply_performance (mod.rs:2822-2857) и push_full_part_state
+- Push-порядок GUI: apply_performance (mod.rs:2856-2872) и push_full_part_state
   (:2325-2349) шлют Volume/Mute/Pan ДО SetPartSf2Mode → на момент их прихода у
   свитчера/свежего движка канала нет → все три теряются; выделенный позже
   канал несёт CC7/CC10 прежнего жильца или GM-дефолт (CC7=100).
@@ -60,7 +60,9 @@ anchor-checked: 2026-11-03 (база = master 0622aa4; все сниппеты �
   Sf2Mode(true) → Sf2Program → NoteOn → пик ≈ 0 (тишина). ДО фикса — слышно
   (канал с дефолтным CC7).
 - TC2 (mute-held-across-switch): Vol 1.0 → Mute(true) → … → Sf2Mode(true) →
-  NoteOn → тишина. ДО фикса — слышно.
+  NoteOn → тишина. Зелёный и ДО фикса: замьюченные парты скипаются на
+  роутинге (synth/mod.rs:2259) — тест пинит роутинг-скип; мьют-гейт CC7 в
+  фиксе — корректность состояния канала, отдельного красного теста не даёт.
 - TC3 (pan-on-switch): Vol 1.0 → Pan(-1.0) → … → Sf2Mode(true) → NoteOn →
   peak_left ≥ 4×peak_right. ДО фикса — FAIL (CC10 уходит до аллокации канала).
 - TC4 (volume-value-on-switch, positive): два одинаковых SF2-свитчера, Vol 1.0
@@ -69,9 +71,10 @@ anchor-checked: 2026-11-03 (база = master 0622aa4; все сниппеты �
 - TC5 (no-op idempotent + baseline): Sf2Mode(true) дважды (второй — no-op) +
   Vol поверх; парт говорит с установленной громкостью, без паники. Проходит
   и до, и после (санити-бейзлайн порядка Volume-ПОСЛЕ-mode).
-- TC6 (tails on no-op): SF2-парт держит ноту → Sf2Mode(true) no-op → хвост
-  не обрывается (peak после no-op > 0 в течение release). Пин существующей
-  семантики «no-op не дренит» (synth/mod.rs:2926-2927).
+- TC6 (tails on no-op): SF2-парт ДЕРЖИТ ноту → no-op Sf2Mode → сустейн
+  продолжается (уровень A в 4+ раза выше контроля B с РЕАЛЬНЫМ флипом в DSP,
+  который дренит+освобождает канал). Пин семантики «no-op не дренит»
+  (synth/mod.rs:2926-2927).
 
 ## Negative Matrix
 
@@ -129,12 +132,16 @@ fn engine_with_sf2(sf: std::sync::Arc<rustysynth::SoundFont>) -> SynthEngine {
     e
 }
 
-/// GUI push order for ONE part from apply_performance (mod.rs:2822-2857),
-/// reduced to the volume/pan/mute/mode essentials.
-fn gui_switch_part_to_sf2(e: &mut SynthEngine, part: usize, vol: f32, pan: f32, mute: bool) {
+/// GUI push order for ONE part from apply_performance (mod.rs:2856-2872),
+/// reduced to the volume/pan/mute/mode essentials. `lo/hi` — диапазон парта:
+/// роутинг звучит во ВСЕ включённые немьютнутые парты с подходящим range
+/// (synth/mod.rs:2258-2271), поэтому тесты с двумя партами обязаны дать
+/// непересекающиеся диапазоны.
+#[allow(clippy::too_many_arguments)]
+fn gui_switch_part_to_sf2(e: &mut SynthEngine, part: usize, vol: f32, pan: f32, mute: bool, lo: u8, hi: u8) {
     let _ = e.handle_control(ControlEvent::SetPartEnabled { part, enabled: true });
     let _ = e.handle_control(ControlEvent::SetPartVolume { part, volume: vol });
-    let _ = e.handle_control(ControlEvent::SetPartRange { part, min_note: 0, max_note: 127 });
+    let _ = e.handle_control(ControlEvent::SetPartRange { part, min_note: lo, max_note: hi });
     let _ = e.handle_control(ControlEvent::SetPartPan { part, pan });
     let _ = e.handle_control(ControlEvent::SetPartMute { part, mute });
     let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part, enabled: true });
@@ -168,7 +175,7 @@ fn overall_peak(e: &mut SynthEngine, note: u8, blocks: usize) -> f32 {
 fn tc1_zero_volume_survives_engine_switch() {
     let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
     let mut e = engine_with_sf2(sf);
-    gui_switch_part_to_sf2(&mut e, 0, 0.0, 0.0, false);
+    gui_switch_part_to_sf2(&mut e, 0, 0.0, 0.0, false, 0, 127);
     let p = overall_peak(&mut e, 60, 200);
     assert!(p < SILENCE, "vol 0.0 must stay silent after DSP->SF2 switch (peak {p})");
 }
@@ -177,7 +184,7 @@ fn tc1_zero_volume_survives_engine_switch() {
 fn tc2_mute_survives_engine_switch() {
     let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
     let mut e = engine_with_sf2(sf);
-    gui_switch_part_to_sf2(&mut e, 0, 1.0, 0.0, true);
+    gui_switch_part_to_sf2(&mut e, 0, 1.0, 0.0, true, 0, 127);
     let p = overall_peak(&mut e, 60, 200);
     assert!(p < SILENCE, "muted part must stay silent after switch (peak {p})");
 }
@@ -186,7 +193,7 @@ fn tc2_mute_survives_engine_switch() {
 fn tc3_pan_survives_engine_switch() {
     let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
     let mut e = engine_with_sf2(sf);
-    gui_switch_part_to_sf2(&mut e, 0, 1.0, -1.0, false);
+    gui_switch_part_to_sf2(&mut e, 0, 1.0, -1.0, false, 0, 127);
     let (pl, pr) = peaks(&mut e, 60, 200);
     assert!(pl > pr * 4.0, "pan -1.0 lost on switch: left {pl}, right {pr}");
 }
@@ -195,11 +202,13 @@ fn tc3_pan_survives_engine_switch() {
 fn tc4_volume_value_applied_on_switch() {
     let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
     let mut e = engine_with_sf2(sf);
-    gui_switch_part_to_sf2(&mut e, 0, 1.0, 0.0, false);
-    let loud = overall_peak(&mut e, 60, 200);
-    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
-    gui_switch_part_to_sf2(&mut e, 1, 0.1, 0.0, false);
-    let quiet = overall_peak(&mut e, 61, 200);
+    // Непересекающиеся диапазоны: иначе NoteOn звучит в ОБОИХ партах и
+    // quiet ≈ loud независимо от CC7. Дренаж хвоста перед вторым замером.
+    gui_switch_part_to_sf2(&mut e, 0, 1.0, 0.0, false, 0, 59);
+    let loud = overall_peak(&mut e, 40, 200);
+    for _ in 0..100 { let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE]; e.tick_block(&mut l, &mut r); }
+    gui_switch_part_to_sf2(&mut e, 1, 0.1, 0.0, false, 60, 127);
+    let quiet = overall_peak(&mut e, 72, 200);
     assert!(quiet < loud * 0.5, "vol 0.1 ({quiet}) not quieter than 1.0 ({loud})");
 }
 
@@ -207,33 +216,53 @@ fn tc4_volume_value_applied_on_switch() {
 fn tc5_noop_switch_keeps_volume_and_no_panic() {
     let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
     let mut e = engine_with_sf2(sf);
-    gui_switch_part_to_sf2(&mut e, 0, 1.0, 0.0, false);
+    gui_switch_part_to_sf2(&mut e, 0, 1.0, 0.0, false, 0, 127);
     // no-op switch (SF2 -> SF2), затем volume поверх — как perf-load пушит
     let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true });
-    let _ = e.handle_control(ControlEvent::SetPartVolume { part: 0, volume: 0.2 });
+    let _ = e.handle_control(ControlEvent::SetPartVolume { part: 0, volume: 0.5 });
     let p = overall_peak(&mut e, 60, 200);
     assert!(p > SILENCE, "no-op switch must keep the part audible (peak {p})");
 }
 
 #[test]
 fn tc6_noop_switch_does_not_cut_tail() {
+    // A: держим ноту, делаем no-op Sf2Mode — сустейн продолжается.
+    // B (контроль): РЕАЛЬНЫЙ флип в DSP — drain+free, парта замолкает.
+    // no-op не должен вести себя как флип.
     let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
-    let mut e = engine_with_sf2(sf);
-    gui_switch_part_to_sf2(&mut e, 0, 1.0, 0.0, false);
-    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
-    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
-    // no-op во время релиза: хвост обязан продолжаться
-    let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true });
-    let p = overall_peak(&mut e, 60, 3);
-    assert!(p > SILENCE, "no-op switch cut the release tail (peak {p})");
+    let mut a = engine_with_sf2(sf.clone());
+    let mut b = engine_with_sf2(sf);
+    gui_switch_part_to_sf2(&mut a, 0, 1.0, 0.0, false, 0, 127);
+    gui_switch_part_to_sf2(&mut b, 0, 1.0, 0.0, false, 0, 127);
+    a.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    b.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let _ = a.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true }); // no-op
+    let _ = b.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: false }); // drain+free
+    let mut la = [0.0f32; BLOCK_SIZE]; let mut ra = [0.0f32; BLOCK_SIZE];
+    let mut lb = [0.0f32; BLOCK_SIZE]; let mut rb = [0.0f32; BLOCK_SIZE];
+    let (mut pa, mut pb) = (0.0f32, 0.0f32);
+    for _ in 0..10 {
+        a.tick_block(&mut la, &mut ra);
+        b.tick_block(&mut lb, &mut rb);
+        for i in 0..BLOCK_SIZE {
+            pa = pa.max(la[i].abs());
+            pb = pb.max(lb[i].abs());
+        }
+    }
+    a.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    b.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    assert!(pa > pb * 4.0, "no-op switch behaved like a real flip: a {pa}, b {pb}");
 }
 ```
 
 - [ ] **Step 2: прогнать — зафиксировать красные**
 
 Run: `cargo test --test sf2_channel_gain 2>&1 | tail -12`
-Expected: tc1/tc2/tc3/tc4 FAIL (перечислить пики в выводе — они же диагностика),
-tc5/tc6 PASS, компиляция чистая.
+Expected: tc1/tc3/tc4 FAIL (канал с дефолтным CC7=100 и центром); tc2/tc5/tc6
+PASS — tc2 зелёный ДО фикса легитимно: замьюченные парты скипаются на
+роутинге (synth/mod.rs:2259), мьют-асимметрия на слух не проявляется
+(мьют-гейт в фиксе нужен для корректности состояния канала, не для этого
+теста). Пики в выводе — диагностика. Компиляция чистая.
 
 - [ ] **Step 3: коммит красных тестов**
 
@@ -259,8 +288,11 @@ git add tests/sf2_channel_gain.rs && git commit -m "test: SF2 channel gain regre
                     .unwrap_or(false);
                 if mode_changed {
                     if let Some(l) = self.parts.get_mut(part) {
-                        // Engine switch: both voice owners must be drained
+                        // Engine switch: both voice owners must be drained.
+                        // ОБЯЗАТЕЛЬНО: единственный writer sf2_mode — иначе
+                        // mode_changed залипает в true и роутинг ломается.
                         l.drain_notes(&mut self.sampler, part, false);
+                        l.sf2_mode = enabled;
                     }
                 }
                 // Allocate/free the channel FIRST: volume/pan/mute events of
@@ -279,18 +311,17 @@ git add tests/sf2_channel_gain.rs && git commit -m "test: SF2 channel gain regre
                             .set_layer_volume(part, if l.mute { 0.0 } else { l.volume });
                     }
                 }
-                None
             }
 ```
 
-Проверить стиль соседних плеч: если match-плеча в `handle_control` не
-заканчиваются явным `None` — сохранить существующий стиль (финальный `None`
-как выражение совместим с `return None;` из прежнего no-op-гарда).
+ПЛЕЧО БЕЗ `None`: match в `handle_control` statement-typed — все плеча
+заканчиваются `;`, функция возвращает `None` в хвосте (synth/mod.rs:3097-3101).
+Сниппет выше заканчивается блоком `}` без выражения — как соседние плечи.
 
 - [ ] **Step 2: прогнать — все зелёные**
 
 Run: `cargo test --test sf2_channel_gain 2>&1 | tail -10 && cargo test --test layer_switch_debug 2>&1 | tail -4`
-Expected: 6/6 sf2_channel_gain ok; существующие layer_switch_debug зелёные
+Expected: 6/6 sf2_channel_gain ok (tc2 зелёный был и до — см. Step 2 Task 1); layer_switch_debug зелёные
 (семантика хвостов не тронута).
 
 - [ ] **Step 3: rt_safety + clippy**
