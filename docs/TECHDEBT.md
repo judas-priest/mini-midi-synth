@@ -1042,6 +1042,18 @@ tests/physical_models.rs (8 TC, амплитудные, позднее окно)
 (конфиги патчей).
 
 ## 52а. tc6v2 — детерминированный пин «no-op Sf2Mode не дренит» — отложено (решение юзера 2026-11-03, «в техдолг»)
+## 55. Per-part Ignore Pitch Bend / Mod Wheel — ГОТОВО (PR #75, 2026-11-05)
+Канон multitimbral RX-свитчей (Tavily: Motif/Fantom, Logic input filter,
+bend-range-0 идиома). Флаги ignore_pb/ignore_mw на парте: чекбоксы PB/MW в
+строке парта (рядом Sus), DSP-маска на 3 точках (lfo_pitch_offset_base,
+mods.pitch_bend, mod_sources.mod_wheel), SF2-форвардинг 0..2 с ignore-чеком,
+немедленный сброс канала при включении (центр/ноль) и re-assert через новое
+зеркало pitch_bend_norm при выключении; персист: PartConfig (serde-default,
+bool_is_false) + PartUiState (симметрия с Sus) + push_full_part_state
+(reconnect) + apply_performance + send_initial_presets. Тесты: 2 юнит
+(tc_ignore/masking, tc_ignore_events), 2 serde-roundtrip. Ограничение: SF2
+PB/MW-форвардинг существует только для партов 0..1 (существующее 0..2).
+
 ## 54. Перфы: менять расположение партов (drag-and-drop / up-down в списке партов) — НОВОЕ (2026-11-03, юзер; гугл практик сделан)
 Юзер хочет менять порядок партов внутри перфа (сейчас слоты фиксированы A1..B8).
 Лучшие практики (Tavily 2026-11-03: FL Studio channel rack, saasui/pixso/pencil&paper DnD-гайды):
