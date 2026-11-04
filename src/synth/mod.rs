@@ -2326,7 +2326,7 @@ impl SynthEngine {
                     value * down
                 };
                 for i in 0..2 {
-                    if self.parts.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
+                    if self.parts.get(i).map(|l| l.sf2_mode && !l.ignore_pb).unwrap_or(false) {
                         self.sampler.pitch_bend(i, value);
                     }
                 }
@@ -2335,7 +2335,7 @@ impl SynthEngine {
                 self.mod_wheel = value;
                 // Forward to SF2 sampler as CC1 on active SF2 parts
                 for i in 0..2 {
-                    if self.parts.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
+                    if self.parts.get(i).map(|l| l.sf2_mode && !l.ignore_mw).unwrap_or(false) {
                         self.sampler.mod_wheel(i, value);
                     }
                 }
@@ -3502,7 +3502,7 @@ impl SynthEngine {
                 macro_vals: part.macro_vals,
                 amp_env: 0.0, filter_env: 0.0,
                 mseg_outputs: [mseg1_val, mseg2_val],
-                mod_wheel: self.mod_wheel,
+                mod_wheel: effective_mw(part.ignore_mw, self.mod_wheel),
                 aftertouch: self.aftertouch_smooth,
                 velocity: part.last_velocity,
                 key_track,
@@ -3512,7 +3512,7 @@ impl SynthEngine {
                 alt_bipolar: part.alt_bipolar,
                 alt_unipolar: part.alt_unipolar,
                 release_vel: part.release_vel,
-                pitch_bend: self.pitch_bend_semitones / 2.0, // normalize -1..+1
+                pitch_bend: effective_pb(part.ignore_pb, self.pitch_bend_semitones) / 2.0, // normalize -1..+1
                 cc: self.cc_values,
                 breath: part.breath,
                 expression: part.expression,
@@ -3524,10 +3524,13 @@ impl SynthEngine {
             };
             let mod_offsets = part.mod_matrix.evaluate(&mod_sources);
 
-            let lfo_pitch_offset_base = self.pitch_bend_semitones
+            // Per-part ignore (TECHDEBT #55): маска PB/MW-вкладов
+            let pb_eff = effective_pb(part.ignore_pb, self.pitch_bend_semitones);
+            let mw_eff = effective_mw(part.ignore_mw, self.mod_wheel);
+            let lfo_pitch_offset_base = pb_eff
                 + lfo1_val * part.params.lfo_pitch_depth * 2.0
                 + lfo2_val * part.params.lfo2_pitch_depth * 2.0
-                + self.mod_wheel * 0.5 * vibrato_val
+                + mw_eff * 0.5 * vibrato_val
                 + self.aftertouch_smooth * 0.3 * lfo1_val
                 + seq_pitch;
             let pitch_offset = lfo_pitch_offset_base + mod_offsets.pitch;
