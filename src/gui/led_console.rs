@@ -50,9 +50,27 @@ pub enum Action {
     /// Pad 32 held >= HOLD: redo the last undone sequencer edit.
     Redo,
     StepPerf(i32),
-    StepPattern(i32),
     PageBack,
     PageForward,
+}
+
+/// Видимых слотов верхней строки (слоты 0..=6, 7-й — MENU).
+pub(crate) const CONSOLE_VISIBLE: usize = 7;
+
+/// Максимальный ЛЕГАЛЬНЫЙ старт окна для списка длиной len.
+pub(crate) fn window_max_start(len: usize) -> usize {
+    len.saturating_sub(CONSOLE_VISIBLE)
+}
+
+/// Auto-follow: если idx вне видимого окна [start, start+7) — вернуть новый
+/// старт (зажатый легальными страницами), иначе None (не двигать).
+/// Регрессия #50: паттерн 7 ставил окно в 7 — вырожденная страница.
+pub(crate) fn follow_start(idx: usize, start: usize, len: usize) -> Option<usize> {
+    if (start..start + CONSOLE_VISIBLE).contains(&idx) {
+        None
+    } else {
+        Some(idx.min(window_max_start(len)))
+    }
 }
 
 pub struct LedConsole {
@@ -143,9 +161,16 @@ impl LedConsole {
 
     fn step(&mut self, dir: i32) -> Action {
         match self.mode {
+            // Стрелки 30/31 в режиме перфов шагают перф (live-смена);
+            // в остальных режимах = листание страницы (юзер-модель #50)
             Mode::Home => Action::StepPerf(dir),
-            Mode::Pattern => Action::StepPattern(dir),
-            _ => Action::StepPerf(dir),
+            _ => {
+                if dir < 0 {
+                    Action::PageBack
+                } else {
+                    Action::PageForward
+                }
+            }
         }
     }
 
@@ -373,7 +398,7 @@ mod tests {
         let mut c = LedConsole::new();
         assert_eq!(c.on_event(PadEvent::Prev, Instant::now()), Some(Action::StepPerf(-1)));
         c.mode = Mode::Pattern;
-        assert_eq!(c.on_event(PadEvent::Next, Instant::now()), Some(Action::StepPattern(1)));
+        assert_eq!(c.on_event(PadEvent::Next, Instant::now()), Some(Action::PageForward));
     }
 
     #[test]
@@ -443,6 +468,37 @@ mod tests {
         assert_eq!(top[2], [0x00, 0xFF, 0x00], "part 15: green");
         // за концом списка -> OFF (окно 14, slot 3 = part 16 — не существует)
         assert_eq!(top[3], [0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn tc1_window_max_start() {
+        assert_eq!(window_max_start(8), 1);   // паттерны: 2 страницы
+        assert_eq!(window_max_start(16), 9);  // мьюты: 16 партов
+        assert_eq!(window_max_start(30), 23); // перфы
+        assert_eq!(window_max_start(3), 0);   // короче окна — одна страница
+    }
+
+    #[test]
+    fn tc2_follow_clamps_to_last_page_start() {
+        // Регрессия finding 2: выбор паттерна 7 ставил окно на вырожденную
+        // страницу 7; обязан — на старт последней легальной страницы
+        assert_eq!(follow_start(7, 0, 8), Some(1));
+    }
+
+    #[test]
+    fn tc3_follow_inside_view_noop() {
+        assert_eq!(follow_start(3, 0, 8), None);
+        assert_eq!(follow_start(6, 0, 8), None);
+    }
+
+    #[test]
+    fn tc4_follow_left_escape() {
+        assert_eq!(follow_start(0, 1, 8), Some(0));
+    }
+
+    #[test]
+    fn tc5_follow_right_edge_visible() {
+        assert_eq!(follow_start(7, 1, 8), None);
     }
 
     #[test]
