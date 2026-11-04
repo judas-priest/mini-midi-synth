@@ -58,22 +58,22 @@ Flute v2	00e4cdef6774e4b4
 Clarinet	00aaed976ca49521
 Shakuhachi (Emulator II Approx)	f5385937ada690a3
 Shakuhachi v2	7ea81b96aa679f71
-Violin	7d66b04eebce40bb
-Violin v2	825961afa89b0890
-Viola	6d9fae9278c8c9da
-Cello	a0e13977d48db584
-Cello v2	c7b332b27bf2c3de
-Double Bass	f7dfe723eee0e48b
-Double Bass v2	e0f063b63117895e
+Violin	d991b23fa627e525
+Violin v2	3caef6db843150c9
+Viola	47f7809c0e946c5e
+Cello	f3392959640c4520
+Cello v2	52b7cf4de17aebe2
+Double Bass	7d0fdfc0360c9aac
+Double Bass v2	3907ec9a3009e83e
 Synth Brass	2db5ad3b97f28ccd
-Trumpet	fa196d69704f8fda
-Trumpet v2	d5f8233352e9d625
-French Horn	aa3acd5393e2d1af
-Trombone	830cb65dd0f4b636
-Trombone v2	c4bbc1660aa1a0c2
-Tuba	78e9479f9c0c6287
-Tuba v2	e0194d562111615e
-French Horn v2	bd971fb885f25231
+Trumpet	4b8a3bdce999adb5
+Trumpet v2	b955e646cbd36486
+French Horn	6a8865a11f2b8759
+Trombone	a9a0ebf602f7ad59
+Trombone v2	11de8add22a7503f
+Tuba	f210d998476e20dd
+Tuba v2	0bbd7bda2b340af4
+French Horn v2	d7b65f38d22899c7
 Sub Bass	b8fd0172be1cc595
 Sub Bass v2 (LP24)	84fcf1ce24f58455
 Acid Bass	ff936448330559a1
@@ -91,7 +91,7 @@ Bass Guitar (Finger)	3c7c7a7913630c51
 Bass Guitar (Finger) v2	cc56b8df314a4465
 Bass Finger v3	6c34bef42d6f1899
 Bass Guitar (Pick)	3cb67523d903e405
-Bass Guitar (Slap)	1e4cf0b163e0c2a9
+Bass Guitar (Slap)	65f7c530c7998fe1
 Saw Lead	177530d1adccefe1
 Mono Lead	a95d8a36bd75ff85
 Detuned Lead	719dd954a128accd

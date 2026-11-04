@@ -291,6 +291,7 @@ pub enum OscState {
         bell_cutoff: f32,
         bore_lp_state: f32,
         blowing_pressure: f32,
+        pressure_env: f32, // текущее давление мундштука (рампа к цели)
         _bore_length_ratio: f32,
     },
     PhaseDistortion {
@@ -623,6 +624,7 @@ impl Oscillator {
                 bell_cutoff: 2000.0,
                 bore_lp_state: 0.0,
                 blowing_pressure: 0.5,
+                pressure_env: 0.0,
                 _bore_length_ratio: 1.0,
             },
             OscType::PhaseDistortion => OscState::PhaseDistortion {
@@ -1039,9 +1041,10 @@ impl Oscillator {
         (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0
     }
 
-    pub fn tick(&mut self, freq: f32) -> f32 {
-        match self.osc_type {
-            OscType::KarplusStrong => self.tick_ks(),
+    pub fn tick(&mut self, freq: f32, env: f32) -> f32 {
+        // `env` = уже оттиканное значение амп-огибающей голоса (voice.rs):
+        // только физ-модели с дыханием (Brass) используют его как давление.
+        let out = match self.osc_type {            OscType::KarplusStrong => self.tick_ks(),
             OscType::Organ => self.tick_organ(freq),
             OscType::Noise => self.next_noise(),
             OscType::FmPiano => self.tick_fm_piano(freq),
@@ -1051,7 +1054,7 @@ impl Oscillator {
             OscType::DrumSynth => self.tick_drum_synth(),
             OscType::BassGuitar => self.tick_bass_guitar(),
             OscType::BowedString => self.tick_bowed_string(),
-            OscType::Brass => self.tick_brass(),
+            OscType::Brass => self.tick_brass(env),
             OscType::PhaseDistortion => self.tick_phase_distortion(freq),
             OscType::Wavefolder => self.tick_wavefolder(freq),
             OscType::ModalResonator => self.tick_modal_resonator(),
@@ -1067,7 +1070,10 @@ impl Oscillator {
             OscType::Fm3 => self.tick_fm3(freq),
             OscType::Twist => self.tick_twist(freq),
             _ => self.tick_standard(freq),
-        }
+        };
+        // Non-finite shield: физ-модели с внутренними состояниями не должны
+        // пропускать inf/NaN в микс даже при residual blowup.
+        if out.is_finite() { out } else { 0.0 }
     }
 
     fn tick_standard(&mut self, freq: f32) -> f32 {
@@ -1551,9 +1557,25 @@ impl Oscillator {
 
         let bow_vel = velocity * 0.3;
 
+        // KS-канон: шумовой сид delay-линий — без него excitation starvation
+        // (bow_velocity 0.3 в хвосте friction-кривой, f≈3e-5 → тишина на C3).
+        // Тот же xorshift-идиом, что в init_brass bore-сиде.
+        let mut nut_delay = Self::take_buf(&mut self.pool_a, n_nut);
+        let mut bridge_delay = Self::take_buf(&mut self.pool_b, n_bridge);
+        let seed = 0.005 * velocity; // сим-верифицировано: ±0.005 достаточно
+        let mut rng = 0xDEADBEEFu32;
+        for s in nut_delay.iter_mut() {
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            *s = seed * (rng as f32 / u32::MAX as f32 - 0.5) * 2.0;
+        }
+        for s in bridge_delay.iter_mut() {
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            *s = seed * (rng as f32 / u32::MAX as f32 - 0.5) * 2.0;
+        }
+
         self.state = OscState::BowedString {
-            nut_delay: Self::take_buf(&mut self.pool_a, n_nut),
-            bridge_delay: Self::take_buf(&mut self.pool_b, n_bridge),
+            nut_delay,
+            bridge_delay,
             nut_pos: 0,
             bridge_pos: 0,
             nut_filter: 0.0,
@@ -1601,28 +1623,45 @@ impl Oscillator {
             let a = 100.0; // friction curve steepness
             let friction = *bow_pressure * v_rel * fast_exp(-a * v_rel * v_rel + 0.5);
 
+            // Питч-компенсация: per-period loop gain не зависит от питча →
+            // lock-время в периодах (77 периодов = 0.59 c на C3). k делает
+            // его константным в секундах (Brass-аналог, #53).
+            let n_total = (n_nut + n_bridge) as f32;
+            let k = (n_total / 183.0).clamp(1.0, 3.0);
+            let friction = friction * k;
+
             // Reflected waves = incoming + friction contribution
             let to_nut = incoming_bridge + friction;
             let to_bridge = incoming_nut + friction;
+
+            // Анти-blowup: внутренние состояния улетали в inf (3.09 c) / NaN
+            // (1.94 c) — клампы + денормал-флэши при записи.
+            const BOWED_CLAMP: f32 = 4.0;
+            let flush = |x: f32| if x.abs() < 1e-20 { 0.0 } else { x };
 
             // Nut reflection: invert + lowpass
             let nut_reflected = -to_nut;
             let nut_lp_coeff = 0.85;
             *nut_filter += nut_lp_coeff * (nut_reflected - *nut_filter);
+            *nut_filter = flush(nut_filter.clamp(-BOWED_CLAMP, BOWED_CLAMP));
             nut_delay[*nut_pos] = *nut_filter;
             *nut_pos = (*nut_pos + 1) % n_nut;
 
             // Bridge side: body filter (one-pole LP + bandpass resonance)
             let bridge_lp_coeff = 0.7;
             *bridge_lp += bridge_lp_coeff * (to_bridge - *bridge_lp);
+            *bridge_lp = flush(bridge_lp.clamp(-BOWED_CLAMP, BOWED_CLAMP));
 
             // Body bandpass resonance
             let f_norm = *body_freq / sample_rate;
             let w = (PI * f_norm).sin() * 2.0;
             let q_inv = 1.0 / *body_q;
-            *bridge_bp = *bridge_lp - *bridge_bp * q_inv;
-            let body_out = *bridge_bp;
-            *bridge_bp += w * body_out;
+            // Канонический Chamberlin: bp накапливает w*hp ПОВЕРХ bp_old,
+            // иначе (1+w)·hp + утечка lp с единичным DC-гейном в петлю
+            let hp = *bridge_lp - *bridge_bp * q_inv;
+            *bridge_bp += w * hp;
+            *bridge_bp = flush(bridge_bp.clamp(-BOWED_CLAMP, BOWED_CLAMP));
+            let body_out = hp;
 
             // Allpass fractional delay on bridge output
             let ap_in = *bridge_lp + body_out * 0.15;
@@ -1631,7 +1670,7 @@ impl Oscillator {
             *allpass_prev_in = ap_in;
             *allpass_prev_out = ap_out;
 
-            bridge_delay[*bridge_pos] = ap_out * 0.995; // slight loss
+            bridge_delay[*bridge_pos] = (ap_out * 0.995).clamp(-BOWED_CLAMP, BOWED_CLAMP); // slight loss
             *bridge_pos = (*bridge_pos + 1) % n_bridge;
 
             // Output from bridge side
@@ -1654,7 +1693,7 @@ impl Oscillator {
     ///   lip_v        → bq_y2      BiQuad output y[n-2]
     ///   lip_freq     → bq_a1      -2*r*cos(2π*f/sr)
     ///   lip_damping  → bq_a2      r² = 0.994009
-    ///   lip_mass_inv → bq_b0      gain (0.03, STK default)
+    ///   lip_mass_inv → bq_b0      gain (DC-gain normalized, LIP_DC_GAIN)
     ///   bell_lp_state→ dc_x1      DC blocker: prev input
     ///   bell_hp_state→ dc_y1      DC blocker: prev output
     ///   bell_cutoff  → bell_a1    bell post-LP coefficient (shapes timbre per instrument)
@@ -1680,7 +1719,14 @@ impl Oscillator {
         let r = 0.997_f32;
         let bq_a1 = -2.0 * r * (TAU * lip_freq_hz / sr).cos();
         let bq_a2 = r * r;
-        let bq_b0 = 0.03_f32;  // STK: lipFilter_.setGain(0.03)
+        // DC-gain normalization: STK-константный b0=0.03 даёт DC-гейн
+        // b0/(1+a1+a2), растущий с питчем вниз (≈36 на A3 против ≈6.3 на C5) —
+        // bq_y уходит глубоко в зону насыщения, петля reflection не качает
+        // (тишина ниже B4, #53). Нормируем: bq_y ≈ p_mouth·LIP_DC_GAIN на
+        // любом питче — внутри чувствительной зоны soft saturation (δ≈0.2).
+        const LIP_DC_GAIN: f32 = 2.5;
+        let dc = 1.0 + bq_a1 + bq_a2; // положительный, крошечный на низком питче
+        let bq_b0 = dc * LIP_DC_GAIN;
 
         // Blowing pressure → STK maxPressure
         let max_pressure = (0.55 + blowing_pressure * 0.40) * velocity.clamp(0.0, 1.0);
@@ -1716,6 +1762,10 @@ impl Oscillator {
             bell_cutoff: bell_a1, // bell post-LP a1
             bore_lp_state: 0.0,   // bell post-LP state
             blowing_pressure: max_pressure,
+            // Start-kick: STK startBlowing ramp'ит СВЕРХУ (от 1.8×target) —
+            // переброс помогает губам сорваться в self-oscillation (#53).
+            // Однополюсная рампа в tick_brass затем оседает на target.
+            pressure_env: max_pressure * 1.8,
             _bore_length_ratio: 1.0,
         };
     }
@@ -1730,7 +1780,7 @@ impl Oscillator {
     ///   sig = delta*p_mouth + (1−delta)*p_bore  ← scattering junction
     ///   bore_in = DC_block(sig)
     ///   output = bell_LP(bore_out)        ← radiated: shapes timbre
-    fn tick_brass(&mut self) -> f32 {
+    fn tick_brass(&mut self, env: f32) -> f32 {
         if let OscState::Brass {
             bore_delay, bore_pos,
             lip_x,          // bq_y1
@@ -1743,18 +1793,29 @@ impl Oscillator {
             bell_cutoff,    // bell post-LP a1
             bore_lp_state,  // bell post-LP state
             blowing_pressure,
+            pressure_env,
             ..
         } = &mut self.state
         {
             let n = bore_delay.len();
             if n == 0 { return 0.0; }
 
+            // Denormal flush: subnormal arithmetic stalls the audio thread
+            // (~2.6 s per note without guards).
+            let flush = |x: f32| if x.abs() < 1e-20 { 0.0 } else { x };
+
             // 1. Read bore return (oldest sample = signal from 2 periods ago)
             let bore_out = bore_delay[*bore_pos];
 
             // 2. Pressures
+            // STK-канон: breathPressure = maxPressure * adsr.tick() — давление
+            // мундштука под огибающей, иначе DC-ступенька бьёт в бору щелчком.
+            // Однополюсная рампа с τ=5мс: coeff = 1 - exp(-1/(0.005*sr))
+            let coeff = 1.0 - (-1.0 / (0.005 * self.sample_rate)).exp();
+            *pressure_env += coeff * (*blowing_pressure * env - *pressure_env);
+            let blowing = flush(*pressure_env);
             let p_bore  = bore_out * 0.85;
-            let p_mouth = *blowing_pressure * 0.3;
+            let p_mouth = blowing * 0.3;
             let dp = p_mouth - p_bore;
 
             // 3. Lip BiQuad resonator (high-Q bandpass at playing frequency)
@@ -1763,8 +1824,12 @@ impl Oscillator {
             *lip_v = *lip_x;
             *lip_x = bq_y;
 
-            // 4. Nonlinear: square + hard saturate  → harmonic generation
-            let delta = (bq_y * bq_y).min(1.0);
+            // 4. Nonlinear: square + soft saturate → harmonic generation.
+            // Мягкое насыщение вместо жёсткого клампа: жёсткий кламп имеет
+            // нулевую производную — устойчивая мёртвая точка (тишина ниже B4,
+            // #53). s/(1+s) выводит из любой точки.
+            let s = bq_y * bq_y;
+            let delta = s / (1.0 + s);
 
             // 5. Scattering junction (STK formula)
             let sig = delta * p_mouth + (1.0 - delta) * p_bore;
@@ -1772,14 +1837,14 @@ impl Oscillator {
             // 6. DC blocker: y[n] = x[n] - x[n-1] + 0.995*y[n-1]
             let dc_out = sig - *bell_lp_state + 0.995 * *bell_hp_state;
             *bell_lp_state = sig;
-            *bell_hp_state = dc_out;
+            *bell_hp_state = flush(dc_out);
 
             // 7. Write DC-blocked signal into bore, advance pointer
-            bore_delay[*bore_pos] = dc_out;
+            bore_delay[*bore_pos] = flush(dc_out);
             *bore_pos = (*bore_pos + 1) % n;
 
             // 8. Bell post-LP: radiate bore_out through bell filter (shapes timbre)
-            *bore_lp_state += *bell_cutoff * (bore_out - *bore_lp_state);
+            *bore_lp_state = flush(*bore_lp_state + *bell_cutoff * (bore_out - *bore_lp_state));
 
             (*bore_lp_state * 3.5).clamp(-1.0, 1.0)
         } else {
