@@ -66,14 +66,14 @@ Cello v2	c7b332b27bf2c3de
 Double Bass	f7dfe723eee0e48b
 Double Bass v2	e0f063b63117895e
 Synth Brass	2db5ad3b97f28ccd
-Trumpet	fa196d69704f8fda
-Trumpet v2	d5f8233352e9d625
-French Horn	aa3acd5393e2d1af
-Trombone	830cb65dd0f4b636
-Trombone v2	c4bbc1660aa1a0c2
-Tuba	78e9479f9c0c6287
-Tuba v2	e0194d562111615e
-French Horn v2	bd971fb885f25231
+Trumpet	4c9432fb21b20e82
+Trumpet v2	41c5d6fefaa8643d
+French Horn	363381698d00e3cd
+Trombone	e93e6ce8cc78680e
+Trombone v2	084e136597bd7d0d
+Tuba	84f8f4f617cc2495
+Tuba v2	aa2dc6982edb1aeb
+French Horn v2	c0a6198aab49b4a1
 Sub Bass	b8fd0172be1cc595
 Sub Bass v2 (LP24)	84fcf1ce24f58455
 Acid Bass	ff936448330559a1

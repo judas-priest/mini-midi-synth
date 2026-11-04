@@ -181,7 +181,7 @@ fn oscillator_basic_waveforms_output_range() {
         let mut max_val = 0.0_f32;
         let mut has_nonzero = false;
         for _ in 0..4410 {
-            let out = osc.tick(440.0);
+            let out = osc.tick(440.0, 1.0);
             assert!(out.is_finite(), "NaN from {osc_type:?}");
             max_val = max_val.max(out.abs());
             if out.abs() > 0.001 { has_nonzero = true; }
@@ -201,7 +201,7 @@ fn oscillator_sine_frequency_accuracy() {
     let mut crossings = 0;
     let mut prev = 0.0_f32;
     for _ in 0..44100 {
-        let out = osc.tick(440.0);
+        let out = osc.tick(440.0, 1.0);
         if prev <= 0.0 && out > 0.0 || prev >= 0.0 && out < 0.0 {
             crossings += 1;
         }
@@ -219,7 +219,7 @@ fn oscillator_noise_is_noisy() {
     osc.reset();
     let mut values = std::collections::HashSet::new();
     for _ in 0..1000 {
-        let out = osc.tick(440.0);
+        let out = osc.tick(440.0, 1.0);
         values.insert((out * 1000.0) as i32);
     }
     assert!(values.len() > 100, "Noise should produce many distinct values, got {}", values.len());

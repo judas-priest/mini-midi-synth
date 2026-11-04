@@ -291,6 +291,7 @@ pub enum OscState {
         bell_cutoff: f32,
         bore_lp_state: f32,
         blowing_pressure: f32,
+        pressure_env: f32, // текущее давление мундштука (рампа к цели)
         _bore_length_ratio: f32,
     },
     PhaseDistortion {
@@ -623,6 +624,7 @@ impl Oscillator {
                 bell_cutoff: 2000.0,
                 bore_lp_state: 0.0,
                 blowing_pressure: 0.5,
+                pressure_env: 0.0,
                 _bore_length_ratio: 1.0,
             },
             OscType::PhaseDistortion => OscState::PhaseDistortion {
@@ -1039,9 +1041,10 @@ impl Oscillator {
         (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0
     }
 
-    pub fn tick(&mut self, freq: f32) -> f32 {
-        match self.osc_type {
-            OscType::KarplusStrong => self.tick_ks(),
+    pub fn tick(&mut self, freq: f32, env: f32) -> f32 {
+        // `env` = уже оттиканное значение амп-огибающей голоса (voice.rs):
+        // только физ-модели с дыханием (Brass) используют его как давление.
+        match self.osc_type {            OscType::KarplusStrong => self.tick_ks(),
             OscType::Organ => self.tick_organ(freq),
             OscType::Noise => self.next_noise(),
             OscType::FmPiano => self.tick_fm_piano(freq),
@@ -1051,7 +1054,7 @@ impl Oscillator {
             OscType::DrumSynth => self.tick_drum_synth(),
             OscType::BassGuitar => self.tick_bass_guitar(),
             OscType::BowedString => self.tick_bowed_string(),
-            OscType::Brass => self.tick_brass(),
+            OscType::Brass => self.tick_brass(env),
             OscType::PhaseDistortion => self.tick_phase_distortion(freq),
             OscType::Wavefolder => self.tick_wavefolder(freq),
             OscType::ModalResonator => self.tick_modal_resonator(),
@@ -1716,6 +1719,7 @@ impl Oscillator {
             bell_cutoff: bell_a1, // bell post-LP a1
             bore_lp_state: 0.0,   // bell post-LP state
             blowing_pressure: max_pressure,
+            pressure_env: 0.0,    // breath pressure ramp state
             _bore_length_ratio: 1.0,
         };
     }
@@ -1730,7 +1734,7 @@ impl Oscillator {
     ///   sig = delta*p_mouth + (1−delta)*p_bore  ← scattering junction
     ///   bore_in = DC_block(sig)
     ///   output = bell_LP(bore_out)        ← radiated: shapes timbre
-    fn tick_brass(&mut self) -> f32 {
+    fn tick_brass(&mut self, env: f32) -> f32 {
         if let OscState::Brass {
             bore_delay, bore_pos,
             lip_x,          // bq_y1
@@ -1743,18 +1747,29 @@ impl Oscillator {
             bell_cutoff,    // bell post-LP a1
             bore_lp_state,  // bell post-LP state
             blowing_pressure,
+            pressure_env,
             ..
         } = &mut self.state
         {
             let n = bore_delay.len();
             if n == 0 { return 0.0; }
 
+            // Denormal flush: subnormal arithmetic stalls the audio thread
+            // (~2.6 s per note without guards).
+            let flush = |x: f32| if x.abs() < 1e-20 { 0.0 } else { x };
+
             // 1. Read bore return (oldest sample = signal from 2 periods ago)
             let bore_out = bore_delay[*bore_pos];
 
             // 2. Pressures
+            // STK-канон: breathPressure = maxPressure * adsr.tick() — давление
+            // мундштука под огибающей, иначе DC-ступенька бьёт в бору щелчком.
+            // Однополюсная рампа с τ=5мс: coeff = 1 - exp(-1/(0.005*sr))
+            let coeff = 1.0 - (-1.0 / (0.005 * self.sample_rate)).exp();
+            *pressure_env += coeff * (*blowing_pressure * env - *pressure_env);
+            let blowing = flush(*pressure_env);
             let p_bore  = bore_out * 0.85;
-            let p_mouth = *blowing_pressure * 0.3;
+            let p_mouth = blowing * 0.3;
             let dp = p_mouth - p_bore;
 
             // 3. Lip BiQuad resonator (high-Q bandpass at playing frequency)
@@ -1763,8 +1778,12 @@ impl Oscillator {
             *lip_v = *lip_x;
             *lip_x = bq_y;
 
-            // 4. Nonlinear: square + hard saturate  → harmonic generation
-            let delta = (bq_y * bq_y).min(1.0);
+            // 4. Nonlinear: square + soft saturate → harmonic generation.
+            // Мягкое насыщение вместо жёсткого клампа: жёсткий кламп имеет
+            // нулевую производную — устойчивая мёртвая точка (тишина ниже B4,
+            // #53). s/(1+s) выводит из любой точки.
+            let s = bq_y * bq_y;
+            let delta = s / (1.0 + s);
 
             // 5. Scattering junction (STK formula)
             let sig = delta * p_mouth + (1.0 - delta) * p_bore;
@@ -1772,14 +1791,14 @@ impl Oscillator {
             // 6. DC blocker: y[n] = x[n] - x[n-1] + 0.995*y[n-1]
             let dc_out = sig - *bell_lp_state + 0.995 * *bell_hp_state;
             *bell_lp_state = sig;
-            *bell_hp_state = dc_out;
+            *bell_hp_state = flush(dc_out);
 
             // 7. Write DC-blocked signal into bore, advance pointer
-            bore_delay[*bore_pos] = dc_out;
+            bore_delay[*bore_pos] = flush(dc_out);
             *bore_pos = (*bore_pos + 1) % n;
 
             // 8. Bell post-LP: radiate bore_out through bell filter (shapes timbre)
-            *bore_lp_state += *bell_cutoff * (bore_out - *bore_lp_state);
+            *bore_lp_state = flush(*bore_lp_state + *bell_cutoff * (bore_out - *bore_lp_state));
 
             (*bore_lp_state * 3.5).clamp(-1.0, 1.0)
         } else {

@@ -643,7 +643,7 @@ impl Voice {
             * self.filter_key_mult;
 
         if self.unison_count <= 1 {
-            let mix = self.render_oscs(base_freq);
+            let mix = self.render_oscs(base_freq, amp);
             let filtered = self.apply_filter(mix, cutoff1, filter_mod, semis_mult);
             let out = filtered * amp * self.velocity * mods.amp_mod;
             return (out, out);
@@ -656,7 +656,7 @@ impl Voice {
 
         for u in 0..self.unison_count as usize {
             let detuned_freq = base_freq * self.unison_detunes[u];
-            let sample = self.oscs[0].tick(detuned_freq);
+            let sample = self.oscs[0].tick(detuned_freq, amp);
             sum_l += sample * self.unison_l_gains[u];
             sum_r += sample * self.unison_r_gains[u];
         }
@@ -670,7 +670,7 @@ impl Voice {
             } else {
                 base_freq
             };
-            extra += self.oscs[1].tick(fm_freq) * self.osc_levels[1];
+            extra += self.oscs[1].tick(fm_freq, amp) * self.osc_levels[1];
         }
         if self.num_oscs >= 3 {
             let osc1_out = sum_l + sum_r;
@@ -679,7 +679,7 @@ impl Voice {
             } else {
                 base_freq
             };
-            extra += self.oscs[2].tick(fm_freq) * self.osc_levels[2];
+            extra += self.oscs[2].tick(fm_freq, amp) * self.osc_levels[2];
         }
 
         // Apply osc1 level and add extra oscs
@@ -736,8 +736,8 @@ impl Voice {
     }
 
     #[inline]
-    fn render_oscs(&mut self, freq: f32) -> f32 {
-        let osc1_out = self.oscs[0].tick(freq);
+    fn render_oscs(&mut self, freq: f32, env: f32) -> f32 {
+        let osc1_out = self.oscs[0].tick(freq, env);
         let mut mix = osc1_out * self.osc_levels[0];
         if self.num_oscs >= 2 {
             let fm_freq = if self.fm_cross_depth > 0.001 {
@@ -745,7 +745,7 @@ impl Voice {
             } else {
                 freq
             };
-            mix += self.oscs[1].tick(fm_freq) * self.osc_levels[1];
+            mix += self.oscs[1].tick(fm_freq, env) * self.osc_levels[1];
         }
         if self.num_oscs >= 3 {
             let fm_freq = if self.fm_cross_depth > 0.001 {
@@ -753,7 +753,7 @@ impl Voice {
             } else {
                 freq
             };
-            mix += self.oscs[2].tick(fm_freq) * self.osc_levels[2];
+            mix += self.oscs[2].tick(fm_freq, env) * self.osc_levels[2];
         }
 
         if self.noise_level > 0.001
