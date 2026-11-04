@@ -66,14 +66,14 @@ Cello v2	52b7cf4de17aebe2
 Double Bass	7d0fdfc0360c9aac
 Double Bass v2	3907ec9a3009e83e
 Synth Brass	2db5ad3b97f28ccd
-Trumpet	4c9432fb21b20e82
-Trumpet v2	41c5d6fefaa8643d
-French Horn	363381698d00e3cd
-Trombone	e93e6ce8cc78680e
-Trombone v2	084e136597bd7d0d
-Tuba	84f8f4f617cc2495
-Tuba v2	aa2dc6982edb1aeb
-French Horn v2	c0a6198aab49b4a1
+Trumpet	4b8a3bdce999adb5
+Trumpet v2	b955e646cbd36486
+French Horn	6a8865a11f2b8759
+Trombone	a9a0ebf602f7ad59
+Trombone v2	11de8add22a7503f
+Tuba	f210d998476e20dd
+Tuba v2	0bbd7bda2b340af4
+French Horn v2	d7b65f38d22899c7
 Sub Bass	b8fd0172be1cc595
 Sub Bass v2 (LP24)	84fcf1ce24f58455
 Acid Bass	ff936448330559a1
@@ -91,7 +91,7 @@ Bass Guitar (Finger)	3c7c7a7913630c51
 Bass Guitar (Finger) v2	cc56b8df314a4465
 Bass Finger v3	6c34bef42d6f1899
 Bass Guitar (Pick)	3cb67523d903e405
-Bass Guitar (Slap)	2fb4aeb878e5ebe9
+Bass Guitar (Slap)	65f7c530c7998fe1
 Saw Lead	177530d1adccefe1
 Mono Lead	a95d8a36bd75ff85
 Detuned Lead	719dd954a128accd
