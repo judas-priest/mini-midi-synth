@@ -80,6 +80,7 @@ pub fn parse_midi_message(data: &[u8]) -> Option<(MidiEvent, usize)> {
         MidiMessage::PitchBendChange(ch, bend) => {
             let raw = u16::from(bend) as f32;
             let normalized = (raw - PITCH_BEND_CENTER) / PITCH_BEND_CENTER;
+            log::debug!("[midi-in] PB ch{} raw{} norm{:.3}", ch.index(), u16::from(bend), normalized);
             Some(MidiEvent::PitchBend { channel: ch.index(), value: normalized })
         }
         MidiMessage::ControlChange(ch, cc, val) => {
