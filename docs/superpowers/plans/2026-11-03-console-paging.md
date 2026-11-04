@@ -63,7 +63,9 @@ tests` led_console.rs.
 ## Negative Matrix
 
 - len < 7 (перфов меньше 7): `saturating_sub` → max_start 0 — одна страница.
-- Стрелки в Menu-режиме: `page_window` плечо `_ => {}` — no-op, безопасно.
+- Стрелки в Menu-режиме: `page_window` плечо `_ => {}` — no-op; perf-follow
+  в PageBack/Forward зажат `Mode::Home` — окно перфов не двигается из
+  невидимых режимов.
 - StepPattern удалён — Action::PageBack/Forward покрывают страницы; пошаговое
   перебирание паттернов исчезает с пэдов (остаётся в GUI-сетке и пэдами 18-24
   по слотам страницы) — осознанный trade по юзер-модели.
@@ -72,8 +74,6 @@ tests` led_console.rs.
 - Follow при len=0 (пустой perf_list): `follow_start(idx,0,0)` — idx вне
   пустого диапазона → Some(idx.min(0)) = Some(0) → perf_window=0; безопасно.
 - Двойной PageBack подряд — clamp держит в 0..=max.
-- Удаление `use` StepPattern — компилятор подскажет неиспользуемый вариант
-  enum'а, реализатор удаляет вариант целиком.
 
 ---
 
@@ -148,8 +148,9 @@ pub(crate) fn follow_start(idx: usize, start: usize, len: usize) -> Option<usize
 
 - [ ] **Step 4: зелёный**
 
-Run: `cargo test --lib follow_start -- --include-ignored 2>&1 | tail -3 || cargo test --lib "led_console" 2>&1 | tail -3`
-Expected: новые 5 тестов зелёные. dead_code на хелперах допустим до Task 2.
+Run: `cargo test --lib led_console 2>&1 | tail -4`
+Expected: новые 5 тестов зелёные (плюс существующие); dead_code на хелперах
+допустим до Task 2 (или `#[allow(dead_code)]` — снимать в Task 2).
 
 - [ ] **Step 5: коммит**
 
@@ -161,10 +162,12 @@ git add src/gui/led_console.rs && git commit -m "feat: window_max_start/follow_s
 
 **Files:**
 - Modify: `src/gui/led_console.rs:144-151` (step), enum `Action` (удалить
-  `StepPattern`)
+  `StepPattern`), тест :376 (см. Step 2b)
 - Modify: `src/gui/mod.rs:2691-2707` (StepPattern handler + PageBack/Forward),
   `:2713-2721` (follow_window), `:2724-2741` (page_window), `:933-937`
-  (page_depth), struct-поле + init (`console_prev_mode`)
+  (page_depth), struct-поле (mod.rs:461, рядом с led_spawn_backoff)
+- Modify: `src/lib.rs:873` — инициализация `console_prev_mode: None` в
+  struct-литерале App (там же, где `led_spawn_backoff: None`)
 
 - [ ] **Step 1: step()** — заменить тело:
 
@@ -188,7 +191,12 @@ git add src/gui/led_console.rs && git commit -m "feat: window_max_start/follow_s
 - [ ] **Step 2: удалить Action::StepPattern** — вариант из enum в
   led_console.rs и обработчик `Action::StepPattern { .. }` (mod.rs:2691-2696)
   целиком (пошаговое перебирание паттернов с пэдов исчезает: выбор — пэдами
-  18-24 по слотам страницы; компилятор найдёт оставшиеся использования).
+  18-24 по слотам страницы).
+  **Step 2b: существующий тест** led_console.rs:376
+  (`prev_next_are_mode_dependent`) ждёт `Some(Action::StepPattern(1))` —
+  обновить на `Some(Action::PageForward)` и семантически по новым правилам
+  (см. новый тест tc6 в Task 1/Step 2c при необходимости). Изменение
+  существующего теста осознанное: семантика стрелок изменилась юзером.
 
 - [ ] **Step 3: PageBack/PageForward** — удалить паттерн-follow (регрессия
   finding 3: ручное листание больше не отменяется); perf-follow оставить:
@@ -196,13 +204,19 @@ git add src/gui/led_console.rs && git commit -m "feat: window_max_start/follow_s
 ```rust
             led_console::Action::PageBack => {
                 self.page_window(-7);
-                // не оставлять пурпур за экраном (perf только; паттерн-follow
-                // удалён — ручное листание не отменяется, #50 finding 3)
-                if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
+                // perf-follow только в HOME: в Pattern/Mute стрелки листают
+                // окно СВОЕГО режима и не должны молча двигать perf_window
+                // (#50 finding 8); паттерн-follow удалён — ручное листание не
+                // отменяется (finding 3)
+                if self.console.mode() == led_console::Mode::Home {
+                    if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
+                }
             }
             led_console::Action::PageForward => {
                 self.page_window(7);
-                if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
+                if self.console.mode() == led_console::Mode::Home {
+                    if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
+                }
             }
 ```
 
@@ -240,6 +254,8 @@ git add src/gui/led_console.rs && git commit -m "feat: window_max_start/follow_s
                 self.mute_window = (self.mute_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             _ => {}
+        }
+    }
 ```
 
 - [ ] **Step 6: page_depth честный** (mod.rs:933-937): плечо Pattern →
@@ -259,7 +275,8 @@ git add src/gui/led_console.rs && git commit -m "feat: window_max_start/follow_s
             console_prev_mode: None,
 ```
 
-(найти точное место инициализации по grep `led_spawn_backoff: `). Затем в
+Инициализация — в lib.rs:873 (struct-литерал App в init_common, рядом с
+`led_spawn_backoff: None`): `console_prev_mode: None,`. Затем в
 кадровом коде после `for a in acts { self.execute_console_action(a); }`
 (mod.rs:783-785) вставить:
 
@@ -292,7 +309,7 @@ Expected: чисто, зелёные.
 - [ ] **Step 9: коммит**
 
 ```bash
-git add src/gui/led_console.rs src/gui/mod.rs && git commit -m "fix: console arrows page the active mode, no window teleport (#50) — pattern follow dropped from manual paging, mode-entry window sync"
+git add src/gui/led_console.rs src/gui/mod.rs src/lib.rs && git commit -m "fix: console arrows page the active mode, no window teleport (#50) — pattern follow dropped from manual paging, mode-entry window sync"
 ```
 
 ### Task 3: Верификация
