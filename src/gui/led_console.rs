@@ -49,7 +49,6 @@ pub enum Action {
     Undo,
     /// Pad 32 held >= HOLD: redo the last undone sequencer edit.
     Redo,
-    StepPerf(i32),
     PageBack,
     PageForward,
 }
@@ -160,17 +159,13 @@ impl LedConsole {
     }
 
     fn step(&mut self, dir: i32) -> Action {
-        match self.mode {
-            // Стрелки 30/31 в режиме перфов шагают перф (live-смена);
-            // в остальных режимах = листание страницы (юзер-модель #50)
-            Mode::Home => Action::StepPerf(dir),
-            _ => {
-                if dir < 0 {
-                    Action::PageBack
-                } else {
-                    Action::PageForward
-                }
-            }
+        // Юзер-модель #50 (фидбек 2026-11-03): стрелки ЛИСТАЮТ страницы во
+        // всех режимах; в HOME раньше StepPerf подгружал соседний перф на
+        // каждое нажатие — воспринималось как скролл с побочным эффектом
+        if dir < 0 {
+            Action::PageBack
+        } else {
+            Action::PageForward
         }
     }
 
@@ -394,9 +389,9 @@ mod tests {
     }
 
     #[test]
-    fn prev_next_are_mode_dependent() {
+    fn prev_next_always_page() {
         let mut c = LedConsole::new();
-        assert_eq!(c.on_event(PadEvent::Prev, Instant::now()), Some(Action::StepPerf(-1)));
+        assert_eq!(c.on_event(PadEvent::Prev, Instant::now()), Some(Action::PageBack));
         c.mode = Mode::Pattern;
         assert_eq!(c.on_event(PadEvent::Next, Instant::now()), Some(Action::PageForward));
     }
