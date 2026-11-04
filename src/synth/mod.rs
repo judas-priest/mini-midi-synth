@@ -2554,6 +2554,12 @@ impl SynthEngine {
                     } else {
                         // Restore the SF2 channel volume zeroed on mute.
                         self.sampler.set_layer_volume(part, l.volume);
+                        // Re-assert the hold-pedal: mute's drain_notes sent
+                        // CC64=0 to the channel (part_all_notes_off), so an
+                        // unmuted part silently ignored sustain until the
+                        // pedal was physically re-pressed (#53-followup).
+                        self.sampler
+                            .set_part_sustain(part, l.sustain_pedal > 0.5 && l.sustain_enabled);
                     }
                 }
             }
