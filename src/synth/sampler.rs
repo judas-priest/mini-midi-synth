@@ -560,12 +560,15 @@ impl SamplerEngine {
     }
 
     pub fn pitch_bend(&mut self, part: usize, value: f32) {
-        if part >= 8 { return; }
-        let ch = (part as i32) % 16;
+        // Адресация через ДИНАМИЧЕСКИЙ канал парта (не part%16!): каналы
+        // выделяются по порядку включения SF2-партов — при DSP-партах вперёд
+        // part N жил на канале M≠N, и бенд уходил чужому каналу (#53-followup,
+        // репорт «некоторые инструменты игнорируют питч»)
+        let Some(ch) = self.part_channel_of(part) else { return; };
         let raw = ((value + 1.0) * 0.5 * 16383.0).round().clamp(0.0, 16383.0) as i32;
         let lsb = raw & 0x7F;
         let msb = (raw >> 7) & 0x7F;
-        self.keys.midi(ch, 0xE0, lsb, msb);
+        self.keys.midi(ch as i32, 0xE0, lsb, msb);
     }
 
     pub fn set_pitch_bend_range(&mut self, semitones: u8) {
@@ -575,10 +578,10 @@ impl SamplerEngine {
     }
 
     pub fn mod_wheel(&mut self, part: usize, value: f32) {
-        if part >= 8 { return; }
-        let ch = (part as i32) % 16;
+        // Динамический канал парта — см. pitch_bend
+        let Some(ch) = self.part_channel_of(part) else { return; };
         let cc_val = (value * 127.0).round().clamp(0.0, 127.0) as i32;
-        self.keys.midi(ch, 0xB0, 1, cc_val);
+        self.keys.midi(ch as i32, 0xB0, 1, cc_val);
     }
 
     pub fn all_notes_off(&mut self) {

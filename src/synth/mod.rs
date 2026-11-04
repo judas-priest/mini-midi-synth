@@ -2325,7 +2325,9 @@ impl SynthEngine {
                         else { self.global_params.pitch_bend_range };
                     value * down
                 };
-                for i in 0..2 {
+                // Все SF2-партии (не только 0..1): канальная адресация в
+                // sampler.pitch_bend теперь динамическая (part_channel_of)
+                for i in 0..self.parts.len() {
                     if self.parts.get(i).map(|l| l.sf2_mode && !l.ignore_pb).unwrap_or(false) {
                         self.sampler.pitch_bend(i, value);
                     }
@@ -2333,8 +2335,8 @@ impl SynthEngine {
             }
             MidiEvent::ModWheel { value, .. } => {
                 self.mod_wheel = value;
-                // Forward to SF2 sampler as CC1 on active SF2 parts
-                for i in 0..2 {
+                // Forward to SF2 sampler as CC1 on ALL SF2 parts (см. PitchBend)
+                for i in 0..self.parts.len() {
                     if self.parts.get(i).map(|l| l.sf2_mode && !l.ignore_mw).unwrap_or(false) {
                         self.sampler.mod_wheel(i, value);
                     }
@@ -2589,7 +2591,7 @@ impl SynthEngine {
                     // СЫРОЕ нормализованное значение (sampler.pitch_bend
                     // ждёт -1..1: sampler.rs:565 (v+1)*0.5*16383;
                     // pitch_bend_semitones содержит range-масштаб — не годится).
-                    if l.sf2_mode && part < 2 {
+                    if l.sf2_mode {
                         let norm = if l.ignore_pb { 0.0 } else { self.pitch_bend_norm };
                         self.sampler.pitch_bend(part, norm);
                     }
@@ -2599,7 +2601,7 @@ impl SynthEngine {
                 if let Some(l) = self.parts.get_mut(part) {
                     l.ignore_mw = on;
                     // Аналогично PB: ignore → 0, un-ignore → текущее колесо.
-                    if l.sf2_mode && part < 2 {
+                    if l.sf2_mode {
                         let v = if l.ignore_mw { 0.0 } else { self.mod_wheel };
                         self.sampler.mod_wheel(part, v);
                     }
