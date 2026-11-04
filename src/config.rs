@@ -101,6 +101,12 @@ pub struct PartUiState {
     /// Sustain pedal affects this part — default true (behaviour as before).
     #[serde(default = "default_true")]
     pub sustain_enabled: bool,
+    /// Part ignores Pitch Bend (TECHDEBT #55).
+    #[serde(default)]
+    pub ignore_pb: bool,
+    /// Part ignores Mod Wheel (TECHDEBT #55).
+    #[serde(default)]
+    pub ignore_mw: bool,
 }
 
 impl PartUiState {

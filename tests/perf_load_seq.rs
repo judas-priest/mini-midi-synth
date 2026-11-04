@@ -25,6 +25,8 @@ fn part(patch_name: &str, enabled: bool) -> PartConfig {
         macro_names: Vec::new(),
         xy_macro_x: 0,
         xy_macro_y: 1,
+        ignore_pb: false,
+        ignore_mw: false,
     }
 }
 
@@ -120,6 +122,24 @@ fn macro_names_and_xy_roundtrip() {
     assert_eq!(back.macro_names, vec!["Kick".to_string(), "Snare".to_string()]);
     assert_eq!(back.xy_macro_x, 2);
     assert_eq!(back.xy_macro_y, 3);
+}
+
+#[test]
+fn ignore_flags_roundtrip() {
+    let mut p = part("Init", true);
+    p.ignore_pb = true;
+    p.ignore_mw = true;
+    let json = serde_json::to_string(&p).unwrap();
+    let back: PartConfig = serde_json::from_str(&json).unwrap();
+    assert!(back.ignore_pb && back.ignore_mw);
+}
+
+#[test]
+fn legacy_part_without_ignore_flags_gets_defaults() {
+    // часть валидного PartConfig без новых ключей (как старые перфы)
+    let legacy = r#"{"patch_name":"Init","enabled":true,"volume":0.8,"key_low":0,"key_high":127}"#;
+    let p: PartConfig = serde_json::from_str(legacy).unwrap();
+    assert!(!p.ignore_pb && !p.ignore_mw);
 }
 
 #[test]

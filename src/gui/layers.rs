@@ -230,6 +230,8 @@ impl App {
                         macro_names: l.macro_names.clone(),
                         xy_macro_x: l.xy_macro_x,
                         xy_macro_y: l.xy_macro_y,
+                        ignore_pb: l.ignore_pb,
+                        ignore_mw: l.ignore_mw,
                     }
                 }).collect();
                 match preset::save_performance(&Performance {
@@ -377,6 +379,22 @@ impl App {
             {
                 self.parts[i].sustain_enabled = s;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: s });
+                self.persist_parts_state();
+            }
+            let mut pb = self.parts[i].ignore_pb;
+            if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut pb, "PB")).on_hover_text(
+                "Ignore pitch bend for this part").changed()
+            {
+                self.parts[i].ignore_pb = pb;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnorePb { part: i, on: pb });
+                self.persist_parts_state();
+            }
+            let mut mw = self.parts[i].ignore_mw;
+            if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut mw, "MW")).on_hover_text(
+                "Ignore mod wheel").changed()
+            {
+                self.parts[i].ignore_mw = mw;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnoreMw { part: i, on: mw });
                 self.persist_parts_state();
             }
 

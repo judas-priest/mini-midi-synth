@@ -204,6 +204,10 @@ pub(crate) enum RootDecision {
     Sound { release: Option<u8>, note: u8 },
 }
 
+/// Per-part ignore: PB/MW-вклад конкретного парта (TECHDEBT #55).
+pub(crate) fn effective_pb(ignore: bool, pb: f32) -> f32 { if ignore { 0.0 } else { pb } }
+pub(crate) fn effective_mw(ignore: bool, mw: f32) -> f32 { if ignore { 0.0 } else { mw } }
+
 pub enum ControlEvent {
     LoadPatch(Box<LoadPatchEvent>),
     SetPartEnabled { part: usize, enabled: bool },
@@ -215,6 +219,10 @@ pub enum ControlEvent {
     /// Sustain pedal (CC64) affects this part (Sus checkbox). While the pedal
     /// is down, turning it OFF also releases this part's pedal-held notes.
     SetPartSustain { part: usize, on: bool },
+    /// Part ignores incoming Pitch Bend (TECHDEBT #55).
+    SetPartIgnorePb { part: usize, on: bool },
+    /// Part ignores incoming Mod Wheel (TECHDEBT #55).
+    SetPartIgnoreMw { part: usize, on: bool },
     SetPartVolume { part: usize, volume: f32 },
     SetPartRange { part: usize, min_note: u8, max_note: u8 },
     SetPartVelRange { part: usize, vel_min: u8, vel_max: u8 },
@@ -584,6 +592,11 @@ struct Part {
     /// Sustain pedal (CC64) affects this part. false: bass without sustain
     /// while a pad part keeps sustaining.
     pub sustain_enabled: bool,
+    /// Part ignores incoming Pitch Bend (TECHDEBT #55) — чужие контроллеры
+    /// шлют мусорный PB, слои не должны дёргаться.
+    pub ignore_pb: bool,
+    /// Part ignores incoming Mod Wheel (TECHDEBT #55).
+    pub ignore_mw: bool,
     root_held: [bool; 128],   // keys currently physically held, for re-keying
     root_active: Option<u8>,  // raw note currently sounding as the root
     breath: f32,            // CC2, 0..1
@@ -632,6 +645,7 @@ impl Part {
             keys_down: [false; 128],
             note_mode: NOTE_MODE_POLY, root_held: [false; 128], root_active: None,
             sustain_enabled: true,
+            ignore_pb: false, ignore_mw: false,
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
             cached_mod_sources: mod_matrix::ModSources {
@@ -1275,6 +1289,9 @@ pub struct SynthEngine {
     /// engine before the SF2 add (per-block linear gain, see tick_block).
     pub dsp_trim_db: f32,
     pitch_bend_semitones: f32,
+    /// Raw normalized pitch-bend wheel value -1..1 (mirror for re-assert on
+    /// SF2 channels when a part un-ignores PB, TECHDEBT #55).
+    pitch_bend_norm: f32,
     mod_wheel: f32,
     vibrato_phase: f32,
     aftertouch: f32,
@@ -1584,7 +1601,8 @@ impl SynthEngine {
             parts, drum_engine: DrumEngine::new(sample_rate),
             sampler: SamplerEngine::new(sample_rate),
             dsp_trim_db: 0.0,
-            pitch_bend_semitones: 0.0, mod_wheel: 0.0, vibrato_phase: 0.0,
+            pitch_bend_semitones: 0.0, pitch_bend_norm: 0.0,
+            mod_wheel: 0.0, vibrato_phase: 0.0,
             aftertouch: 0.0, aftertouch_smooth: 0.0,
             cc_values: [0.0; 4], cc_numbers: [1, 2, 3, 4],
             sample_rate,
@@ -2292,6 +2310,7 @@ impl SynthEngine {
                 }
             }
             MidiEvent::PitchBend { value, .. } => {
+                self.pitch_bend_norm = value;
                 // Asymmetric bend: per-part patch overrides global range
                 let layer_up   = self.parts.iter().find(|l| l.enabled).map(|l| l.params.pitch_bend_up).unwrap_or(0.0);
                 let layer_down = self.parts.iter().find(|l| l.enabled).map(|l| l.params.pitch_bend_down).unwrap_or(0.0);
@@ -2307,7 +2326,7 @@ impl SynthEngine {
                     value * down
                 };
                 for i in 0..2 {
-                    if self.parts.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
+                    if self.parts.get(i).map(|l| l.sf2_mode && !l.ignore_pb).unwrap_or(false) {
                         self.sampler.pitch_bend(i, value);
                     }
                 }
@@ -2316,7 +2335,7 @@ impl SynthEngine {
                 self.mod_wheel = value;
                 // Forward to SF2 sampler as CC1 on active SF2 parts
                 for i in 0..2 {
-                    if self.parts.get(i).map(|l| l.sf2_mode).unwrap_or(false) {
+                    if self.parts.get(i).map(|l| l.sf2_mode && !l.ignore_mw).unwrap_or(false) {
                         self.sampler.mod_wheel(i, value);
                     }
                 }
@@ -2560,6 +2579,29 @@ impl SynthEngine {
                         // pedal was physically re-pressed (#53-followup).
                         self.sampler
                             .set_part_sustain(part, l.sustain_pedal > 0.5 && l.sustain_enabled);
+                    }
+                }
+            }
+            ControlEvent::SetPartIgnorePb { part, on } => {
+                if let Some(l) = self.parts.get_mut(part) {
+                    l.ignore_pb = on;
+                    // SF2-канал: сброс в центр немедленно; при un-ignore —
+                    // СЫРОЕ нормализованное значение (sampler.pitch_bend
+                    // ждёт -1..1: sampler.rs:565 (v+1)*0.5*16383;
+                    // pitch_bend_semitones содержит range-масштаб — не годится).
+                    if l.sf2_mode && part < 2 {
+                        let norm = if l.ignore_pb { 0.0 } else { self.pitch_bend_norm };
+                        self.sampler.pitch_bend(part, norm);
+                    }
+                }
+            }
+            ControlEvent::SetPartIgnoreMw { part, on } => {
+                if let Some(l) = self.parts.get_mut(part) {
+                    l.ignore_mw = on;
+                    // Аналогично PB: ignore → 0, un-ignore → текущее колесо.
+                    if l.sf2_mode && part < 2 {
+                        let v = if l.ignore_mw { 0.0 } else { self.mod_wheel };
+                        self.sampler.mod_wheel(part, v);
                     }
                 }
             }
@@ -3460,7 +3502,7 @@ impl SynthEngine {
                 macro_vals: part.macro_vals,
                 amp_env: 0.0, filter_env: 0.0,
                 mseg_outputs: [mseg1_val, mseg2_val],
-                mod_wheel: self.mod_wheel,
+                mod_wheel: effective_mw(part.ignore_mw, self.mod_wheel),
                 aftertouch: self.aftertouch_smooth,
                 velocity: part.last_velocity,
                 key_track,
@@ -3470,7 +3512,7 @@ impl SynthEngine {
                 alt_bipolar: part.alt_bipolar,
                 alt_unipolar: part.alt_unipolar,
                 release_vel: part.release_vel,
-                pitch_bend: self.pitch_bend_semitones / 2.0, // normalize -1..+1
+                pitch_bend: effective_pb(part.ignore_pb, self.pitch_bend_semitones) / 2.0, // normalize -1..+1
                 cc: self.cc_values,
                 breath: part.breath,
                 expression: part.expression,
@@ -3482,10 +3524,13 @@ impl SynthEngine {
             };
             let mod_offsets = part.mod_matrix.evaluate(&mod_sources);
 
-            let lfo_pitch_offset_base = self.pitch_bend_semitones
+            // Per-part ignore (TECHDEBT #55): маска PB/MW-вкладов
+            let pb_eff = effective_pb(part.ignore_pb, self.pitch_bend_semitones);
+            let mw_eff = effective_mw(part.ignore_mw, self.mod_wheel);
+            let lfo_pitch_offset_base = pb_eff
                 + lfo1_val * part.params.lfo_pitch_depth * 2.0
                 + lfo2_val * part.params.lfo2_pitch_depth * 2.0
-                + self.mod_wheel * 0.5 * vibrato_val
+                + mw_eff * 0.5 * vibrato_val
                 + self.aftertouch_smooth * 0.3 * lfo1_val
                 + seq_pitch;
             let pitch_offset = lfo_pitch_offset_base + mod_offsets.pitch;
