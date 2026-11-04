@@ -1646,10 +1646,11 @@ impl App {
         // Compact width for pitch bend utility
         ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
 
-        // Asymmetric pitch bend
-        ui.strong("Pitch Bend");
-        changed |= self.param_slider_ex(ui, "pitch_bend_up",   "Range Up",   0.0, 48.0, false, " st");
-        changed |= self.param_slider_ex(ui, "pitch_bend_down", "Range Down", 0.0, 48.0, false, " st");
+        // Asymmetric pitch bend — REMOVED (юзер 2026-11-05): масштаб бенда
+        // унифицирован на глобальном PB-фейдере (топ-бар «PB: N st»);
+        // per-patch Range Up/Down больше не имеют эффекта, поля
+        // pitch_bend_up/down в патч-параметрах оставлены для совместимости
+        // json (не читаются при бенде).
         }); // end Pitch Bend frame
 
         if changed {

@@ -2311,20 +2311,18 @@ impl SynthEngine {
             }
             MidiEvent::PitchBend { value, .. } => {
                 self.pitch_bend_norm = value;
-                // Asymmetric bend: per-part patch overrides global range
-                let layer_up   = self.parts.iter().find(|l| l.enabled).map(|l| l.params.pitch_bend_up).unwrap_or(0.0);
-                let layer_down = self.parts.iter().find(|l| l.enabled).map(|l| l.params.pitch_bend_down).unwrap_or(0.0);
-                self.pitch_bend_semitones = if value >= 0.0 {
-                    let up = if layer_up > 0.0 { layer_up }
-                        else if self.global_params.pitch_bend_up > 0.0 { self.global_params.pitch_bend_up }
-                        else { self.global_params.pitch_bend_range };
-                    value * up
+                // УНИФИКАЦИЯ (юзер, 2026-11-05): масштаб бенда — ТОЛЬКО
+                // глобальный PB-фейдер (он же задаёт ранж SF2-каналов через
+                // SetGlobalParam→set_pitch_bend_range). Прежний дивергентный
+                // путь «Range Up/Down первого включённого парта» убран: один
+                // парт молча менял бенд всем остальным. Asymmetric up/down
+                // остаются глобальными полями (pitch_bend_up/down).
+                let (up, down) = if self.global_params.pitch_bend_up > 0.0 {
+                    (self.global_params.pitch_bend_up, self.global_params.pitch_bend_down)
                 } else {
-                    let down = if layer_down > 0.0 { layer_down }
-                        else if self.global_params.pitch_bend_down > 0.0 { self.global_params.pitch_bend_down }
-                        else { self.global_params.pitch_bend_range };
-                    value * down
+                    (self.global_params.pitch_bend_range, self.global_params.pitch_bend_range)
                 };
+                self.pitch_bend_semitones = if value >= 0.0 { value * up } else { value * down };
                 // Все SF2-партии (не только 0..1): канальная адресация в
                 // sampler.pitch_bend теперь динамическая (part_channel_of)
                 for i in 0..self.parts.len() {
