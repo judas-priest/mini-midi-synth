@@ -296,11 +296,11 @@ fn legacy_part_without_ignore_flags_gets_defaults() {
   дополнить `ignore_pb: false, ignore_mw: false,`; компилятор перечислит).
 
 - [ ] **Step 3: чекбоксы в строке парта** — рядом с Sus (draw_part_row,
-  паттерн существующего Sus-чекбокса: `ui.checkbox(&mut l.ignore_pb, "PB")` в
+  паттерн существующего Sus-чекбокса: `ui.checkbox(&mut self.parts[i].ignore_pb, "PB")` в
   том же horizontal, с hover-текстом «Ignore pitch bend for this part» /
   «Ignore mod wheel»; изменение → пуш `ControlEvent::SetPartIgnorePb/
-  SetPartIgnoreMw` + `persist_parts_state` НЕ нужен (флаг в перф-конфиге,
-  не в parts_state) — НЕ персистить в PartUiState).
+  SetPartIgnoreMw` + `self.persist_parts_state()` — флаг персистится в
+  PartUiState (см. Step 4, симметрия с Sus).
 
 - [ ] **Step 4: перф save/restore + reset + reconnect:**
   - литерал draw_perf_row (layers.rs:220-233): `ignore_pb: l.ignore_pb, ignore_mw: l.ignore_mw,`;
