@@ -96,10 +96,12 @@ fn tc4_volume_value_applied_on_switch() {
     let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
     let mut e = engine_with_sf2(sf);
     // Непересекающиеся диапазоны: иначе NoteOn звучит в ОБОИХ партах и
-    // quiet ≈ loud независимо от CC7. Дренаж хвоста перед вторым замером.
+    // quiet ≈ loud независимо от CC7. Дренаж хвоста перед вторым замером:
+    // релиз пианино (~2с при 48кГц) переживает 100 блоков — хвост ноты 40
+    // парты 0 контаминировал замер quiet (0.31 вместо ~0.005).
     gui_switch_part_to_sf2(&mut e, 0, 1.0, 0.0, false, 0, 59);
     let loud = overall_peak(&mut e, 40, 200);
-    for _ in 0..100 { let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE]; e.tick_block(&mut l, &mut r); }
+    for _ in 0..1000 { let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE]; e.tick_block(&mut l, &mut r); }
     gui_switch_part_to_sf2(&mut e, 1, 0.1, 0.0, false, 60, 127);
     let quiet = overall_peak(&mut e, 72, 200);
     assert!(quiet < loud * 0.5, "vol 0.1 ({quiet}) not quieter than 1.0 ({loud})");
