@@ -24,6 +24,18 @@ const PARTS_PER_ZONE: usize = 8;
 const ZONE_A: std::ops::Range<usize> = 0..PARTS_PER_ZONE;
 const ZONE_B: std::ops::Range<usize> = PARTS_PER_ZONE..PARTS_PER_ZONE * 2;
 
+/// Честные диапазоны зон по РЕАЛЬНОСТИ сплита (#51): сплит активен только
+/// при живой правой руке — иначе все парты 0..=127, как бы перф ни хранил
+/// split_point. Единственный источник диапазонов для движка и заголовков.
+#[allow(dead_code)] // снимается в Task 2
+pub(super) fn zone_range_pair(split_point: u8, split_active: bool) -> ([u8; 2], [u8; 2]) {
+    if split_active {
+        ([0, split_point.saturating_sub(1)], [split_point, 127])
+    } else {
+        ([0, 127], [0, 127])
+    }
+}
+
 impl App {
     pub(super) fn draw_part_rows(&mut self, ui: &mut egui::Ui) {
         // ── Performance save/load (above Split) ──────────────────────────
@@ -538,4 +550,31 @@ impl App {
         }
     }
 
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::*;
+
+    #[test]
+    fn tc1_active_split_pair() {
+        assert_eq!(zone_range_pair(60, true), ([0, 59], [60, 127]));
+    }
+
+    #[test]
+    fn tc2_no_zone_b_means_no_split() {
+        // Регрессия «Organ играет до C3»: перф с split_point=60 и без
+        // включённых B-партов обязан давать полный диапазон
+        assert_eq!(zone_range_pair(60, false), ([0, 127], [0, 127]));
+    }
+
+    #[test]
+    fn tc3_split_at_zero() {
+        assert_eq!(zone_range_pair(0, true), ([0, 0], [0, 127]));
+    }
+
+    #[test]
+    fn tc4_split_at_top() {
+        assert_eq!(zone_range_pair(127, true), ([0, 126], [127, 127]));
+    }
 }
