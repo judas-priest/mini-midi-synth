@@ -2925,21 +2925,35 @@ impl SynthEngine {
             ControlEvent::SetPartSf2Mode { part, enabled } => {
                 // No-op switch (perf load pushes current state for every part):
                 // draining here would cut SF2 tails on every perf change.
-                if let Some(l) = self.parts.get(part) {
-                    if l.sf2_mode == enabled { return None; }
-                }
-                // Engine switch: both voice owners must be drained
-                if let Some(l) = self.parts.get_mut(part) {
-                    l.drain_notes(&mut self.sampler, part, false);
-                    l.sf2_mode = enabled;
-                    // (Re)apply the part's pan on the SF2 channel — CC10 was
-                    // never sent while the part was in DSP mode.
-                    if enabled {
-                        let cc = (l.pan.clamp(-1.0, 1.0) * 0.5 + 0.5) * 127.0;
-                        self.sampler.set_channel_pan(part, cc as i32);
+                // Drain only on a REAL mode flip.
+                let mode_changed = self.parts.get(part)
+                    .map(|l| l.sf2_mode != enabled)
+                    .unwrap_or(false);
+                if mode_changed {
+                    if let Some(l) = self.parts.get_mut(part) {
+                        // Engine switch: both voice owners must be drained.
+                        // ОБЯЗАТЕЛЬНО: единственный writer sf2_mode — иначе
+                        // mode_changed залипает в true и роутинг ломается.
+                        l.drain_notes(&mut self.sampler, part, false);
+                        l.sf2_mode = enabled;
                     }
                 }
+                // Allocate/free the channel FIRST: volume/pan/mute events of
+                // the perf-load and reconnect push orders arrive BEFORE this
+                // switch and early-return while the channel is still absent.
                 self.sampler.set_part_mode(part, enabled);
+                // (Re)apply per-channel gains: a freshly allocated channel
+                // keeps the previous occupant's CC7/CC10 or GM defaults —
+                // the "перф напутал громкость/панораму, лечится
+                // перезагрузкой" report (2026-11-03).
+                if enabled {
+                    if let Some(l) = self.parts.get(part) {
+                        let cc = (l.pan.clamp(-1.0, 1.0) * 0.5 + 0.5) * 127.0;
+                        self.sampler.set_channel_pan(part, cc as i32);
+                        self.sampler
+                            .set_layer_volume(part, if l.mute { 0.0 } else { l.volume });
+                    }
+                }
             }
             ControlEvent::SetPartSf2Program { part, program, bank } => {
                 // NO drain: rustysynth 0xC0 = channel.set_patch only — sounding
