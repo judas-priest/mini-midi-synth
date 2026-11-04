@@ -50,17 +50,14 @@ pub enum Action {
     /// Pad 32 held >= HOLD: redo the last undone sequencer edit.
     Redo,
     StepPerf(i32),
-    StepPattern(i32),
     PageBack,
     PageForward,
 }
 
 /// Видимых слотов верхней строки (слоты 0..=6, 7-й — MENU).
-#[allow(dead_code)] // снимается в Task 2 (#50), когда хелперы начнут вызываться
 pub(crate) const CONSOLE_VISIBLE: usize = 7;
 
 /// Максимальный ЛЕГАЛЬНЫЙ старт окна для списка длиной len.
-#[allow(dead_code)]
 pub(crate) fn window_max_start(len: usize) -> usize {
     len.saturating_sub(CONSOLE_VISIBLE)
 }
@@ -68,7 +65,6 @@ pub(crate) fn window_max_start(len: usize) -> usize {
 /// Auto-follow: если idx вне видимого окна [start, start+7) — вернуть новый
 /// старт (зажатый легальными страницами), иначе None (не двигать).
 /// Регрессия #50: паттерн 7 ставил окно в 7 — вырожденная страница.
-#[allow(dead_code)]
 pub(crate) fn follow_start(idx: usize, start: usize, len: usize) -> Option<usize> {
     if (start..start + CONSOLE_VISIBLE).contains(&idx) {
         None
@@ -165,9 +161,16 @@ impl LedConsole {
 
     fn step(&mut self, dir: i32) -> Action {
         match self.mode {
+            // Стрелки 30/31 в режиме перфов шагают перф (live-смена);
+            // в остальных режимах = листание страницы (юзер-модель #50)
             Mode::Home => Action::StepPerf(dir),
-            Mode::Pattern => Action::StepPattern(dir),
-            _ => Action::StepPerf(dir),
+            _ => {
+                if dir < 0 {
+                    Action::PageBack
+                } else {
+                    Action::PageForward
+                }
+            }
         }
     }
 
@@ -395,7 +398,7 @@ mod tests {
         let mut c = LedConsole::new();
         assert_eq!(c.on_event(PadEvent::Prev, Instant::now()), Some(Action::StepPerf(-1)));
         c.mode = Mode::Pattern;
-        assert_eq!(c.on_event(PadEvent::Next, Instant::now()), Some(Action::StepPattern(1)));
+        assert_eq!(c.on_event(PadEvent::Next, Instant::now()), Some(Action::PageForward));
     }
 
     #[test]

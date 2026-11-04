@@ -108,8 +108,8 @@ impl App {
             ui.label("Pattern:");
             // #32 Phase 5: the GUI selector is QUANTIZED (queued to the next
             // boundary). The visible pattern comes back through the atom
-            // mirror — the console SelectPattern/StepPattern pads stay
-            // IMMEDIATE on purpose (hardware transport path).
+            // mirror — the console SelectPattern pads (top-row page slots)
+            // stay IMMEDIATE on purpose (hardware transport path).
             if ui.checkbox(&mut self.drum_chain_on, "Chain")
                 .on_hover_text("Chain: marked patterns play in order, one per bar")
                 .changed()

@@ -459,6 +459,8 @@ pub struct App {
     pub led_child: Option<std::process::Child>,
     /// Backoff gate for (re)spawn attempts (crash / spawn failure).
     pub led_spawn_backoff: Option<std::time::Instant>,
+    /// Last seen console mode — mode-entry window sync (#50 finding 4).
+    pub console_prev_mode: Option<led_console::Mode>,
     // Drum kit save/load
     pub drum_kit_name: String,
     pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
@@ -782,6 +784,24 @@ impl eframe::App for App {
         for a in acts {
             self.execute_console_action(a);
         }
+        // Смена режима консоли: окно режима открывается на текущем выборе
+        // (finding 4: stale-страница при входе; идемпотентно, раз в смену)
+        let m = self.console.mode();
+        if self.console_prev_mode != Some(m) {
+            self.console_prev_mode = Some(m);
+            match m {
+                led_console::Mode::Pattern => {
+                    self.follow_window(self.drum_current_pattern as usize, false);
+                }
+                led_console::Mode::Mute => self.mute_window = 0,
+                led_console::Mode::Home => {
+                    if let Some(i) = self.active_perf_console() {
+                        self.follow_window(i, true);
+                    }
+                }
+                _ => {}
+            }
+        }
 
         // Companion process lifecycle (TECHDEBT #16): spawn on toggle-on /
         // first need, kill only OUR child on toggle-off, respawn with 5s
@@ -931,7 +951,7 @@ impl eframe::App for App {
             let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
             let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
             let page_depth = match self.console.mode() {
-                led_console::Mode::Pattern => self.pat_window,
+                led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
                 led_console::Mode::Mute => self.mute_window / 7,
                 _ => self.perf_window / 7,
             };
@@ -2688,35 +2708,37 @@ impl App {
                 }
                 self.follow_window(next, true);
             }
-            led_console::Action::StepPattern(dir) => {
-                let next = (self.drum_current_pattern as i32 + dir).rem_euclid(8);
-                self.drum_current_pattern = next as u8;
-                let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: next as u8 });
-                self.follow_window(next as usize, false);
-            }
             led_console::Action::PageBack => {
                 self.page_window(-7);
-                // не оставлять пурпур за экраном (Important-фикс ревью)
-                if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
-                self.follow_window(self.drum_current_pattern as usize, false);
+                // perf-follow только в HOME: в Pattern/Mute стрелки листают
+                // окно СВОЕГО режима и не должны молча двигать perf_window
+                // (#50 finding 8); паттерн-follow удалён — ручное листание не
+                // отменяется (finding 3)
+                if self.console.mode() == led_console::Mode::Home {
+                    if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
+                }
             }
             led_console::Action::PageForward => {
                 self.page_window(7);
-                if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
-                self.follow_window(self.drum_current_pattern as usize, false);
+                if self.console.mode() == led_console::Mode::Home {
+                    if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
+                }
             }
         }
     }
 
-    /// Auto-follow: keep the active index inside [w, w+7); if it escapes past
-    /// the right edge it becomes the FIRST visible slot (user-requested).
+    /// Auto-follow: keep the active index inside [w, w+7); if it escapes the
+    /// window, the start is clamped to the last LEGAL page (never a degenerate
+    /// one — regression #50 finding 2).
     fn follow_window(&mut self, idx: usize, is_perf: bool) {
         if is_perf {
-            if !(self.perf_window..self.perf_window + 7).contains(&idx) {
-                self.perf_window = idx.min(self.perf_list.len().saturating_sub(1));
+            if let Some(w) =
+                led_console::follow_start(idx, self.perf_window, self.perf_list.len())
+            {
+                self.perf_window = w;
             }
-        } else if !(self.pat_window..self.pat_window + 7).contains(&idx) {
-            self.pat_window = idx.min(7);
+        } else if let Some(w) = led_console::follow_start(idx, self.pat_window, 8) {
+            self.pat_window = w;
         }
     }
 
@@ -2724,17 +2746,15 @@ impl App {
     fn page_window(&mut self, delta: i32) {
         match self.console.mode() {
             led_console::Mode::Home => {
-                let n = self.perf_list.len();
-                let max_w = n.saturating_sub(7);
+                let max_w = led_console::window_max_start(self.perf_list.len());
                 self.perf_window = (self.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             led_console::Mode::Pattern => {
-                // 8 patterns, window shows 7: max start = 1
-                self.pat_window = (self.pat_window as i32 + delta).clamp(0, 1) as usize;
+                let max_w = led_console::window_max_start(8); // = 1
+                self.pat_window = (self.pat_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             led_console::Mode::Mute => {
-                let n = self.parts.len();
-                let max_w = n.saturating_sub(7);
+                let max_w = led_console::window_max_start(self.parts.len());
                 self.mute_window = (self.mute_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             _ => {}

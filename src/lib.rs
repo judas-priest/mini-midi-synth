@@ -871,6 +871,7 @@ pub fn run_gui(
         led_last_send: None,
         led_child: None,
         led_spawn_backoff: None,
+        console_prev_mode: None,
         drum_kit_name: String::new(),
         drum_kit_list: preset::list_drum_kits(),
         drum_midi_import_path: String::new(),
