@@ -126,7 +126,7 @@ use mini_midi_synth::synth::{ControlEvent, MidiEvent, SynthEngine, BLOCK_SIZE};
 const SR: f32 = 48_000.0;
 
 fn engine_with(patch_name: &str) -> SynthEngine {
-    let patches = preset::load_all_patches();
+    let patches = preset::load_factory_patches(); // hermetic (preset.rs:560)
     let idx = patches.iter().position(|p| p.name == patch_name)
         .unwrap_or_else(|| panic!("patch {patch_name} must exist"));
     let mut e = SynthEngine::new(SR);
@@ -219,7 +219,7 @@ fn tc7_slap_click_tamed() {
 
 #[test]
 fn tc8_no_regression_finger_and_high_brass() {
-    let (_, late_f, _) = render(&mut engine_with("Bass Guitar"), 48);
+    let (_, late_f, _) = render(&mut engine_with("Bass Guitar (Finger)"), 48);
     assert!(late_f >= 0.1, "finger bass regressed: late {late_f:.3}");
     let (_, late_b, _) = render(&mut engine_with("Trumpet"), 72);
     assert!(late_b >= 0.2, "brass working band regressed: late {late_b:.3}");
@@ -243,33 +243,41 @@ git add tests/physical_models.rs && git commit -m "test: physical-model regressi
 
 **Files:**
 - Modify: `src/synth/oscillator.rs` (Brass state init ~:1709, `blowing_pressure`
-  хранение :1718, `tick_brass` :1757-1788)
+  хранение :1718, `tick_brass` :1733-1788), `src/synth/voice.rs`
+  (render_oscs/dispatch env-проброс), `src/synth/tests.rs` (:184/:204/:222 —
+  osc.tick(440.0) → osc.tick(440.0, 1.0); компилятор перечислит)
 
-- [ ] **Step 1: давление через амп-огибающую (STK-канон).** В состоянии Brass
-  добавить поле (рядом с `blowing_pressure`):
+- [ ] **Step 1: давление через амп-огибающую (STK-канон).** Цепочка env:
+  в voice.rs локальная `amp` — УЖЕ ОТТИКАННОЕ значение `self.amp_env.tick()`
+  (voice.rs:601, до render_oscs :646/:740). КРИТИЧНО: НЕ тикать amp_env ещё
+  раз — ADSR stateful, двойной tick = вдвое быстрее огибающая у ВСЕХ патчей.
+  Риппл: `render_oscs(freq, amp)` (+ унисон-ветка :659) →
+  `Oscillator::tick(freq, env)` (диспетчер oscillator.rs:1042, ОДИН match) —
+  только плечо Brass пересылает env в tick_brass, остальные осцилляторы
+  игнорируют параметр (передаётся, не используется). Сигнатурный риппл
+  компилятор перечислит. В состоянии Brass добавить поле:
 
 ```rust
-    pressure_env: f32, // текущее давление мундштука (рампится к цели)
+    pressure_env: f32, // текущее давление мундштука (рампа к цели)
 ```
 
-в `init_brass` — `pressure_env: 0.0`; в `tick_brass` заменить прямое
-использование `blowing_pressure` на рампу (коэффициент под атаку ~5 мс):
+в `init_brass` — `pressure_env: 0.0`; в tick_brass (функция :1733-1788)
+заменить прямое использование `self.blowing_pressure` (:1757) на рампу с
+коэффициентом, выведенным из SR (τ ≈ 5 мс):
 
 ```rust
         // STK-канон: breathPressure = maxPressure * adsr.tick() — давление
-        // мундштука под огибающей, иначе DC-ступенька бьёт в бору щелчком
-        let target = self.blowing_pressure * env_value; // env_value — текущая амп-огибающая 0..1
-        self.pressure_env += 0.15 * (target - self.pressure_env);
+        // мундштука под огибающей, иначе DC-ступенька бьёт в бору щелчком.
+        // Однополюсная рампа с τ=5мс: coeff = 1 - exp(-1/(0.005*sr))
+        let coeff = 1.0 - (-1.0 / (0.005 * self.sample_rate)).exp();
+        self.pressure_env += coeff * (self.blowing_pressure * env - self.pressure_env);
         let blowing = self.pressure_env;
 ```
 
-где `env_value` — значение амплитудной огибающей голоса на этом сэмпле
-(пробросить из voice.rs в osc-вызов; если сигнатура `tick_brass` не принимает
-env — добавить параметр `env: f32` в осцилляторный вызов и передавать
-`self.amp_env` из голоса; реализатор находит точную цепочку по
-`tick_brass(` в voice.rs и добавляет аргумент БЕЗ изменения других осцилляторов
-— им передавать 1.0). Все места внутри tick_brass, использовавшие
-`self.blowing_pressure` как давление, используют локальную `blowing`.
+(`env` — аргумент tick_brass; `self.sample_rate` — поле OscState, проверить
+фактическое имя, если нет — пробросить или использовать конст SR-эквивалент
+из файла.) Все места tick_brass, использовавшие `self.blowing_pressure` как
+давление, используют локальную `blowing`.
 
 - [ ] **Step 2: мягкое насыщение.** В tick_brass заменить (:1767):
 
@@ -306,7 +314,7 @@ Expected: tc1/tc2/tc3/tc8 зелёные; tc4-tc7 ещё красные (Bowed/S
 - [ ] **Step 5: коммит**
 
 ```bash
-git add src/synth/oscillator.rs src/synth/voice.rs && git commit -m "fix: Brass lip model — soft saturation kills the dead point, breath pressure under amp env, denormal guards (#53)"
+git add src/synth/oscillator.rs src/synth/voice.rs src/synth/tests.rs && git commit -m "fix: Brass lip model — soft saturation kills the dead point, breath pressure under amp env, denormal guards (#53)"
 ```
 
 ### Task 3: Bowed — сид, питч-компенсация, Chamberlin, клампы
@@ -326,11 +334,11 @@ git add src/synth/oscillator.rs src/synth/voice.rs && git commit -m "fix: Brass 
         for s in bridge_delay.iter_mut() { *s = seed * (rand_term()); }
 ```
 
-где `rand_term()` — детерминированный псевдошум в [-1,1] без аллокаций
-(например LCG по индексу: `((i * 2654435761) >> 16) as f32 / 65535.0 * 2.0 - 1.0`
-— реализатор вписывает существующий в файле источник шума, если есть;
-если нет — LCG как выше). `velocity` уже в скоупе init (проверить сигнатуру;
-если нет — взять 1.0 и комментарий).
+Источник термов — СУЩЕСТВУЮЩИЙ в файле идиом bore-сида (init_brass
+:1700-1704) / `Oscillator::next_noise` (oscillator.rs:1035) — тот же паттерн
+применить к обеим линиям (LCG-вариант из лоб: `(i * 2654435761) >> 16` в
+usize даёт термы до ±600 — НЕ использовать). `velocity` в скоупе init —
+проверить сигнатуру; если нет — взять 1.0 с комментарием.
 
 - [ ] **Step 2: питч-компенсированный gain трения** — в tick_bowed_string,
   где friction вычислен (после `f = p·v_rel·exp(...)`):
@@ -343,8 +351,8 @@ git add src/synth/oscillator.rs src/synth/voice.rs && git commit -m "fix: Brass 
         let f = f * k;
 ```
 
-(`n_total` — суммарная длина delay-петли в сэмплах, переменная уже есть в
-функции; если называется иначе — реализатор берёт фактическое имя.)
+(`n_total` = `n_nut + n_bridge` — в tick_bowed_string есть только компоненты
+:1584-1585; вычислить локально один раз.)
 
 - [ ] **Step 3: починка Chamberlin** (:1623-1625) — заменить:
 
@@ -406,23 +414,29 @@ git add src/synth/oscillator.rs && git commit -m "fix: BowedString — noise see
                     // не обрушивает в фиксированную точку и не флипает знак
                     // (старая давилка: |x|>fh → fh−(x−fh)·0.85, FP 0.027,
                     // знак флипался выше 1.33·fh — slap умирал за 100 мс)
-                    let fh = fret_height;
+                    let fh = self.fret_height;
                     if x.abs() > fh {
                         let d = x.abs() - fh;
-                        y = x.signum() * (fh + d * 0.15);
+                        y = x.signum() * (fh + d * self.fret_damping);
                     } else {
                         y = x;
                     }
 ```
 
-(`x`/`y` — фактические имена переменных collision-ветки; сохранить
-окружающий код.)
+(`x`/`y` — фактические имена переменных collision-ветки (:439-443 —
+`loop_out`/`self.fret_height`); сохранить окружающий код. `fret_damping`
+(bass.rs:307, =0.85) в init Slap ставить 0.15 — поле живёт, не dead.)
 
-- [ ] **Step 2: fret_height амплитудно-адекватный** (:306):
+- [ ] **Step 2: fret_height амплитудно-адекватный** (:306, фактическая строка
+  `self.fret_height = if style == BassStyle::Slap { 0.05 } else { 0.0 };` —
+  style-guard СОХРАНИТЬ, иначе finger/pick получат коллизию):
 
 ```rust
-        let fret_height = 0.45 * velocity.max(0.5); // было 0.05 — ниже рабочей амплитуды струны
-```
+        self.fret_height = if style == BassStyle::Slap {
+            0.45 * velocity.max(0.5) // было 0.05 — ниже рабочей амплитуды струны
+        } else {
+            0.0
+        };
 
 - [ ] **Step 3: клик** (:361): `velocity * 0.5` → `velocity * 0.15` с
   комментарием (STK-канон: эксайтер маскируется телом ноты).
@@ -430,7 +444,11 @@ git add src/synth/oscillator.rs && git commit -m "fix: BowedString — noise see
 - [ ] **Step 4: зелёный Slap + не-регрессия + полный тест-файл**
 
 Run: `cargo test --test physical_models 2>&1 | tail -4`
-Expected: 8/8 ok.
+Expected: 8/8 ok. КОНТИНГЕНЦИЯ TC7: убрав давилку, поднимается всё начало
+(инжекция velocity·1.1, pickup читается ДО коллизии bass.rs:399-418) —
+если ранний пик > 0.35 уже от тела ноты, а не щелчка: снизить эксайт
+slap-ветки (инжекция 1.1 → ~0.6) и перезапустить; порог не ослаблять молча —
+коммит с комментарием о причине.
 
 - [ ] **Step 5: коммит**
 
