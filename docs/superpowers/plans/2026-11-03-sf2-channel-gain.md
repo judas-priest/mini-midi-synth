@@ -71,10 +71,11 @@ anchor-checked: 2026-11-03 (база = master 0622aa4; все сниппеты �
 - TC5 (no-op idempotent + baseline): Sf2Mode(true) дважды (второй — no-op) +
   Vol поверх; парт говорит с установленной громкостью, без паники. Проходит
   и до, и после (санити-бейзлайн порядка Volume-ПОСЛЕ-mode).
-- TC6 (tails on no-op): SF2-парт ДЕРЖИТ ноту → no-op Sf2Mode → сустейн
-  продолжается (уровень A в 4+ раза выше контроля B с РЕАЛЬНЫМ флипом в DSP,
-  который дренит+освобождает канал). Пин семантики «no-op не дренит»
-  (synth/mod.rs:2926-2927).
+- ~~TC6 (tails on no-op)~~ — СНЯТ по урокам исполнения (двe попытки: 10-блочное
+  окно — релиз неотличим от сустейна; 100-блочное с прероллом — релиз органа
+  заполняет окно, pa≈pb). Семантика «no-op не дренит» закрепляется СТРУКТУРНО:
+  drain_notes остаётся внутри `if mode_changed` (видно в диффе фикса) +
+  код-ревью. Амплитудный тест здесь флакогенен.
 
 ## Negative Matrix
 
@@ -224,55 +225,15 @@ fn tc5_noop_switch_keeps_volume_and_no_panic() {
     assert!(p > SILENCE, "no-op switch must keep the part audible (peak {p})");
 }
 
-#[test]
-fn tc6_noop_switch_does_not_cut_tail() {
-    // A: держим ноту (Drawbar Organ — бесконечный сустейн, умеренный релиз),
-    // делаем no-op Sf2Mode — сустейн продолжается.
-    // B (контроль): РЕАЛЬНЫЙ флип в DSP — drain(release)+free — релиз затухает.
-    // ОКНО 100 блоков (~69ms): в 10-блочном релиз не успевает отлиочь от
-    // сустейна (урок исполнения 2026-11-03: red pre-fix при pa≈pb).
-    let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
-    let mut a = engine_with_sf2(sf.clone());
-    let mut b = engine_with_sf2(sf);
-    for e in [&mut a, &mut b] {
-        gui_switch_part_to_sf2(e, 0, 1.0, 0.0, false, 0, 127);
-        let _ = e.handle_control(ControlEvent::SetPartSf2Program { part: 0, program: 16, bank: 0 });
-        e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
-    }
-    // Преролл ~100 блоков: атака не должна попадать в измерительное окно
-    // (урок исполнения #2: без преролла па ≈ pb — оба пика от атаки).
-    for _ in 0..100 {
-        let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
-        a.tick_block(&mut l, &mut r);
-        b.tick_block(&mut l, &mut r);
-    }
-    let _ = a.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true }); // no-op
-    let _ = b.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: false }); // drain(release)+free
-    let mut la = [0.0f32; BLOCK_SIZE]; let mut ra = [0.0f32; BLOCK_SIZE];
-    let mut lb = [0.0f32; BLOCK_SIZE]; let mut rb = [0.0f32; BLOCK_SIZE];
-    let (mut pa, mut pb) = (0.0f32, 0.0f32);
-    for _ in 0..100 {
-        a.tick_block(&mut la, &mut ra);
-        b.tick_block(&mut lb, &mut rb);
-        for i in 0..BLOCK_SIZE {
-            pa = pa.max(la[i].abs());
-            pb = pb.max(lb[i].abs());
-        }
-    }
-    a.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
-    b.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
-    assert!(pa > pb * 4.0, "no-op switch behaved like a real flip: a {pa}, b {pb}");
-}
+(tc6 снят — см. Test Cases)
 ```
 
 - [ ] **Step 2: прогнать — зафиксировать красные**
 
 Run: `cargo test --test sf2_channel_gain 2>&1 | tail -12`
-Expected: tc1/tc3/tc4 FAIL (канал с дефолтным CC7=100 и центром); tc2/tc5/tc6
+Expected: tc1/tc3/tc4 FAIL (канал с дефолтным CC7=100 и центром); tc2/tc5
 PASS — tc2 зелёный ДО фикса легитимно: замьюченные парты скипаются на
-роутинге (synth/mod.rs:2259), мьют-асимметрия на слух не проявляется
-(мьют-гейт в фиксе нужен для корректности состояния канала, не для этого
-теста). Пики в выводе — диагностика. Компиляция чистая.
+роутинге (synth/mod.rs:2259). Пики в выводе — диагностика. Компиляция чистая.
 
 - [ ] **Step 3: коммит красных тестов**
 
@@ -285,12 +246,13 @@ git add tests/sf2_channel_gain.rs && git commit -m "test: SF2 channel gain regre
 **Files:**
 - Modify: `src/synth/mod.rs` (~:2925-2943)
 
-- [ ] **Step 0: амение tc6 (урок исполнения, red-коммит 4489e41)** — в
-tests/sf2_channel_gain.rs заменить тело tc6 на версию из секции Test Cases /
-Task 1 Step 1 ЭТОЙ версии плана (Drawbar Organ program 16, окно 100 блоков;
-в 10-блочном окне релиз неотличим от сустейна — pa≈pb). Прогнать
-`cargo test --test sf2_channel_gain tc6` — tc6 теперь ЗЕЛЁНЫЙ на красном
-коммите. Коммит: `git add tests/sf2_channel_gain.rs && git commit -m "test: tc6 — organ sustain, 100-block window (10-block window can't tell release from sustain)"`.
+- [ ] **Step 0: убрать tc6 (уроки исполнения, red-коммит 4489e41)** — две
+  попытки спасти амплитудный пин «no-op не дренит» провалились (10-блочное
+  окно; 100-блок+преролл — релиз органа держит pb≈pa). Удалить тест tc6 из
+  tests/sf2_channel_gain.rs ЦЕЛИКОМ (файл в worktree уже с амендоментом —
+  откатить к HEAD 4489e41 и удалить только tc6). Семантика закрепляется
+  структурно: в фиксе drain_notes остаётся внутри `if mode_changed`.
+  Коммит: `git add tests/sf2_channel_gain.rs && git commit -m "test: drop tc6 — release-vs-sustain not robustly discriminable at block granularity; no-drain pinned structurally in the fix"`.
 
 - [ ] **Step 1: переписать обработчик** — заменить ПЛЕЧО `SetPartSf2Mode`
 в `handle_control` (src/synth/mod.rs ~:2925-2943) целиком на:
@@ -338,7 +300,7 @@ Task 1 Step 1 ЭТОЙ версии плана (Drawbar Organ program 16, окн
 - [ ] **Step 2: прогнать — все зелёные**
 
 Run: `cargo test --test sf2_channel_gain 2>&1 | tail -10 && cargo test --test layer_switch_debug 2>&1 | tail -4`
-Expected: 6/6 sf2_channel_gain ok (tc2 зелёный был и до — см. Step 2 Task 1); layer_switch_debug зелёные
+Expected: 5/5 sf2_channel_gain ok (tc2 зелёный был и до — см. Task 1 Step 2); layer_switch_debug зелёные
 (семантика хвостов не тронута).
 
 - [ ] **Step 3: rt_safety + clippy**
