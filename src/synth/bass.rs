@@ -362,14 +362,15 @@ impl BassModel {
                     // Velocity injection: energy into both wave directions.
                     // 1.1 → 0.55 (TC7 contingency plan: «1.1 → ~0.6»): убрав
                     // давилку, ранний пик 0.527 > 0.35; на 0.6 → 0.377,
-                    // на 0.55 → 0.354. Остаточный пик — не щелчок (click
-                    // теперь 0.15): SVF-овершут старта. Порог не тронут.
+                    // на 0.55 → 0.354. Остаточный пик — не щелчок: pickup
+                    // SVF (Q≈2.8) звенит на эксайтере, тело самой атаки ~0.3.
+                    // Click 0.15→0.10 (pre-approved contingency, #53).
                     self.buffer[idx] = (env * 0.7 + noise * 0.3) * velocity * 0.55;
                 }
 
                 // Percussive click (STK-канон: эксайтер маскируется телом
                 // ноты — 0.5 давил полнодиапазонный щелчок в атаку)
-                self.slap_click_amp = velocity * 0.15;
+                self.slap_click_amp = velocity * 0.10;
             }
         }
 
