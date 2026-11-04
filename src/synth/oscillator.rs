@@ -1693,7 +1693,7 @@ impl Oscillator {
     ///   lip_v        → bq_y2      BiQuad output y[n-2]
     ///   lip_freq     → bq_a1      -2*r*cos(2π*f/sr)
     ///   lip_damping  → bq_a2      r² = 0.994009
-    ///   lip_mass_inv → bq_b0      gain (0.03, STK default)
+    ///   lip_mass_inv → bq_b0      gain (DC-gain normalized, LIP_DC_GAIN)
     ///   bell_lp_state→ dc_x1      DC blocker: prev input
     ///   bell_hp_state→ dc_y1      DC blocker: prev output
     ///   bell_cutoff  → bell_a1    bell post-LP coefficient (shapes timbre per instrument)
@@ -1719,7 +1719,14 @@ impl Oscillator {
         let r = 0.997_f32;
         let bq_a1 = -2.0 * r * (TAU * lip_freq_hz / sr).cos();
         let bq_a2 = r * r;
-        let bq_b0 = 0.03_f32;  // STK: lipFilter_.setGain(0.03)
+        // DC-gain normalization: STK-константный b0=0.03 даёт DC-гейн
+        // b0/(1+a1+a2), растущий с питчем вниз (≈36 на A3 против ≈6.3 на C5) —
+        // bq_y уходит глубоко в зону насыщения, петля reflection не качает
+        // (тишина ниже B4, #53). Нормируем: bq_y ≈ p_mouth·LIP_DC_GAIN на
+        // любом питче — внутри чувствительной зоны soft saturation (δ≈0.2).
+        const LIP_DC_GAIN: f32 = 2.5;
+        let dc = 1.0 + bq_a1 + bq_a2; // положительный, крошечный на низком питче
+        let bq_b0 = dc * LIP_DC_GAIN;
 
         // Blowing pressure → STK maxPressure
         let max_pressure = (0.55 + blowing_pressure * 0.40) * velocity.clamp(0.0, 1.0);
@@ -1755,7 +1762,10 @@ impl Oscillator {
             bell_cutoff: bell_a1, // bell post-LP a1
             bore_lp_state: 0.0,   // bell post-LP state
             blowing_pressure: max_pressure,
-            pressure_env: 0.0,    // breath pressure ramp state
+            // Start-kick: STK startBlowing ramp'ит СВЕРХУ (от 1.8×target) —
+            // переброс помогает губам сорваться в self-oscillation (#53).
+            // Однополюсная рампа в tick_brass затем оседает на target.
+            pressure_env: max_pressure * 1.8,
             _bore_length_ratio: 1.0,
         };
     }
