@@ -91,7 +91,7 @@ Bass Guitar (Finger)	3c7c7a7913630c51
 Bass Guitar (Finger) v2	cc56b8df314a4465
 Bass Finger v3	6c34bef42d6f1899
 Bass Guitar (Pick)	3cb67523d903e405
-Bass Guitar (Slap)	1e4cf0b163e0c2a9
+Bass Guitar (Slap)	2fb4aeb878e5ebe9
 Saw Lead	177530d1adccefe1
 Mono Lead	a95d8a36bd75ff85
 Detuned Lead	719dd954a128accd

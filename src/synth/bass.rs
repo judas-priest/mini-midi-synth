@@ -303,8 +303,14 @@ impl BassModel {
         ];
 
         // --- Fret collision (slap only) ---
-        self.fret_height = if style == BassStyle::Slap { 0.05 } else { 0.0 };
-        self.fret_damping = 0.85;
+        self.fret_height = if style == BassStyle::Slap {
+            0.45 * velocity.max(0.5) // было 0.05 — ниже рабочей амплитуды струны
+        } else {
+            0.0
+        };
+        // Мягкая коллизия: damping = доля excess, сохраняемая поверх fh
+        // (DAFx-канон — мягкая пружина, не давилка).
+        self.fret_damping = if style == BassStyle::Slap { 0.15 } else { 0.85 };
 
         // --- Excitation ---
         self.buffer.resize(n, 0.0);
@@ -353,12 +359,17 @@ impl BassModel {
                     let env = 1.0 - (i as f32 / slap_len as f32);
                     let noise = self.next_noise();
                     let idx = (strike_pos + i) % n;
-                    // Velocity injection: energy into both wave directions
-                    self.buffer[idx] = (env * 0.7 + noise * 0.3) * velocity * 1.1;
+                    // Velocity injection: energy into both wave directions.
+                    // 1.1 → 0.55 (TC7 contingency plan: «1.1 → ~0.6»): убрав
+                    // давилку, ранний пик 0.527 > 0.35; на 0.6 → 0.377,
+                    // на 0.55 → 0.354. Остаточный пик — не щелчок (click
+                    // теперь 0.15): SVF-овершут старта. Порог не тронут.
+                    self.buffer[idx] = (env * 0.7 + noise * 0.3) * velocity * 0.55;
                 }
 
-                // Percussive click
-                self.slap_click_amp = velocity * 0.5;
+                // Percussive click (STK-канон: эксайтер маскируется телом
+                // ноты — 0.5 давил полнодиапазонный щелчок в атаку)
+                self.slap_click_amp = velocity * 0.15;
             }
         }
 
@@ -435,11 +446,14 @@ impl BassModel {
         self.ap_y1 = ap_out;
 
         // === Fret collision (slap buzz) ===
+        // DAFx-канон: коллизия с мягкой жёсткостью — сжимает, но
+        // не обрушивает в фиксированную точку и не флипает знак
+        // (старая давилка: |x|>fh → fh−(x−fh)·0.85, FP 0.027,
+        // знак флипался выше 1.33·fh — slap умирал за 100 мс)
         let mut loop_out = ap_out * self.loop_gain;
         if self.fret_height > 0.0 && loop_out.abs() > self.fret_height {
-            // Reflect excess displacement, apply collision damping
             let excess = loop_out.abs() - self.fret_height;
-            loop_out = loop_out.signum() * (self.fret_height - excess * self.fret_damping);
+            loop_out = loop_out.signum() * (self.fret_height + excess * self.fret_damping);
         }
 
         // Write back to delay line
