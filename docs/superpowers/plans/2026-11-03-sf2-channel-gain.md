@@ -239,6 +239,13 @@ fn tc6_noop_switch_does_not_cut_tail() {
         let _ = e.handle_control(ControlEvent::SetPartSf2Program { part: 0, program: 16, bank: 0 });
         e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
     }
+    // Преролл ~100 блоков: атака не должна попадать в измерительное окно
+    // (урок исполнения #2: без преролла па ≈ pb — оба пика от атаки).
+    for _ in 0..100 {
+        let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+        a.tick_block(&mut l, &mut r);
+        b.tick_block(&mut l, &mut r);
+    }
     let _ = a.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true }); // no-op
     let _ = b.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: false }); // drain(release)+free
     let mut la = [0.0f32; BLOCK_SIZE]; let mut ra = [0.0f32; BLOCK_SIZE];
