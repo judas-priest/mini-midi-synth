@@ -199,9 +199,10 @@ git add src/gui/layers.rs && git commit -m "feat: zone_range_pair — split real
         self.apply_split_ranges();
 ```
 
-Точное место: в remove_part после push-очистки слота, до/после
-persist_parts_state — по смыслу: вызывать только когда удалённый парт был в
-ZONE_B (для A-парта диапазоны не меняются).
+Точное место: в remove_part (layers.rs:501-519) после push-очистки слота
+(`if part >= PARTS_PER_ZONE` — условие зоны B уже там); вызывать только для
+B-парта (для A диапазоны не меняются; безусловный вызов тоже безопасен —
+просто 16 лишних send_part_range).
 
 - [ ] **Step 3: заголовок B** — в секции B (`if split_on {`) заменить
   формат заголовка:

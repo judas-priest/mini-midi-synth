@@ -41,6 +41,9 @@ tests` led_console.rs.
   led_console.rs:275+ существует.
 - Пэды верхней строки: слоты 0..=7 = окно [w, w+7); SelectPattern по пэду
   (mod.rs:2655) выбирает видимый слот — follow там не нужен.
+- Комментарий drums.rs:111 упоминает StepPattern — после удаления варианта
+  обновить формулировку (в Files list не вынесено, реализатор поправит по
+  месту).
 
 ---
 
@@ -192,11 +195,12 @@ git add src/gui/led_console.rs && git commit -m "feat: window_max_start/follow_s
   led_console.rs и обработчик `Action::StepPattern { .. }` (mod.rs:2691-2696)
   целиком (пошаговое перебирание паттернов с пэдов исчезает: выбор — пэдами
   18-24 по слотам страницы).
-  **Step 2b: существующий тест** led_console.rs:376
-  (`prev_next_are_mode_dependent`) ждёт `Some(Action::StepPattern(1))` —
-  обновить на `Some(Action::PageForward)` и семантически по новым правилам
-  (см. новый тест tc6 в Task 1/Step 2c при необходимости). Изменение
-  существующего теста осознанное: семантика стрелок изменилась юзером.
+  **Step 2b: существующий тест** led_console.rs:372-377
+  (`prev_next_are_mode_dependent`) ждёт Pattern Next →
+  `Some(Action::StepPattern(1))` — обновить на `Some(Action::PageForward)`
+  (Home Prev → StepPerf(-1) остаётся валидным). Изменение существующего
+  теста осознанное: семантика стрелок изменилась юзером. (TC6 — структурная
+  проверка диффа, не юнит-тест.)
 
 - [ ] **Step 3: PageBack/PageForward** — удалить паттерн-follow (регрессия
   finding 3: ручное листание больше не отменяется); perf-follow оставить:
@@ -264,8 +268,8 @@ git add src/gui/led_console.rs && git commit -m "feat: window_max_start/follow_s
                 led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
 ```
 
-- [ ] **Step 7: sync при смене режима** (finding 4) — поле в struct App (рядом
-  с `led_spawn_backoff`, mod.rs:359) и init в App::new:
+- [ ] **Step 7: sync при смене режима** (finding 4) — поле в struct App
+  (mod.rs:461, рядом с `led_spawn_backoff`) и init (lib.rs:873):
 
 ```rust
     pub console_prev_mode: Option<led_console::Mode>,
