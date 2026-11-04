@@ -18,15 +18,15 @@ lfo_pitch_offset_base) + в `mods.pitch_bend` (mod-matrix источник). SF2
 парта рядом с Sus; перф-персист через PartConfig (serde-default, канон #49).
 Undo — НЕТ (флаг приёма, не звук; как Mute-чекбокс вне undo).
 
-**Tech Stack:** Rust/egui; юнит-тесты в src/synth/tests.rs (поля+маскировка
-через pub(crate)-хелперы), serde-roundtrip в tests/perf_load_seq.rs по образцу
-macro_names-тестов.
+**Tech Stack:** Rust/egui; юнит-тесты (TDD) на хелперы/handlers/serde;
+маскировка DSP-сборки и SF2-форвардинга — экранная верификация (TC5/TC6),
+не юнит (внутренности tick_block).
 
 **Проверенные факты (вычитано; не пересматривать):**
 - PB: handler MidiEvent::PitchBend (synth/mod.rs:2294-2315): глобальный
   `self.pitch_bend_semitones` (asymmetric range) + форвардинг `for i in 0..2`
   `sampler.pitch_bend(i, value)` ТОЛЬКО sf2-партам (:2311-2314).
-- MW: handler MidiEvent::ModWheel (mod.rs:2317-2325): `self.mod_wheel` +
+- MW: handler MidiEvent::ModWheel (mod.rs:2315-2323): `self.mod_wheel` +
   форвардинг `for i in 0..2` sf2-партам `sampler.mod_wheel(i, value)`.
 - DSP-потребители: сборка `lfo_pitch_offset_base` (mod.rs:3484-3491) —
   `self.pitch_bend_semitones` + `self.mod_wheel * 0.5 * vibrato_val`;
@@ -134,6 +134,13 @@ Expected: FAIL — полей/функций нет.
     pub ignore_pb: bool,
     pub ignore_mw: bool,
 ```
+
+```rust
+// Поля движка (рядом с pitch_bend_semitones :1277 / mod_wheel :1278):
+    pitch_bend_norm: f32, // сырое нормализованное значение колеса -1..1 (зеркало для re-assert)
+```
+дефолт `pitch_bend_norm: 0.0` (литерал :1587 рядом с pitch_bend_semitones),
+в PitchBend handler (:2294) первой строкой: `self.pitch_bend_norm = value;`
 дефолты `ignore_pb: false, ignore_mw: false` (:634 литерал). Хелперы на
 уровне модуля synth:
 
@@ -158,10 +165,11 @@ Handlers (рядом SetPartSustain :2572; SF2-канальный immediate-rese
                 if let Some(l) = self.parts.get_mut(part) {
                     l.ignore_pb = on;
                     // SF2-канал: сброс в центр немедленно; при un-ignore —
-                    // текущее значение движка (иначе парта висит в центре
-                    // до следующего шевеления колеса)
+                    // СЫРОЕ нормализованное значение (sampler.pitch_bend
+                    // ждёт -1..1: sampler.rs:565 (v+1)*0.5*16383; pitch_
+                    // bend_semitones содержит range-масштаб — НЕ годится)
                     if l.sf2_mode && part < 2 {
-                        let norm = if l.ignore_pb { 0.0 } else { self.pitch_bend_semitones * 0.5 };
+                        let norm = if l.ignore_pb { 0.0 } else { self.pitch_bend_norm };
                         self.sampler.pitch_bend(part, norm);
                     }
                 }
@@ -198,7 +206,10 @@ git add src/synth/mod.rs src/synth/tests.rs && git commit -m "feat: per-part ign
 - Modify: `src/synth/mod.rs` — сборка offset (:3484-3491), mods.pitch_bend
   (:3480), форвардинг PB (:2311-2314) и MW (:2317-2325)
 
-- [ ] **Step 1: DSP-сборка** — в tick_block-функции сборки offset:
+- [ ] **Step 1: DSP-сборка** — в tick_block-функции сборки offset; ОДНОВРЕМЕННО
+  замаскировать mod-matrix источники: `mods.pitch_bend` (:3473) и
+  `mod_sources.mod_wheel` (:3463) — иначе matrix-маршруты PB/MW обходили бы
+  игнор:
 
 ```rust
             // Per-part ignore (TECHDEBT #55): маска PB/MW-вкладов
@@ -212,8 +223,9 @@ git add src/synth/mod.rs src/synth/tests.rs && git commit -m "feat: per-part ign
                 + seq_pitch;
 ```
 
-и `mods.pitch_bend` (:3480): `pitch_bend: effective_pb(part.ignore_pb, self.pitch_bend_semitones) / 2.0,`
-(переменную `part` в скоупе — существующий `&l`/`part` цикла; сверить имена).
+`mods.pitch_bend` (:3473): `pitch_bend: effective_pb(part.ignore_pb, self.pitch_bend_semitones) / 2.0,`;
+`mod_sources.mod_wheel` (:3463): `mod_wheel: effective_mw(part.ignore_mw, self.mod_wheel),`
+(биндинг `part` — существующий цикл :3451+).
 
 - [ ] **Step 2: SF2-форвардинг** — в обоих циклах `for i in 0..2` добавить
   ignore-чек:
@@ -246,18 +258,18 @@ git add src/synth/mod.rs && git commit -m "feat: ignore_pb/ignore_mw mask DSP pi
   PartConfig в draw_perf_row (:199-220)
 - Modify: `src/preset.rs` — PartConfig два поля (после sustain_enabled, канон
   macro_names):
-  `#[serde(default, skip_serializing_if = "std::ops::Not::not")] pub ignore_pb: bool,`
-  `#[serde(default, skip_serializing_if = "std::ops::Not::not")] pub ignore_mw: bool,`
-  (`std::ops::Not::not` — skip когда false; сверить с существующими
-  skip_serializing_if в файле, если паттерн иной — взять файловый)
-- Modify: `src/gui/mod.rs` — apply_performance restore (:2833-2845 рядом с
-  macro-восстановлением): `self.parts[i].ignore_pb = part.ignore_pb;` и mw;
-  ЛИТЕРАЛЫ PartConfig обновить во всех 4 местах (компилятор перечислит:
-  preset.rs init_performance, layers.rs perf-save, tests/perf_load_seq.rs part(),
-  tests/sustain_audit.rs) + apply_performance
-- Modify: `src/gui/layers.rs` add_part_to_zone/remove_part reset-пуш
-  (reset_and_push_part mod.rs:2364-2372) — сброс флагов в дефолт + пуш событий
-- Test: `tests/perf_load_seq.rs` — TC3/TC4
+  `#[serde(default, skip_serializing_if = "bool_is_false")] pub ignore_pb: bool,`
+  `#[serde(default, skip_serializing_if = "bool_is_false")] pub ignore_mw: bool,`
+  (`fn bool_is_false(v: &bool) -> bool { !**v }` рядом с существующими
+  хелперами preset.rs:801-806 — файловый канон)
+- Modify: `src/gui/mod.rs` — apply_performance restore (рядом с macro-restore
+  :2846-2850; SetPartSustain-пуш :2872), push_full_part_state (:2344-2375),
+  GUI Part struct (~:160-200) + дефолты (:192), reset_and_push_part (:2381),
+  PartUiState persist/restore (gui/mod.rs:2725 / :1928-1936)
+- Modify: `src/config.rs` — PartUiState два serde-default поля (:90-104)
+- Modify: `src/gui/layers.rs` — draw_perf_row PartConfig литерал (:220-233),
+  чекбоксы в draw_part_row (рядом Sus)
+- Test: `tests/perf_load_seq.rs` — TC3/TC4; литералы в tests/sustain_audit.rs
 
 - [ ] **Step 1: падающие serde-тесты** (канон macro_names-тестов):
 
@@ -290,11 +302,20 @@ fn legacy_part_without_ignore_flags_gets_defaults() {
   SetPartIgnoreMw` + `persist_parts_state` НЕ нужен (флаг в перф-конфиге,
   не в parts_state) — НЕ персистить в PartUiState).
 
-- [ ] **Step 4: перф save/restore + reset** — литерал draw_perf_row:
-  `ignore_pb: l.ignore_pb, ignore_mw: l.ignore_mw,`; apply_performance:
-  восстановить оба поля И запушить события
-  `SetPartIgnorePb/SetPartIgnoreMw` (рядом с SetPartSustain-пушем :2841);
-  reset_and_push_part (:2364-2372): поля false + пуш событий.
+- [ ] **Step 4: перф save/restore + reset + reconnect:**
+  - литерал draw_perf_row (layers.rs:220-233): `ignore_pb: l.ignore_pb, ignore_mw: l.ignore_mw,`;
+  - apply_performance: восстановить оба поля И запушить события
+    `SetPartIgnorePb/SetPartIgnoreMw` (рядом с SetPartSustain-пушем :2872);
+  - **push_full_part_state** (gui/mod.rs:2344-2375, спавн + audio-reconnect:
+    добавить пуш обоих событий рядом с SetPartSustain :2362 — иначе флаги
+    молча откатывались бы в false при реконнекте (класс stale-бага #40);
+  - GUI Part struct (gui/mod.rs ~:160-200): поля `ignore_pb/ignore_mw` +
+    дефолты false в литерале :192 (компилятор перечислит);
+  - reset_and_push_part (gui/mod.rs:2381): поля false + пуш событий;
+  - **PartUiState** (config.rs:90-104): добавить оба флага с
+    `#[serde(default)]` + persist_parts_state (gui/mod.rs:2725) и restore
+    (gui/mod.rs:1928-1936) — СИММЕТРИЯ с Sus (иначе флаг живёт только в
+    перфе, а Sus/mute переживают рестарт без Save).
 
 - [ ] **Step 5: гейт**
 
