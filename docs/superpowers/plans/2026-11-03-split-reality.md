@@ -31,7 +31,10 @@ SetPartRange→движок тривиален и покрыт существу�
   читается двусмысленно.
 - Движок-гейт: `raw < lo || raw > hi` (synth/mod.rs:1783) — диапазоны
   включающие по обоим краям.
-- `ZONE_B.iter().any(|&i| self.parts[i].enabled)` — паттерн итерации массива.
+- ZONE_A/ZONE_B — `std::ops::Range<usize>` (layers.rs:24-25), НЕ массивы.
+  Паттерн предиката: `self.parts[ZONE_B].iter().any(|p| p.enabled)`
+  (layers.rs:34 — так считается split_on). `for i in ZONE_A` — ок (Range =
+  Iterator<Item=usize>).
 
 ---
 
@@ -52,9 +55,13 @@ B пусто) должен играть все 128 нот.
 
 ## Negative Matrix
 
-- Все парты B выключены, но split_on=true в GUI (юзер удалил все B-парты):
-  заголовок A честно покажет 0..=127 (движок и заголовок согласованы);
-  секция B остаётся видимой (там «+ Add part») с честным заголовком B.
+- Юзер удалил последний B-парт через ×: split_on = производное
+  (`self.parts[ZONE_B].iter().any(...)`, layers.rs:34) — в том же кадре
+  становится false, секция B скрывается. ОДНАКО remove_part
+  (layers.rs:501-519) НЕ зовёт apply_split_ranges — движок оставался бы
+  порезанным до следующего триггера. Закрыто Step 2b: remove_part для
+  B-парта зовёт apply_split_ranges (теперь безопасно — предикат сам
+  разворачивает полный диапазон).
 - Включение B-парта позже: `reset_and_push_part` + `apply_split_ranges`
   (layers.rs:80-82) — хелпер пересчитает с split_active=true автоматически.
 - sp=0/127 из битого перфа — `saturating_sub` + TC3/TC4 (существующее поведение).
@@ -116,6 +123,7 @@ Expected: FAIL — `zone_range_pair` не существует.
 /// Честные диапазоны зон по РЕАЛЬНОСТИ сплита (#51): сплит активен только
 /// при живой правой руке — иначе все парты 0..=127, как бы перф ни хранил
 /// split_point. Единственный источник диапазонов для движка и заголовков.
+#[allow(dead_code)] // снимается в Task 2
 pub(super) fn zone_range_pair(split_point: u8, split_active: bool) -> ([u8; 2], [u8; 2]) {
     if split_active {
         ([0, split_point.saturating_sub(1)], [split_point, 127])
@@ -128,8 +136,9 @@ pub(super) fn zone_range_pair(split_point: u8, split_active: bool) -> ([u8; 2], 
 - [ ] **Step 4: зелёный**
 
 Run: `cargo test --lib split_tests 2>&1 | tail -4`
-Expected: 4 passed. (На этом коммите функция не используется — dead_code
-warning допустим, Task 2 подключит и закроет clippy-гейт.)
+Expected: 4 passed. (На этом коммите функция не используется — добавь
+`#[allow(dead_code)]` над ней и сними в Task 2, иначе коммит не проходит
+clippy -D warnings.)
 
 - [ ] **Step 5: коммит**
 
@@ -152,7 +161,7 @@ git add src/gui/layers.rs && git commit -m "feat: zone_range_pair — split real
         // сплит резал зону A до sp-1 («Organ играет до C3» при выключенном
         // сплите; Reset и рестарт — те же грабли). Юзер-модель: нет B —
         // нет сплита.
-        let split_active = ZONE_B.iter().any(|&i| self.parts[i].enabled);
+        let split_active = self.parts[ZONE_B].iter().any(|p| p.enabled);
         let (a, b) = zone_range_pair(self.split_point, split_active);
         for i in ZONE_A {
             self.parts[i].min_note = a[0];
@@ -170,13 +179,29 @@ git add src/gui/layers.rs && git commit -m "feat: zone_range_pair — split real
 - [ ] **Step 2: заголовок A** — заменить блок :119-123:
 
 ```rust
-            let split_active = ZONE_B.iter().any(|&i| self.parts[i].enabled);
+            let split_active = self.parts[ZONE_B].iter().any(|p| p.enabled);
             let (a_r, _) = zone_range_pair(self.split_point, split_active);
             let a_header = format!("◀ Left hand (A) — {}..={}", a_r[0], a_r[1]);
 ```
 
 (Старый `if split_on {...} else {...}` удаляется: заголовок всегда честный по
 реальности движка; включающая нотация `..=` вместо двусмысленной `..`.)
+
+- [ ] **Step 2b: remove_part перестаёт оставлять порезанный движок** — в
+  `remove_part` (layers.rs:501-519), после сброса пушей удалённого B-парта
+  (ветка `if part >= PARTS_PER_ZONE` / аналог — реализатор находит ветку
+  удаления парта ЗОНЫ B), добавить:
+
+```rust
+        // #51: удаление последнего B-парта = сплит исчез; предикат внутри
+        // сам развернёт зону A в 0..=127 (раньше движок оставался
+        // порезанным до следующего триггера apply_split_ranges)
+        self.apply_split_ranges();
+```
+
+Точное место: в remove_part после push-очистки слота, до/после
+persist_parts_state — по смыслу: вызывать только когда удалённый парт был в
+ZONE_B (для A-парта диапазоны не меняются).
 
 - [ ] **Step 3: заголовок B** — в секции B (`if split_on {`) заменить
   формат заголовка:
@@ -194,13 +219,16 @@ git add src/gui/layers.rs && git commit -m "feat: zone_range_pair — split real
                         "▶ Right hand (B) — {}..={}", b_r[0], b_r[1])).weak().small());
 ```
 
-(При split_on и пустой B — честные 0..=127: сплит ещё не существует; парта
-добавится — предикат пересчитается.)
+(split_on — производное от наличия включённых B (layers.rs:34), поэтому
+пустая B при split_on невозможна: секция B скрыта вместе с удалением
+последнего B-парта. Заголовок всегда sp..=127 при показе.)
+
+- [ ] **Step 3b: снять `#[allow(dead_code)]` с zone_range_pair** (Task 1).
 
 - [ ] **Step 4: гейт**
 
-Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2 && cargo test 2>&1 | grep -E "test result" | grep -vc " 0 failed"; cargo test 2>&1 | grep -E "FAILED|panicked" | head -3`
-Expected: clippy чист, все result-строки ok (счётчик failed-строк = 0), FAILED/panicked нет.
+Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2 && cargo test 2>&1 | tail -30`
+Expected: clippy чист, все result-строки ok, FAILED/panicked нет.
 
 - [ ] **Step 5: коммит**
 
