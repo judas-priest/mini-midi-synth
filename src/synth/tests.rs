@@ -1346,3 +1346,28 @@ fn tc_s_scope_freeze_hysteresis() {
         5
     );
 }
+
+// ── Per-part ignore PB/MW (TECHDEBT #55) ───────────────────────
+
+#[test]
+fn tc_ignore_flags_effective_masking() {
+    // pub(crate) хелперы: маска на входе сборки offset
+    assert_eq!(super::effective_pb(true, 0.7), 0.0);
+    assert_eq!(super::effective_pb(false, 0.7), 0.7);
+    assert_eq!(super::effective_mw(true, 0.5), 0.0);
+    assert_eq!(super::effective_mw(false, 0.5), 0.5);
+}
+
+#[test]
+fn tc_ignore_events_set_part_fields() {
+    let mut e = SynthEngine::new(48_000.0);
+    e.set_patches(crate::preset::load_factory_patches());
+    let _ = e.handle_control(ControlEvent::SetPartIgnorePb { part: 0, on: true });
+    let _ = e.handle_control(ControlEvent::SetPartIgnoreMw { part: 1, on: true });
+    assert!(e.parts[0].ignore_pb);
+    assert!(!e.parts[0].ignore_mw);
+    assert!(e.parts[1].ignore_mw);
+    assert!(!e.parts[1].ignore_pb);
+    let _ = e.handle_control(ControlEvent::SetPartIgnorePb { part: 0, on: false });
+    assert!(!e.parts[0].ignore_pb);
+}
