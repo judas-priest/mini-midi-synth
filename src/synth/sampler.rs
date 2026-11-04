@@ -232,6 +232,7 @@ pub struct SamplerEngine {
     /// Global SF2 release multiplier, re-applied after SF2 rebuilds (fresh
     /// rustysynth instances start at scale 1.0).
     release_scale: f32,
+    pitch_bend_range: u8,
     /// User fine trim in dB on top of SF2_CAL_GAIN. 0.0 = calibration alone.
     /// Re-applied after SF2 rebuilds (fresh rustysynth instances start at 0.5).
     pub sf2_trim_db: f32,
@@ -255,6 +256,7 @@ impl SamplerEngine {
             sample_offset: 0,
             part_sustain: [true; 16],
             release_scale: 1.0,
+            pitch_bend_range: 2,
             sf2_trim_db: 0.0,
         }
     }
@@ -343,8 +345,10 @@ impl SamplerEngine {
             // own — the seq re-asserts per note-on after the reset above.
             self.send_part_programs(true);
             // Rebuild made a fresh Synthesizer — re-apply the release scale
+            // AND the pitch bend range (fresh channels default to 2 st)
             if let Some(synth) = &mut self.keys.synth {
                 synth.set_release_time_scale(self.release_scale);
+                synth.set_pitch_bend_range(self.pitch_bend_range as i32);
             }
         }
         let mut drums_displaced = Displaced::default();
@@ -362,6 +366,11 @@ impl SamplerEngine {
         let mut keys_displaced = Displaced::default();
         if let Some(sf) = self.keys.soundfont.clone() {
             keys_displaced = self.load_keys_soundfont(sf);
+            // load_keys_soundfont rebuilds the Synthesizer — fresh channels
+            // default to 2 st; re-assert the stored range (#53-хвост)
+            if let Some(synth) = &mut self.keys.synth {
+                synth.set_pitch_bend_range(self.pitch_bend_range as i32);
+            }
         }
         let mut drums_displaced = Displaced::default();
         if let Some(sf) = self.drums.soundfont.clone() {
@@ -572,6 +581,10 @@ impl SamplerEngine {
     }
 
     pub fn set_pitch_bend_range(&mut self, semitones: u8) {
+        // Запоминаем: rebuild'ы (block size / sample rate / SF2 reload)
+        // создают свежий Synthesizer с дефолтным ранжем 2 — без этого
+        // глобальный ранж молча терялся после любого реконнекта (#53-хвост)
+        self.pitch_bend_range = semitones;
         log::debug!("[sampler] set_pitch_bend_range({}) synth_present={}", semitones, self.keys.synth.is_some());
         if let Some(synth) = &mut self.keys.synth {
             synth.set_pitch_bend_range(semitones as i32);
