@@ -21,17 +21,17 @@ Option-synth). Тест: держится нота → no-op Sf2Mode → счё�
 
 **Проверенные факты (вычитано; не пересматривать):**
 - `Voice.voice_state: i32` (voice.rs:75); `VoiceState` — unit-struct с
-  константами (:312); переходы: `start()` → PLAYING (:179), `note_off()`
-  PLAYING → RELEASE_REQUESTED (:184-185), `process()`:
-  RELEASE_REQUESTED && !hold_pedal → RELEASED (:292-297); `end()`:
-  PLAYING → RELEASE_REQUESTED (:183-186).
+  константами (:312); переходы: `start()` → PLAYING (:179), `end()`:
+  PLAYING → RELEASE_REQUESTED (:183-186) — именно через end() идёт drain
+  (`note_off_all_channel(ch,false)` → Voice::end()); `process()`:
+  RELEASE_REQUESTED && !hold_pedal → RELEASED (:292-297).
 - `Synthesizer.voices: VoiceCollection` (synthesizer.rs:31);
   `VoiceCollection::get_active_voices(&mut self) -> &mut [Voice]`
   (voice_collection.rs:89, pub(crate)) — итерируется в synthesizer.rs:188.
   `Voice` хранит канал? — НЕ проверено: для теста достаточно ОБЩЕГО счётчика
   по синту (в тесте звучит одна партия).
 - `SamplerEngine.keys: SubSynth` (sampler.rs:204), `keys.synth: Option<Synthesizer>`
-  (:94-95); образец Option-аксессора: `set_pitch_bend_range` (:574-578).
+  (SubSynth :94-96); образец Option-аксессора: `set_pitch_bend_range` (:583).
 - `drain_notes` (synth/mod.rs:1083-1096): `part_all_notes_off(idx)` →
   `note_off_all_channel(ch, false)` → voices в RELEASE_REQUESTED/RELEASED;
   DSP-голоса → `voice.note_off()`. Real-flip контроль в тесте гарантированно
@@ -76,6 +76,9 @@ STK-канон: drain = note_off → release-фаза, не мгновенный
   (0 vs >0), точность не нужна.
 - Вендор-обновление rustysynth — правки переносить руками (CLAUDE.md-канон,
   прецедент cpal/oboe).
+- Повторный/парный no-op пуш (реальный триггер — perf-load шлёт состояние
+  каждому парту) — idempotent: drain только в mode_changed, счётчик не трогается.
+  Матрица-строка для пина: tc6a дважды подряд — тот же результат.
 
 ---
 
@@ -131,9 +134,10 @@ STK-канон: drain = note_off → release-фаза, не мгновенный
 - [ ] **Step 4: компиляция**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2`
-Expected: чисто (новые методы пока не используются вне тестов — если
-dead_code: методы pub на pub-типах в lib-crate НЕ мёртвый код; SamplerEngine
-pub-метод тоже; проверка выдаст).
+Expected: чисто. dead_code-зависимость: `Voice::is_in_release` оживает
+  ТОЛЬКО через Synthesizer-метод — оба в ОДНОМ коммите (Voice в приватном
+  модуле, pub его не спасает); Synthesizer/SamplerEngine/SynthEngine-методы
+  pub на pub-типах lib-crate — не мёртвый код в любом порядке.
 
 - [ ] **Step 5: коммит**
 
