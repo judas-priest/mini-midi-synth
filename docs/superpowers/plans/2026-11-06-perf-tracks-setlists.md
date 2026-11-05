@@ -42,7 +42,7 @@ TDD — pure-функции (resolve/сериализация) тестируе�
   промахе — молча (аудит #50 finding 5; fix: warn+toast в этом плане).
 - Консольные сайты, читающие len списка: page_window Home-плечо
   (window_max_start(perf_list.len()) :2749-2751), follow_window (:2736),
-  paint `filled` (:950), page_depth (:952-956), mode-entry sync (Home → follow).
+  paint `filled` (:955), page_depth (:958-962), mode-entry sync (Home → follow).
 - Кэш-поле в App — канон: `perf_list` (:499), `console_prev_mode` (:463).
 - config UiSettings (config.rs:150+): `#[serde(default)]`-паттерн на каждом
   поле; `pad_perf_map: Vec<Option<String>>` (:163) — прецедент Vec<Option<String>>.
@@ -187,7 +187,10 @@ git add src/config.rs tests/config_folders.rs && git commit -m "feat: PerfFolder
 ### Task 2: resolve_folder_entries — чистый резолвер + App-кэш
 
 **Files:**
-- Modify: `src/gui/mod.rs` — free fn resolve_folder_entries + App поле
+- Modify: `src/config.rs` — `pub fn resolve_folder_entries` РЯДОМ с PerfFolder
+  (НЕ в gui: mod gui приватный + feature-gated, tests/ его не видят; config
+  компилируется во всех билдах)
+- Modify: `src/gui/mod.rs` — App поле
   `console_list: Vec<(String, Option<std::path::PathBuf>)>` (:499 рядом с
   perf_list) + дефолт в lib.rs App-литерале + `fn refresh_console_list(&mut self)`
   + вызовы refresh: после построения perf_list (lib.rs:902 — нельзя, lib строит
@@ -201,7 +204,7 @@ git add src/config.rs tests/config_folders.rs && git commit -m "feat: PerfFolder
 ```rust
 #[test]
 fn tc1_resolve_keeps_tombstones() {
-    use mini_midi_synth::gui::resolve_folder_entries;
+    use mini_midi_synth::config::resolve_folder_entries;
     let pl = vec![
         ("A".to_string(), std::path::PathBuf::from("/a.json")),
         ("B".to_string(), std::path::PathBuf::from("/b.json")),
@@ -209,7 +212,7 @@ fn tc1_resolve_keeps_tombstones() {
     ];
     let folder = PerfFolder { name: "T".into(),
         perfs: vec!["B".into(), "Ghost".into(), "A".into()] };
-    let r = resolve_folder_entries(&pl, &folder);
+    let r = resolve_folder_entries(&pl, Some(&folder));
     assert_eq!(r.len(), 3); // tombstone НЕ выбрасывается — индексы стабильны
     assert_eq!(r[0], ("B".to_string(), Some(std::path::PathBuf::from("/b.json"))));
     assert_eq!(r[1], ("Ghost".to_string(), None));
@@ -218,7 +221,7 @@ fn tc1_resolve_keeps_tombstones() {
 
 #[test]
 fn tc2_no_folder_resolves_to_full_list() {
-    use mini_midi_synth::gui::resolve_folder_entries;
+    use mini_midi_synth::config::resolve_folder_entries;
     let pl = vec![("(Init)".to_string(), std::path::PathBuf::from("/i.json"))];
     let r = resolve_folder_entries(&pl, None);
     assert_eq!(r.len(), 1);
@@ -231,22 +234,28 @@ fn tc2_no_folder_resolves_to_full_list() {
 
 - [ ] **Step 2: красный** — `cargo test --test config_folders 2>&1 | tail -4`
 
-- [ ] **Step 3: реализация** — src/gui/mod.rs (уровень модуля):
+- [ ] **Step 3: реализация** — src/config.rs (рядом с PerfFolder):
 
 ```rust
 /// Резолв папки (#57): алиасы → (name, Option<path>). Отсутствующий перф
 /// ОСТАЁТСЯ tombstone-слотом (None) — раскладка пэдов стабильна, пэд тёмный,
-/// нажатие = warn (research-канон setlists: warn-on-press).
+/// нажатие = warn (research-канон setlists: warn-on-press). None = плоский
+/// список (fallback до создания папок).
 pub fn resolve_folder_entries(
     perf_list: &[(String, std::path::PathBuf)],
-    folder: &config::PerfFolder,
+    folder: Option<&PerfFolder>,
 ) -> Vec<(String, Option<std::path::PathBuf>)> {
-    folder.perfs.iter()
-        .map(|name| {
-            let path = perf_list.iter().find(|(n, _)| n == name).map(|(_, p)| p.clone());
-            (name.clone(), path)
-        })
-        .collect()
+    match folder {
+        Some(f) => f.perfs.iter()
+            .map(|name| {
+                let path = perf_list.iter().find(|(n, _)| n == name).map(|(_, p)| p.clone());
+                (name.clone(), path)
+            })
+            .collect(),
+        None => perf_list.iter()
+            .map(|(n, p)| (n.clone(), Some(p.clone())))
+            .collect(),
+    }
 }
 ```
 
@@ -257,22 +266,21 @@ perf_list :499), дефолт `Vec::new()` в lib.rs литерале; мето�
     /// Пересчёт консольного списка перфов (#57): папка или плоский список.
     /// Также логирует tombstones (warn) — один раз на refresh.
     fn refresh_console_list(&mut self) {
-        self.console_list = match self.config.ui.active_folder
+        let folder = self.config.ui.active_folder
             .and_then(|i| self.config.ui.perf_folders.get(i))
-        {
-            Some(f) => {
-                let r = resolve_folder_entries(&self.perf_list, f);
-                for (name, path) in &r {
-                    if path.is_none() {
-                        log::warn!("[console] папка '{}': перф '{name}' не найден (tombstone)", f.name);
-                    }
-                }
-                r
-            }
-            None => self.perf_list.iter()
-                .map(|(n, p)| (n.clone(), Some(p.clone())))
-                .collect(),
+            .map(|f| (f.name.clone(), f.clone()));
+        let (fname, folder) = match folder {
+            Some((n, f)) => (Some(n), Some(f)),
+            None => (None, None),
         };
+        self.console_list = config::resolve_folder_entries(&self.perf_list, folder.as_ref());
+        for (name, path) in &self.console_list {
+            if path.is_none() {
+                if let Some(n) = &fname {
+                    log::warn!("[console] папка '{n}': перф '{name}' не найден (tombstone)");
+                }
+            }
+        }
     }
 ```
 
@@ -286,8 +294,8 @@ Task 4 sync-блок ДО match), (b) layers.rs после `self.perf_list = ...
   ВСЕХ консольных местах `self.perf_list` → `self.console_list` (опция
   unwrap Some(p)): LoadPerf handler (:2684-2691: `perf_list.get(idx)` →
   `console_list.get(idx)` — path Option: `if let Some((name, Some(_)))`),
-  follow_window perf-плечо len (:2736), page_window Home-плечо len (:2749),
-  paint `filled` (:950) + painting count, page_depth Home len, mode-entry sync
+  follow_window perf-плечо len (~:2755), page_window Home-плечо len (~:2770),
+  paint `filled` (:955) + painting count, page_depth Home len, mode-entry sync
   follow (len через refresh). `active_perf_console()` (:2789) — матч по
   console_list именам (если активный tombstone → None — корректно).
 
@@ -302,7 +310,7 @@ git add src/gui/mod.rs src/lib.rs src/gui/layers.rs tests/config_folders.rs && g
 ### Task 3: LoadPerf tombstone warn + toast
 
 **Files:**
-- Modify: `src/gui/mod.rs` LoadPerf handler (:2684-2691)
+- Modify: `src/gui/mod.rs` LoadPerf handler (~:2683-2692)
 
 - [ ] **Step 1: warn + toast на tombstone-пэде** — LoadPerf: `idx` за
   пределами ИЛИ path = None → `log::warn!("[console] perf slot {}: перф не
@@ -358,7 +366,9 @@ git add src/gui/mod.rs && git commit -m "feat: tombstone perf slot warns + toast
             3 => { self.mode = Mode::Tracks; None }
 ```
 
-в Tracks-режиме tap(slot):
+в Tracks-режиме tap(slot) — вставка ДО generic-обработки
+`if slot == 0 { self.mode = Mode::Menu }` (иначе MENU-тап в Tracks открыл бы
+меню вместо возврата в HOME):
 
 ```rust
         if self.mode == Mode::Tracks {
@@ -372,7 +382,10 @@ Action::TrackSelect(usize) новый вариант; тесты в tests-мод
 (канон prev_next_step_semantics): Menu slot3 → Mode::Tracks; Tracks slot1 →
 TrackSelect(0).
 
-- [ ] **Step 2: top_colors arm** — для Mode::Tracks вернуть цвета папок
+- [ ] **Step 2: top_colors** — мод выберет fn в mod.rs (Paint site: match
+console.mode() → Home: top_colors(...), Tracks: folder_colors(...), остальное
+как сейчас; компилятор заставит добавить arm в ВНУТРЕННИЙ match top_colors —
+плечо unreachable/zeros). Для Mode::Tracks цвета папок:
   (вход: active_folder: Option<usize>, folders_len, tracks_window — расширить
   сигнатуру top_colors параметром `folders: Option<(Option<usize>, usize, usize)>`
   ИЛИ отдельная fn folder_colors(active, len, w) -> [[u8;3];8] и в mod.rs
@@ -411,12 +424,21 @@ TrackSelect(0).
             }
 ```
 
-(поле console.mode pub? — если нет: дать led_console pub fn set_mode /
-return Mode change через Action; реализатор проверяет видимость и добавляет
-`pub fn force_mode(&mut self, m: Mode)` при необходимости.) page_window —
-Tracks-плечо clamp по folders.len(); mode-entry sync: Tracks → refresh + без
-follow. `console_prev_mode` сравнение уже работает с новым вариантом (Mode
-derive PartialEq — проверить derive; если нет — добавить).
+(verified: поле `mode` ПРИВАТНОЕ (:85), getter `pub fn mode()` (:301),
+Mode уже derives PartialEq (:13) — хедж снят.) Для смены режима добавить в
+led_console.rs каноничный мутатор и использовать ЕГО (поле не делать pub —
+инкапсуляция state-машины):
+
+```rust
+    /// Программная смена режима (TrackSelect → Home, #57). Не через tap().
+    pub fn force_mode(&mut self, m: Mode) {
+        self.pending.clear();
+        self.mode = m;
+    }
+```
+
+page_window — Tracks-плечо clamp по folders.len(); mode-entry sync: Tracks →
+refresh + без follow; `console_prev_mode` сравнение работает (PartialEq есть).
 
 - [ ] **Step 4: гейт + коммит**
 
@@ -466,7 +488,11 @@ git add src/gui/led_console.rs src/gui/mod.rs src/lib.rs && git commit -m "feat:
 ```
 
 (поле `show_tracks_manager: bool` + false в литералах App/lib.rs — канон
-show_pad_perf.)
+show_pad_perf. BORROW: снапшот `let folders: Vec<(usize, String)> =
+self.config.ui.perf_folders.iter().enumerate().map(|(i,f)|(i,f.name.clone())).collect();`
+ДО ComboBox; замыкание итерирует folders (owned), клики сохраняют решение в
+локаль, мутация + refresh_console_list() — после замыкания. Тот же
+copy-then-act канон, что в ВНИМАНИЕ-блоке Step 2 — распространяется и сюда.)
 
 - [ ] **Step 2: менеджер** — ModalWindow (fixed_width(520.0)). Скелет
   draw_tracks_manager (ui, ctx) — вызов вCentralPanel-хвосте рядом с другими
@@ -479,7 +505,7 @@ show_pad_perf.)
         let mut win = super::modal::ModalWindow::new(
             ctx, "tracks_manager", "Track Folders (Setlists)", &mut open, 520.0)
             .fixed_width(520.0);
-        win.show(ctx, |ui| {
+        win.show(|ui| {
             ui.label(egui::RichText::new("Папки-треки: алиасы перфов. Правка перфа — в оригинале.").weak());
             for (fi, folder) in self.config.ui.perf_folders.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
@@ -549,6 +575,9 @@ borrowck: цикл по индексам, не iter_mut), (3) мутации con
 response, мутация по .changed()/clicked() вне). Разрешать borrow-конфликты
 по канону Sus-чекбокса (copy-then-act). Точная раскладка мутаций — на
 реализаторе; тесты не покрывают GUI, гейт — компиляция + clippy + экран.
+ПЕРСИСТ: КАЖДАЯ мутация папок (create/rename/delete/reorder/add/remove) —
+`let _ = self.config.save();` (канон TrackSelect handler): setlists иначе
+исчезают при рестарте (config.save() event-driven, на выходе не гарантирован).
 
 - [ ] **Step 3: гейт + коммит**
 
