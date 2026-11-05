@@ -135,6 +135,16 @@ impl Synthesizer {
     /// * `command` - The type of the message.
     /// * `data1` - The first data part of the message.
     /// * `data2` - The second data part of the message.
+    /// Число активных голосов в release-фазе (все каналы). Тест-аксессор:
+    /// пин «no-op Sf2Mode не дренит» (#52а). НЕ вызывать из RT-кода.
+    pub fn get_voices_in_release_count(&mut self) -> usize {
+        self.voices
+            .get_active_voices()
+            .iter()
+            .filter(|v| v.is_in_release())
+            .count()
+    }
+
     pub fn process_midi_message(&mut self, channel: i32, command: i32, data1: i32, data2: i32) {
         if !(0 <= channel && channel < self.channels.len() as i32) {
             return;

@@ -591,6 +591,16 @@ impl SamplerEngine {
         }
     }
 
+    /// Тест-аксессор фазы голосов SF2-синта (TECHDEBT #52а). НЕ для RT-пути
+    /// (get_active_voices требует &mut).
+    pub fn voices_in_release(&mut self) -> usize {
+        if let Some(synth) = &mut self.keys.synth {
+            synth.get_voices_in_release_count()
+        } else {
+            0
+        }
+    }
+
     pub fn mod_wheel(&mut self, part: usize, value: f32) {
         // Динамический канал парта — см. pitch_bend
         let Some(ch) = self.part_channel_of(part) else { return; };
