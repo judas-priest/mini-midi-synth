@@ -242,7 +242,8 @@ impl App {
                 }) {
                     Ok(_path) => { self.show_toast("Performance saved", ToastKind::Success);
                                    self.perf_list = preset::list_performances();
-                                   self.perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new())); }
+                                   self.perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
+                                   self.refresh_console_list(); }
                     Err(e)    => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
             }

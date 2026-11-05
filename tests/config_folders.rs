@@ -30,3 +30,29 @@ fn tc4_legacy_config_without_folders_gets_defaults() {
     assert!(ui.perf_folders.is_empty());
     assert_eq!(ui.active_folder, None);
 }
+
+#[test]
+fn tc1_resolve_keeps_tombstones() {
+    use mini_midi_synth::config::resolve_folder_entries;
+    let pl = vec![
+        ("A".to_string(), std::path::PathBuf::from("/a.json")),
+        ("B".to_string(), std::path::PathBuf::from("/b.json")),
+        ("C".to_string(), std::path::PathBuf::from("/c.json")),
+    ];
+    let folder = PerfFolder { name: "T".into(),
+        perfs: vec!["B".into(), "Ghost".into(), "A".into()] };
+    let r = resolve_folder_entries(&pl, Some(&folder));
+    assert_eq!(r.len(), 3); // tombstone НЕ выбрасывается — индексы стабильны
+    assert_eq!(r[0], ("B".to_string(), Some(std::path::PathBuf::from("/b.json"))));
+    assert_eq!(r[1], ("Ghost".to_string(), None));
+    assert_eq!(r[2], ("A".to_string(), Some(std::path::PathBuf::from("/a.json"))));
+}
+
+#[test]
+fn tc2_no_folder_resolves_to_full_list() {
+    use mini_midi_synth::config::resolve_folder_entries;
+    let pl = vec![("(Init)".to_string(), std::path::PathBuf::from("/i.json"))];
+    let r = resolve_folder_entries(&pl, None);
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].0, "(Init)");
+}

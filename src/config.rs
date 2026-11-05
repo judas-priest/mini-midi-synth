@@ -131,6 +131,27 @@ pub struct PerfFolder {
     pub perfs: Vec<String>,
 }
 
+/// Резолв папки (#57): алиасы → (name, Option<path>). Отсутствующий перф
+/// ОСТАЁТСЯ tombstone-слотом (None) — раскладка пэдов стабильна, пэд тёмный,
+/// нажатие = warn (research-канон setlists: warn-on-press). None = плоский
+/// список (fallback до создания папок).
+pub fn resolve_folder_entries(
+    perf_list: &[(String, std::path::PathBuf)],
+    folder: Option<&PerfFolder>,
+) -> Vec<(String, Option<std::path::PathBuf>)> {
+    match folder {
+        Some(f) => f.perfs.iter()
+            .map(|name| {
+                let path = perf_list.iter().find(|(n, _)| n == name).map(|(_, p)| p.clone());
+                (name.clone(), path)
+            })
+            .collect(),
+        None => perf_list.iter()
+            .map(|(n, p)| (n.clone(), Some(p.clone())))
+            .collect(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
     pub window_width: f32,

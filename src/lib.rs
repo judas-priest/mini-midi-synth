@@ -900,6 +900,8 @@ pub fn run_gui(
             perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
             perf_list
         },
+        // #57: пересчитывается первым кадром (guard в update())
+        console_list: Vec::new(),
         nav_press_time: None,
         show_pad_perf: false,
         pad_perf_map: {

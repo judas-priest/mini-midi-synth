@@ -502,6 +502,9 @@ pub struct App {
     // Performance save/load
     pub perf_name: String,
     pub perf_list: Vec<(String, std::path::PathBuf)>,
+    /// Консольный список перфов (#57): активная папка (алиасы, tombstone =
+    /// None-path) или плоский perf_list. Все консольные сайты читают кэш.
+    pub console_list: Vec<(String, Option<std::path::PathBuf>)>,
     // Navigate button timing
     pub nav_press_time: Option<std::time::Instant>,
     // Pad performance map: 16 pads (notes 36-51) → performance names
@@ -602,6 +605,11 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // #57 interim: console_list строится первым кадром (Task 4 заменит
+        // guard'ом на mode-entry sync)
+        if self.console_list.is_empty() {
+            self.refresh_console_list();
+        }
         // On Android high-DPI screens, set proper pixel ratio for crisp font rendering
         #[cfg(target_os = "android")]
         ctx.set_pixels_per_point(2.5);
@@ -952,7 +960,7 @@ impl eframe::App for App {
             for (i, part) in self.parts.iter().enumerate().take(16) {
                 mutes[i] = part.mute;
             }
-            let filled = self.perf_list.len();
+            let filled = self.console_list.len();
             let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
             let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
             let page_depth = match self.console.mode() {
@@ -2682,7 +2690,7 @@ impl App {
         match action {
             led_console::Action::LoadPerf(i) => {
                 let idx = self.perf_window + i - 1; // slot -> real index
-                if let Some((name, _)) = self.perf_list.get(idx) {
+                if let Some((name, Some(_))) = self.console_list.get(idx) {
                     let name = name.clone();
                     if self.load_performance_by_name(&name) {
                         log::info!("[console] perf slot {} loaded ({})", i, name);
@@ -2716,13 +2724,25 @@ impl App {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqRedo);
             }
             led_console::Action::StepPerf(dir) => {
-                let n = self.perf_list.len();
+                let n = self.console_list.len();
                 if n == 0 { return; }
                 let cur = self.active_perf_console().unwrap_or(0);
-                let next = (cur as i32 + dir).rem_euclid(n as i32) as usize;
-                if let Some((name, _)) = self.perf_list.get(next) {
-                    let name = name.clone();
-                    self.load_performance_by_name(&name);
+                // #57: tombstone-слоты пропускаем (warn, канон warn-on-press),
+                // максимум n попыток; follow — одним вызовом после цикла
+                let mut next = cur;
+                for _ in 0..n {
+                    next = (next as i32 + dir).rem_euclid(n as i32) as usize;
+                    match self.console_list.get(next) {
+                        None => break,
+                        Some((name, None)) => {
+                            log::warn!("[console] step: перф '{name}' не найден (tombstone)");
+                        }
+                        Some((name, Some(_))) => {
+                            let name = name.clone();
+                            self.load_performance_by_name(&name);
+                            break;
+                        }
+                    }
                 }
                 // follow снапится на границу страницы (#50-фикс) — окно
                 // больше не уходит в off-grid
@@ -2755,7 +2775,7 @@ impl App {
     fn follow_window(&mut self, idx: usize, is_perf: bool) {
         if is_perf {
             if let Some(w) =
-                led_console::follow_start(idx, self.perf_window, self.perf_list.len())
+                led_console::follow_start(idx, self.perf_window, self.console_list.len())
             {
                 self.perf_window = w;
             }
@@ -2768,7 +2788,7 @@ impl App {
     fn page_window(&mut self, delta: i32) {
         match self.console.mode() {
             led_console::Mode::Home => {
-                let max_w = led_console::window_max_start(self.perf_list.len());
+                let max_w = led_console::window_max_start(self.console_list.len());
                 self.perf_window = (self.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             led_console::Mode::Pattern => {
@@ -2800,9 +2820,31 @@ impl App {
         self.save_global_to_config();
     }
 
-    /// Index of the current performance in perf_list (None if unknown).
+    /// Пересчёт консольного списка перфов (#57): папка или плоский список.
+    /// Также логирует tombstones (warn) — один раз на refresh.
+    fn refresh_console_list(&mut self) {
+        let folder = self.config.ui.active_folder
+            .and_then(|i| self.config.ui.perf_folders.get(i))
+            .map(|f| (f.name.clone(), f.clone()));
+        let (fname, folder) = match folder {
+            Some((n, f)) => (Some(n), Some(f)),
+            None => (None, None),
+        };
+        self.console_list =
+            crate::config::resolve_folder_entries(&self.perf_list, folder.as_ref());
+        for (name, path) in &self.console_list {
+            if path.is_none() {
+                if let Some(n) = &fname {
+                    log::warn!("[console] папка '{n}': перф '{name}' не найден (tombstone)");
+                }
+            }
+        }
+    }
+
+    /// Index of the current performance in console_list (None if unknown;
+    /// tombstone-active → None — корректно).
     fn active_perf_console(&self) -> Option<usize> {
-        self.perf_list.iter().position(|(n, _)| n == &self.perf_name)
+        self.console_list.iter().position(|(n, _)| n == &self.perf_name)
     }
 
     /// Load a performance by name (for pad perf switching).
