@@ -149,3 +149,35 @@ fn tc6b_real_flip_releases_voices() {
     let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: false });
     assert!(e.sampler_voices_in_release() > 0, "real flip did not release voices");
 }
+
+/// #55-followup: SF2 mono (play_mode 1) — новая нота глушит предыдущую
+/// (детерминированный пин по частоте: mono = lone E4; poly-контроль даёт
+/// двухнотный пик). Репорт 2026-11-05: «моно не реагирует» — SF2-ветка
+/// route_note_on миновала mono-логику DSP-голосов.
+#[test]
+fn sf2_mono_switches_to_new_note() {
+    let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
+    let mut e = engine_with_sf2(sf);
+    let _ = e.handle_control(ControlEvent::SetGlobalParam { key: "pitch_bend_range", value: 2.0 });
+    let mut map = std::collections::BTreeMap::new();
+    map.insert("play_mode".into(), 1.0);
+    let _ = e.handle_control(ControlEvent::load_patch_from_edited(0, &map, None));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 127 });
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    let mut sig: Vec<f32> = Vec::with_capacity(4096);
+    for blk in 0..200 {
+        l.fill(0.0); r.fill(0.0);
+        e.tick_block(&mut l, &mut r);
+        if blk >= 50 { sig.extend_from_slice(&l); }
+    }
+    let n = sig.len();
+    let mut best = (0.0f32, 0usize);
+    for lag in (100..400).rev() {
+        let mut c = 0.0f32;
+        for i in lag..n { c += sig[i] * sig[i - lag]; }
+        if c > best.0 { best = (c, lag); }
+    }
+    let f = 48000.0 / best.1 as f32;
+    assert!((f - 329.63).abs() < 6.0, "SF2 mono: sounding {f:.1} Hz, expected lone E4 329.6 (previous note must be killed)");
+}
