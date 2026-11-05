@@ -1274,6 +1274,23 @@ impl eframe::App for App {
 
                 ui.separator();
 
+                // #57: Tracks (папки-перфы) — отдельная сущность, канон
+                // Helix (Setlist-меню по кнопке) / Kemper (Rig Manager):
+                // индикатор активного трека + кнопка менеджера в топ-баре,
+                // НЕ в строке перфа.
+                let track_name = self.config.ui.active_folder
+                    .and_then(|i| self.config.ui.perf_folders.get(i))
+                    .map(|f| f.name.as_str())
+                    .unwrap_or("(all)");
+                ui.label(egui::RichText::new(format!("Track: {track_name}")).weak());
+                if ui.button("Tracks").on_hover_text(
+                    "Track folders (setlists) — organize perfs per song").clicked()
+                {
+                    self.show_tracks_manager = true;
+                }
+
+                ui.separator();
+
                 // Oscilloscope
                 let scope_w = 150.0_f32;
                 let scope_h = 40.0_f32;
@@ -2905,7 +2922,67 @@ impl App {
                 "Папки-треки: алиасы перфов. Правка перфа — в оригинале.").weak());
             let perf_names: Vec<String> =
                 self.perf_list.iter().map(|(n, _)| n.clone()).collect();
+            // Двухпанельный расклад (канон Rig Manager): слева папки,
+            // справа алиасы выбранной папки.
+            let sel = self.config.ui.active_folder;
+            ui.columns(2, |cols| {
+                // ── Левая: папки ──
+                cols[0].horizontal(|ui| {
+                    if ui.small_button("+ New").clicked() {
+                        ops.push(Op::New);
+                    }
+                });
+                for fi in 0..self.config.ui.perf_folders.len() {
+                    let name = self.config.ui.perf_folders[fi].name.clone();
+                    let active = sel == Some(fi);
+                    cols[0].horizontal(|ui| {
+                        if ui.selectable_label(active, &name).clicked() {
+                            ops.push(Op::SetActive(fi));
+                        }
+                    });
+                }
+                // ── Правая: алиасы выбранной папки ──
+                cols[1].horizontal(|ui| {
+                    ui.label(egui::RichText::new(match sel {
+                        Some(fi) => self.config.ui.perf_folders[fi].name.as_str(),
+                        None => "(select a folder)",
+                    }).strong());
+                });
+                if let Some(fi) = sel {
+                    if fi < self.config.ui.perf_folders.len() {
+                        cols[1].horizontal(|ui| {
+                            if ui.small_button("+ add current perf").clicked() {
+                                ops.push(Op::AddCur(fi));
+                            }
+                            egui::ComboBox::from_id_salt("tm_add_perf")
+                                .selected_text("+ perf from list")
+                                .show_ui(ui, |ui| {
+                                    for n in &perf_names {
+                                        if ui.selectable_label(false, n).clicked() {
+                                            ops.push(Op::AddPerf(fi, n.clone()));
+                                        }
+                                    }
+                                });
+                        });
+                        for pi in (0..self.config.ui.perf_folders[fi].perfs.len()).rev() {
+                            let pname =
+                                self.config.ui.perf_folders[fi].perfs[pi].clone();
+                            cols[1].horizontal(|ui| {
+                                ui.label(format!("  {}", pname));
+                                if ui.small_button("\u{00D7}").clicked() {
+                                    ops.push(Op::DelPerf(fi, pi));
+                                }
+                            });
+                        }
+                    } else {
+                        cols[1].label("(empty)");
+                    }
+                } else {
+                    cols[1].label("(no folder selected)");
+                }
+            });
             for fi in 0..self.config.ui.perf_folders.len() {
+                let _ = fi;
                 let name = self.config.ui.perf_folders[fi].name.clone();
                 let perfs = self.config.ui.perf_folders[fi].perfs.clone();
                 let active = self.config.ui.active_folder == Some(fi);
