@@ -373,6 +373,28 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode: next_mode });
                 self.persist_parts_state();
             }
+            // Play Mode (Poly/Mono/Mono-ST/Latch/...): live-переключение в
+            // строке (юзер 2026-11-05: моно/легато/лэтч просились в строку,
+            // как Sus/PB/MW). Источник правды — edited_params (как в дереве
+            // params.rs), undo-снапшот на смену; портаменто остаётся в дереве
+            // (глубина звука, не live-свитч).
+            let mut pmode = self.parts[i].edited_params.get("play_mode").copied().unwrap_or(0.0) as usize;
+            let pm_before = pmode;
+            let pm_resp = egui::ComboBox::from_id_salt(format!("pm_row_{i}"))
+                .width(56.0)
+                .selected_text((*crate::gui::PLAY_MODE_NAMES.get(pmode).unwrap_or(&"Poly")).to_string())
+                .show_ui(ui, |ui| {
+                    for (mi, name) in crate::gui::PLAY_MODE_NAMES.iter().enumerate() {
+                        if ui.selectable_value(&mut pmode, mi, *name).changed() {
+                            self.push_undo_snapshot_for(i);
+                            self.parts[i].edited_params.insert("play_mode".into(), pmode as f32);
+                            self.send_edited_params(i);
+                        }
+                    }
+                });
+            pm_resp.response.on_hover_text(
+                "Play mode: Poly / Mono / Mono-ST / Latch / ... (portamento — в дереве параметров)");
+            let _ = pm_before;
             let mut s = self.parts[i].sustain_enabled;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut s, "Sus")).on_hover_text(
                 "Sustain pedal affects this part").changed()
