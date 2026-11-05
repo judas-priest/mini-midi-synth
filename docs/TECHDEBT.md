@@ -1083,6 +1083,22 @@ CLAP/Rust канон): vendor-rustysynth `Voice::is_in_release()` +
 формы (слепо нельзя, нужен слух юзера); Bowed — структурный план (день);
 Slap — настройка инжекции/коллизии. Приоритет: после юзер-проверки общего.
 
+## 57. Перфы: папки-треки (Setlists) — ГОТОВО (PR #77, 2026-11-06; research: tavily_research pro — Helix setlists=алиасы, Kemper Performance=song, dedicated Setlist Mode = паттерн №1, tombstone+warn-on-press)
+Реализовано: PerfFolder {name, perfs: Vec<String>} в config (алиасы по имени,
+serde-default); resolve_folder_entries (config.rs, чистая, tombstone-слоты
+СОХРАНЯЮТСЯ — индексы пэдов стабильны); App.console_list кэш + refresh
+(first frame через mode-sync, perf save, все мутации папок); консольные
+сайты (paint/LoadPerf/StepPerf/follow/page) на console_list; TrackSelect:
+MENU → слот 3 → Tracks-режим (пэды = папки, активная пурпур FF00FF, тап →
+активная папка + HOME); tombstone → warn + Error toast; GUI: ComboBox трека
+в perf-строке + Tracks-менеджер (ModalWindow fixed_width 520: create/rename/
+delete/reorder папок, add current/perf-from-list, remove alias — КАЖДАЯ
+мутация persist + refresh). Flat fallback: без папок — прежнее поведение.
+Тесты: config_folders 4/4, led_console +3 (Tracks-семантика), 183 lib.
+Out of scope: drag-reorder (egui_dnd), UUID, экспорт сетлистов, CBOR.
+Полироль от ревью: MENU-экран слот 3 тёмный (теперь функционален — покрасить),
+LoadPerf-tombstone toast в flat-режиме вводит в заблуждение (редкий кейс).
+
 ## 57. Перфы: папки-треки (Setlists) — НОВОЕ (идея юзера 2026-11-05, гугл практик: Helix setlists = алиасы пресетов)
 Юзер-модель: папка = ТРЕК (песня); внутри — упорядоченный список ПЕРФОВ-ССЫЛОК
 (не копий). Трек 1: Bass, Piano; Трек 2: Piano, Synth — «Piano» в обеих = ОДИН
