@@ -810,6 +810,11 @@ impl eframe::App for App {
                 led_console::Mode::Pattern => {
                     self.follow_window(self.drum_current_pattern as usize, false);
                 }
+                led_console::Mode::Tracks => {
+                    // Подсказка входа (#57 UX): как рулить с пэдов
+                    self.show_toast("TRACKS: tap a folder — MENU returns",
+                        ToastKind::Info);
+                }
                 led_console::Mode::Mute => self.mute_window = 0,
                 led_console::Mode::Home => {
                     if let Some(i) = self.active_perf_console() {
@@ -3045,6 +3050,11 @@ impl App {
                 }
             }
         });
+        // Close propagation: Done/Esc/✕ set *win_open=false — propagate to
+        // the flag (was dropped in the UX rewrite — Done did nothing)
+        if !open {
+            self.show_tracks_manager = false;
+        }
         for op in ops {
             match op {
                 Op::SetActive(fi) => {
