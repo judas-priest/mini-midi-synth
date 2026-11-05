@@ -111,7 +111,8 @@ use mini_midi_synth::config::{self, PerfFolder};
 
 #[test]
 fn tc4_folders_roundtrip() {
-    let mut ui = config::UiSettings::default();
+    // UiSettings::default() НЕ существует — собираем через serde из "{}"
+    let mut ui: config::UiSettings = serde_json::from_str("{}").unwrap();
     ui.perf_folders = vec![
         PerfFolder { name: "Track 1".into(), perfs: vec!["Bass".into(), "Piano".into()] },
         PerfFolder { name: "Track 2".into(), perfs: vec!["Piano".into(), "Synth".into()] },
@@ -538,10 +539,12 @@ copy-then-act канон, что в ВНИМАНИЕ-блоке Step 2 — ра�
                     if ui.small_button("↑").clicked() && fi > 0 {
                         self.config.ui.perf_folders.swap(fi - 1, fi);
                         if self.config.ui.active_folder == Some(fi) { self.config.ui.active_folder = Some(fi - 1); }
+                        let _ = self.config.save(); self.refresh_console_list();
                     }
                     if ui.small_button("↓").clicked() && fi + 1 < self.config.ui.perf_folders.len() {
                         self.config.ui.perf_folders.swap(fi, fi + 1);
                         if self.config.ui.active_folder == Some(fi) { self.config.ui.active_folder = Some(fi + 1); }
+                        let _ = self.config.save(); self.refresh_console_list();
                     }
                     if ui.small_button("\u{00D7}").on_hover_text("Delete folder").clicked() {
                         self.config.ui.perf_folders.remove(fi);
@@ -555,20 +558,20 @@ copy-then-act канон, что в ВНИМАНИЕ-блоке Step 2 — ра�
                 for pi in (0..folder.perfs.len()).rev() {
                     ui.horizontal(|ui| {
                         ui.label(format!("  {}", folder.perfs[pi]));
-                        if ui.small_button("\u{00D7}").clicked() { folder.perfs.remove(pi); self.refresh_console_list(); }
+                        if ui.small_button("\u{00D7}").clicked() { folder.perfs.remove(pi); let _ = self.config.save(); self.refresh_console_list(); }
                     });
                 }
                 ui.horizontal(|ui| {
-                    let cur = self.parts[self.active_part].perf_name.clone();
+                    let cur = self.perf_name.clone(); // App.perf_name, НЕ PartState-поле
                     if ui.small_button("+ add current perf").clicked() {
-                        folder.perfs.push(cur.clone()); self.refresh_console_list();
+                        folder.perfs.push(cur.clone()); let _ = self.config.save(); self.refresh_console_list();
                     }
                     egui::ComboBox::from_id_salt(format!("add_perf_{fi}"))
                         .selected_text("+ perf from list")
                         .show_ui(ui, |ui| {
                             for (n, _) in &self.perf_list {
                                 if ui.selectable_label(false, n).clicked() {
-                                    folder.perfs.push(n.clone()); self.refresh_console_list();
+                                    folder.perfs.push(n.clone()); let _ = self.config.save(); self.refresh_console_list();
                                 }
                             }
                         });
