@@ -23,6 +23,7 @@ pub struct ModalWindow<'a> {
     title: String,
     win_open: &'a mut bool,
     default_width: f32,
+    fixed_width: Option<f32>,
     default_height: f32,
     default_pos: Option<egui::Pos2>,
     esc_closes: bool,
@@ -44,6 +45,7 @@ impl<'a> ModalWindow<'a> {
             title: title.into(),
             win_open,
             default_width,
+            fixed_width: None,
             default_height: 540.0,
             default_pos: None,
             esc_closes: true,
@@ -79,6 +81,14 @@ impl<'a> ModalWindow<'a> {
     /// Начальная позиция окна (первое открытие — до того, как egui запомнит
     /// позицию по Id). Сохранённую из config позицию задаёт вызывающий.
     #[must_use]
+    /// Жёсткая ширина: min_width = max_width = w. Режет храповик egui
+    /// (Resize растит окно до контента и никогда не сжимает) — контент
+    /// шире окна клипается. Для браузера инструментов (#38-регресс).
+    pub fn fixed_width(mut self, w: f32) -> Self {
+        self.fixed_width = Some(w);
+        self
+    }
+
     pub fn default_pos(mut self, pos: egui::Pos2) -> Self {
         self.default_pos = Some(pos);
         self
@@ -111,6 +121,9 @@ impl<'a> ModalWindow<'a> {
             .collapsible(false)
             .default_width(self.default_width)
             .default_height(self.default_height);
+        if let Some(w) = self.fixed_width {
+            win = win.min_width(w).max_width(w);
+        }
         if let Some(pos) = self.default_pos {
             win = win.default_pos(pos);
         }

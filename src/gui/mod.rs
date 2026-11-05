@@ -1566,7 +1566,9 @@ impl App {
             ctx, "inst_browser", format!("Instrument Browser — {layer_label}"),
             &mut win_open, 400.0,
         )
-        .default_height(540.0);
+        .default_height(540.0)
+        // #38-регресс: пин ширины — храповик egui растит окно до контента
+        .fixed_width(400.0);
         // #34: restore the position saved in a previous session (within a
         // session egui remembers drags itself, keyed by the constant Id).
         if let Some([x, y]) = self.config.ui.inst_browser_pos {
@@ -1610,7 +1612,7 @@ impl App {
                 let w = ui.available_width();
                 let r = ui.add(egui::TextEdit::singleline(&mut self.preset_search)
                     .hint_text("\u{1F50D} Search...")
-                    .desired_width((w - 22.0).max(60.0)));
+                    .desired_width((w - 30.0).max(60.0)));
                 if !self.preset_search.is_empty()
                     && ui.small_button("\u{00D7}").clicked()
                 {
