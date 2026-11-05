@@ -118,3 +118,34 @@ fn tc5_noop_switch_keeps_volume_and_no_panic() {
     let p = overall_peak(&mut e, 60, 200);
     assert!(p > SILENCE, "no-op switch must keep the part audible (peak {p})");
 }
+
+/// #52а: детерминированный пин «no-op Sf2Mode не дренит» (замена
+/// амплитудного tc6: 2 попытки провалились — release-vs-sustain
+/// неразличимы по сигналу; фаза голоса атомарна).
+#[test]
+fn tc6a_noop_switch_does_not_release_voices() {
+    let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
+    let mut e = engine_with_sf2(sf);
+    gui_switch_part_to_sf2(&mut e, 0, 1.0, 0.0, false, 0, 127);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    // прогреть: голос PLAYING, счётчик release == 0
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..10 { e.tick_block(&mut l, &mut r); }
+    assert_eq!(e.sampler_voices_in_release(), 0, "held note must be PLAYING");
+    // no-op switch (SF2 -> SF2): голос обязан остаться PLAYING
+    let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true });
+    assert_eq!(e.sampler_voices_in_release(), 0, "no-op switch released voices (drain on no-op)");
+}
+
+#[test]
+fn tc6b_real_flip_releases_voices() {
+    // Контроль TC-A: счётчик вообще видит drain (иначе tc6a тривиален)
+    let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
+    let mut e = engine_with_sf2(sf);
+    gui_switch_part_to_sf2(&mut e, 0, 1.0, 0.0, false, 0, 127);
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..10 { e.tick_block(&mut l, &mut r); }
+    let _ = e.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: false });
+    assert!(e.sampler_voices_in_release() > 0, "real flip did not release voices");
+}

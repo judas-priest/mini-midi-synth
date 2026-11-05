@@ -186,6 +186,13 @@ impl Voice {
         }
     }
 
+    /// Фаза ≠ PLAYING (RELEASE_REQUESTED или RELEASED) — голос отпущен и
+    /// доигрывает хвост. Пин «no-op не дренит» (#52а): интроспекция вместо
+    /// амплитудных окон.
+    pub fn is_in_release(&self) -> bool {
+        self.voice_state != VoiceState::PLAYING
+    }
+
     pub(crate) fn kill(&mut self) {
         self.note_gain = 0_f32;
     }
