@@ -468,6 +468,8 @@ pub struct App {
     pub led_spawn_backoff: Option<std::time::Instant>,
     /// Last seen console mode — mode-entry window sync (#50 finding 4).
     pub console_prev_mode: Option<led_console::Mode>,
+    /// Track Folders: armed delete confirmation (auto-disarm) — #57 UX.
+    pub tracks_del_armed: Option<std::time::Instant>,
     // Drum kit save/load
     pub drum_kit_name: String,
     pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
@@ -2893,6 +2895,8 @@ impl App {
             Rename(usize, String),
             MoveUp(usize),
             MoveDown(usize),
+            MoveAliasUp(usize, usize),
+            MoveAliasDown(usize, usize),
             DelFolder(usize),
             DelPerf(usize, usize),
             AddCur(usize),
@@ -2908,126 +2912,139 @@ impl App {
             .fixed_width(520.0);
         win.show(|ui| {
             ui.label(egui::RichText::new(
-                "Папки-треки: алиасы перфов. Правка перфа — в оригинале.").weak());
+                "Setlists are ordered lists of aliases — the original perf is edited in one place.")
+                .weak());
             let perf_names: Vec<String> =
                 self.perf_list.iter().map(|(n, _)| n.clone()).collect();
-            // Двухпанельный расклад (канон Rig Manager): слева папки,
-            // справа алиасы выбранной папки.
             let sel = self.config.ui.active_folder;
+            let armed = self.tracks_del_armed;
+
+            // ── Left pane: Setlists ──
             ui.columns(2, |cols| {
-                // ── Левая: папки ──
+                // ── Left: Setlists ──
                 cols[0].horizontal(|ui| {
+                    ui.label(egui::RichText::new("Setlists").strong());
                     if ui.small_button("+ New").clicked() {
                         ops.push(Op::New);
                     }
                 });
+                if self.config.ui.perf_folders.is_empty() {
+                    cols[0].add_space(theme::SP_MD);
+                    cols[0].label(egui::RichText::new("No setlists yet.").weak());
+                    cols[0].label(egui::RichText::new("Click + New to create one.").weak());
+                }
                 for fi in 0..self.config.ui.perf_folders.len() {
                     let name = self.config.ui.perf_folders[fi].name.clone();
                     let active = sel == Some(fi);
                     cols[0].horizontal(|ui| {
-                        if ui.selectable_label(active, &name).clicked() {
+                        if ui.selectable_label(sel == Some(fi), &name)
+                            .on_hover_text("Select for editing").clicked()
+                        {
                             ops.push(Op::SetActive(fi));
                         }
+                        if active {
+                            ui.label(egui::RichText::new("ACTIVE")
+                                .color(egui::Color32::from_rgb(0xFF, 0x00, 0xFF)).small());
+                        }
                     });
                 }
-                // ── Правая: алиасы выбранной папки ──
+                // ── Right: Contents of the selected setlist ──
                 cols[1].horizontal(|ui| {
                     ui.label(egui::RichText::new(match sel {
-                        Some(fi) => self.config.ui.perf_folders[fi].name.as_str(),
-                        None => "(select a folder)",
+                        Some(fi) => format!(
+                            "Contents: {}", self.config.ui.perf_folders[fi].name),
+                        None => "Contents".to_string(),
                     }).strong());
                 });
-                if let Some(fi) = sel {
-                    if fi < self.config.ui.perf_folders.len() {
-                        cols[1].horizontal(|ui| {
-                            if ui.small_button("+ add current perf").clicked() {
-                                ops.push(Op::AddCur(fi));
-                            }
-                            egui::ComboBox::from_id_salt("tm_add_perf")
-                                .selected_text("+ perf from list")
-                                .show_ui(ui, |ui| {
-                                    for n in &perf_names {
-                                        if ui.selectable_label(false, n).clicked() {
-                                            ops.push(Op::AddPerf(fi, n.clone()));
-                                        }
+            });
+
+            match sel {
+                Some(fi) if fi < self.config.ui.perf_folders.len() => {
+                    // ── Toolbar (non-destructive left, destructive right) ──
+                    ui.horizontal(|ui| {
+                        if ui.small_button("+ Current Perf").clicked() {
+                            ops.push(Op::AddCur(fi));
+                        }
+                        egui::ComboBox::from_id_salt("tm_add_perf")
+                            .selected_text("+ Perf…")
+                            .show_ui(ui, |ui| {
+                                for n in &perf_names {
+                                    if ui.selectable_label(false, n).clicked() {
+                                        ops.push(Op::AddPerf(fi, n.clone()));
                                     }
-                                });
-                        });
-                        for pi in (0..self.config.ui.perf_folders[fi].perfs.len()).rev() {
-                            let pname =
-                                self.config.ui.perf_folders[fi].perfs[pi].clone();
-                            cols[1].horizontal(|ui| {
-                                ui.label(format!("  {}", pname));
-                                if ui.small_button("\u{00D7}").clicked() {
-                                    ops.push(Op::DelPerf(fi, pi));
                                 }
                             });
-                        }
-                    } else {
-                        cols[1].label("(empty)");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("\u{2193}").on_hover_text("Move setlist down").clicked() {
+                                ops.push(Op::MoveDown(fi));
+                            }
+                            if ui.small_button("\u{2191}").on_hover_text("Move setlist up").clicked() {
+                                ops.push(Op::MoveUp(fi));
+                            }
+                            let mut armed_now = armed;
+                            if confirm::confirm_button(ui, "Delete Setlist",
+                                &mut armed_now, true,
+                                "Click again to delete this setlist")
+                            {
+                                ops.push(Op::DelFolder(fi));
+                            }
+                            self.tracks_del_armed = armed_now;
+                        });
+                    });
+                    // ── Alias rows: label … reorder ↑↓ … × (right edge) ──
+                    if self.config.ui.perf_folders[fi].perfs.is_empty() {
+                        ui.add_space(theme::SP_SM);
+                        ui.label(egui::RichText::new(
+                            "Empty setlist — add performances above.").weak());
                     }
-                } else {
-                    cols[1].label("(no folder selected)");
-                }
-            });
-            for fi in 0..self.config.ui.perf_folders.len() {
-                let _ = fi;
-                let name = self.config.ui.perf_folders[fi].name.clone();
-                let perfs = self.config.ui.perf_folders[fi].perfs.clone();
-                let active = self.config.ui.active_folder == Some(fi);
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if ui.selectable_label(active, &name)
-                        .on_hover_text("Set active").clicked()
-                    {
-                        ops.push(Op::SetActive(fi));
+                    for pi in (0..self.config.ui.perf_folders[fi].perfs.len()).rev() {
+                        let pname = self.config.ui.perf_folders[fi].perfs[pi].clone();
+                        ui.horizontal(|ui| {
+                            ui.label(format!("  {}", pname));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.small_button("\u{00D7}")
+                                    .on_hover_text("Remove from setlist (the perf itself is kept)")
+                                    .clicked()
+                                {
+                                    ops.push(Op::DelPerf(fi, pi));
+                                }
+                                if pi + 1 < self.config.ui.perf_folders[fi].perfs.len()
+                                    && ui.small_button("\u{2193}").clicked()
+                                {
+                                    ops.push(Op::MoveAliasDown(fi, pi));
+                                }
+                                if pi > 0 && ui.small_button("\u{2191}").clicked() {
+                                    ops.push(Op::MoveAliasUp(fi, pi));
+                                }
+                            });
+                        });
                     }
-                    if ui.small_button("↑").clicked() { ops.push(Op::MoveUp(fi)); }
-                    if ui.small_button("↓").clicked() { ops.push(Op::MoveDown(fi)); }
-                    let mut renamed = name.clone();
-                    let resp = ui.add(egui::TextEdit::singleline(&mut renamed)
-                        .desired_width(160.0));
-                    if resp.lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                        && !renamed.trim().is_empty()
-                        && renamed.trim() != name.as_str()
-                    {
-                        ops.push(Op::Rename(fi, renamed.trim().to_string()));
-                    }
-                    if ui.small_button("\u{00D7}")
-                        .on_hover_text("Delete folder").clicked()
-                    {
-                        ops.push(Op::DelFolder(fi));
-                    }
-                });
-                for (pi, pname) in perfs.iter().enumerate() {
+                    // ── Rename: inline, commits on Enter ──
+                    ui.add_space(theme::SP_SM);
                     ui.horizontal(|ui| {
-                        ui.label(format!("  {pname}"));
-                        if ui.small_button("\u{00D7}").clicked() {
-                            ops.push(Op::DelPerf(fi, pi));
+                        ui.label("Rename:");
+                        let mut renamed =
+                            self.config.ui.perf_folders[fi].name.clone();
+                        let resp = ui.add(egui::TextEdit::singleline(&mut renamed)
+                            .desired_width(160.0)
+                            .hint_text("Enter to apply"));
+                        if resp.lost_focus()
+                            && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            && !renamed.trim().is_empty()
+                            && renamed.trim()
+                                != self.config.ui.perf_folders[fi].name.as_str()
+                        {
+                            ops.push(Op::Rename(fi, renamed.trim().to_string()));
                         }
                     });
                 }
-                ui.horizontal(|ui| {
-                    if ui.small_button("+ add current perf").clicked() {
-                        ops.push(Op::AddCur(fi));
-                    }
-                    egui::ComboBox::from_id_salt(format!("add_perf_{fi}"))
-                        .selected_text("+ perf from list")
-                        .show_ui(ui, |ui| {
-                            for n in &perf_names {
-                                if ui.selectable_label(false, n).clicked() {
-                                    ops.push(Op::AddPerf(fi, n.clone()));
-                                }
-                            }
-                        });
-                });
+                Some(_) | None => {
+                    ui.add_space(theme::SP_MD);
+                    ui.label(egui::RichText::new(
+                        "Select a setlist on the left to edit its contents.").weak());
+                }
             }
-            if ui.button("+ New track").clicked() { ops.push(Op::New); }
         });
-        if !open { self.show_tracks_manager = false; }
-        // Применение решений ПОСЛЕ отрисовки — никаких borrow-конфликтов.
-        // Guard-и по длине: конфиг мог измениться между кадрами.
         for op in ops {
             match op {
                 Op::SetActive(fi) => {
@@ -3072,6 +3089,22 @@ impl App {
                         }
                         let _ = self.config.save();
                         self.refresh_console_list();
+                    }
+                }
+                Op::MoveAliasUp(fi, pi) => {
+                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                        if pi > 0 && pi < f.perfs.len() {
+                            f.perfs.swap(pi - 1, pi);
+                            let _ = self.config.save();
+                        }
+                    }
+                }
+                Op::MoveAliasDown(fi, pi) => {
+                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                        if pi + 1 < f.perfs.len() {
+                            f.perfs.swap(pi, pi + 1);
+                            let _ = self.config.save();
+                        }
                     }
                 }
                 Op::DelPerf(fi, pi) => {
