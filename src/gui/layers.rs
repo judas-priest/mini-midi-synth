@@ -381,20 +381,22 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: s });
                 self.persist_parts_state();
             }
-            let mut pb = self.parts[i].ignore_pb;
+            // Единая семантика чекбоксов (юзер 2026-11-05): ГАЛКА = РЕАГИРУЕТ
+            // (как Sus). Внутри — ignore-флаги (инверсия на границе GUI).
+            let mut pb = !self.parts[i].ignore_pb;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut pb, "PB")).on_hover_text(
-                "Ignore pitch bend for this part").changed()
+                "Part responds to pitch bend (unchecked = ignore)").changed()
             {
-                self.parts[i].ignore_pb = pb;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnorePb { part: i, on: pb });
+                self.parts[i].ignore_pb = !pb;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnorePb { part: i, on: !pb });
                 self.persist_parts_state();
             }
-            let mut mw = self.parts[i].ignore_mw;
+            let mut mw = !self.parts[i].ignore_mw;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut mw, "MW")).on_hover_text(
-                "Ignore mod wheel").changed()
+                "Part responds to mod wheel (unchecked = ignore)").changed()
             {
-                self.parts[i].ignore_mw = mw;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnoreMw { part: i, on: mw });
+                self.parts[i].ignore_mw = !mw;
+                let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnoreMw { part: i, on: !mw });
                 self.persist_parts_state();
             }
 
