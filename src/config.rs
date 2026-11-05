@@ -121,6 +121,16 @@ impl PartUiState {
 
 fn default_true() -> bool { true }
 
+/// Папка-трек (#57): упорядоченный список АЛИАСОВ перфов (по имени).
+/// Правка перфа-оригинала живёт во всех папках; отсутствующий перф =
+/// tombstone-слот (тёмный пэд, warn-on-press).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerfFolder {
+    pub name: String,
+    #[serde(default)]
+    pub perfs: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiSettings {
     pub window_width: f32,
@@ -161,6 +171,12 @@ pub struct UiSettings {
     /// Pad performance map: 16 slots (notes 36-51) → performance name.
     #[serde(default)]
     pub pad_perf_map: Vec<Option<String>>,
+    /// Папки-треки (setlists): алиасы перфов по имени (#57).
+    #[serde(default)]
+    pub perf_folders: Vec<PerfFolder>,
+    /// Активная папка консоли (None = плоский список всех перфов).
+    #[serde(default)]
+    pub active_folder: Option<usize>,
     /// Keyboard split note persisted across restarts.
     #[serde(default)]
     pub split_point: Option<u8>,
@@ -251,6 +267,8 @@ impl Default for Config {
                 layer_a_volume: 0.8,
                 layer_b_volume: 0.5,
                 pad_perf_map: Vec::new(),
+                perf_folders: Vec::new(),
+                active_folder: None,
                 split_point: None,
                 last_performance: None,
                 led_companion: false,
