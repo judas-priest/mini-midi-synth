@@ -511,6 +511,8 @@ pub struct App {
     pub nav_press_time: Option<std::time::Instant>,
     // Pad performance map: 16 pads (notes 36-51) → performance names
     pub show_pad_perf: bool,
+    /// Track folders manager modal (#57).
+    pub show_tracks_manager: bool,
     pub pad_perf_map: [Option<String>; 16],
     pub pad_prev_state: [u8; 16],
     pub last_config_save: std::time::Instant,
@@ -1379,6 +1381,9 @@ impl eframe::App for App {
 
         // Instrument browser modal (from part row)
         self.draw_instrument_browser_modal(ctx);
+
+        // Track folders manager modal (#57)
+        self.draw_tracks_manager(ctx);
 
         // Draw toast notifications
         self.toasts.retain(|t| t.created.elapsed().as_secs_f32() < 3.0);
@@ -2867,6 +2872,170 @@ impl App {
             if path.is_none() {
                 if let Some(n) = &fname {
                     log::warn!("[console] папка '{n}': перф '{name}' не найден (tombstone)");
+                }
+            }
+        }
+    }
+
+    /// #57: менеджер папок-треков (сетлистов). egui-замыкания не могут держать
+    /// &mut self — решения собираются в ops во время отрисовки (copy-then-act),
+    /// применяются после закрытия окна; КАЖДАЯ мутация — config.save()
+    /// (event-driven, на выходе не гарантирован) + refresh_console_list.
+    fn draw_tracks_manager(&mut self, ctx: &egui::Context) {
+        enum Op {
+            SetActive(usize),
+            Rename(usize, String),
+            MoveUp(usize),
+            MoveDown(usize),
+            DelFolder(usize),
+            DelPerf(usize, usize),
+            AddCur(usize),
+            AddPerf(usize, String),
+            New,
+        }
+        if !self.show_tracks_manager { return; }
+        let mut open = true;
+        let mut ops: Vec<Op> = Vec::new();
+        let cur_perf = self.perf_name.clone();
+        let win = modal::ModalWindow::new(
+            ctx, "tracks_manager", "Track Folders (Setlists)", &mut open, 520.0)
+            .fixed_width(520.0);
+        win.show(|ui| {
+            ui.label(egui::RichText::new(
+                "Папки-треки: алиасы перфов. Правка перфа — в оригинале.").weak());
+            let perf_names: Vec<String> =
+                self.perf_list.iter().map(|(n, _)| n.clone()).collect();
+            for fi in 0..self.config.ui.perf_folders.len() {
+                let name = self.config.ui.perf_folders[fi].name.clone();
+                let perfs = self.config.ui.perf_folders[fi].perfs.clone();
+                let active = self.config.ui.active_folder == Some(fi);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(active, &name)
+                        .on_hover_text("Set active").clicked()
+                    {
+                        ops.push(Op::SetActive(fi));
+                    }
+                    if ui.small_button("↑").clicked() { ops.push(Op::MoveUp(fi)); }
+                    if ui.small_button("↓").clicked() { ops.push(Op::MoveDown(fi)); }
+                    let mut renamed = name.clone();
+                    let resp = ui.add(egui::TextEdit::singleline(&mut renamed)
+                        .desired_width(160.0));
+                    if resp.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        && !renamed.trim().is_empty()
+                        && renamed.trim() != name.as_str()
+                    {
+                        ops.push(Op::Rename(fi, renamed.trim().to_string()));
+                    }
+                    if ui.small_button("\u{00D7}")
+                        .on_hover_text("Delete folder").clicked()
+                    {
+                        ops.push(Op::DelFolder(fi));
+                    }
+                });
+                for (pi, pname) in perfs.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("  {pname}"));
+                        if ui.small_button("\u{00D7}").clicked() {
+                            ops.push(Op::DelPerf(fi, pi));
+                        }
+                    });
+                }
+                ui.horizontal(|ui| {
+                    if ui.small_button("+ add current perf").clicked() {
+                        ops.push(Op::AddCur(fi));
+                    }
+                    egui::ComboBox::from_id_salt(format!("add_perf_{fi}"))
+                        .selected_text("+ perf from list")
+                        .show_ui(ui, |ui| {
+                            for n in &perf_names {
+                                if ui.selectable_label(false, n).clicked() {
+                                    ops.push(Op::AddPerf(fi, n.clone()));
+                                }
+                            }
+                        });
+                });
+            }
+            if ui.button("+ New track").clicked() { ops.push(Op::New); }
+        });
+        if !open { self.show_tracks_manager = false; }
+        // Применение решений ПОСЛЕ отрисовки — никаких borrow-конфликтов.
+        // Guard-и по длине: конфиг мог измениться между кадрами.
+        for op in ops {
+            match op {
+                Op::SetActive(fi) => {
+                    if fi < self.config.ui.perf_folders.len() {
+                        self.config.ui.active_folder = Some(fi);
+                        self.perf_window = 0;
+                        let _ = self.config.save();
+                        self.refresh_console_list();
+                    }
+                }
+                Op::Rename(fi, nm) => {
+                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) { f.name = nm; }
+                    let _ = self.config.save();
+                }
+                Op::MoveUp(fi) => {
+                    if fi > 0 && fi < self.config.ui.perf_folders.len() {
+                        self.config.ui.perf_folders.swap(fi - 1, fi);
+                        if self.config.ui.active_folder == Some(fi) {
+                            self.config.ui.active_folder = Some(fi - 1);
+                        }
+                        let _ = self.config.save();
+                        self.refresh_console_list();
+                    }
+                }
+                Op::MoveDown(fi) => {
+                    if fi + 1 < self.config.ui.perf_folders.len() {
+                        self.config.ui.perf_folders.swap(fi, fi + 1);
+                        if self.config.ui.active_folder == Some(fi) {
+                            self.config.ui.active_folder = Some(fi + 1);
+                        }
+                        let _ = self.config.save();
+                        self.refresh_console_list();
+                    }
+                }
+                Op::DelFolder(fi) => {
+                    if fi < self.config.ui.perf_folders.len() {
+                        self.config.ui.perf_folders.remove(fi);
+                        match self.config.ui.active_folder {
+                            Some(a) if a == fi => self.config.ui.active_folder = None,
+                            Some(a) if a > fi => self.config.ui.active_folder = Some(a - 1),
+                            _ => {}
+                        }
+                        let _ = self.config.save();
+                        self.refresh_console_list();
+                    }
+                }
+                Op::DelPerf(fi, pi) => {
+                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                        if pi < f.perfs.len() { f.perfs.remove(pi); }
+                    }
+                    let _ = self.config.save();
+                    self.refresh_console_list();
+                }
+                Op::AddCur(fi) => {
+                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                        f.perfs.push(cur_perf.clone());
+                    }
+                    let _ = self.config.save();
+                    self.refresh_console_list();
+                }
+                Op::AddPerf(fi, n) => {
+                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                        f.perfs.push(n);
+                    }
+                    let _ = self.config.save();
+                    self.refresh_console_list();
+                }
+                Op::New => {
+                    let n = self.config.ui.perf_folders.len() + 1;
+                    self.config.ui.perf_folders.push(crate::config::PerfFolder {
+                        name: format!("Track {n}"),
+                        perfs: Vec::new(),
+                    });
+                    let _ = self.config.save();
                 }
             }
         }

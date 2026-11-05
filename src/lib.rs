@@ -905,6 +905,7 @@ pub fn run_gui(
         console_list: Vec::new(),
         nav_press_time: None,
         show_pad_perf: false,
+        show_tracks_manager: false,
         pad_perf_map: {
             let saved = &c.config.ui.pad_perf_map;
             std::array::from_fn(|i| saved.get(i).cloned().flatten())
