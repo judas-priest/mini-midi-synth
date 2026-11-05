@@ -181,3 +181,33 @@ fn sf2_mono_switches_to_new_note() {
     let f = 48000.0 / best.1 as f32;
     assert!((f - 329.63).abs() < 6.0, "SF2 mono: sounding {f:.1} Hz, expected lone E4 329.6 (previous note must be killed)");
 }
+
+/// #55-followup: SF2 mono recovery — отпустили звучащую клавишу при зажатой
+/// предыдущей → синт вернулся к ней (last-note priority, канон Moog/SoS).
+#[test]
+fn sf2_mono_recovers_held_note() {
+    let Some(sf) = load_font() else { eprintln!("no SC-55.sf2, skipping"); return };
+    let mut e = engine_with_sf2(sf);
+    let mut map = std::collections::BTreeMap::new();
+    map.insert("play_mode".into(), 1.0);
+    let _ = e.handle_control(ControlEvent::load_patch_from_edited(0, &map, None));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 127 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 64 });
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    let mut sig: Vec<f32> = Vec::with_capacity(4096);
+    for blk in 0..200 {
+        l.fill(0.0); r.fill(0.0);
+        e.tick_block(&mut l, &mut r);
+        if blk >= 50 { sig.extend_from_slice(&l); }
+    }
+    let n = sig.len();
+    let mut best = (0.0f32, 0usize);
+    for lag in (100..400).rev() {
+        let mut c = 0.0f32;
+        for i in lag..n { c += sig[i] * sig[i - lag]; }
+        if c > best.0 { best = (c, lag); }
+    }
+    let f = 48000.0 / best.1 as f32;
+    assert!((f - 261.63).abs() < 10.0, "SF2 mono recovery: sounding {f:.1} Hz, expected held C4 261.6");
+}

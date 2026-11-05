@@ -596,7 +596,7 @@ struct Part {
     /// route_note_on минует DSP mono-логику — моно для сэмплера делаем
     /// здесь: новая нота глушит предыдущую (#55-фидбек «моно не реагирует
     /// на SF2»).
-    sf2_mono_note: Option<u8>,
+    sf2_mono_stack: Vec<(u8, u8)>,
     /// Part ignores incoming Pitch Bend (TECHDEBT #55) — чужие контроллеры
     /// шлют мусорный PB, слои не должны дёргаться.
     pub ignore_pb: bool,
@@ -647,7 +647,7 @@ impl Part {
             rand_bipolar: 0.0, rand_unipolar: 0.5,
             alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
             sustained_notes: [false; 128],
-            sf2_mono_note: None,
+            sf2_mono_stack: Vec::new(),
             keys_down: [false; 128],
             note_mode: NOTE_MODE_POLY, root_held: [false; 128], root_active: None,
             sustain_enabled: true,
@@ -1816,13 +1816,17 @@ impl SynthEngine {
             // SF2 mono (play_mode 1/2): новая нота глушит предыдущую.
             // (Legato-семантика «без ретрига» для сэмплера не отличима —
             // note_on всегда ретриггерит; режимы ведут себя одинаково.)
-            let mono = { let p = &self.parts[i]; p.params.play_mode as u8 == 1 || p.params.play_mode as u8 == 2 };
-            if mono {
+            let mono = { let p = &self.parts[i];
+                p.params.play_mode as u8 == 1 || p.params.play_mode as u8 == 2 };
+            if mono && self.parts[i].note_mode == crate::synth::NOTE_MODE_POLY {
+                // Last-note priority (канон Moog/SoS): стек зажатых клавиш,
+                // звучит последняя; заглушаем предыдущую звучащую
                 let part = &mut self.parts[i];
-                if let Some(prev) = part.sf2_mono_note.take() {
+                part.sf2_mono_stack.retain(|&(n, _)| n != raw);
+                if let Some(&(prev, _)) = part.sf2_mono_stack.last() {
                     self.sampler.note_off(i, tr(prev));
                 }
-                part.sf2_mono_note = Some(raw);
+                part.sf2_mono_stack.push((raw, velocity));
             }
             if let Some(old) = release { self.sampler.note_off(i, tr(old)); }
             self.sampler.note_on(i, tr(note), velocity);
@@ -1853,7 +1857,22 @@ impl SynthEngine {
         let next = self.parts[i].root_off(raw);
         let tr = |n: u8| (n as i16 + transpose as i16).clamp(0, 127) as u8;
         if sf2_mode {
-            if self.parts[i].sf2_mono_note == Some(raw) { self.parts[i].sf2_mono_note = None; }
+            // Last-note priority: отпустили звучащую клавишу — вернуться к
+            // последней из оставшихся зажатых (re-trigger, канон Moog/SoS)
+            let (mono, vel) = { let p = &self.parts[i];
+                (p.params.play_mode as u8 == 1 || p.params.play_mode as u8 == 2, p.last_velocity) };
+            if mono && self.parts[i].note_mode == crate::synth::NOTE_MODE_POLY {
+                let part = &mut self.parts[i];
+                let had = part.sf2_mono_stack.iter().any(|&(n, _)| n == raw);
+                part.sf2_mono_stack.retain(|&(n, _)| n != raw);
+                self.sampler.note_off(i, tr(raw));
+                if had {
+                    if let Some(&(top, top_vel)) = part.sf2_mono_stack.last() {
+                        self.sampler.note_on(i, tr(top), if top_vel > 0 { top_vel } else { (vel * 127.0) as u8 });
+                    }
+                }
+                return;
+            }
             self.sampler.note_off(i, tr(raw));
             // Re-key в Root-режиме: синтезированный корень (old) может быть
             // ≠ raw — отпустить и его, иначе дрон под новой нотой.
