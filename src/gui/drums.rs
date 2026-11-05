@@ -101,20 +101,6 @@ impl App {
                 self.save_global_to_config();
             }
 
-            // #57: Tracks (папки-перфы) — живая строка перформанса: индикатор
-            // активного трека + кнопка менеджера (отдельная сущность, канон
-            // Helix Setlist-меню / Kemper Rig Manager).
-            let track_name = self.config.ui.active_folder
-                .and_then(|i| self.config.ui.perf_folders.get(i))
-                .map(|f| f.name.as_str())
-                .unwrap_or("(all)");
-            ui.label(egui::RichText::new(format!("Track: {track_name}")).weak());
-            if ui.small_button("Tracks").on_hover_text(
-                "Track folders (setlists) — organize perfs per song").clicked()
-            {
-                self.show_tracks_manager = true;
-            }
-
         });
         ui.add_space(theme::SP_MD); // ритм секций: транспорт | паттерн | грид
 

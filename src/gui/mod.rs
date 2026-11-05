@@ -1150,15 +1150,21 @@ impl eframe::App for App {
                         self.global_dirty = true;
                     }
                 }
-                ui.label("SF2 rel:");
-                let mut scale = self.sf2_release_scale;
-                if ui.add(egui::DragValue::new(&mut scale).range(0.05..=3.0).speed(0.05).suffix("\u{00d7}"))
-                    .on_hover_text("SF2 release-time scale (1.0 = file defaults)").changed()
-                {
-                    self.sf2_release_scale = scale;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale });
-                    self.global_dirty = true;
-                }
+
+                // #57: Tracks (папки-перфы) — вторая строка глобальной панели,
+                // под Sustain-фейдером (юзер 2026-11-06). Отдельная сущность.
+                ui.horizontal(|ui| {
+                    let track_name = self.config.ui.active_folder
+                        .and_then(|i| self.config.ui.perf_folders.get(i))
+                        .map(|f| f.name.as_str())
+                        .unwrap_or("(all)");
+                    ui.label(egui::RichText::new(format!("Track: {track_name}")).weak());
+                    if ui.small_button("Tracks").on_hover_text(
+                        "Track folders (setlists) — organize perfs per song").clicked()
+                    {
+                        self.show_tracks_manager = true;
+                    }
+                });
 
                 ui.separator();
 
