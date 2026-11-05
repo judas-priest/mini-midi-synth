@@ -2716,20 +2716,14 @@ impl App {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqRedo);
             }
             led_console::Action::PageBack => {
+                // ЧИСТОЕ листание: follow после paging притягивал окно к
+                // активному перфу — стрелки становились no-op/реверсом
+                // (аудит #50: «не возвращается»; follow остаётся только в
+                // mode-entry sync)
                 self.page_window(-7);
-                // perf-follow только в HOME: в Pattern/Mute стрелки листают
-                // окно СВОЕГО режима и не должны молча двигать perf_window
-                // (#50 finding 8); паттерн-follow удалён — ручное листание не
-                // отменяется (finding 3)
-                if self.console.mode() == led_console::Mode::Home {
-                    if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
-                }
             }
             led_console::Action::PageForward => {
                 self.page_window(7);
-                if self.console.mode() == led_console::Mode::Home {
-                    if let Some(i) = self.active_perf_console() { self.follow_window(i, true); }
-                }
             }
         }
     }

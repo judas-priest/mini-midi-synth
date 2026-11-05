@@ -68,7 +68,11 @@ pub(crate) fn follow_start(idx: usize, start: usize, len: usize) -> Option<usize
     if (start..start + CONSOLE_VISIBLE).contains(&idx) {
         None
     } else {
-        Some(idx.min(window_max_start(len)))
+        // СНАП НА ГРАНИЦУ СТРАНИЦЫ: сырой idx.min(max) давал off-grid окна
+        // (idx 6 → окно 6 → вся раскладка пэдов сдвинута на 1 — «pad 20 даёт
+        // Halloween», аудит #50). Страница = кратная 7, зажатая последней.
+        let page = (idx / CONSOLE_VISIBLE) * CONSOLE_VISIBLE;
+        Some(page.min(window_max_start(len)))
     }
 }
 
