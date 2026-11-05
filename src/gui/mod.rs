@@ -1151,21 +1151,6 @@ impl eframe::App for App {
                     }
                 }
 
-                // #57: Tracks (папки-перфы) — вторая строка глобальной панели,
-                // под Sustain-фейдером (юзер 2026-11-06). Отдельная сущность.
-                ui.horizontal(|ui| {
-                    let track_name = self.config.ui.active_folder
-                        .and_then(|i| self.config.ui.perf_folders.get(i))
-                        .map(|f| f.name.as_str())
-                        .unwrap_or("(all)");
-                    ui.label(egui::RichText::new(format!("Track: {track_name}")).weak());
-                    if ui.small_button("Tracks").on_hover_text(
-                        "Track folders (setlists) — organize perfs per song").clicked()
-                    {
-                        self.show_tracks_manager = true;
-                    }
-                });
-
                 ui.separator();
 
                 // F2 Master Tone (global)
@@ -1312,6 +1297,21 @@ impl eframe::App for App {
                     if points.len() >= 2 {
                         painter.add(egui::Shape::line(points, egui::Stroke::new(1.0, theme::SCOPE_WAVE)));
                     }
+                }
+            });
+            ui.add_space(theme::SP_SM);
+
+            // #57: Tracks — ОТДЕЛЬНАЯ строка под фейдерами (юзер 2026-11-06)
+            ui.horizontal(|ui| {
+                let track_name = self.config.ui.active_folder
+                    .and_then(|i| self.config.ui.perf_folders.get(i))
+                    .map(|f| f.name.as_str())
+                    .unwrap_or("(all)");
+                ui.label(egui::RichText::new(format!("Track: {track_name}")).weak());
+                if ui.small_button("Tracks").on_hover_text(
+                    "Track folders (setlists) — organize perfs per song").clicked()
+                {
+                    self.show_tracks_manager = true;
                 }
             });
             ui.add_space(theme::SP_SM);
