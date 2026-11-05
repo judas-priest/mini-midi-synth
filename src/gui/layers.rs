@@ -242,7 +242,8 @@ impl App {
                 }) {
                     Ok(_path) => { self.show_toast("Performance saved", ToastKind::Success);
                                    self.perf_list = preset::list_performances();
-                                   self.perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new())); }
+                                   self.perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
+                                   self.refresh_console_list(); }
                     Err(e)    => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
             }
@@ -275,6 +276,34 @@ impl App {
                     self.apply_performance(&perf);
                     self.show_toast(format!("Loaded: {}", perf.name), ToastKind::Success);
                 }
+            }
+            ui.separator();
+            // #57: активный трек (папка перфов). Решение — в локаль,
+            // мутация + refresh после замыкания (copy-then-act).
+            let mut names: Vec<String> = vec!["(all perfs)".into()];
+            names.extend(self.config.ui.perf_folders.iter().map(|f| f.name.clone()));
+            let cur = self.config.ui.active_folder.map(|i| i + 1).unwrap_or(0);
+            let mut track_pick: Option<Option<usize>> = None;
+            egui::ComboBox::from_id_salt("track_sel")
+                .selected_text(names.get(cur).map(|s| s.as_str()).unwrap_or("(all perfs)"))
+                .width(90.0)
+                .show_ui(ui, |ui| {
+                    for (i, tname) in names.iter().enumerate() {
+                        if ui.selectable_label(cur == i, tname).clicked() {
+                            track_pick = Some((i != 0).then(|| i - 1));
+                        }
+                    }
+                });
+            if let Some(pick) = track_pick {
+                self.config.ui.active_folder = pick;
+                self.perf_window = 0;
+                let _ = self.config.save();
+                self.refresh_console_list();
+            }
+            if ui.small_button("Tracks…")
+                .on_hover_text("Manage track folders (setlists)").clicked()
+            {
+                self.show_tracks_manager = true;
             }
         });
     }

@@ -441,6 +441,8 @@ pub struct App {
     /// Instant of the last beat-1 transition (GUI flash)
     pub drum_beat_flash: Option<std::time::Instant>,
     pub perf_window: usize,   // first perf_list idx visible on slots 1..=7
+    /// First folder idx visible on Tracks-mode slots 1..=7 (#57).
+    pub tracks_window: usize,
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
     pub mute_window: usize,   // first part idx visible on MUTE slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -502,10 +504,15 @@ pub struct App {
     // Performance save/load
     pub perf_name: String,
     pub perf_list: Vec<(String, std::path::PathBuf)>,
+    /// Консольный список перфов (#57): активная папка (алиасы, tombstone =
+    /// None-path) или плоский perf_list. Все консольные сайты читают кэш.
+    pub console_list: Vec<(String, Option<std::path::PathBuf>)>,
     // Navigate button timing
     pub nav_press_time: Option<std::time::Instant>,
     // Pad performance map: 16 pads (notes 36-51) → performance names
     pub show_pad_perf: bool,
+    /// Track folders manager modal (#57).
+    pub show_tracks_manager: bool,
     pub pad_perf_map: [Option<String>; 16],
     pub pad_prev_state: [u8; 16],
     pub last_config_save: std::time::Instant,
@@ -790,10 +797,13 @@ impl eframe::App for App {
             self.execute_console_action(a);
         }
         // Смена режима консоли: окно режима открывается на текущем выборе
-        // (finding 4: stale-страница при входе; идемпотентно, раз в смену)
+        // (finding 4: stale-страница при входе; идемпотентно, раз в смену).
+        // refresh_console_list здесь же покрывает первый кадр (prev = None)
+        // и все изменения perf_list/папок до входа консоли в режим (#57).
         let m = self.console.mode();
         if self.console_prev_mode != Some(m) {
             self.console_prev_mode = Some(m);
+            self.refresh_console_list();
             match m {
                 led_console::Mode::Pattern => {
                     self.follow_window(self.drum_current_pattern as usize, false);
@@ -952,18 +962,24 @@ impl eframe::App for App {
             for (i, part) in self.parts.iter().enumerate().take(16) {
                 mutes[i] = part.mute;
             }
-            let filled = self.perf_list.len();
+            let filled = self.console_list.len();
             let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
             let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
             let page_depth = match self.console.mode() {
                 led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
                 led_console::Mode::Mute => self.mute_window / 7,
+                led_console::Mode::Tracks => self.tracks_window / 7,
                 _ => self.perf_window / 7,
             };
-            let top = self.console.top_colors(self.active_perf_console(), filled,
-                                              self.drum_current_pattern as usize, &mutes,
-                                              self.perf_window, self.pat_window,
-                                              self.mute_window);
+            let top = match self.console.mode() {
+                led_console::Mode::Tracks => self.console.folder_colors(
+                    self.config.ui.active_folder,
+                    self.config.ui.perf_folders.len(), self.tracks_window),
+                _ => self.console.top_colors(self.active_perf_console(), filled,
+                                             self.drum_current_pattern as usize, &mutes,
+                                             self.perf_window, self.pat_window,
+                                             self.mute_window),
+            };
             let bottom = self.console.bottom_colors(playing, recording, page_depth,
                                                     undo_avail, redo_avail);
             let mut snap = [[0u8; 3]; 16];
@@ -1365,6 +1381,9 @@ impl eframe::App for App {
 
         // Instrument browser modal (from part row)
         self.draw_instrument_browser_modal(ctx);
+
+        // Track folders manager modal (#57)
+        self.draw_tracks_manager(ctx);
 
         // Draw toast notifications
         self.toasts.retain(|t| t.created.elapsed().as_secs_f32() < 3.0);
@@ -2682,12 +2701,31 @@ impl App {
         match action {
             led_console::Action::LoadPerf(i) => {
                 let idx = self.perf_window + i - 1; // slot -> real index
-                if let Some((name, _)) = self.perf_list.get(idx) {
-                    let name = name.clone();
-                    if self.load_performance_by_name(&name) {
-                        log::info!("[console] perf slot {} loaded ({})", i, name);
-                        self.follow_window(idx, true);
+                match self.console_list.get(idx) {
+                    Some((name, Some(_))) => {
+                        let name = name.clone();
+                        if self.load_performance_by_name(&name) {
+                            log::info!("[console] perf slot {} loaded ({})", i, name);
+                            self.follow_window(idx, true);
+                        }
                     }
+                    _ => {
+                        // #57 tombstone: битая ссылка папки — не молчать
+                        log::warn!("[console] perf slot {}: missing perf (tombstone)", i);
+                        self.show_toast("Perf missing — edit Tracks", ToastKind::Error);
+                    }
+                }
+            }
+            led_console::Action::TrackSelect(i) => {
+                // консоль шлёт УЖЕ window-local 0-based (slot-1 из tap())
+                let idx = self.tracks_window + i;
+                if idx < self.config.ui.perf_folders.len() {
+                    self.config.ui.active_folder = Some(idx);
+                    let _ = self.config.save();
+                    self.refresh_console_list();
+                    self.perf_window = 0; // новая папка — с первой страницы
+                    self.console.force_mode(led_console::Mode::Home);
+                    // mode-entry sync подхватит след. кадром (prev=Tracks≠Home)
                 }
             }
             led_console::Action::SelectPattern(i) => {
@@ -2716,13 +2754,25 @@ impl App {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqRedo);
             }
             led_console::Action::StepPerf(dir) => {
-                let n = self.perf_list.len();
+                let n = self.console_list.len();
                 if n == 0 { return; }
                 let cur = self.active_perf_console().unwrap_or(0);
-                let next = (cur as i32 + dir).rem_euclid(n as i32) as usize;
-                if let Some((name, _)) = self.perf_list.get(next) {
-                    let name = name.clone();
-                    self.load_performance_by_name(&name);
+                // #57: tombstone-слоты пропускаем (warn, канон warn-on-press),
+                // максимум n попыток; follow — одним вызовом после цикла
+                let mut next = cur;
+                for _ in 0..n {
+                    next = (next as i32 + dir).rem_euclid(n as i32) as usize;
+                    match self.console_list.get(next) {
+                        None => break,
+                        Some((name, None)) => {
+                            log::warn!("[console] step: перф '{name}' не найден (tombstone)");
+                        }
+                        Some((name, Some(_))) => {
+                            let name = name.clone();
+                            self.load_performance_by_name(&name);
+                            break;
+                        }
+                    }
                 }
                 // follow снапится на границу страницы (#50-фикс) — окно
                 // больше не уходит в off-grid
@@ -2755,7 +2805,7 @@ impl App {
     fn follow_window(&mut self, idx: usize, is_perf: bool) {
         if is_perf {
             if let Some(w) =
-                led_console::follow_start(idx, self.perf_window, self.perf_list.len())
+                led_console::follow_start(idx, self.perf_window, self.console_list.len())
             {
                 self.perf_window = w;
             }
@@ -2768,7 +2818,7 @@ impl App {
     fn page_window(&mut self, delta: i32) {
         match self.console.mode() {
             led_console::Mode::Home => {
-                let max_w = led_console::window_max_start(self.perf_list.len());
+                let max_w = led_console::window_max_start(self.console_list.len());
                 self.perf_window = (self.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             led_console::Mode::Pattern => {
@@ -2778,6 +2828,12 @@ impl App {
             led_console::Mode::Mute => {
                 let max_w = led_console::window_max_start(self.parts.len());
                 self.mute_window = (self.mute_window as i32 + delta).clamp(0, max_w as i32) as usize;
+            }
+            led_console::Mode::Tracks => {
+                let max_w =
+                    led_console::window_max_start(self.config.ui.perf_folders.len());
+                self.tracks_window =
+                    (self.tracks_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             _ => {}
         }
@@ -2800,9 +2856,195 @@ impl App {
         self.save_global_to_config();
     }
 
-    /// Index of the current performance in perf_list (None if unknown).
+    /// Пересчёт консольного списка перфов (#57): папка или плоский список.
+    /// Также логирует tombstones (warn) — один раз на refresh.
+    fn refresh_console_list(&mut self) {
+        let folder = self.config.ui.active_folder
+            .and_then(|i| self.config.ui.perf_folders.get(i))
+            .map(|f| (f.name.clone(), f.clone()));
+        let (fname, folder) = match folder {
+            Some((n, f)) => (Some(n), Some(f)),
+            None => (None, None),
+        };
+        self.console_list =
+            crate::config::resolve_folder_entries(&self.perf_list, folder.as_ref());
+        for (name, path) in &self.console_list {
+            if path.is_none() {
+                if let Some(n) = &fname {
+                    log::warn!("[console] папка '{n}': перф '{name}' не найден (tombstone)");
+                }
+            }
+        }
+    }
+
+    /// #57: менеджер папок-треков (сетлистов). egui-замыкания не могут держать
+    /// &mut self — решения собираются в ops во время отрисовки (copy-then-act),
+    /// применяются после закрытия окна; КАЖДАЯ мутация — config.save()
+    /// (event-driven, на выходе не гарантирован) + refresh_console_list.
+    fn draw_tracks_manager(&mut self, ctx: &egui::Context) {
+        enum Op {
+            SetActive(usize),
+            Rename(usize, String),
+            MoveUp(usize),
+            MoveDown(usize),
+            DelFolder(usize),
+            DelPerf(usize, usize),
+            AddCur(usize),
+            AddPerf(usize, String),
+            New,
+        }
+        if !self.show_tracks_manager { return; }
+        let mut open = true;
+        let mut ops: Vec<Op> = Vec::new();
+        let cur_perf = self.perf_name.clone();
+        let win = modal::ModalWindow::new(
+            ctx, "tracks_manager", "Track Folders (Setlists)", &mut open, 520.0)
+            .fixed_width(520.0);
+        win.show(|ui| {
+            ui.label(egui::RichText::new(
+                "Папки-треки: алиасы перфов. Правка перфа — в оригинале.").weak());
+            let perf_names: Vec<String> =
+                self.perf_list.iter().map(|(n, _)| n.clone()).collect();
+            for fi in 0..self.config.ui.perf_folders.len() {
+                let name = self.config.ui.perf_folders[fi].name.clone();
+                let perfs = self.config.ui.perf_folders[fi].perfs.clone();
+                let active = self.config.ui.active_folder == Some(fi);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(active, &name)
+                        .on_hover_text("Set active").clicked()
+                    {
+                        ops.push(Op::SetActive(fi));
+                    }
+                    if ui.small_button("↑").clicked() { ops.push(Op::MoveUp(fi)); }
+                    if ui.small_button("↓").clicked() { ops.push(Op::MoveDown(fi)); }
+                    let mut renamed = name.clone();
+                    let resp = ui.add(egui::TextEdit::singleline(&mut renamed)
+                        .desired_width(160.0));
+                    if resp.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        && !renamed.trim().is_empty()
+                        && renamed.trim() != name.as_str()
+                    {
+                        ops.push(Op::Rename(fi, renamed.trim().to_string()));
+                    }
+                    if ui.small_button("\u{00D7}")
+                        .on_hover_text("Delete folder").clicked()
+                    {
+                        ops.push(Op::DelFolder(fi));
+                    }
+                });
+                for (pi, pname) in perfs.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("  {pname}"));
+                        if ui.small_button("\u{00D7}").clicked() {
+                            ops.push(Op::DelPerf(fi, pi));
+                        }
+                    });
+                }
+                ui.horizontal(|ui| {
+                    if ui.small_button("+ add current perf").clicked() {
+                        ops.push(Op::AddCur(fi));
+                    }
+                    egui::ComboBox::from_id_salt(format!("add_perf_{fi}"))
+                        .selected_text("+ perf from list")
+                        .show_ui(ui, |ui| {
+                            for n in &perf_names {
+                                if ui.selectable_label(false, n).clicked() {
+                                    ops.push(Op::AddPerf(fi, n.clone()));
+                                }
+                            }
+                        });
+                });
+            }
+            if ui.button("+ New track").clicked() { ops.push(Op::New); }
+        });
+        if !open { self.show_tracks_manager = false; }
+        // Применение решений ПОСЛЕ отрисовки — никаких borrow-конфликтов.
+        // Guard-и по длине: конфиг мог измениться между кадрами.
+        for op in ops {
+            match op {
+                Op::SetActive(fi) => {
+                    if fi < self.config.ui.perf_folders.len() {
+                        self.config.ui.active_folder = Some(fi);
+                        self.perf_window = 0;
+                        let _ = self.config.save();
+                        self.refresh_console_list();
+                    }
+                }
+                Op::Rename(fi, nm) => {
+                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) { f.name = nm; }
+                    let _ = self.config.save();
+                }
+                Op::MoveUp(fi) => {
+                    if fi > 0 && fi < self.config.ui.perf_folders.len() {
+                        self.config.ui.perf_folders.swap(fi - 1, fi);
+                        if self.config.ui.active_folder == Some(fi) {
+                            self.config.ui.active_folder = Some(fi - 1);
+                        }
+                        let _ = self.config.save();
+                        self.refresh_console_list();
+                    }
+                }
+                Op::MoveDown(fi) => {
+                    if fi + 1 < self.config.ui.perf_folders.len() {
+                        self.config.ui.perf_folders.swap(fi, fi + 1);
+                        if self.config.ui.active_folder == Some(fi) {
+                            self.config.ui.active_folder = Some(fi + 1);
+                        }
+                        let _ = self.config.save();
+                        self.refresh_console_list();
+                    }
+                }
+                Op::DelFolder(fi) => {
+                    if fi < self.config.ui.perf_folders.len() {
+                        self.config.ui.perf_folders.remove(fi);
+                        match self.config.ui.active_folder {
+                            Some(a) if a == fi => self.config.ui.active_folder = None,
+                            Some(a) if a > fi => self.config.ui.active_folder = Some(a - 1),
+                            _ => {}
+                        }
+                        let _ = self.config.save();
+                        self.refresh_console_list();
+                    }
+                }
+                Op::DelPerf(fi, pi) => {
+                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                        if pi < f.perfs.len() { f.perfs.remove(pi); }
+                    }
+                    let _ = self.config.save();
+                    self.refresh_console_list();
+                }
+                Op::AddCur(fi) => {
+                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                        f.perfs.push(cur_perf.clone());
+                    }
+                    let _ = self.config.save();
+                    self.refresh_console_list();
+                }
+                Op::AddPerf(fi, n) => {
+                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                        f.perfs.push(n);
+                    }
+                    let _ = self.config.save();
+                    self.refresh_console_list();
+                }
+                Op::New => {
+                    let n = self.config.ui.perf_folders.len() + 1;
+                    self.config.ui.perf_folders.push(crate::config::PerfFolder {
+                        name: format!("Track {n}"),
+                        perfs: Vec::new(),
+                    });
+                    let _ = self.config.save();
+                }
+            }
+        }
+    }
+
+    /// Index of the current performance in console_list (None if unknown;
+    /// tombstone-active → None — корректно).
     fn active_perf_console(&self) -> Option<usize> {
-        self.perf_list.iter().position(|(n, _)| n == &self.perf_name)
+        self.console_list.iter().position(|(n, _)| n == &self.perf_name)
     }
 
     /// Load a performance by name (for pad perf switching).

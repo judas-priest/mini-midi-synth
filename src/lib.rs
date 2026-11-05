@@ -854,6 +854,7 @@ pub fn run_gui(
         drum_prev_step: 0,
         drum_beat_flash: None,
         perf_window: 1,
+        tracks_window: 0,
         pat_window: 0,
         mute_window: 0,
         drum_undo_atom: c.drum_undo_atom,
@@ -900,8 +901,11 @@ pub fn run_gui(
             perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
             perf_list
         },
+        // #57: пересчитывается первым кадром (guard в update())
+        console_list: Vec::new(),
         nav_press_time: None,
         show_pad_perf: false,
+        show_tracks_manager: false,
         pad_perf_map: {
             let saved = &c.config.ui.pad_perf_map;
             std::array::from_fn(|i| saved.get(i).cloned().flatten())
