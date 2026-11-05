@@ -23,7 +23,7 @@ Tracks-режим: `Mode::Tracks`, MENU-слот 3 (был тёмный), пэд
 TDD — pure-функции (resolve/сериализация) тестируемы, консоль-пламбинг — экран.
 
 **Проверенные факты (вычитано; не пересматривать):**
-- `Mode { Home, Pattern, Mute, Menu }` (led_console.rs:14-20); `tap(slot)`
+- `Mode { Home, Pattern, Mute, Menu }` (led_console.rs:14-20); `tap(slot)` (:147-168)
   :121-128: в Menu слот 0→Home, 1→Pattern, 2→Mute, **3 = тёмный no-op** (коммент
   «ex-toggle»); MENU-тап повторно в Menu-режиме → Home (:122-124: `if self.mode ==
   Mode::Menu { ... }` обрабатывает слоты). `Mode` — `#[derive(Default)]`-стиль,
@@ -41,7 +41,7 @@ TDD — pure-функции (resolve/сериализация) тестируе�
 - LoadPerf: `load_performance_by_name` (mod.rs:2686) возвращает false при
   промахе — молча (аудит #50 finding 5; fix: warn+toast в этом плане).
 - Консольные сайты, читающие len списка: page_window Home-плечо
-  (window_max_start(perf_list.len()) :2749-2751), follow_window (:2736),
+  (window_max_start(perf_list.len()) :2749-2751), follow_window (~:2755),
   paint `filled` (:955), page_depth (:958-962), mode-entry sync (Home → follow).
 - Кэш-поле в App — канон: `perf_list` (:499), `console_prev_mode` (:463).
 - config UiSettings (config.rs:150+): `#[serde(default)]`-паттерн на каждом
@@ -75,8 +75,8 @@ TDD — pure-функции (resolve/сериализация) тестируе�
 ## Negative Matrix
 
 - Папок нет вообще (до первого создания) — resolve → полный список (TC2).
-- Папка пуста — консоль: `filled = 0`, пэды 18-24 тёмные; пэды не кликабельны
-  (LoadPerf idx вне списка → get → None → ничего) — существующий guard.
+- Папка пуста — консоль: `filled = 0`, пэды 18-24 тёмные; нажатие → warn +
+  toast (Task 3 catch-all), не молча.
 - Дубликат имени перфа в папке — разрешён (два пэда на один перф; безвредно).
 - Дубликат имени ПАПКИ — разрешён на уровне данных; GUI-менеджер не запрещает
   (различаются по индексу active_folder), rename по индексу.
@@ -135,9 +135,9 @@ fn tc4_legacy_config_without_folders_gets_defaults() {
 }
 ```
 
-Если UiSettings::default() не реализован (проверить `impl Default`) — собрать
-литерал по образцу config.rs:253 (`pad_perf_map: Vec::new(),` сосед) или
-десериализовать из `r#"{}"#` в обоих тестах (serde-default покроет).
+UiSettings::default() НЕ существует (verified: config.rs:124, только
+Config::default собирает литерал :235-263) — оба теста десериализуют из
+`r#"{}"#` (serde-default покроет новые поля).
 
 - [ ] **Step 2: красный**
 
@@ -169,8 +169,8 @@ UiSettings поля (рядом с pad_perf_map :163):
     pub active_folder: Option<usize>,
 ```
 
-Инициализация в Default UiSettings (канон config.rs:253):
-`perf_folders: Vec::new(), active_folder: None,`.
+Инициализация в литерале UiSettings внутри `Config::default` (config.rs:235-263,
+рядом с pad_perf_map): `perf_folders: Vec::new(), active_folder: None,`.
 
 - [ ] **Step 4: зелёный**
 
@@ -229,8 +229,8 @@ fn tc2_no_folder_resolves_to_full_list() {
 }
 ```
 
-(видимость: `pub(crate)`/`pub` — tests/ интеграционный, нужен `pub` +
-`pub mod gui` уже в lib.rs:8-16; PerfFolder import из config.)
+(видимость: tests/ интеграционный — resolver живёт в config.rs, `pub mod
+config` есть (lib.rs:6); `mod gui` приватный и feature-gated — в gui НЕ класть.)
 
 - [ ] **Step 2: красный** — `cargo test --test config_folders 2>&1 | tail -4`
 
@@ -284,20 +284,37 @@ perf_list :499), дефолт `Vec::new()` в lib.rs литерале; мето�
     }
 ```
 
-Вызовы refresh_console_list: (a) первый кадр — в режиме-синк-блоке
-(console_prev_mode init None уже даёт первый проход: добавить refresh в
-Task 4 sync-блок ДО match), (b) layers.rs после `self.perf_list = ...` (:245),
-(c) все изменения папок/active_folder (Task 5), (d) сразу после LoadPerf не
-нужно (perf_list не менялся).
+Вызовы refresh_console_list: (a) СРАЗУ В TASK 2 — иначе console_list пуст
+вечно до Task 4 (пэды тёмные, LoadPerf no-op): добавить в конец
+send_initial_presets ИЛИ в первый кадр sync-блока (который появится в Task 4 —
+промежуточно: refresh в конце load_edited_params НЕ место; ЛУЧШЕ: в Task 2
+добавить refresh в gui/mod.rs update() первом проходе — guard
+`if self.console_list.is_empty() { self.refresh_console_list(); }` в начале
+update(), удаляется в Task 4 на sync-блок); (b) layers.rs после
+`self.perf_list = ...` (:245); (c) все изменения папок/active_folder (Task 5);
+(d) после LoadPerf не нужно (perf_list не менялся).
 
 - [ ] **Step 4: зелёный + консольные сайты на console_list** — заменить во
-  ВСЕХ консольных местах `self.perf_list` → `self.console_list` (опция
-  unwrap Some(p)): LoadPerf handler (:2684-2691: `perf_list.get(idx)` →
-  `console_list.get(idx)` — path Option: `if let Some((name, Some(_)))`),
-  follow_window perf-плечо len (~:2755), page_window Home-плечо len (~:2770),
-  paint `filled` (:955) + painting count, page_depth Home len, mode-entry sync
-  follow (len через refresh). `active_perf_console()` (:2789) — матч по
-  console_list именам (если активный tombstone → None — корректно).
+  ВСЕХ консольных местах `self.perf_list` → `self.console_list` (path Option —
+  tombstone-чек):
+  - LoadPerf handler (~:2683-2692): `console_list.get(idx)` — tombstone см. Task 3;
+  - **StepPerf handler (~:2718-2730): len + `.get(next)` на console_list;
+    tombstone при next → не молчать: лог warn + ПРОПУСТИТЬ шаг (итерировать dir
+    дальше до живого перфа, максимум n попыток — канон TC3 warn-on-press),
+    затем follow_window(next, true) одним вызовом после цикла;**
+  - follow_window perf-плечо len (~:2755);
+  - page_window Home-плечо len (~:2770);
+  - paint `filled` (:955) + painting count;
+  - active_perf_console (~:2804): матч по console_list именам (tombstone-активный
+    → None — корректно);
+  - **step() `_` arm (30/31 в Tracks) → StepPerf по console_list — ОСОЗНАННО**:
+    стрелки шагают перфы ПАПКИ;
+  - load_performance_by_name (~:2810) НЕ трогать (читает канонический perf_list
+    для path — алиасы резолвятся именем);
+  - page_depth (~:958): добавить Tracks-плечо `Mode::Tracks => self.tracks_window / 7`
+    (сейчас `_` arm показывает perf_window — мусор в Tracks);
+  - top_colors внутренний match станет non-exhaustive с Mode::Tracks — плечо
+    unreachable/zeros (mod.rs выбирает folder_colors для Tracks).
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2 && cargo test 2>&1 | tail -30`
 
@@ -418,7 +435,7 @@ console.mode() → Home: top_colors(...), Tracks: folder_colors(...), остал
                     let _ = self.config.save();
                     self.refresh_console_list();
                     self.perf_window = 0; // новая папка — с первой страницы
-                    self.console.mode = led_console::Mode::Home;
+                    self.console.force_mode(led_console::Mode::Home);
                     // mode-entry sync подхватит след. кадром (prev=Tracks≠Home)
                 }
             }
@@ -472,11 +489,13 @@ git add src/gui/led_console.rs src/gui/mod.rs src/lib.rs && git commit -m "feat:
                     .show_ui(ui, |ui| {
                         if ui.selectable_label(cur == 0, "(all perfs)").clicked() {
                             self.config.ui.active_folder = None;
+                            let _ = self.config.save();
                             self.refresh_console_list();
                         }
                         for (fi, fname) in self.config.ui.perf_folders.iter().enumerate() {
                             if ui.selectable_label(cur == fi + 1, &fname.name).clicked() {
                                 self.config.ui.active_folder = Some(fi);
+                                let _ = self.config.save();
                                 self.perf_window = 0;
                                 self.refresh_console_list();
                             }
@@ -512,6 +531,7 @@ copy-then-act канон, что в ВНИМАНИЕ-блоке Step 2 — ра�
                     let active = self.config.ui.active_folder == Some(fi);
                     if ui.selectable_label(active, &folder.name).on_hover_text("Set active").clicked() {
                         self.config.ui.active_folder = Some(fi);
+                        let _ = self.config.save();
                         self.perf_window = 0;
                         self.refresh_console_list();
                     }
@@ -527,6 +547,7 @@ copy-then-act канон, что в ВНИМАНИЕ-блоке Step 2 — ра�
                         self.config.ui.perf_folders.remove(fi);
                         if self.config.ui.active_folder == Some(fi) { self.config.ui.active_folder = None; }
                         else if let Some(a) = self.config.ui.active_folder { if a > fi { self.config.ui.active_folder = Some(a - 1); } }
+                        let _ = self.config.save();
                         self.refresh_console_list();
                     }
                 });
@@ -558,6 +579,8 @@ copy-then-act канон, что в ВНИМАНИЕ-блоке Step 2 — ра�
                 let n = self.config.ui.perf_folders.len() + 1;
                 self.config.ui.perf_folders.push(
                     crate::config::PerfFolder { name: format!("Track {n}"), perfs: Vec::new() });
+                let _ = self.config.save();
+                self.refresh_console_list();
             }
         });
         if !open { self.show_tracks_manager = false; }
