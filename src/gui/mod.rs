@@ -1274,23 +1274,6 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                // #57: Tracks (папки-перфы) — отдельная сущность, канон
-                // Helix (Setlist-меню по кнопке) / Kemper (Rig Manager):
-                // индикатор активного трека + кнопка менеджера в топ-баре,
-                // НЕ в строке перфа.
-                let track_name = self.config.ui.active_folder
-                    .and_then(|i| self.config.ui.perf_folders.get(i))
-                    .map(|f| f.name.as_str())
-                    .unwrap_or("(all)");
-                ui.label(egui::RichText::new(format!("Track: {track_name}")).weak());
-                if ui.button("Tracks").on_hover_text(
-                    "Track folders (setlists) — organize perfs per song").clicked()
-                {
-                    self.show_tracks_manager = true;
-                }
-
-                ui.separator();
-
                 // Oscilloscope
                 let scope_w = 150.0_f32;
                 let scope_h = 40.0_f32;
