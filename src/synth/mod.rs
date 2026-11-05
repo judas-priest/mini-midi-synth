@@ -1593,6 +1593,11 @@ impl CachedFxParams {
 }
 
 impl SynthEngine {
+    /// Тест-аксессор #52а. НЕ для RT-пути.
+    pub fn sampler_voices_in_release(&mut self) -> usize {
+        self.sampler.voices_in_release()
+    }
+
     pub fn new(sample_rate: f32) -> Self {
         // All 8 parts pre-allocated; only part 0 enabled by default
         let mut parts: Vec<Part> = (0..MAX_PARTS).map(|_| Part::new(sample_rate)).collect();
