@@ -2715,6 +2715,27 @@ impl App {
             led_console::Action::Redo => {
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqRedo);
             }
+            led_console::Action::StepPerf(dir) => {
+                let n = self.perf_list.len();
+                if n == 0 { return; }
+                let cur = self.active_perf_console().unwrap_or(0);
+                let next = (cur as i32 + dir).rem_euclid(n as i32) as usize;
+                if let Some((name, _)) = self.perf_list.get(next) {
+                    let name = name.clone();
+                    self.load_performance_by_name(&name);
+                }
+                // follow снапится на границу страницы (#50-фикс) — окно
+                // больше не уходит в off-grid
+                self.follow_window(next, true);
+            }
+            led_console::Action::StepPattern(dir) => {
+                let next = (self.drum_current_pattern as i32 + dir).rem_euclid(8);
+                self.drum_current_pattern = next as u8;
+                let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: next as u8 });
+                // follow снапится на границу страницы — degenerate window 7
+                // больше не возникает (#50-фикс)
+                self.follow_window(next as usize, false);
+            }
             led_console::Action::PageBack => {
                 // ЧИСТОЕ листание: follow после paging притягивал окно к
                 // активному перфу — стрелки становились no-op/реверсом

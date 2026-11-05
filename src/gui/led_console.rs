@@ -51,6 +51,11 @@ pub enum Action {
     Redo,
     PageBack,
     PageForward,
+    /// Пэд 30 (ВЛЕВО): шаг назад — Home: соседний перф, Pattern: соседний
+    /// паттерн. РОДНАЯ семантика (e5ad801) — восстановлена 2026-11-05
+    /// после ошибочного удаления в #72/#73.
+    StepPerf(i32),
+    StepPattern(i32),
 }
 
 /// Видимых слотов верхней строки (слоты 0..=6, 7-й — MENU).
@@ -163,13 +168,15 @@ impl LedConsole {
     }
 
     fn step(&mut self, dir: i32) -> Action {
-        // Юзер-модель #50 (фидбек 2026-11-03): стрелки ЛИСТАЮТ страницы во
-        // всех режимах; в HOME раньше StepPerf подгружал соседний перф на
-        // каждое нажатие — воспринималось как скролл с побочным эффектом
-        if dir < 0 {
-            Action::PageBack
-        } else {
-            Action::PageForward
+        // РОДНАЯ семантика пэдов 30/31 (ВЛЕВО/ВПРАВО, e5ad801): шаг по
+        // списку активного режима. Страницы — пэды 28/29 (PageBack/Forward).
+        // Ошибочно заменено на paging в #72/#73 — восстановлено 2026-11-05;
+        // следом follow теперь снапится на страницы (#50), так что
+        // degenerate-window баг больше не сопровождает StepPattern.
+        match self.mode {
+            Mode::Home => Action::StepPerf(dir),
+            Mode::Pattern => Action::StepPattern(dir),
+            _ => Action::StepPerf(dir),
         }
     }
 
@@ -393,11 +400,13 @@ mod tests {
     }
 
     #[test]
-    fn prev_next_always_page() {
+    fn prev_next_step_semantics() {
+        // РОДНАЯ семантика 30/31 (ВЛЕВО/ВПРАВО): Home = StepPerf,
+        // Pattern = StepPattern. Страницы — пэды 28/29.
         let mut c = LedConsole::new();
-        assert_eq!(c.on_event(PadEvent::Prev, Instant::now()), Some(Action::PageBack));
+        assert_eq!(c.on_event(PadEvent::Prev, Instant::now()), Some(Action::StepPerf(-1)));
         c.mode = Mode::Pattern;
-        assert_eq!(c.on_event(PadEvent::Next, Instant::now()), Some(Action::PageForward));
+        assert_eq!(c.on_event(PadEvent::Next, Instant::now()), Some(Action::StepPattern(1)));
     }
 
     #[test]
