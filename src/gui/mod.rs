@@ -2690,11 +2690,18 @@ impl App {
         match action {
             led_console::Action::LoadPerf(i) => {
                 let idx = self.perf_window + i - 1; // slot -> real index
-                if let Some((name, Some(_))) = self.console_list.get(idx) {
-                    let name = name.clone();
-                    if self.load_performance_by_name(&name) {
-                        log::info!("[console] perf slot {} loaded ({})", i, name);
-                        self.follow_window(idx, true);
+                match self.console_list.get(idx) {
+                    Some((name, Some(_))) => {
+                        let name = name.clone();
+                        if self.load_performance_by_name(&name) {
+                            log::info!("[console] perf slot {} loaded ({})", i, name);
+                            self.follow_window(idx, true);
+                        }
+                    }
+                    _ => {
+                        // #57 tombstone: битая ссылка папки — не молчать
+                        log::warn!("[console] perf slot {}: missing perf (tombstone)", i);
+                        self.show_toast("Perf missing — edit Tracks", ToastKind::Error);
                     }
                 }
             }
