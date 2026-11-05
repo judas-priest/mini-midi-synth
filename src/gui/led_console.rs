@@ -17,6 +17,8 @@ pub enum Mode {
     Pattern,
     Mute,
     Menu,
+    /// Выбор активной папки-трека (#57): слоты 1..=7 = папки, слот 0 = выход.
+    Tracks,
 }
 
 /// Console input events (note -> slot by the caller).
@@ -56,6 +58,8 @@ pub enum Action {
     /// после ошибочного удаления в #72/#73.
     StepPerf(i32),
     StepPattern(i32),
+    /// Tracks-режим (#57): выбрать папку (window-local 0-based, канон SelectPattern).
+    TrackSelect(usize),
 }
 
 /// Видимых слотов верхней строки (слоты 0..=6, 7-й — MENU).
@@ -150,8 +154,15 @@ impl LedConsole {
                 0 => { self.mode = Mode::Home; None }
                 1 => { self.mode = Mode::Pattern; None }
                 2 => { self.mode = Mode::Mute; None }
-                _ => None, // dark slot in menu: no-op (slot 3 = ex-target toggle)
+                // Menu-слот 3 (#57): Tracks — выбор активной папки-трека
+                3 => { self.mode = Mode::Tracks; None }
+                _ => None, // dark slot in menu: no-op
             };
+        }
+        if self.mode == Mode::Tracks {
+            // слот 0 = MENU (белый) — тап возвращает в HOME
+            if slot == 0 { self.mode = Mode::Home; return None; }
+            return Some(Action::TrackSelect(slot - 1)); // window-local, канон SelectPattern
         }
         if slot == 0 {
             // always-visible MENU button (top-left): tap = open menu
@@ -163,7 +174,8 @@ impl LedConsole {
             Mode::Home => Action::LoadPerf(slot),
             Mode::Pattern => Action::SelectPattern(slot - 1),
             Mode::Mute => Action::ToggleMute(slot - 1),
-            Mode::Menu => unreachable!(),
+            // Tracks обрабатывается выше (ранний return), Menu — выше
+            Mode::Tracks | Mode::Menu => unreachable!(),
         })
     }
 
@@ -254,6 +266,8 @@ impl LedConsole {
                     };
                 }
             }
+            // Tracks рисует mod.rs через folder_colors — сюда не доходит
+            Mode::Tracks => {}
         }
         c
     }
@@ -300,6 +314,31 @@ impl LedConsole {
     /// Current top-row mode (for window paging in the GUI).
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+
+    /// Программная смена режима (TrackSelect → Home, #57). Не через tap().
+    pub fn force_mode(&mut self, m: Mode) {
+        self.pending.clear();
+        self.mode = m;
+    }
+
+    /// Пэды режима Tracks (#57): слот 0 = MENU белый, 1..=7 = папки (активная
+    /// FF00FF пурпур, остальные 0066FF синий, пустые — чёрный).
+    pub fn folder_colors(
+        &self, active_folder: Option<usize>, filled: usize, w: usize,
+    ) -> [[u8; 3]; 8] {
+        let mut out = [[0x00, 0x00, 0x00]; 8];
+        out[0] = [0xFF, 0xFF, 0xFF]; // MENU
+        for (i, col) in out.iter_mut().enumerate().skip(1) {
+            let idx = w + i - 1;
+            if idx >= filled { break; }
+            *col = if active_folder == Some(idx) {
+                [0xFF, 0x00, 0xFF] // selected: magenta
+            } else {
+                [0x00, 0x66, 0xFF] // available: blue
+            };
+        }
+        out
     }
 }
 
@@ -438,13 +477,36 @@ mod tests {
     }
 
     #[test]
-    fn menu_slot3_tap_is_noop_and_stays_menu() {
+    fn menu_slot3_tap_opens_tracks() {
+        // #57 TC5: MENU-слот 3 — новый режим Tracks (был тёмный no-op)
         let mut c = LedConsole::new();
         c.mode = Mode::Menu;
         let now = Instant::now();
         c.on_event(PadEvent::Down(3), now);
         assert_eq!(c.on_event(PadEvent::Up(3), now + Duration::from_millis(30)), None);
-        assert_eq!(c.mode, Mode::Menu, "dark slot must not leave the menu");
+        assert_eq!(c.mode, Mode::Tracks);
+    }
+
+    #[test]
+    fn tracks_slot_tap_selects_folder() {
+        // #57 TC5: слоты 1..=7 = папки, window-local 0-based
+        let mut c = LedConsole::new();
+        c.mode = Mode::Tracks;
+        let now = Instant::now();
+        c.on_event(PadEvent::Down(1), now);
+        assert_eq!(c.on_event(PadEvent::Up(1), now + Duration::from_millis(30)),
+                   Some(Action::TrackSelect(0)));
+    }
+
+    #[test]
+    fn tracks_menu_slot_tap_returns_home() {
+        // #57: слот 0 в Tracks = возврат в HOME (не открыть меню)
+        let mut c = LedConsole::new();
+        c.mode = Mode::Tracks;
+        let now = Instant::now();
+        c.on_event(PadEvent::Down(0), now);
+        assert_eq!(c.on_event(PadEvent::Up(0), now + Duration::from_millis(30)), None);
+        assert_eq!(c.mode, Mode::Home);
     }
 
     #[test]

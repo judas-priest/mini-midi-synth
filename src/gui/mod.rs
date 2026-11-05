@@ -441,6 +441,8 @@ pub struct App {
     /// Instant of the last beat-1 transition (GUI flash)
     pub drum_beat_flash: Option<std::time::Instant>,
     pub perf_window: usize,   // first perf_list idx visible on slots 1..=7
+    /// First folder idx visible on Tracks-mode slots 1..=7 (#57).
+    pub tracks_window: usize,
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
     pub mute_window: usize,   // first part idx visible on MUTE slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -605,11 +607,6 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // #57 interim: console_list строится первым кадром (Task 4 заменит
-        // guard'ом на mode-entry sync)
-        if self.console_list.is_empty() {
-            self.refresh_console_list();
-        }
         // On Android high-DPI screens, set proper pixel ratio for crisp font rendering
         #[cfg(target_os = "android")]
         ctx.set_pixels_per_point(2.5);
@@ -798,10 +795,13 @@ impl eframe::App for App {
             self.execute_console_action(a);
         }
         // Смена режима консоли: окно режима открывается на текущем выборе
-        // (finding 4: stale-страница при входе; идемпотентно, раз в смену)
+        // (finding 4: stale-страница при входе; идемпотентно, раз в смену).
+        // refresh_console_list здесь же покрывает первый кадр (prev = None)
+        // и все изменения perf_list/папок до входа консоли в режим (#57).
         let m = self.console.mode();
         if self.console_prev_mode != Some(m) {
             self.console_prev_mode = Some(m);
+            self.refresh_console_list();
             match m {
                 led_console::Mode::Pattern => {
                     self.follow_window(self.drum_current_pattern as usize, false);
@@ -966,12 +966,18 @@ impl eframe::App for App {
             let page_depth = match self.console.mode() {
                 led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
                 led_console::Mode::Mute => self.mute_window / 7,
+                led_console::Mode::Tracks => self.tracks_window / 7,
                 _ => self.perf_window / 7,
             };
-            let top = self.console.top_colors(self.active_perf_console(), filled,
-                                              self.drum_current_pattern as usize, &mutes,
-                                              self.perf_window, self.pat_window,
-                                              self.mute_window);
+            let top = match self.console.mode() {
+                led_console::Mode::Tracks => self.console.folder_colors(
+                    self.config.ui.active_folder,
+                    self.config.ui.perf_folders.len(), self.tracks_window),
+                _ => self.console.top_colors(self.active_perf_console(), filled,
+                                             self.drum_current_pattern as usize, &mutes,
+                                             self.perf_window, self.pat_window,
+                                             self.mute_window),
+            };
             let bottom = self.console.bottom_colors(playing, recording, page_depth,
                                                     undo_avail, redo_avail);
             let mut snap = [[0u8; 3]; 16];
@@ -2705,6 +2711,18 @@ impl App {
                     }
                 }
             }
+            led_console::Action::TrackSelect(i) => {
+                // консоль шлёт УЖЕ window-local 0-based (slot-1 из tap())
+                let idx = self.tracks_window + i;
+                if idx < self.config.ui.perf_folders.len() {
+                    self.config.ui.active_folder = Some(idx);
+                    let _ = self.config.save();
+                    self.refresh_console_list();
+                    self.perf_window = 0; // новая папка — с первой страницы
+                    self.console.force_mode(led_console::Mode::Home);
+                    // mode-entry sync подхватит след. кадром (prev=Tracks≠Home)
+                }
+            }
             led_console::Action::SelectPattern(i) => {
                 // консоль шлёт УЖЕ window-local 0-based (slot-1 из tap())
                 let idx = self.pat_window + i;
@@ -2805,6 +2823,12 @@ impl App {
             led_console::Mode::Mute => {
                 let max_w = led_console::window_max_start(self.parts.len());
                 self.mute_window = (self.mute_window as i32 + delta).clamp(0, max_w as i32) as usize;
+            }
+            led_console::Mode::Tracks => {
+                let max_w =
+                    led_console::window_max_start(self.config.ui.perf_folders.len());
+                self.tracks_window =
+                    (self.tracks_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             _ => {}
         }
