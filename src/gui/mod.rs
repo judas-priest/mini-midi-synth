@@ -468,6 +468,9 @@ pub struct App {
     pub led_spawn_backoff: Option<std::time::Instant>,
     /// Last seen console mode — mode-entry window sync (#50 finding 4).
     pub console_prev_mode: Option<led_console::Mode>,
+    /// Drag-and-drop part swap (#54): исходный слот драга за хендл ⠿,
+    /// живёт в пределах GUI-фрейма/драга (Some пока pointer down).
+    pub part_drag_src: Option<usize>,
     /// Track Folders: armed delete confirmation (auto-disarm) — #57 UX.
     pub tracks_del_armed: Option<std::time::Instant>,
     // Drum kit save/load
@@ -2455,6 +2458,32 @@ impl App {
         self.push_full_part_state(part);
     }
 
+    /// Свап содержимого двух слотов одной зоны (#54): GUI-структуры,
+    /// движок обоих слотов, активный парт, персист. Undo НЕТ (осознанно:
+    /// одно-слотовый канон snapshot; свап обратим повторным свапом).
+    fn swap_parts(&mut self, a: usize, b: usize) {
+        if swap_check(a, b, crate::gui::PARTS_PER_ZONE).is_err() { return; }
+        self.parts.swap(a, b);
+        // active_part едет с партом (юзер продолжает править тот же звук).
+        // ЧЕРЕЗ set_active_part — он синхронизирует и active_part_atom
+        // (drums UI zone labels, headless display)
+        if self.active_part == a { self.set_active_part(b); }
+        else if self.active_part == b { self.set_active_part(a); }
+        self.do_swap_parts_push(a, b);
+    }
+
+    fn do_swap_parts_push(&mut self, a: usize, b: usize) {
+        // Движку — полное состояние обоих слотов (канон reset_and_push_part):
+        // sf2/volume/pan/etc через push_full_part_state, патч — через
+        // send_edited_params (LoadPatch). MIDI-ноты, игравшие в момент свапа,
+        // доигрывают в старом слоте (их перенос — out of scope).
+        self.push_full_part_state(a);
+        self.push_full_part_state(b);
+        self.send_edited_params(a);
+        self.send_edited_params(b);
+        self.persist_parts_state();
+    }
+
     /// Re-sends the MIDI CC mapping to a freshly created engine.
     pub(super) fn send_cc_map(&mut self) {
         let _ = self.ctrl_tx.push(ControlEvent::SetCcMap { map: Box::new(self.cc_map) });
@@ -3416,8 +3445,6 @@ mod part_undo_tests {
 
 /// Свап партов разрешён только в пределах одной зоны (A↔A, B↔B):
 /// диапазоны/сплит-семантика зоны не переезжают (#54).
-/// (`allow` — до Task 2, который подключает свап в draw_part_rows.)
-#[allow(dead_code)]
 fn swap_check(a: usize, b: usize, zone_size: usize) -> Result<(), &'static str> {
     if a == b { return Err("same slot"); }
     if (a / zone_size) != (b / zone_size) { return Err("cross-zone swap"); }

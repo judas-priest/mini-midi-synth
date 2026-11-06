@@ -121,6 +121,8 @@ impl App {
         // Диапазон руки — один раз в заголовке зоны; карта зон внизу удалена
         // (фидбек: дублировала диапазоны по строкам и занимала место).
         let max_h = (ui.available_height() - theme::SP_LG).max(120.0);
+        // #54: сбор rect'ов строк для drag hit-test
+        let mut row_rects: Vec<(usize, egui::Rect)> = Vec::new();
         egui::ScrollArea::vertical()
             .id_salt("layers_parts_scroll")
             .auto_shrink(false)
@@ -136,7 +138,7 @@ impl App {
             for i in ZONE_A {
                 if !self.parts[i].enabled { continue; }
                 ui.push_id(format!("part_row_{i}"), |ui| {
-                    self.draw_part_row(ui, i);
+                    self.draw_part_row(ui, i, &mut row_rects);
                 });
             }
             ui.add_space(theme::SP_SM); // воздух над Add part (TECHDEBT #36)
@@ -158,7 +160,7 @@ impl App {
                 for i in ZONE_B {
                     if !self.parts[i].enabled { continue; }
                     ui.push_id(format!("part_row_{i}"), |ui| {
-                        self.draw_part_row(ui, i);
+                        self.draw_part_row(ui, i, &mut row_rects);
                     });
                 }
                 ui.add_space(theme::SP_SM); // воздух над Add part (TECHDEBT #36)
@@ -167,6 +169,43 @@ impl App {
                     && ui.small_button("+ Add part").on_hover_text("Add part to Zone B").clicked()
                 {
                     self.add_part_to_zone(true);
+                }
+            }
+
+            // #54: drag part row — hit-test + drop. РАЗМЕЩЕНИЕ: в САМОМ КОНЦЕ
+            // ScrollArea-замыкания (после "+ Add part" зоны B) — return здесь
+            // обрезал бы зону B и row_rects.
+            if let Some(src) = self.part_drag_src {
+                let (Some(pointer), dragging) = (
+                    ui.ctx().pointer_interact_pos(),
+                    ui.ctx().input(|i| i.pointer.any_down()),
+                ) else { self.part_drag_src = None; return; };
+                if !dragging {
+                    // drop: целевой слот = строка под pointer
+                    for (i, r) in &row_rects {
+                        if r.contains(pointer) {
+                            let dst = *i;
+                            let src_zone = src / crate::gui::PARTS_PER_ZONE;
+                            let dst_zone = dst / crate::gui::PARTS_PER_ZONE;
+                            if src_zone == dst_zone && src != dst {
+                                self.swap_parts(src, dst);
+                            }
+                            break;
+                        }
+                    }
+                    self.part_drag_src = None;
+                } else {
+                    // подсветка слота-цели в той же зоне
+                    for (i, r) in &row_rects {
+                        if r.contains(pointer) && (i / crate::gui::PARTS_PER_ZONE)
+                            == (src / crate::gui::PARTS_PER_ZONE) && *i != src
+                        {
+                            // 4-й аргумент StrokeKind ОБЯЗАТЕЛЕН в egui 0.31.1
+                            ui.painter().rect_stroke(*r, 4.0,
+                                egui::Stroke::new(2.0, egui::Color32::from_rgb(0xFF, 0x00, 0xFF)),
+                                egui::StrokeKind::Inside);
+                        }
+                    }
                 }
             }
         });
@@ -282,7 +321,8 @@ impl App {
     }
 
     /// One row = all fields of a part (mockup_layers2.html).
-    fn draw_part_row(&mut self, ui: &mut egui::Ui, i: usize) {
+    fn draw_part_row(&mut self, ui: &mut egui::Ui, i: usize,
+        row_rects: &mut Vec<(usize, egui::Rect)>) {
         let is_active = i == self.active_part
             && !self.show_drums && !self.show_looper
             && !self.show_midi_seq && !self.show_fx_chain;
@@ -290,6 +330,21 @@ impl App {
         let num = (i % PARTS_PER_ZONE) + 1;
 
         ui.horizontal(|ui| {
+            // #54: drag-хендл (⠿) — Sense::drag, старт драга ставит
+            // part_drag_src; сам контент строки обычный (drag живёт на
+            // хендле, не на всей строке — канон строк с чекбоксами/слайдерами)
+            ui.horizontal(|ui| {
+                let (_rect, resp) = ui.allocate_exact_size(
+                    egui::vec2(14.0, 22.0),
+                    egui::Sense::drag());
+                if resp.drag_started() {
+                    self.part_drag_src = Some(i);
+                }
+                ui.label(egui::RichText::new("\u{2802}").weak());
+            });
+            // Подсветка цели — в drop-детекте draw_part_rows (layers.rs)
+            // по row_rects; ui.max_rect() здесь = остаток ScrollArea, НЕ строка
+
             // Part label — цвет парта = цвет руки на карте зон (identity);
             // активный парт — тинт фоном (selection), без egui-selection-синевы
             // и рамок (research: identity и selection — разные каналы).
@@ -532,6 +587,8 @@ impl App {
                 self.pending_remove_part = Some(i);
             }
         });
+        // #54: rect строки для drag hit-test (после horizontal — включает всю строку)
+        row_rects.push((i, ui.min_rect()));
     }
 
     fn add_part_to_zone(&mut self, zone_b: bool) {
