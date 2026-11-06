@@ -812,7 +812,7 @@ impl eframe::App for App {
                 }
                 led_console::Mode::Tracks => {
                     // Подсказка входа (#57 UX): как рулить с пэдов
-                    self.show_toast("TRACKS: tap a folder — MENU returns",
+                    self.show_toast("TRACKS: tap a folder — MENU — назад",
                         ToastKind::Info);
                 }
                 led_console::Mode::Mute => self.mute_window = 0,
@@ -976,12 +976,19 @@ impl eframe::App for App {
                 led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
                 led_console::Mode::Mute => self.mute_window / 7,
                 led_console::Mode::Tracks => self.tracks_window / 7,
+                // FolderPerfs: PAGE-глубина по перф-страницам — явное плечо
+                // (то же, что `_`; самодокументация)
+                led_console::Mode::FolderPerfs => self.perf_window / 7,
                 _ => self.perf_window / 7,
             };
             let top = match self.console.mode() {
                 led_console::Mode::Tracks => self.console.folder_colors(
                     self.config.ui.active_folder,
                     self.config.ui.perf_folders.len(), self.tracks_window),
+                led_console::Mode::FolderPerfs => self.console.top_colors(
+                    self.active_perf_console(), self.console_list.len(),
+                    self.drum_current_pattern as usize, &mutes,
+                    self.perf_window, self.pat_window, self.mute_window),
                 _ => self.console.top_colors(self.active_perf_console(), filled,
                                              self.drum_current_pattern as usize, &mutes,
                                              self.perf_window, self.pat_window,
@@ -2730,24 +2737,14 @@ impl App {
                 }
             }
             led_console::Action::TrackSelect(i) => {
-                // Слот-элемент 0 TRACKS-списка = виртуальный "(ALL PERFS)" —
-                // выход к общим перфам с пэдов (юзер-спека 2026-11-06)
-                // Юзер 2026-11-06: тап по треку НЕ выкидывает в HOME —
-                // остаёмся в TRACKS, папка красится пурпуром; выход —
-                // (ALL PERFS) или MENU → Home
-                if self.tracks_window + i == 0 {
-                    self.config.ui.active_folder = None;
-                    let _ = self.config.save();
-                    self.refresh_console_list();
-                    self.perf_window = 0;
-                    return;
-                }
-                let idx = self.tracks_window + i - 1; // -1: слот ALL PERFS
+                // Тап папки в TRACKS: папка становится активной, консоль
+                // входит в её перфы (Mode::FolderPerfs ставит led_console::tap)
+                let idx = self.tracks_window + i;
                 if idx < self.config.ui.perf_folders.len() {
                     self.config.ui.active_folder = Some(idx);
                     let _ = self.config.save();
                     self.refresh_console_list();
-                    self.perf_window = 0;
+                    self.perf_window = 0; // TC8: перф-страница с начала
                 }
             }
             led_console::Action::SelectPattern(i) => {
@@ -2852,11 +2849,14 @@ impl App {
                 self.mute_window = (self.mute_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             led_console::Mode::Tracks => {
-                // список TRACKS = folders + 1 виртуальный ALL PERFS-слот
                 let max_w = led_console::window_max_start(
-                    self.config.ui.perf_folders.len() + 1);
+                    self.config.ui.perf_folders.len());
                 self.tracks_window =
                     (self.tracks_window as i32 + delta).clamp(0, max_w as i32) as usize;
+            }
+            led_console::Mode::FolderPerfs => {
+                let max_w = led_console::window_max_start(self.console_list.len());
+                self.perf_window = (self.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             _ => {}
         }
