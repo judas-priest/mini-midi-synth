@@ -317,12 +317,6 @@ impl LedConsole {
         self.mode
     }
 
-    /// Программная смена режима (TrackSelect → Home, #57). Не через tap().
-    pub fn force_mode(&mut self, m: Mode) {
-        self.pending.clear();
-        self.mode = m;
-    }
-
     /// Пэды режима Tracks (#57): слот 0 = MENU белый, слот 1 при w==0 =
     /// виртуальный "(ALL PERFS)" (оранжевый), 1..=7 = папки (активная FF00FF
     /// пурпур, остальные FF8000 оранжевый, пустые — чёрный).
