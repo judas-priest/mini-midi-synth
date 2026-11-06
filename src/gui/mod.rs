@@ -2732,12 +2732,14 @@ impl App {
             led_console::Action::TrackSelect(i) => {
                 // Слот-элемент 0 TRACKS-списка = виртуальный "(ALL PERFS)" —
                 // выход к общим перфам с пэдов (юзер-спека 2026-11-06)
+                // Юзер 2026-11-06: тап по треку НЕ выкидывает в HOME —
+                // остаёмся в TRACKS, папка красится пурпуром; выход —
+                // (ALL PERFS) или MENU → Home
                 if self.tracks_window + i == 0 {
                     self.config.ui.active_folder = None;
                     let _ = self.config.save();
                     self.refresh_console_list();
                     self.perf_window = 0;
-                    self.console.force_mode(led_console::Mode::Home);
                     return;
                 }
                 let idx = self.tracks_window + i - 1; // -1: слот ALL PERFS
@@ -2745,9 +2747,7 @@ impl App {
                     self.config.ui.active_folder = Some(idx);
                     let _ = self.config.save();
                     self.refresh_console_list();
-                    self.perf_window = 0; // новая папка — с первой страницы
-                    self.console.force_mode(led_console::Mode::Home);
-                    // mode-entry sync подхватит след. кадром (prev=Tracks≠Home)
+                    self.perf_window = 0;
                 }
             }
             led_console::Action::SelectPattern(i) => {
