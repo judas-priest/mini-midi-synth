@@ -1069,11 +1069,12 @@ impl eframe::App for App {
                     self.show_keybinds_window = !self.show_keybinds_window;
                     self.keybind_capturing = None;
                 }
-                // #30: Dock/Tab тумблер драм-юнита в стиле соседних кнопок.
-                // Текстовая метка (стрелочные глифы в egui-шрифте не
-                // отрисовались — канон ⠿): метка = где юнит СЕЙЧАС,
-                // hover = что сделает клик
-                if ui.button(if self.config.ui.dock_bottom_unit { "Dock" } else { "Tab" })
+                // #30: Dock/Tab тумблер драм-юнита — глифы ⬆/⬇ (U+2B06/2B07)
+                // из emoji-icon-font, того же, что рисует ⚙/⌨ (проверено по
+                // cmap шрифтов egui; тонких стрелок U+2191 там НЕТ — кнопка
+                // была пустой). ⬇ = юнит на вкладке, клик докирует;
+                // ⬆ = юнит в доке, клик возвращает на вкладку
+                if ui.button(if self.config.ui.dock_bottom_unit { "\u{2B06}" } else { "\u{2B07}" })
                     .on_hover_text(if self.config.ui.dock_bottom_unit {
                         "Seq unit is docked at the window bottom — click to move it to the Drums tab"
                     } else {
