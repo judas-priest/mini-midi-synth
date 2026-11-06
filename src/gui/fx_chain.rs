@@ -47,12 +47,12 @@ impl App {
                     // Swap buttons (outside closure so we can act on the chain).
                     // Хит-зона 24×24 — WCAG 2.5.8 (голый small_button ~20px)
                     ui.horizontal(|ui| {
-                        let up = ui.add_sized([24.0, 24.0], egui::Button::new("↑").small())
+                        let up = ui.add_sized([24.0, 24.0], egui::Button::new("\u{2B06}").small())
                             .on_hover_text("Move up");
                         if i > 0 && up.clicked() {
                             swap = Some((i - 1, i));
                         }
-                        let down = ui.add_sized([24.0, 24.0], egui::Button::new("↓").small())
+                        let down = ui.add_sized([24.0, 24.0], egui::Button::new("\u{2B07}").small())
                             .on_hover_text("Move down");
                         if i + 1 < FX_SLOTS && down.clicked() {
                             swap = Some((i, i + 1));
