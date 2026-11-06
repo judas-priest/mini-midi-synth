@@ -262,12 +262,16 @@ pub enum OscState {
     },
     BassGuitar(BassModel),
     BowedString {
-        bridge_delay: Vec<f32>, // DelayL bridge: запись wpos, чтение
-                                // линейной интерполяцией позади (дробная
+        bridge_delay: Vec<f32>, // DelayA bridge: запись wpos, чтение
+                                // allpass-интерполяцией позади (дробная
                                 // задержка base_delay·β)
         bridge_wpos: usize,
+        bridge_ap_x: f32,       // allpass-интерполятор: prev input (x[n−1])
+        bridge_ap_y: f32,       // allpass-интерполятор: prev output (y[n−1])
         nut_delay: Vec<f32>,
         nut_wpos: usize,
+        nut_ap_x: f32,          // allpass-интерполятор nut-линии
+        nut_ap_y: f32,
         nut_vib: f32,           // вибрато: доп. длина nut-линии в сэмплах
         vib_phase: f32,         // фаза вибрато-LFO (6.13 Гц, STK)
         string_filter_state: f32, // one-pole loop loss (pole 0.95, gain 0.95)
@@ -600,7 +604,9 @@ impl Oscillator {
             },
             OscType::BowedString => OscState::BowedString {
                 bridge_delay: Vec::new(), bridge_wpos: 0,
+                bridge_ap_x: 0.0, bridge_ap_y: 0.0,
                 nut_delay: Vec::new(), nut_wpos: 0,
+                nut_ap_x: 0.0, nut_ap_y: 0.0,
                 nut_vib: 0.0, vib_phase: 0.0, string_filter_state: 0.0,
                 body_bq: [[0.0; 5]; 6], body_x1: [0.0; 6], body_x2: [0.0; 6],
                 body_y1: [0.0; 6], body_y2: [0.0; 6],
@@ -1531,12 +1537,10 @@ impl Oscillator {
         let _ = body_type; // body bank — violin для всех типов (см. план)
         self.reclaim_buffers();
         let sample_rate = self.sample_rate;
-        // Питч-компенсация: linear-interp (≈1 сэмпл) + ГРУППОВАЯ задержка
-        // one-pole loop-фильтра (pole 0.95) на частоте ноты — аналитически.
-        // Плановая константа «≈2 сэмпла» на деле ~7–17 сэмплов (τ растёт к
-        // низким частотам): без этого струна плывёт −4…−6 % по всему
-        // диапазону (замер: C3 126.0 Гц, C4 244.9 Гц, C5 494.8 Гц).
-        let a = 0.95f32;
+        // Питч-компенсация: allpass-interp (≈1 сэмпл) + ГРУППОВАЯ задержка
+        // one-pole loop-фильтра (pole = 0.75 − 0.2·22050/sr, STK) на частоте
+        // ноты — аналитически. Без этого струна плывёт по диапазону.
+        let a = 0.75f32 - 0.2 * 22050.0 / sample_rate;
         let w = std::f32::consts::TAU * freq / sample_rate;
         let tau = (a * w.cos() - a * a) / (1.0 - 2.0 * a * w.cos() + a * a);
         let base_delay = (sample_rate / freq - tau - 1.0).max(4.0);
@@ -1585,8 +1589,12 @@ impl Oscillator {
         self.state = OscState::BowedString {
             bridge_delay,
             bridge_wpos: 0,
+            bridge_ap_x: 0.0,
+            bridge_ap_y: 0.0,
             nut_delay,
             nut_wpos: 0,
+            nut_ap_x: 0.0,
+            nut_ap_y: 0.0,
             nut_vib: 0.0,
             vib_phase: 0.0,
             string_filter_state: 0.0,
@@ -1609,18 +1617,35 @@ impl Oscillator {
     }
 
     /// Bowed string tick: STK single-loop waveguide (both reflections
-    /// inverted, fractional DelayL reads, STK bow table, Maestre body bank
-    /// outside the loop, vibrato).
+    /// inverted, fractional DelayA-style allpass reads — |H|=1, нулевая
+    /// потеря амплитуды на любом дробном сдвиге; линейная интерполяция
+    /// душила петлю: на высоких нотах gain падал ниже порога sustain
+    /// (ноты ≥ Bb3 умирали в шумовой пол), на низких толкала энергию в 2f0.
+    /// STK bow table, Maestre body bank вне петли, vibrato).
     fn tick_bowed_string(&mut self, env: f32) -> f32 {
-        // Дробное чтение позади wpos (linear interp)
-        fn delay_read(buf: &[f32], wpos: usize, delay: f32) -> f32 {
+        // Дробное чтение позади wpos: first-order allpass (Thiran/Regalia)
+        // между соседними тапами. |H| = 1 точно на всех частотах — петля
+        // не теряет энергию на интерполяции (STK DelayA заменяет линейную
+        // интерполяцию именно по этой причине). Состояние per-line, живёт
+        // между сэмплами: y[n] = c·x[n] + x[n−1] − c·y[n−1],
+        // c = (1−frac)/(1+frac).
+        fn delay_read_ap(
+            buf: &[f32], wpos: usize, delay: f32,
+            ap_x1: &mut f32, ap_y1: &mut f32,
+        ) -> f32 {
             let n = buf.len();
             let r = wpos as f32 - delay;
             let i0f = r.floor();
             let frac = r - i0f;
             let i0 = (i0f as isize).rem_euclid(n as isize) as usize;
-            let i1 = (i0 + 1) % n;
-            buf[i0] + frac * (buf[i1] - buf[i0])
+            // x[n−1] не читаем из кольца: из-за сдвига wpos на 1 сэмпл/тик
+            // tap i0+1 сегодня = tap i0 вчера = *ap_x1 (уже в состоянии).
+            let s1 = buf[i0]; // меньшая задержка (ближе к wpos)
+            let c = if frac >= 0.999 { 0.999 } else { (1.0 - frac) / (1.0 + frac) };
+            let y = c * (s1 - *ap_y1) + *ap_x1;
+            *ap_x1 = s1;
+            *ap_y1 = y;
+            y
         }
         fn write(buf: &mut [f32], wpos: &mut usize, v: f32) {
             buf[*wpos] = v;
@@ -1628,8 +1653,8 @@ impl Oscillator {
         }
 
         if let OscState::BowedString {
-            bridge_delay, bridge_wpos,
-            nut_delay, nut_wpos, nut_vib, vib_phase,
+            bridge_delay, bridge_wpos, bridge_ap_x, bridge_ap_y,
+            nut_delay, nut_wpos, nut_ap_x, nut_ap_y, nut_vib, vib_phase,
             string_filter_state,
             body_bq, body_x1, body_x2, body_y1, body_y2,
             bow_slope, bow_beta, base_delay,
@@ -1649,27 +1674,45 @@ impl Oscillator {
             // субгармонический ряд (чужие высоты, #56а)
             // clamp СКОБКАМИ на произведение: иначе .max(1.0) применился бы
             // к (1+nut_vib) и срезал нижнюю половину вибрато
+            // БЕЗ flush: петлевые состояния (delay-линии, string filter)
+            // не flush'аем — flush убивает хвост, который петля должна
+            // нести (sustain); denormal-защита остаётся только на
+            // непетлевых выходных состояниях.
             let nut_d = (*base_delay * (1.0 - *bow_beta) * (1.0 + *nut_vib))
-                .min(nut_delay.len() as f32 - 1.0)
+                .min(nut_delay.len() as f32 - 2.0)
                 .max(1.0); // guard: чтение всегда внутри кольца
-            let bridge_d = *base_delay * *bow_beta;
-            let nut_refl = -flush(delay_read(nut_delay, *nut_wpos, nut_d));
-            let br_raw = flush(delay_read(bridge_delay, *bridge_wpos, bridge_d));
+            let bridge_d = (*base_delay * *bow_beta)
+                .min(bridge_delay.len() as f32 - 2.0);
+            let nut_refl = -delay_read_ap(nut_delay, *nut_wpos, nut_d, nut_ap_x, nut_ap_y);
+            let br_raw = delay_read_ap(bridge_delay, *bridge_wpos, bridge_d, bridge_ap_x, bridge_ap_y);
 
-            // 2) Loop loss: one-pole pole 0.95, gain 0.95 (STK stringFilter)
-            *string_filter_state =
-                flush(0.05 * br_raw + 0.95 * *string_filter_state);
+            // 2) Loop loss: STK stringFilter дословно — one-pole с
+            //    pole = 0.75 − 0.2·22050/sr (≈0.658 @48k), b0 = 1 − pole
+            //    (DC-нормировка, «peak unity»), gain 0.95 → |H| ≈ 0.95 на
+            //    ЛЮБОЙ аудио-частоте. Прежний pole 0.95 при DC-нормировке
+            //    давил всё выше ~30 Гц: |H(f0)| = 0.90 на C4, 0.57 на C5 —
+            //    ноты ≥ Bb3 теряли loop-gain и умирали в шумовой пол.
+            let sf_p = 0.75f32 - 0.2 * 22050.0 / sample_rate;
+            let sf_b0 = 1.0 - sf_p;
+            *string_filter_state = sf_b0 * br_raw + sf_p * *string_filter_state;
             let br_refl = -0.95 * *string_filter_state;
 
             // 3) Bow table (STK BowTabl): slope = 5 − 4·pressure;
             //    bow velocity под огибающей (STK: maxVel·adsr)
-            let bow_vel = 0.3 * env;
+            // Скорость смычка: буст ×8 с потолком — смычок разгоняется за
+            // ~35 мс независимо от amp_attack. Амп-огибающая (0.2 с, Task 3)
+            // управляет громкостью НАРУЖУ (voice.rs final_amp умножает выход
+            // ещё раз); пропорциональная подача env в смычок при медленной
+            // атаке = низкая скорость смычка → струна «hoots» октавой (STK
+            // физика: low bow speed → octave hoot; замер: C4 521.7 Гц весь
+            // onset при amp_attack 0.2).
+            let bow_vel = 0.3 * (env * 8.0).min(1.0);
             let v_delta = bow_vel - (br_refl + nut_refl);
             let force = v_delta / ((*bow_slope * v_delta.abs() + 0.75).powi(4));
 
             // 4) Инжекция в обе линии (STK-канон: force в ОБЕ)
-            let nut_in = flush(br_refl + force);
-            let br_in = flush(nut_refl + force);
+            let nut_in = br_refl + force;
+            let br_in = nut_refl + force;
             write(nut_delay, nut_wpos, nut_in);
             write(bridge_delay, bridge_wpos, br_in);
 
