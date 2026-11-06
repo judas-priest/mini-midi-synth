@@ -9,3 +9,4 @@ android/symbols/
 fuzz/target/
 fuzz/artifacts/
 fuzz/coverage/
+vendor/cpal/.cargo-checksum.json
