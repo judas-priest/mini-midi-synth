@@ -49,10 +49,6 @@ impl Compressor {
     }
 
     #[allow(dead_code)]
-    pub fn set_attack(&mut self, v: f32) { self.attack = v; self.update_coeffs(); }
-    #[allow(dead_code)]
-    pub fn set_release(&mut self, v: f32) { self.release = v; self.update_coeffs(); }
-    #[allow(dead_code)]
     pub fn attack(&self) -> f32 { self.attack }
     #[allow(dead_code)]
     pub fn release(&self) -> f32 { self.release }

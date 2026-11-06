@@ -323,11 +323,6 @@ impl SamplerEngine {
         self.drums.rebuild(None, self.sample_rate, self.block_size)
     }
 
-    #[allow(dead_code)]
-    pub fn keys_loaded(&self) -> bool { self.keys.is_loaded() }
-    #[allow(dead_code)]
-    pub fn drums_loaded(&self) -> bool { self.drums.is_loaded() }
-
     /// Returns both displaced sub-synths (keys, drums) for deferred freeing.
     #[must_use = "the displaced soundfonts must be freed off the audio thread"]
     pub fn set_block_size(&mut self, size: usize) -> (Displaced, Displaced) {

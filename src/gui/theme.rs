@@ -116,14 +116,6 @@ pub const KEY_WHITE_ACTIVE: Color32 = Color32::from_rgb(80, 180, 255);
 /// Black piano key active / pressed.
 pub const KEY_BLACK_ACTIVE: Color32 = Color32::from_rgb(60, 140, 220);
 
-/// Cyan pad idle color (top row).
-#[allow(dead_code)] // palette reference
-pub const PAD_CYAN: Color32 = Color32::from_rgb(0, 200, 210);
-
-/// Pink pad idle color (bottom row).
-#[allow(dead_code)] // palette reference
-pub const PAD_PINK: Color32 = Color32::from_rgb(220, 60, 150);
-
 /// Pad-perf top-row accent (≥3:1 к BG_PAD_EMPTY; чёрный текст ≥4.5:1).
 pub const PAD_PERF_TOP: Color32 = Color32::from_rgb(0, 140, 160);
 

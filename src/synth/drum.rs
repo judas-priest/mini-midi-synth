@@ -1388,11 +1388,6 @@ impl DrumEngine {
         let vol = self.volume * self.volume; // perceptual curve
         ((out_l * vol + click * vol, out_r * vol + click * vol), sf2_triggers)
     }
-
-    #[allow(dead_code)]
-    pub fn slot_name(slot: usize) -> &'static str {
-        if slot < NUM_DRUM_SLOTS { DRUM_NAMES[slot] } else { "?" }
-    }
 }
 
 #[cfg(test)]
