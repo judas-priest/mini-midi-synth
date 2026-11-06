@@ -19,6 +19,9 @@ pub enum Mode {
     Menu,
     /// Выбор активной папки-трека (#57): слоты 1..=7 = папки, слот 0 = выход.
     Tracks,
+    /// Перфы активной папки (#57 иерархия): слоты 1..=7 = перфы папки
+    /// (window-local), слот 0 = MENU — назад в меню треков.
+    FolderPerfs,
 }
 
 /// Console input events (note -> slot by the caller).
@@ -160,9 +163,21 @@ impl LedConsole {
             };
         }
         if self.mode == Mode::Tracks {
-            // слот 0 = MENU (белый) — тап возвращает в HOME
-            if slot == 0 { self.mode = Mode::Home; return None; }
-            return Some(Action::TrackSelect(slot - 1)); // window-local, канон SelectPattern
+            // слот 0 = MENU (белый) — НАЗАД на уровень: верхнее меню
+            if slot == 0 { self.mode = Mode::Menu; return None; }
+            // слоты 1..=7 = папки: DRILL-DOWN — режим FolderPerfs ставится
+            // ЗДЕСЬ (optimistic: handler в том же кадре ставит active_folder
+            // и обновит console_list до paint); Action несёт window-local слот.
+            // perf_window = 0 — НЕ ЗДЕСЬ (поле на App, не LedConsole; сброс
+            // делает TrackSelect handler в mod.rs)
+            self.mode = Mode::FolderPerfs;
+            return Some(Action::TrackSelect(slot - 1));
+        }
+        if self.mode == Mode::FolderPerfs {
+            // слот 0 = MENU (белый) — НАЗАД: меню треков
+            if slot == 0 { self.mode = Mode::Tracks; return None; }
+            // слоты 1..=7 = перфы папки (window-local): тап = загрузить
+            return Some(Action::LoadPerf(slot));
         }
         if slot == 0 {
             // always-visible MENU button (top-left): tap = open menu
@@ -174,8 +189,8 @@ impl LedConsole {
             Mode::Home => Action::LoadPerf(slot),
             Mode::Pattern => Action::SelectPattern(slot - 1),
             Mode::Mute => Action::ToggleMute(slot - 1),
-            // Tracks обрабатывается выше (ранний return), Menu — выше
-            Mode::Tracks | Mode::Menu => unreachable!(),
+            // Tracks/FolderPerfs обрабатываются выше (ранний return), Menu — выше
+            Mode::Tracks | Mode::Menu | Mode::FolderPerfs => unreachable!(),
         })
     }
 
@@ -220,7 +235,9 @@ impl LedConsole {
             c[0] = [0xFF, 0xFF, 0xFF]; // MENU button (white)
         }
         match self.mode {
-            Mode::Home => {
+            // FolderPerfs красится через top_colors КАК Home ( поверх
+            // console_list = алиасы активной папки)
+            Mode::Home | Mode::FolderPerfs => {
                 for (i, col) in c.iter_mut().enumerate().skip(1) {
                     let idx = w_perf + i - 1;
                     if Some(idx) == active_perf {
@@ -317,33 +334,22 @@ impl LedConsole {
         self.mode
     }
 
-    /// Пэды режима Tracks (#57): слот 0 = MENU белый, слот 1 при w==0 =
-    /// виртуальный "(ALL PERFS)" (оранжевый), 1..=7 = папки (активная FF00FF
-    /// пурпур, остальные FF8000 оранжевый, пустые — чёрный).
+    /// Режим Tracks: список папок. Оранжевые FF8000 (validated), активная
+    /// папка — пурпур-маркер последнего входа. ALL PERFS-слота нет: выход
+    /// к общим перфам = MENU → синяя плитка HOME (иерархия #57 UX).
     pub fn folder_colors(
         &self, active_folder: Option<usize>, filled: usize, w: usize,
     ) -> [[u8; 3]; 8] {
-        // Ряд TRACKS: оранжевые папки (FF8000, validated), активная — пурпур
-        // (канон режимов). Слот 1 при w==0 = виртуальный "(ALL PERFS)" —
-        // выход к общим перфам с пэдов (юзер-спека 2026-11-06).
         let mut out = [[0x00, 0x00, 0x00]; 8];
         out[0] = [0xFF, 0xFF, 0xFF]; // MENU
         for (i, col) in out.iter_mut().enumerate().skip(1) {
             let idx = w + i - 1;
-            if idx == 0 && w == 0 {
-                *col = [0xFF, 0x80, 0x00]; // (ALL PERFS)
-                continue;
-            }
-            let folder = idx - 1; // -1: слот ALL PERFS
-            // ВАЖНО: bound-first — stale active_folder ≥ filled (папка
-            // удалена, конфиг не пересохранён) не должен красить пустой слот
-            if folder >= filled {
-                *col = [0x00, 0x00, 0x00];
-            } else if Some(folder) == active_folder {
-                *col = [0xFF, 0x00, 0xFF]; // active: magenta
+            if idx >= filled { break; }
+            *col = if Some(idx) == active_folder {
+                [0xFF, 0x00, 0xFF] // последняя посещённая папка
             } else {
-                *col = [0xFF, 0x80, 0x00];
-            }
+                [0xFF, 0x80, 0x00] // папка: orange
+            };
         }
         out
     }
@@ -503,17 +509,53 @@ mod tests {
         c.on_event(PadEvent::Down(1), now);
         assert_eq!(c.on_event(PadEvent::Up(1), now + Duration::from_millis(30)),
                    Some(Action::TrackSelect(0)));
+        assert_eq!(c.mode(), Mode::FolderPerfs); // tap = вход в папку
     }
 
     #[test]
-    fn tracks_menu_slot_tap_returns_home() {
-        // #57: слот 0 в Tracks = возврат в HOME (не открыть меню)
+    fn tc_tracks_tap_drills_into_folder() {
+        // #57 UX: тап папки в TRACKS = DRILL-DOWN — режим FolderPerfs
+        // ставится state-машиной ЗДЕСЬ, Action несёт window-local слот
+        let mut c = LedConsole::new();
+        c.mode = Mode::Tracks;
+        assert_eq!(c.on_event(PadEvent::Down(1), Instant::now()), None);
+        assert_eq!(c.on_event(PadEvent::Up(1), Instant::now() + Duration::from_millis(50)),
+                   Some(Action::TrackSelect(0)));
+        assert_eq!(c.mode(), Mode::FolderPerfs);
+    }
+
+    #[test]
+    fn tc_folderperfs_menu_goes_back_to_tracks() {
+        // MENU = назад на уровень: FolderPerfs → Tracks
+        let mut c = LedConsole::new();
+        c.mode = Mode::FolderPerfs;
+        assert_eq!(c.on_event(PadEvent::Down(0), Instant::now()), None);
+        assert_eq!(c.on_event(PadEvent::Up(0), Instant::now() + Duration::from_millis(50)),
+                   None); // слот 0 = смена режима внутрь state-машины (без Action)
+        assert_eq!(c.mode(), Mode::Tracks);
+    }
+
+    #[test]
+    fn tc_tracks_menu_goes_to_top_menu() {
+        // MENU = назад на уровень: Tracks → верхнее меню
+        let mut c = LedConsole::new();
+        c.mode = Mode::Tracks;
+        assert_eq!(c.on_event(PadEvent::Down(0), Instant::now()), None);
+        assert_eq!(c.on_event(PadEvent::Up(0), Instant::now() + Duration::from_millis(50)),
+                   None);
+        assert_eq!(c.mode(), Mode::Menu);
+    }
+
+    #[test]
+    fn tracks_menu_slot_tap_back_to_top_menu() {
+        // #57 иерархия: слот 0 в Tracks = НАЗАД на уровень — верхнее меню
+        // (из него синяя плитка HOME — выход к общим перфам)
         let mut c = LedConsole::new();
         c.mode = Mode::Tracks;
         let now = Instant::now();
         c.on_event(PadEvent::Down(0), now);
         assert_eq!(c.on_event(PadEvent::Up(0), now + Duration::from_millis(30)), None);
-        assert_eq!(c.mode, Mode::Home);
+        assert_eq!(c.mode, Mode::Menu);
     }
 
     #[test]
@@ -540,20 +582,28 @@ mod tests {
 
     #[test]
     fn tc_tracks_colors_all_perfs_and_folders() {
-        // Ряд TRACKS: слот 1 (w=0) = ALL PERFS; папки оранжевые; активная пурпур
+        // #57 иерархия: слоты 1..=7 = папки БЕЗ сдвига (пресс-what-you-see);
+        // оранжевые, активная пурпур, пустые — чёрные; ALL PERFS-слота нет
         let mut c = LedConsole::new();
         c.mode = Mode::Tracks;
         let none = c.folder_colors(None, 2, 0);
-        assert_eq!(none[1], [0xFF, 0x80, 0x00], "ALL PERFS slot must be orange");
-        assert_eq!(none[2], [0xFF, 0x80, 0x00], "folder 0 must be orange");
+        assert_eq!(none[0], [0xFF, 0xFF, 0xFF], "slot 0 = MENU white");
+        assert_eq!(none[1], [0xFF, 0x80, 0x00], "folder 0 orange (no ALL PERFS slot)");
+        assert_eq!(none[2], [0xFF, 0x80, 0x00], "folder 1 orange");
+        assert_eq!(none[3], [0x00, 0x00, 0x00], "no folder 2: OFF");
         let act = c.folder_colors(Some(0), 2, 0);
-        assert_eq!(act[1], [0xFF, 0x80, 0x00], "ALL PERFS slot");
-        assert_eq!(act[2], [0xFF, 0x00, 0xFF], "active folder 0 must be magenta");
-        // paging w=1: слот 1 = папка 0 (ALL PERFS только на первой странице)
-        let page2 = c.folder_colors(Some(0), 2, 1);
-        assert_eq!(page2[1], [0xFF, 0x00, 0xFF], "folder 0 magenta on page 2");
-        // TC7: ALL PERFS доступен даже с нулём папок
-        assert_eq!(c.folder_colors(None, 0, 0)[1], [0xFF, 0x80, 0x00], "ALL PERFS available even with zero folders");
+        assert_eq!(act[1], [0xFF, 0x00, 0xFF], "active folder 0 must be magenta");
+        assert_eq!(act[2], [0xFF, 0x80, 0x00], "folder 1 still orange");
+        // paging w=1: слот 1 = папка 1, без сдвига
+        let page2 = c.folder_colors(Some(1), 2, 1);
+        assert_eq!(page2[1], [0xFF, 0x00, 0xFF], "folder 1 magenta on page 2");
+        // ноль папок — все слоты тёмные (кроме MENU)
+        let empty = c.folder_colors(None, 0, 0);
+        assert_eq!(empty[0], [0xFF, 0xFF, 0xFF], "MENU stays white");
+        assert_eq!(empty[1], [0x00, 0x00, 0x00], "no folders: slots dark");
+        // bound-first: stale active_folder >= filled не красит пустой слот
+        let stale = c.folder_colors(Some(5), 2, 0);
+        assert_eq!(stale[3], [0x00, 0x00, 0x00], "stale active folder: OFF");
     }
 
     #[test]
