@@ -306,40 +306,93 @@ fn golden_engine_fx_chain_slots() {
 }
 
 // ── S2 pre-pin: parameter sweep golden (2026-11-07) ─────────────────────
-// Для каждого ключа to_map: экстремум-значение → полный рендер → хэш.
-// Пинит build_voice_params (magic scalings вида `* 4.0 + 0.5`) и
-// CachedFxParams::from_preset — ровно то, что переписывает реестр S2.
-// Расхождение = реестр изменил семантику масштаба. Осознанное
-// обновление goldens — только с diff-ревью звучания.
+// Свип полного набора параметров (~420 ключей) в КОНТЕКСТАХ:
+//  - каждый из 30 движков osc_type (движко-специфичные ключи);
+//  - «fx_all» — все _mix/_en FX-ключей = 1 (legacy + слоты): масштабы
+//    spring/neuron/tape/bonsai/exciter/... через CachedFxParams;
+//  - «lfo_open» — LFO-глубины = 1: темповые параметры модуляции.
+// В golden попадают только ЖИВЫЕ ключи (hash != baseline) — набор
+// самоподдерживающийся. Пинит build_voice_params и CachedFxParams —
+// ровно поверхность реестра S2.
+// Расхождение = реестр изменил семантику масштаба. Осознанное обновление
+// goldens — только с diff-ревью звучания (MINI_MIDI_GOLDEN_UPDATE=1).
 
-fn render_param_sweep(preset_name: &str) -> Vec<(String, u64)> {
+const SWEEP_ENGINES: u32 = 30; // OscType 0..=29 (oscillator.rs:104-133)
+
+fn render_sweep(
+    name: &str, overlays: &[(&str, f32)],
+    key_filter: impl Fn(&str) -> bool,
+) -> Vec<(String, u64)> {
     let patches = preset::load_all_patches();
-    let patch = patches.iter().find(|p| p.name.eq_ignore_ascii_case(preset_name))
-        .unwrap_or_else(|| panic!("preset '{}' not found", preset_name));
-    let mut entries = Vec::new();
-    // JSON пресетов sparse (только отклонения) — свип поверх ПОЛНОГО
-    // дефолтного набора ключей, оверлей значениями пресета
+    let patch = patches.iter().find(|p| p.name.eq_ignore_ascii_case("Init"))
+        .expect("Init preset not found").clone();
+    // Полный дефолтный набор ключей (JSON пресетов sparse) + оверлей
     let mut base = mini_midi_synth::synth::PatchParams::default().to_map();
     for (k, v) in &patch.params {
         base.insert(k.clone(), *v);
     }
+    for (k, v) in overlays {
+        base.insert(k.to_string(), *v);
+    }
+    let mut p0 = patch.clone();
+    p0.params = base.clone();
+    let baseline = render_preset_hash(&p0);
+    let mut entries = Vec::new();
     for (k, v) in &base {
+        if !key_filter(k) { continue; }
         let mut m = base.clone();
-        // Экстремум, отличный от текущего; клампы from_map легитимны
         m.insert(k.clone(), if *v == 0.5 { 0.25 } else { 0.5 });
         let mut p = patch.clone();
         p.params = m;
-        entries.push((format!("{preset_name}|{k}"), render_preset_hash(&p)));
+        let h = render_preset_hash(&p);
+        if h != baseline {
+            entries.push((format!("{name}|{k}"), h));
+        }
     }
     entries
+}
+
+type SweepCtx = (String, Vec<(&'static str, f32)>, fn(&str) -> bool);
+
+fn sweep_contexts() -> Vec<SweepCtx> {
+    let all: fn(&str) -> bool = |_| true;
+    let mut c: Vec<SweepCtx> = (0..SWEEP_ENGINES)
+        .map(|t| (format!("e{t}"), vec![("osc_type", t as f32)], all))
+        .collect();
+    // FX-семейства: у каждого свой флаг активации (spring требует
+    // reverb_type>0.5 — mod.rs:3871; свипается только семейство —
+    // рантайм ~секунды на контекст)
+    let fam: Vec<SweepCtx> = vec![
+        ("spring".to_string(), vec![("reverb_type", 1.0), ("spring_mix", 1.0)],
+            |k| k.starts_with("spring_")),
+        ("tape".to_string(), vec![("tape_mix", 1.0)], |k| k.starts_with("tape_")),
+        ("neuron".to_string(), vec![("neuron_mix", 1.0)], |k| k.starts_with("neuron_")),
+        ("ring_mod".to_string(), vec![("ring_mod_mix", 1.0)], |k| k.starts_with("ring_mod_")),
+        ("freq_shift".to_string(), vec![("freq_shift_mix", 1.0)], |k| k.starts_with("freq_shift_")),
+        ("wave_shaper".to_string(), vec![("wave_shaper_mix", 1.0)], |k| k.starts_with("wave_shaper_")),
+        ("inter_ws".to_string(), vec![("inter_ws_mix", 1.0)], |k| k.starts_with("inter_ws_")),
+        ("delay".to_string(), vec![("delay_mix", 1.0)],
+            |k| k.starts_with("delay_")),
+        ("env".to_string(), vec![("filter_env_amount", 0.5), ("noise_level", 0.3)],
+            |k| k.ends_with("_shape") || k == "filter_hold"),
+        // LFO2 с открытыми глубинами: rate/waveform/deform становятся слышимыми
+        ("lfo2".to_string(), vec![
+            ("lfo2_pitch_depth", 1.0), ("lfo2_filter_depth", 1.0), ("lfo2_amp_depth", 1.0),
+        ], |k| k.starts_with("lfo2_")),
+        ("lfo1".to_string(), vec![
+            ("lfo_pitch_depth", 1.0), ("lfo_filter_depth", 1.0), ("lfo_amp_depth", 1.0),
+        ], |k| k.starts_with("lfo1_") || k.starts_with("lfo_") && !k.starts_with("lfo2")),
+    ];
+    c.extend(fam);
+    c
 }
 
 #[test]
 fn golden_param_sweep_hashes_match() {
     let mut entries = Vec::new();
-    for name in ["Init", "Chorus Pad"] {
-        entries.extend(render_param_sweep(name));
+    for (name, overlays, pred) in sweep_contexts() {
+        entries.extend(render_sweep(&name, &overlays, pred));
     }
-    assert!(entries.len() > 300, "sweep too small: {}", entries.len());
+    assert!(entries.len() > 600, "sweep too small: {}", entries.len());
     check_golden("param_sweep_hashes.txt", &entries);
 }
