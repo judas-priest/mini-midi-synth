@@ -1096,7 +1096,11 @@ delete/reorder папок, add current/perf-from-list, remove alias — КАЖД
 мутация persist + refresh). Flat fallback: без папок — прежнее поведение.
 Тесты: config_folders 4/4, led_console +3 (Tracks-семантика), 183 lib.
 Out of scope: drag-reorder (egui_dnd), UUID, экспорт сетлистов, CBOR.
-Полироль от ревью: MENU-экран слот 3 тёмный (теперь функционален — покрасить),
+Полироль: MENU-слот 3 покрашен в оранжевый TRACKS (PR #78, юзер-спека
+«пад 20 = режим треков, режим отличается цветом»); TRACKS-режим = оранжевые
+папки + пурпур-актив, пад 18 на первой странице = (ALL PERFS) — выход к общим
+перфам С ПЭДОВ (юзер-вопрос закрыт); page_window clamp n+1. Хвост-полироль:
+
 LoadPerf-tombstone toast в flat-режиме вводит в заблуждение (редкий кейс).
 
 ## 57. Перфы: папки-треки (Setlists) — НОВОЕ (идея юзера 2026-11-05, гугл практик: Helix setlists = алиасы пресетов)
