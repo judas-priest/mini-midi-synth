@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-anchor-checked: 2026-11-06 (база = master 3908063; факты вычитаны из кода; юзер-спека: «пад 20 = режим треков, режим отличается цветом, логика — как у трёх существующих режимов»; audit 2026-11-06 — menu slot 3 тёмный, вход в TRACKS уже реализован (menu_slot3_tap_opens_tracks), ALL PERFS отсутствует)
+anchor-checked: 2026-11-06 (база = master e33021a (3908063 — docs-коммит поверх, содержимое идентично); факты вычитаны из кода; юзер-спека: «пад 20 = режим треков, режим отличается цветом, логика — как у трёх существующих режимов»; audit 2026-11-06 — menu slot 3 тёмный (:256-268), вход в TRACKS уже реализован (menu_slot3_tap_opens_tracks :480), ALL PERFS отсутствует)
 
 **Goal:** TRACKS — полноценный четвёртый режим консоли по канону трёх существующих:
 MENU-плитка на паде 20 = оранжевая; в режиме ряд пэдов = оранжевые папки, активная
@@ -56,6 +56,10 @@ prev_next_step_semantics/там же).
 - TC5 (tap-семантика, экран + код-ревью): TRACKS, w=0: тап пэда 18 → ALL PERFS
   (active_folder=None, Home); тап пэда 19 → папка 0; 28/29 страницы листают
   w=0/1.
+- TC7 (filled=0): `folder_colors(None, 0, 0)`: слот 1 = оранжевый ALL PERFS,
+  остальные тёмные — выход к общим перфам доступен даже без папок.
+- TC8 (paging ≥7 папок): `window_max_start(n+1)` — последняя папка достижима
+  с пэдов (Task 2 a2 clamp).
 
 ## Negative Matrix
 
@@ -68,6 +72,9 @@ prev_next_step_semantics/там же).
 - MENU в TRACKS-режиме (слот 0) — белый MENU-тап → Home с треком (не сброс);
   сброс только через повторный вход TRACKS → ALL PERFS (юзер-спека).
 - непроверенные hue — не используем (только FF8000/FF00FF).
+- folders.len() = 0: TC7 — ALL PERFS тап → None (idempotent, безопасно).
+- ≥7 папок: page_window clamp n+1 (TC8) — последняя папка достижима.
+- существующий тест menu_slot3_led_is_off — обновляется spec-driven (Step 2/3a2).
 - дубликат TrackSelect-тапа в один кадр — консоль шлёт одно событие на тап.
 
 ---
@@ -109,9 +116,11 @@ prev_next_step_semantics/там же).
 
 - [ ] **Step 2: красный**
 
-Run: `cargo test --lib tc_menu_orange tc_tracks_colors 2>&1 | tail -5`
-Expected: tc_menu_orange FAIL (слот 3 чёрный), tc_tracks_colors FAIL
-(жёлтый ALL PERFS отсутствует — синие папки).
+Run: `cargo test --lib tc_menu_orange tc_tracks_colors menu_slot3_led_is_off 2>&1 | tail -6`
+Expected: tc_menu_orange + tc_tracks_colors FAIL; **существующий тест
+`menu_slot3_led_is_off` (led_console.rs:512-523) тоже FAIL** — он пинит слот 3
+чёрным; в Step 3 обновить его ожидание на `[0xFF, 0x80, 0x00]` (изменение
+существующего теста осознанное и spec-driven: слот 3 теперь TRACKS-плитка).
 
 - [ ] **Step 3: реализация.**
 
@@ -122,7 +131,14 @@ Expected: tc_menu_orange FAIL (слот 3 чёрный), tc_tracks_colors FAIL
                         _ => [0x00, 0x00, 0x00],
 ```
 
-(b) folder_colors — заменить тело:
+(a2) Обновить тест `menu_slot3_led_is_off` (led_console.rs:512-523):
+`menu[3]` ожидание `[0x00, 0x00, 0x00]` → `[0xFF, 0x80, 0x00]` + переименовать
+в `menu_slot3_led_is_orange_tracks` (слот 3 теперь TRACKS-плитка — spec-driven).
+
+(b) folder_colors — заменить тело (заодно обновить протухшие комментарии:
+top_colors doc «menu slot 3 is dark» (:198-199) → «slot 3 = orange TRACKS»;
+Mode::Menu arm comment «slot 3 is dark (target toggle removed)» (:257-259) →
+удалить/заменить; doc folder_colors «0066FF синий» → оранжевый):
 
 ```rust
     pub fn folder_colors(
@@ -140,12 +156,14 @@ Expected: tc_menu_orange FAIL (слот 3 чёрный), tc_tracks_colors FAIL
                 continue;
             }
             let folder = idx - 1; // -1: слот ALL PERFS
-            if Some(folder) == active_folder {
-                *col = [0xFF, 0x00, 0xFF]; // active: magenta
-            } else if folder < filled {
-                *col = [0xFF, 0x80, 0x00];
-            } else {
+            // ВАЖНО: bound-first — stale active_folder ≥ filled (папка
+            // удалена, конфиг не пересохранён) не должен красить пустой слот
+            if folder >= filled {
                 *col = [0x00, 0x00, 0x00];
+            } else if Some(folder) == active_folder {
+                *col = [0xFF, 0x00, 0xFF]; // active: magenta
+            } else {
+                *col = [0xFF, 0x80, 0x00];
             }
         }
         out
@@ -196,6 +214,19 @@ git add src/gui/led_console.rs && git commit -m "feat: TRACKS menu tile orange (
 (Остальные действия в TRACKS — MENU-тап слота 0 → Home с треком — уже
 реализованы; полировка: перед force_mode(Home) при ALL PERFS логика
 mode-entry sync Home-плечо сама снимет follow.)
+
+(a2) **page_window Tracks-плечо — clamp +1** (список TRACKS = folders+1
+виртуальный ALL PERFS; старый clamp по folders.len() делал последний папок
+недостижимым при ≥7 папках):
+
+```rust
+            led_console::Mode::Tracks => {
+                let max_w = led_console::window_max_start(
+                    self.config.ui.perf_folders.len() + 1);
+                self.tracks_window = (self.tracks_window as i32 + delta)
+                    .clamp(0, max_w as i32) as usize;
+            }
+```
 
 - [ ] **Step 2: гейт**
 
