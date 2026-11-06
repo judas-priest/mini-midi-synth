@@ -1497,3 +1497,45 @@ fn tc_linear_interp_bit_identical_to_canon() {
             "linear interp diverges at delay={delay_raw}");
     }
 }
+
+// ── QW1: CC scope SSOT (2026-11-07 refactor-audit) ──────────────────
+
+#[test]
+fn tc_registry_global_keys_have_global_scope() {
+    for m in crate::cc_map::PARAM_REGISTRY {
+        if crate::cc_map::is_global_param(m.key) {
+            assert_eq!(m.scope, crate::cc_map::ParamScope::Global,
+                "registry scope contradicts GLOBAL_PARAM_KEYS for '{}'", m.key);
+        }
+    }
+}
+
+#[test]
+fn tc_cc_scope_survives_config_roundtrip() {
+    let mut config = crate::config::Config::default();
+    let bindings: std::collections::BTreeMap<u8, crate::cc_map::CcBindingRaw> =
+        crate::cc_map::CcMap::default_map().bindings.iter().enumerate()
+            .filter_map(|(cc, b)| {
+                let b = (*b)?;
+                Some((cc as u8, crate::cc_map::CcBindingRaw {
+                    param_key: b.param_key.to_string(),
+                    min_val: b.min_val, max_val: b.max_val,
+                    logarithmic: b.logarithmic, scope: b.scope,
+                }))
+            }).collect();
+    config.cc_map = Some(crate::cc_map::CcMapRaw { bindings: bindings.clone() });
+    let map = crate::cc_map::CcMap::from_config(&config);
+    for cc in [54u8, 66] {
+        let b = map.bindings[cc as usize].expect("binding present");
+        assert_eq!(b.scope, crate::cc_map::ParamScope::Global,
+            "CC{cc} {} must stay Global after roundtrip", b.param_key);
+    }
+    // SSOT-forcing: конфиг со СТАРОЙ записью scope=Patch — реестр правит
+    let mut stale = bindings;
+    stale.get_mut(&66).unwrap().scope = crate::cc_map::ParamScope::Patch;
+    let cfg2 = crate::config::Config { cc_map: Some(crate::cc_map::CcMapRaw { bindings: stale }), ..Default::default() };
+    let map2 = crate::cc_map::CcMap::from_config(&cfg2);
+    assert_eq!(map2.bindings[66].as_ref().unwrap().scope,
+        crate::cc_map::ParamScope::Global,
+        "registry is SSOT: stale saved scope must be overridden");
+}
