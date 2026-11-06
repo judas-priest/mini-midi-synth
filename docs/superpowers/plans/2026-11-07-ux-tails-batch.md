@@ -52,8 +52,9 @@ Tracks-менеджере ↑/↓ двигают выделение папок, 
 rename-TextEdit не конфликтует со стрелками; (3) #34/#35 браузер-часть —
 пометить ГОТОВО (уже реализовано).
 
-- TC1 (sync): active_folder = Some(9), folders 12 → tracks_window = 5
-  (page-aligned: папки 5..11, папка 9 на слоте 5). Юнит-пин tc_page_start:
+- TC1 (sync): active_folder = Some(9), folders 12 → tracks_window = 7
+  (page-aligned snap: (9/7)·7 = 7, min(max_w = 5) = 5 → СТЕПЕНЬ-КЛАМП:
+  итог 5; папки 5..11, папка 9 на слоте 5). Юнит-пин tc_page_start:
   page_start(9, 12) = 5.
 - TC2 (manager nav): tracks_sel None → ↓ → Some(0); ↓ → Some(1); ↑ → Some(0).
 - TC3 (manager Enter): tracks_sel = Some(2), folders ≥ 3 → Enter →
@@ -86,6 +87,8 @@ rename-TextEdit не конфликтует со стрелками; (3) #34/#35
 
 **Files:**
 - Modify: `src/gui/mod.rs` — mode-entry sync Tracks-плечо (gui/mod.rs:806-826)
+- Modify: `src/gui/led_console.rs` — pub(crate) fn page_start (рядом с
+  window_max_start/follow_start)
 
 - [ ] **Step 1: page_start хелпер + Tracks-плечо sync.** Хелпер в
   led_console.rs (рядом с window_max_start/follow_start):
@@ -121,15 +124,32 @@ Tracks-плечо mode-entry sync — заменить:
                 }
 ```
 
+- [ ] **Step 1b: юнит-пин** — led_console tests (канон tc1_window_max_start):
+
+```rust
+    #[test]
+    fn tc_page_start() {
+        // активная 9 из 12: страница 1 (папки 7..13), папка 9 на слоте 3
+        assert_eq!(page_start(9, 12), 7);
+        // активная 6 — страница 0
+        assert_eq!(page_start(6, 12), 0);
+        // clamp: idx за пределами → последняя страница
+        assert_eq!(page_start(14, 15), 8);
+        // пустой список → 0
+        assert_eq!(page_start(0, 0), 0);
+    }
+```
+
 - [ ] **Step 2: гейт**
 
-Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok"`
-Expected: чисто, 32.
+Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test --lib led_console 2>&1 | tail -3 && cargo test 2>&1 | grep -cE "test result: ok"`
+Expected: чисто, 4 asserts зелёные (page_start(9,12) = 7: page-aligned,
+folder 9 на слоте 3), все suite'ы зелёные.
 
 - [ ] **Step 3: коммит**
 
 ```bash
-git add src/gui/mod.rs && git commit -m "fix: entering TRACKS opens the page of the active folder (#57 tail)"
+git add src/gui/led_console.rs src/gui/mod.rs && git commit -m "fix: entering TRACKS opens the page of the active folder (#57 tail, page_start)"
 ```
 
 ### Task 2: Tracks-менеджер — стрелки + Enter (TECHDEBT #35)
