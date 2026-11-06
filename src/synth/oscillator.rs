@@ -266,11 +266,9 @@ pub enum OscState {
                                 // allpass-интерполяцией позади (дробная
                                 // задержка base_delay·β)
         bridge_wpos: usize,
-        bridge_ap_x: f32,       // allpass-интерполятор: prev input (x[n−1])
         bridge_ap_y: f32,       // allpass-интерполятор: prev output (y[n−1])
         nut_delay: Vec<f32>,
         nut_wpos: usize,
-        nut_ap_x: f32,          // allpass-интерполятор nut-линии
         nut_ap_y: f32,
         nut_vib: f32,           // вибрато: доп. длина nut-линии в сэмплах
         vib_phase: f32,         // фаза вибрато-LFO (6.13 Гц, STK)
@@ -604,9 +602,9 @@ impl Oscillator {
             },
             OscType::BowedString => OscState::BowedString {
                 bridge_delay: Vec::new(), bridge_wpos: 0,
-                bridge_ap_x: 0.0, bridge_ap_y: 0.0,
+                bridge_ap_y: 0.0,
                 nut_delay: Vec::new(), nut_wpos: 0,
-                nut_ap_x: 0.0, nut_ap_y: 0.0,
+                nut_ap_y: 0.0,
                 nut_vib: 0.0, vib_phase: 0.0, string_filter_state: 0.0,
                 body_bq: [[0.0; 5]; 6], body_x1: [0.0; 6], body_x2: [0.0; 6],
                 body_y1: [0.0; 6], body_y2: [0.0; 6],
@@ -1543,7 +1541,7 @@ impl Oscillator {
         let a = 0.75f32 - 0.2 * 22050.0 / sample_rate;
         let w = std::f32::consts::TAU * freq / sample_rate;
         let tau = (a * w.cos() - a * a) / (1.0 - 2.0 * a * w.cos() + a * a);
-        let base_delay = (sample_rate / freq - tau - 1.0).max(4.0);
+        let base_delay = (sample_rate / freq - tau).max(4.0);
         let beta = bow_position.clamp(0.02, 0.98);
         let n_bridge = ((base_delay * beta) as usize).max(2);
         let n_nut = ((base_delay * (1.0 - beta)) as usize).max(2);
@@ -1589,11 +1587,9 @@ impl Oscillator {
         self.state = OscState::BowedString {
             bridge_delay,
             bridge_wpos: 0,
-            bridge_ap_x: 0.0,
             bridge_ap_y: 0.0,
             nut_delay,
             nut_wpos: 0,
-            nut_ap_x: 0.0,
             nut_ap_y: 0.0,
             nut_vib: 0.0,
             vib_phase: 0.0,
@@ -1631,19 +1627,33 @@ impl Oscillator {
         // c = (1−frac)/(1+frac).
         fn delay_read_ap(
             buf: &[f32], wpos: usize, delay: f32,
-            ap_x1: &mut f32, ap_y1: &mut f32,
+            ap_y1: &mut f32,
         ) -> f32 {
             let n = buf.len();
             let r = wpos as f32 - delay;
             let i0f = r.floor();
             let frac = r - i0f;
             let i0 = (i0f as isize).rem_euclid(n as isize) as usize;
-            // x[n−1] не читаем из кольца: из-за сдвига wpos на 1 сэмпл/тик
-            // tap i0+1 сегодня = tap i0 вчера = *ap_x1 (уже в состоянии).
-            let s1 = buf[i0]; // меньшая задержка (ближе к wpos)
-            let c = if frac >= 0.999 { 0.999 } else { (1.0 - frac) / (1.0 + frac) };
-            let y = c * (s1 - *ap_y1) + *ap_x1;
-            *ap_x1 = s1;
+            // Канон DelayA (Thiran): вход allpass — НОВЫЙ тап (lag ceil−1,
+            // ближе к wpos), x[n−1] — СТАРЫЙ тап (lag ceil), читается из
+            // кольца прямо сейчас. Прежний вариант кормил allpass СТАРЫМ
+            // тапом с устаревшим x[n−1] (= тап lag ceil+1) → дробная часть
+            // ложилась не на ту сторону целого сэмпла: delivered =
+            // ceil+frac вместо ceil−frac, до ~2 сэмплов поздно на строку →
+            // плоские detune-участки (−20..−50 центов) и сдвиг mode-бассейнов.
+            let s_new = buf[(i0 + 1) % n]; // lag ceil−1
+            let s_old = buf[i0];           // lag ceil
+            let f = 1.0 - frac;            // доп. задержка после нового тапа
+            // frac-гвард: c = (1−f)/(1+f) при f→0 уходит к 1 — полюс allpass
+            // на границе устойчивости (фазовый выброс, mode-hop на 2·f0:
+            // нота 62, bridge frac ≈ 0.01). Канон-замена: линейная
+            // интерполяция между соседними тапами.
+            if !(0.02..=0.98).contains(&f) {
+                *ap_y1 = 0.0;
+                return s_new + f * (s_old - s_new);
+            }
+            let c = (1.0 - f) / (1.0 + f);
+            let y = c * (s_new - *ap_y1) + s_old;
             *ap_y1 = y;
             y
         }
@@ -1653,8 +1663,8 @@ impl Oscillator {
         }
 
         if let OscState::BowedString {
-            bridge_delay, bridge_wpos, bridge_ap_x, bridge_ap_y,
-            nut_delay, nut_wpos, nut_ap_x, nut_ap_y, nut_vib, vib_phase,
+            bridge_delay, bridge_wpos, bridge_ap_y,
+            nut_delay, nut_wpos, nut_ap_y, nut_vib, vib_phase,
             string_filter_state,
             body_bq, body_x1, body_x2, body_y1, body_y2,
             bow_slope, bow_beta, base_delay,
@@ -1678,13 +1688,18 @@ impl Oscillator {
             // не flush'аем — flush убивает хвост, который петля должна
             // нести (sustain); denormal-защита остаётся только на
             // непетлевых выходных состояниях.
+            // guard len−1 (НЕ len−2): буферы аллоцированы n + vib_headroom,
+            // прежний len−2 срезал сам headroom → на верхних нотах (base < 50
+            // сэмплов) delay постоянно упирался в пол, петля недобирала
+            // ~0.2–1.2 сэмпла → +30..90 центов (n84: +72) и мёртвые ноты ≥89.
+            // Чтение allpass'ом трогает только buf[i0] — len−1 безопасно.
             let nut_d = (*base_delay * (1.0 - *bow_beta) * (1.0 + *nut_vib))
-                .min(nut_delay.len() as f32 - 2.0)
+                .min(nut_delay.len() as f32 - 1.0)
                 .max(1.0); // guard: чтение всегда внутри кольца
             let bridge_d = (*base_delay * *bow_beta)
-                .min(bridge_delay.len() as f32 - 2.0);
-            let nut_refl = -delay_read_ap(nut_delay, *nut_wpos, nut_d, nut_ap_x, nut_ap_y);
-            let br_raw = delay_read_ap(bridge_delay, *bridge_wpos, bridge_d, bridge_ap_x, bridge_ap_y);
+                .min(bridge_delay.len() as f32 - 1.0);
+            let nut_refl = -delay_read_ap(nut_delay, *nut_wpos, nut_d, nut_ap_y);
+            let br_raw = delay_read_ap(bridge_delay, *bridge_wpos, bridge_d, bridge_ap_y);
 
             // 2) Loop loss: STK stringFilter дословно — one-pole с
             //    pole = 0.75 − 0.2·22050/sr (≈0.658 @48k), b0 = 1 − pole
@@ -1695,7 +1710,10 @@ impl Oscillator {
             let sf_p = 0.75f32 - 0.2 * 22050.0 / sample_rate;
             let sf_b0 = 1.0 - sf_p;
             *string_filter_state = sf_b0 * br_raw + sf_p * *string_filter_state;
-            let br_refl = -0.95 * *string_filter_state;
+            // Loop gain 0.97 (STK 0.95): allpass-интерполятор вносит чуть
+            // больший фазовый сдвиг, чем линейная интерполяция; 0.95 держит
+            // петлю на ножe — верхние ноты теряют basin (нота 62 → 2·f0).
+            let br_refl = -0.97 * *string_filter_state;
 
             // 3) Bow table (STK BowTabl): slope = 5 − 4·pressure;
             //    bow velocity под огибающей (STK: maxVel·adsr)
@@ -1706,9 +1724,26 @@ impl Oscillator {
             // атаке = низкая скорость смычка → струна «hoots» октавой (STK
             // физика: low bow speed → octave hoot; замер: C4 521.7 Гц весь
             // onset при amp_attack 0.2).
-            let bow_vel = 0.3 * (env * 8.0).min(1.0);
+            // Скорость смычка 0.15 (было 0.3): при 0.3 stick-фаза пинает
+            // струну в чужую моду на ноте 62; 0.15 — basin f0 (сим-свитч).
+            let bow_vel = 0.15 * (env * 8.0).min(1.0);
             let v_delta = bow_vel - (br_refl + nut_refl);
-            let force = v_delta / ((*bow_slope * v_delta.abs() + 0.75).powi(4));
+            // STK BowTable canon: force = δ·(|slope·δ| + 0.75)^−4 с CLAMP'ом
+            // коэффициента [0.01, 0.98] (BowTable.h ctor). Минимум — главный
+            // стабилизатор мод: без него трение схлопывается как δ⁻³ при
+            // больших δ (фаза slip) → петля свободно уходит в чужую моду
+            // (4·f0 на 49-50/58-60, 2·f0 на 77-80).
+            let coeff = ((*bow_slope * v_delta.abs() + 0.75).powi(4))
+                .recip()
+                .clamp(0.01, 0.98);
+            let force = v_delta * coeff;
+            // Замечание о STK BowTabl ½-½ one-pole: НЕ переносим. Проверено
+            // свипами (a=0.5, 0.25): в нашей петле сглаживание сил смычка
+            // удлиняет stick-фазу и роняет ноты 59-62/76-80 в октавный
+            // basin (2 транзита петли на цикл), a=0.25 убивает sustain ≥85.
+            // Режим-стабилизаторы здесь — честная геометрия петли (allpass
+            // pairing + clamp-guard + компенсация tau), BowTable-clamp и
+            // gain/vel трим, не сглаживание.
 
             // 4) Инжекция в обе линии (STK-канон: force в ОБЕ)
             let nut_in = br_refl + force;
