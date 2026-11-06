@@ -129,8 +129,9 @@ Tracks-плечо mode-entry sync — заменить:
 ```rust
     #[test]
     fn tc_page_start() {
-        // активная 9 из 12: страница 1 (папки 7..13), папка 9 на слоте 3
-        assert_eq!(page_start(9, 12), 7);
+        // активная 9 из 12: page-aligned (9/7)·7 = 7 → clamp max_w = 5 → 5
+        // (папка 9 на слоте 4: 9 − 5 = 4)
+        assert_eq!(page_start(9, 12), 5);
         // активная 6 — страница 0
         assert_eq!(page_start(6, 12), 0);
         // clamp: idx за пределами → последняя страница
@@ -143,8 +144,8 @@ Tracks-плечо mode-entry sync — заменить:
 - [ ] **Step 2: гейт**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test --lib led_console 2>&1 | tail -3 && cargo test 2>&1 | grep -cE "test result: ok"`
-Expected: чисто, 4 asserts зелёные (page_start(9,12) = 7: page-aligned,
-folder 9 на слоте 3), все suite'ы зелёные.
+Expected: чисто, 4 asserts зелёные (page_start(9,12) = 5: page-aligned 7 →
+clamp max_w = 5), все suite'ы зелёные.
 
 - [ ] **Step 3: коммит**
 
