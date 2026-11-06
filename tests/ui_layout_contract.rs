@@ -82,3 +82,51 @@ fn panels_carve_no_overlap_seq_above_keyboard() {
         "central must span full width without a right panel: {central:?}"
     );
 }
+
+// ── S4 pre-pin (2026-11-07): порядок регистрации панелей из ИСТОЧНИКА ──
+// Прежний контракт — ручное зеркало геометрии; он не детектит смену
+// ПОРЯДКА панелей в mod.rs (REFACTOR_AUDIT, сверка). Этот тест читает
+// реальный порядок регистрации из исходника: egui карвит панели строго
+// в порядке show() — перестановка ломает раскладку молча.
+// При S4-разрезе gui/mod.rs скан расширить на все файлы gui/.
+
+#[test]
+fn panel_registration_order_matches_source_contract() {
+    const MOD_RS: &str = include_str!("../src/gui/mod.rs");
+    // Ожидаемый порядок (id, вид). top-панели карверт сверху вниз,
+    // bottom — снизу вверх; CentralPanel забирает остаток.
+    const EXPECTED: &[(&str, &str)] = &[
+        ("midi_learn_bar", "top"),
+        ("header", "top"),
+        ("global_controls", "top"),
+        ("keyboard_panel", "bottom"),
+        ("pad_perf_bar", "bottom"),
+        ("drum_seq_panel", "bottom"),
+    ];
+    // Слить top/bottom в ПОРЯДОК ФАЙЛА (не по видам): повторный проход
+    let mut seq: Vec<(String, &str)> = Vec::new();
+    let mut rest = MOD_RS;
+    loop {
+        let t = rest.find("TopBottomPanel::top(\"");
+        let b = rest.find("TopBottomPanel::bottom(\"");
+        match (t, b) {
+            (None, None) => break,
+            (Some(i), None) => { seq.push(extract_id(&rest[i + 21..], "top")); rest = &rest[i + 21..]; }
+            (None, Some(j)) => { seq.push(extract_id(&rest[j + 24..], "bottom")); rest = &rest[j + 24..]; }
+            (Some(i), Some(j)) => {
+                if i < j { seq.push(extract_id(&rest[i + 21..], "top")); rest = &rest[i + 21..]; }
+                else { seq.push(extract_id(&rest[j + 24..], "bottom")); rest = &rest[j + 24..]; }
+            }
+        }
+    }
+    let expected: Vec<(String, &str)> = EXPECTED.iter()
+        .map(|(id, k)| (id.to_string(), *k)).collect();
+    assert_eq!(seq, expected,
+        "panel registration order changed — egui carves in show() order; \
+         update EXPECTED only with layout-diff review");
+}
+
+fn extract_id(s: &str, kind: &'static str) -> (String, &'static str) {
+    let id = &s[..s.find('"').expect("unterminated panel id")];
+    (id.to_string(), kind)
+}

@@ -1371,3 +1371,129 @@ fn tc_ignore_events_set_part_fields() {
     let _ = e.handle_control(ControlEvent::SetPartIgnorePb { part: 0, on: false });
     assert!(!e.parts[0].ignore_pb);
 }
+
+// ── Refactor safety net (S2/S6 pre-pins, 2026-11-07) ─────────────────
+// Пины ТЕКУЩЕГО поведения перед реестром параметров (S2) и дедупом
+// dsp_utils (S6). Любое расхождение = рефактор сломал семантику.
+
+/// set_param = live-updateable подмножество (остальные ключи обновляются
+/// только через LoadPatch — по дизайну). Пины:
+/// 1) каждый arm set_param существует в to_map (класс silent-typo);
+/// 2) каждый CC-биндинг целяется в arm set_param или глобальный ключ
+///    (класс «мёртвая ручка»);
+/// 3) GlobalParams::set: полный набор arm'ов меняет значения.
+const MOD_SRC: &str = include_str!("mod.rs");
+
+/// Извлечь `"key" =>` arm'ы из match-блока исходника (без regex; выравни-
+/// вание пробелами после кавычки допускается).
+fn match_arms_between(src: &str, start_marker: &str) -> Vec<String> {
+    let start = src.find(start_marker)
+        .unwrap_or_else(|| panic!("marker not found: {start_marker}"));
+    let block = &src[start..];
+    let end = block[1..].find("\n    fn ").map(|i| i + 1).unwrap_or(block.len());
+    let block = &block[..end];
+    let mut arms = Vec::new();
+    let mut rest = block;
+    while let Some(q) = rest.find('"') {
+        rest = &rest[q + 1..];
+        if let Some(q2) = rest.find('"') {
+            let (lit, tail) = rest.split_at(q2);
+            let after = tail[1..].trim_start();
+            if after.starts_with("=>") {
+                arms.push(lit.to_string());
+            }
+            rest = &tail[1..];
+        } else {
+            break;
+        }
+    }
+    arms
+}
+
+#[test]
+fn tc_set_param_arms_synced_with_map() {
+    let arms = match_arms_between(MOD_SRC, "fn set_param(&mut self, key: &str, value: f32)");
+    assert!(arms.len() > 100, "suspiciously few arms: {}", arms.len());
+    let map = PatchParams::default().to_map();
+    let missing: Vec<&str> = arms.iter().filter(|a| !map.contains_key(*a)).map(|s| s.as_str()).collect();
+    assert!(missing.is_empty(), "set_param arms missing from to_map: {missing:?}");
+}
+
+#[test]
+fn tc_cc_bindings_target_set_param_arms() {
+    let patch_arms = match_arms_between(MOD_SRC, "fn set_param(&mut self, key: &str, value: f32)");
+    let global_arms = match_arms_between(MOD_SRC, "fn set(&mut self, key: &str");
+    assert!(global_arms.len() == 7, "GlobalParams arms: {global_arms:?}");
+    let cc = crate::cc_map::CcMap::default_map();
+    let mut bad: Vec<&'static str> = Vec::new();
+    for b in cc.bindings.iter().flatten() {
+        let known = patch_arms.iter().any(|a| a == b.param_key)
+            || global_arms.iter().any(|a| a == b.param_key);
+        let scope_ok = crate::cc_map::is_global_param(b.param_key)
+            == (b.scope == crate::cc_map::ParamScope::Global);
+        if !known || !scope_ok {
+            bad.push(b.param_key);
+        }
+    }
+    assert!(bad.is_empty(), "CC bindings target dead keys / scope mismatch: {bad:?}");
+}
+
+#[test]
+fn tc_global_set_fullness() {
+    let arms = match_arms_between(MOD_SRC, "fn set(&mut self, key: &str");
+    assert_eq!(arms.len(), 7, "GlobalParams arms changed — update this pin: {arms:?}");
+    let mut g = GlobalParams::default();
+    for k in &arms {
+        let before = match k.as_str() {
+            "master_volume" => g.master_volume,
+            "master_tone" => g.master_tone,
+            "reverb_mix" => g.reverb_mix.unwrap_or(-1.0),
+            "delay_mix" => g.delay_mix.unwrap_or(-1.0),
+            "pitch_bend_range" => g.pitch_bend_range,
+            "pitch_bend_up" => g.pitch_bend_up,
+            "pitch_bend_down" => g.pitch_bend_down,
+            _ => unreachable!("{k}"),
+        };
+        // target внутри range-клампов arm'ов (pitch_bend_range 1..24)
+        let target = if k == "pitch_bend_range" { 7.0 }
+            else if before == 0.5 { 0.25 } else { 0.5 };
+        g.set(k, target);
+        let after = match k.as_str() {
+            "master_volume" => g.master_volume,
+            "master_tone" => g.master_tone,
+            "reverb_mix" => g.reverb_mix.unwrap_or(-1.0),
+            "delay_mix" => g.delay_mix.unwrap_or(-1.0),
+            "pitch_bend_range" => g.pitch_bend_range,
+            "pitch_bend_up" => g.pitch_bend_up,
+            "pitch_bend_down" => g.pitch_bend_down,
+            _ => unreachable!("{k}"),
+        };
+        assert!((after - target).abs() < 1e-6, "GlobalParams::set ignored '{k}'");
+    }
+}
+
+/// S6 pre-pin: buf_read_linear — канон линейной интерполяции; локальные
+/// копии (combulator/floaty_delay/delay) обязаны быть bit-identical.
+/// Зеркалит канон ПОЛНОСТЬЮ: clamp delay в [1, n-2], ring-wrap read_pos.
+#[test]
+fn tc_linear_interp_bit_identical_to_canon() {
+    let mut x: u32 = 0x12345678;
+    let mut buf = vec![0.0f32; 512];
+    for v in buf.iter_mut() {
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        *v = (x as f32 / u32::MAX as f32) * 2.0 - 1.0;
+    }
+    let n = buf.len();
+    for delay_raw in [0.0f32, 0.5, 1.0, 2.75, 100.25, 510.0, 1000.0] {
+        let d = delay_raw.clamp(1.0, (n - 2) as f32);
+        let read_f = 0usize as f32 - d;
+        let read_f = if read_f < 0.0 { read_f + n as f32 } else { read_f };
+        let i0 = read_f as usize % n;
+        let i1 = (i0 + 1) % n;
+        let frac = read_f.fract();
+        let local = buf[i0] * (1.0 - frac) + buf[i1] * frac;
+        let canon = dsp_utils::buf_read_linear(&buf, 0, delay_raw);
+        assert_eq!(canon.to_bits(), local.to_bits(),
+            "linear interp diverges at delay={delay_raw}");
+    }
+}
