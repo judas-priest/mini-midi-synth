@@ -14,8 +14,9 @@ send_edited_params — канон reset_and_push_part) + remap active_part. Др
 хендл-иконка (Sense::drag) в начале строки; во время драга — подсветка
 слота-цели по pointer.y (hit-test по сохранённым rect'ам строк); drop = свап.
 Зоны: свап ТОЛЬКО в пределах зоны (A 0..8, B 8..16) — диапазоны/сплит-семантика
-не ломаются. Undo: два PartUndoSnapshot (по одному на слот, пуш в обратном
-порядке) — каждый Ctrl+Z откатывает один слот, два отката = полный откат свапа.
+не ломаются. Undo свапа — НЕТ (осознанно): PartUndoSnapshot одно-слотов, двухслотовый
+откат сломал бы канон; порядок партов — персистится в перфе при Save,
+случайный свап лечится повторным свапом (операция обратима сама в себя).
 Tracks-менеджер: ↑↓ кнопки на алиасах (drag там — по фидбеку).
 
 **Tech Stack:** Rust/egui (Sense::drag, hit-test по rect'ам — без egui_dnd:
@@ -24,8 +25,8 @@ Tracks-менеджер: ↑↓ кнопки на алиасах (drag там �
 зависимости); TDD — свап-логика чистая функция + тесты; драг-детект — экран.
 
 **Проверенные факты (вычитано; не пересматривать):**
-- `PartState` (gui/mod.rs:156-200+): все поля Copy-клон-able кроме
-  edited_params (BTreeMap) и macro_names (Vec) — Clone есть.
+- `PartState` (gui/mod.rs:156-188): БЕЗ derive — mem::swap Clone не нужен;
+  все поля move-able.
 - Строки рисует `draw_part_row(&mut self, ui, i: usize)` (layers.rs:285),
   вызовы из `draw_part_rows` (:39) в двух зонах (`for i in ZONE_A` / ZONE_B).
 - ZONE_A = 0..8, ZONE_B = 8..16 (`std::ops::Range`, layers.rs:24-25).
@@ -56,8 +57,8 @@ Tracks-менеджер: ↑↓ кнопки на алиасах (drag там �
   зоны/сплит-семантика не ломаются.
 - TC3 (сам на себя): `swap_check(5, 5, 8)` → Err (no-op не должен проходить
   как валидный drag).
-- TC4 (active_part remap): active_part = 3, свап 3↔5 → active_part = 5
-  (парт «едет» со своим содержимым; юзер продолжает править тот же звук).
+- TC4 (active_part remap, экран/код-ревью — App-метод, не юнит): active_part
+  = 3, свап 3↔5 → active_part = 5 (парт «едет» со своим содержимым).
 - TC5 (alias move down): (0..3), move(1) → [0,2,1] порядок алиасов.
 - TC6 (alias move up, clamp): move(0) на [0,1,2] → без изменений (guard).
 
@@ -65,13 +66,10 @@ Tracks-менеджер: ↑↓ кнопки на алиасах (drag там �
 
 - свап через зоны (A↔B) — запрещён (TC2): диапазоны/сплит — семантика зоны.
 - active_part на одном из свапаемых — remap (TC4).
-- свап с НЕактивным (disabled) партом — разрешён: слоты состояний меняются,
-  enabled флаги едут с партами (перф «макет» легитимен).
-- undo свапа — два PartUndoSnapshot (пуш: сначала новый слот, потом старый —
-  чтобы ПЕРВЫЙ Ctrl+Z вернул старый контент в ЦЕЛЕВОЙ слот... фактически
-  порядок пушей a-старый, b-старый; поп идёт с конца). Ограничение: полный
-  откат = 2 Ctrl+Z (по одному на слот) — осознанный компромисс канона
-  single-part snapshot.
+- disabled парты — не в row_rects (draw_part_rows skip `!enabled`),
+  drag-целью быть не могут; свап с ними недостижим из UI.
+- undo свапа — НЕТ (осознанно, см. Architecture): PartUndoSnapshot
+  одно-слотовый; свап обратим повторным свапом.
 - drag упал мимо строк (pointer вне таблицы) — отмена драга, без свапа.
 - drag начат, но pointer.y вернулся в исходную строку — отмена (no-op).
 - TrackSelect/LoadPerf во время драга — драг живёт в GUI-фрейме (локальное
@@ -158,14 +156,16 @@ git add src/gui/mod.rs && git commit -m "feat: swap_check — same-zone part swa
 
 ```rust
     /// Свап содержимого двух слотов одной зоны (#54): GUI-структуры,
-    /// движок обоих слотов, активный парт, персист. Без undo-снапшота —
-    /// осознанно (двухслотовый откат ломает single-part канон).
+    /// движок обоих слотов, активный парт, персист. Undo НЕТ (осознанно:
+    /// одно-слотовый канон snapshot; свап обратим повторным свапом).
     fn swap_parts(&mut self, a: usize, b: usize) {
         if swap_check(a, b, crate::gui::PARTS_PER_ZONE).is_err() { return; }
         self.parts.swap(a, b);
-        // active_part едет с партом (юзер продолжает править тот же звук)
-        if self.active_part == a { self.active_part = b; }
-        else if self.active_part == b { self.active_part = a; }
+        // active_part едет с партом (юзер продолжает править тот же звук).
+        // ЧЕРЕЗ set_active_part — он синхронизирует и active_part_atom
+        // (drums UI zone labels, headless display)
+        if self.active_part == a { self.set_active_part(b); }
+        else if self.active_part == b { self.set_active_part(a); }
         self.do_swap_parts_push(a, b);
     }
 
@@ -208,7 +208,9 @@ init `part_drag_src: None,` в lib.rs литерале.
   (после отрисовки всех контролов). После обоих циклов зон:
 
 ```rust
-        // #54: drag part row — hit-test + drop
+        // #54: drag part row — hit-test + drop. РАЗМЕЩЕНИЕ: в САМОМ КОНЦЕ
+        // ScrollArea-замыкания (после "+ Add part" зоны B) — return здесь
+        // обрезал бы зону B и row_rects.
         if let Some(src) = self.part_drag_src {
             let (Some(pointer), dragging) = (
                 ui.ctx().pointer_interact_pos(),
@@ -253,22 +255,18 @@ init `part_drag_src: None,` в lib.rs литерале.
             // #54: drag-хендл (⠿) — Sense::drag, старт драга ставит
             // part_drag_src; сам контент строки обычный (drag живёт на
             // хендле, не на всей строке — канон строк с чекбоксами/слайдерами)
-            let (handle_resp, _) = ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(
-                    egui::vec2(14.0, ui.available_height()),
+            let inner = ui.horizontal(|ui| {
+                let (_rect, resp) = ui.allocate_exact_size(
+                    egui::vec2(14.0, 22.0),
                     egui::Sense::drag());
-                if r.drag_started() {
+                if resp.drag_started() {
                     self.part_drag_src = Some(i);
                 }
                 ui.label(egui::RichText::new("\u{2802}").weak());
-                (r, ())
             });
-            let _ = handle_resp;
-            if self.part_drag_src == Some(i) {
-                ui.painter().rect_filled(
-                    ui.max_rect(), 2.0,
-                    egui::Color32::from_rgba_premultiplied(0xFF, 0x00, 0xFF, 24));
-            }
+            // Подсветка СТРОКИ-источника — по её rect из row_rects (см.
+            // draw_part_rows drop-блок; ui.max_rect() здесь = весь остаток
+            // ScrollArea — НЕ строка), рисуется в drop-детекте mod.rs
 ```
 
   ВНИМАНИЕ borrow: draw_part_row(&mut self) — `self.part_drag_src = Some(i)`
@@ -288,73 +286,11 @@ Expected: чисто, зелёные.
 git add src/gui/mod.rs src/gui/layers.rs src/lib.rs && git commit -m "feat: part swap via drag handle — same-zone only, full state push both slots, active part follows (#54)"
 ```
 
-### Task 3: Alias ↑↓ в Tracks-менеджере (keyboard-альтернатива канона)
+### Task 3 (УДАЛЕНА): alias ↑↓ — УЖЕ РЕАЛИЗОВАНО в f9c9b31 (ux redesign:
+MoveAliasUp/Down ops + ↑↓ кнопки в alias-строках + apply-arms; TC5/TC6
+оттуда). Верификация — в Task 4.
 
-**Files:**
-- Modify: `src/gui/mod.rs` — draw_tracks_manager: alias-строки — добавить ↑↓
-  рядом с × (порядок алиасов = порядок на пэдах папки); enum Op + apply-arms
-  MoveAliasUp/Down
-
-- [ ] **Step 1: Op варианты** — в enum Op добавить:
-
-```rust
-            MoveAliasUp(usize, usize),
-            MoveAliasDown(usize, usize),
-```
-
-- [ ] **Step 2: кнопки в alias-строке** — рядом с × (в правой панели, где
-  алиасы):
-
-```rust
-                            ui.horizontal(|ui| {
-                                ui.label(format!("  {}", pname));
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.small_button("\u{00D7}").clicked() {
-                                        ops.push(Op::DelPerf(fi, pi));
-                                    }
-                                    if pi + 1 < self.config.ui.perf_folders[fi].perfs.len()
-                                        && ui.small_button("\u{2193}").clicked()
-                                    {
-                                        ops.push(Op::MoveAliasDown(fi, pi));
-                                    }
-                                    if pi > 0 && ui.small_button("\u{2191}").clicked() {
-                                        ops.push(Op::MoveAliasUp(fi, pi));
-                                    }
-                                });
-                            });
-```
-
-- [ ] **Step 3: apply-arms** — в match op:
-
-```rust
-                Op::MoveAliasUp(fi, pi) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
-                        if pi > 0 && pi < f.perfs.len() {
-                            f.perfs.swap(pi - 1, pi);
-                            let _ = self.config.save();
-                        }
-                    }
-                }
-                Op::MoveAliasDown(fi, pi) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
-                        if pi + 1 < f.perfs.len() {
-                            f.perfs.swap(pi, pi + 1);
-                            let _ = self.config.save();
-                        }
-                    }
-                }
-```
-
-- [ ] **Step 4: гейт + коммит**
-
-Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -2 && cargo test 2>&1 | tail -30`
-Expected: чисто, зелёные.
-
-```bash
-git add src/gui/mod.rs && git commit -m "feat: alias ↑↓ reorder in Tracks manager — keyboard alternative canon (#54)"
-```
-
-### Task 4: Верификация
+### Task 4: Верификация### Task 4: Верификация
 
 - [ ] Гейт: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety`
 - [ ] PR → squash merge → rebuild release → relaunch
@@ -362,8 +298,14 @@ git add src/gui/mod.rs && git commit -m "feat: alias ↑↓ reorder in Tracks ma
   пурпур-рамка цели → drop → парты поменялись местами (инструмент/громкость/
   мьют едут со слотами), активный парт следует; drag через зоны — рамка не
   появляется, drop — no-op; Tracks → ↑↓ алиасов меняет порядок пэдов
-- [ ] TECHDEBT #54: ГОТОВО (drag same-zone swap + alias ↑↓; cross-zone и
-  drag-алиасов — по фидбеку)
+- [ ] ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ (задокументировать в #54): свап живёт до
+  рестарта/до Load перфа — при рестарте apply_performance восстанавливает
+  парты ПО ИНДЕКСАМ из файла перфа (свап откатывается); полный персист
+  порядка = перезаписать перф (Save) — по фидбеку решить, делать ли
+  автозапись при свапе
+- [ ] TECHDEBT #54: ГОТОВО с ограничением (drag same-zone swap; alias ↑↓
+  уже в f9c9b31; cross-zone и drag-алиасов — по фидбеку; свап не переживает
+  рестарт/Load — см. выше)
 
 ## Out of scope
 
