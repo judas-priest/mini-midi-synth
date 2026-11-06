@@ -1069,6 +1069,20 @@ impl eframe::App for App {
                     self.show_keybinds_window = !self.show_keybinds_window;
                     self.keybind_capturing = None;
                 }
+                // #30: Dock/Tab тумблер драм-юнита — иконка в стиле соседних
+                // кнопок: ↓ = докируется вниз (юнит сейчас на вкладке),
+                // ↑ = вверх на вкладку (юнит сейчас в доке)
+                if ui.button(if self.config.ui.dock_bottom_unit { "\u{2191}" } else { "\u{2193}" })
+                    .on_hover_text(if self.config.ui.dock_bottom_unit {
+                        "Seq unit is docked at the window bottom — click to move it to the Drums tab"
+                    } else {
+                        "Unit lives on the Drums tab — click to dock it to the window bottom"
+                    })
+                    .clicked()
+                {
+                    self.config.ui.dock_bottom_unit = !self.config.ui.dock_bottom_unit;
+                    self.save_global_to_config();
+                }
 
                 ui.separator();
 
