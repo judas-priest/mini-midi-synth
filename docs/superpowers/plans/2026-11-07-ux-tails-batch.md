@@ -52,13 +52,9 @@ Tracks-менеджере ↑/↓ двигают выделение папок, 
 rename-TextEdit не конфликтует со стрелками; (3) #34/#35 браузер-часть —
 пометить ГОТОВО (уже реализовано).
 
-- TC1 (sync): active_folder = Some(9), folders 12 → вход TRACKS:
-  tracks_window = 9/7 = 1 (страница 2, папка 9 видна: слот 1 = 7+1... idx =
-  w+1 → папка (w·7)+i−1: w=1, i=2 → папка 8? трассировка: слот i (1..=7)
-  показывает папку w + i − 1 → папка 9 видна при w = 3 (9 = 3+7−1)... w =
-  min(active_folder, max_w = 12−7 = 5)... ФОРМУЛА ТЕСТА: w_after = страница,
-  содержащая active_folder: `active_folder / 7` С clamp... активная 9:
-  страницы 0 (0-6), 1 (7-13) → w = 1. Тест-пин: `page_of(9, max_w) == 1`.
+- TC1 (sync): active_folder = Some(9), folders 12 → tracks_window = 5
+  (page-aligned: папки 5..11, папка 9 на слоте 5). Юнит-пин tc_page_start:
+  page_start(9, 12) = 5.
 - TC2 (manager nav): tracks_sel None → ↓ → Some(0); ↓ → Some(1); ↑ → Some(0).
 - TC3 (manager Enter): tracks_sel = Some(2), folders ≥ 3 → Enter →
   active_folder = Some(2), config saved, console_list refreshed.
@@ -77,6 +73,9 @@ rename-TextEdit не конфликтует со стрелками; (3) #34/#35
 - rename фокус: стрелки работают КАК текстовый курсор в TextEdit (egui
   консьюмит) — nav guard от этой коллизии и есть TC4.
 - Browser (TC5): не трогаем — уже канон.
+- Конкурентные модалки (браузер + менеджер открыты): оба nav-блока читают
+  НЕконсьюмящий ctx.input — двигаются одновременно. Осознанное ограничение
+  (канон браузера такой же); mutual exclusion — по фидбеку.
 - двойной Enter подряд (после set active) — active_folder == sel → set
   идемпотентен, save перезапишет то же — безвредно.
 - RT: всё GUI-поток.
@@ -88,7 +87,18 @@ rename-TextEdit не конфликтует со стрелками; (3) #34/#35
 **Files:**
 - Modify: `src/gui/mod.rs` — mode-entry sync Tracks-плечо (gui/mod.rs:806-826)
 
-- [ ] **Step 1: Tracks-плечо sync** — заменить:
+- [ ] **Step 1: page_start хелпер + Tracks-плечо sync.** Хелпер в
+  led_console.rs (рядом с window_max_start/follow_start):
+
+```rust
+/// Стартовая страница окна, содержащая элемент idx (page-aligned,
+/// зажатая последней валидной страницей). Канон follow_start + page-snap.
+pub(crate) fn page_start(idx: usize, len: usize) -> usize {
+    ((idx / CONSOLE_VISIBLE) * CONSOLE_VISIBLE).min(window_max_start(len))
+}
+```
+
+Tracks-плечо mode-entry sync — заменить:
 
 ```rust
                 led_console::Mode::Tracks => {
@@ -102,21 +112,14 @@ rename-TextEdit не конфликтует со стрелками; (3) #34/#35
 ```rust
                 led_console::Mode::Tracks => {
                     // Хвост #57: вход показывает страницу активной папки
-                    let folders = self.config.ui.perf_folders.len();
-                    if folders > 0 {
-                        let page = self.config.ui.active_folder
-                            .map(|a| a / 7)
-                            .unwrap_or(0);
-                        let max_w = led_console::window_max_start(folders);
-                        self.tracks_window = page.min(max_w);
-                    }
+                    // (page_start сам clamp'ит при 0 папок → 0)
+                    self.tracks_window = led_console::page_start(
+                        self.config.ui.active_folder.unwrap_or(0),
+                        self.config.ui.perf_folders.len());
                     self.show_toast("TRACKS: tap a folder — MENU — назад",
                         ToastKind::Info);
                 }
 ```
-
-(константа 7 = слотов в окне; канон CONSOLE_VISIBLE/page_depth — сверить:
-page_depth Pattern-плечо использует `/ 7`.)
 
 - [ ] **Step 2: гейт**
 
@@ -153,8 +156,9 @@ lib.rs литерал: `tracks_sel: None, tracks_rename_focus: false,`.
   консервативного guard'а, дребезг отсутствует: фокус живёт пока TextEdit
   активен).
 
-- [ ] **Step 3: nav-ввод в update()** — РЯДОМ с browser-вводом (:1563),
-  ДО окон:
+- [ ] **Step 3: nav-ввод в update()** — НЕ в draw_instrument_browser_modal
+  (браузер-навигация :1563 живёт в его draw-fn — другой контекст); блок в
+  update(), ДО отрисовки окон (draw_tracks_manager зовётся :1397):
 
 ```rust
         // #35: Tracks-менеджер — стрелки/Enter, если окно открыто и rename
@@ -190,7 +194,10 @@ lib.rs литерал: `tracks_sel: None, tracks_rename_focus: false,`.
 ```
 
 - [ ] **Step 4: paint sel-выделения** — в draw_tracks_manager левая панель,
-  selectable_label: `tracks_sel == Some(fi)` вместо/вместе с `active`:
+  selectable_label: `tracks_sel == Some(fi)`; + в apply-arms MoveUp/MoveDown
+  sel следует за папкой: `if self.tracks_sel == Some(fi) { self.tracks_sel =
+  Some(fi ± 1); }` (аналог active_folder-ремапам в тех же arms); DelFolder —
+  sel clamp/None (как tracks_window):
 
 ```rust
                         let sel_here = self.tracks_sel == Some(fi);
@@ -227,6 +234,9 @@ git add src/gui/mod.rs src/lib.rs && git commit -m "feat: Tracks manager keyboar
 - [ ] **Step 2: Экран (юзер):** вход TRACKS показывает страницу активной
   папки; в менеджере ↑/↓ двигают выделение, Enter делает активной; rename
   в фокусе — стрелки правят текст; браузер — без регрессий
+- [ ] #35 в TECHDEBT: PARTIAL — браузер/менеджер ГОТОВО; Pad Remap,
+  combo-popups, настройки — осталось. #34: ГОТОВО, но размер окна
+  (default_height 540) — только в сессии egui, персистится позиция
 
 ## Out of scope
 
