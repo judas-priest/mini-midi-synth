@@ -443,6 +443,12 @@ pub struct App {
     pub perf_window: usize,   // first perf_list idx visible on slots 1..=7
     /// First folder idx visible on Tracks-mode slots 1..=7 (#57).
     pub tracks_window: usize,
+    /// Keyboard-selected folder in the Tracks manager (#35); None = nothing
+    /// selected yet (Enter is a no-op until arrows moved once).
+    pub tracks_sel: Option<usize>,
+    /// Last-frame focus of the rename TextEdit in the Tracks manager —
+    /// conservative nav guard (set during draw, read next frame in update()).
+    pub tracks_rename_focus: bool,
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
     pub mute_window: usize,   // first part idx visible on MUTE slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -1393,6 +1399,37 @@ impl eframe::App for App {
         // Keybindings window
         if self.show_keybinds_window {
             self.draw_keybinds_window(ctx);
+        }
+
+        // #35: Tracks-менеджер — стрелки/Enter, если окно открыто и rename
+        // НЕ в фокусе (канон браузера: ввод до окна)
+        if self.show_tracks_manager && !self.tracks_rename_focus {
+            let folders = self.config.ui.perf_folders.len();
+            if folders > 0 {
+                let moved = ctx.input(|i| {
+                    let mut d: i32 = 0;
+                    if i.key_pressed(egui::Key::ArrowDown) { d += 1; }
+                    if i.key_pressed(egui::Key::ArrowUp) { d -= 1; }
+                    d
+                });
+                if moved != 0 {
+                    let cur = self.tracks_sel
+                        .unwrap_or(self.config.ui.active_folder
+                            .unwrap_or(0))
+                        .min(folders - 1) as i32;
+                    self.tracks_sel = Some((cur + moved).clamp(0, folders as i32 - 1) as usize);
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if let Some(sel) = self.tracks_sel {
+                        if sel < self.config.ui.perf_folders.len() {
+                            self.config.ui.active_folder = Some(sel);
+                            let _ = self.config.save();
+                            self.refresh_console_list();
+                            self.perf_window = 0;
+                        }
+                    }
+                }
+            }
         }
 
         // Instrument browser modal (from part row)
@@ -2940,9 +2977,16 @@ impl App {
             AddPerf(usize, String),
             New,
         }
-        if !self.show_tracks_manager { return; }
+        if !self.show_tracks_manager {
+            // Guard-флаг не должен залипать после закрытия окна.
+            self.tracks_rename_focus = false;
+            return;
+        }
         let mut open = true;
         let mut ops: Vec<Op> = Vec::new();
+        // #35: фокус rename-TextEdit прошлого кадра — консервативный nav-guard
+        // для update() (draw идёт после update, флаг на кадр позже).
+        let mut rename_focus = false;
         let cur_perf = self.perf_name.clone();
         let win = modal::ModalWindow::new(
             ctx, "tracks_manager", "Track Folders (Setlists)", &mut open, 520.0)
@@ -2973,11 +3017,13 @@ impl App {
                 for fi in 0..self.config.ui.perf_folders.len() {
                     let name = self.config.ui.perf_folders[fi].name.clone();
                     let active = sel == Some(fi);
+                    let sel_here = self.tracks_sel == Some(fi);
                     cols[0].horizontal(|ui| {
-                        if ui.selectable_label(sel == Some(fi), &name)
-                            .on_hover_text("Select for editing").clicked()
+                        if ui.selectable_label(sel_here || active, &name)
+                            .on_hover_text(if active { "Active — click to select for editing" } else { "Click/Enter to set active" }).clicked()
                         {
                             ops.push(Op::SetActive(fi));
+                            self.tracks_sel = Some(fi);
                         }
                         if active {
                             ui.label(egui::RichText::new("ACTIVE")
@@ -3065,6 +3111,9 @@ impl App {
                         let resp = ui.add(egui::TextEdit::singleline(&mut renamed)
                             .desired_width(160.0)
                             .hint_text("Enter to apply"));
+                        if resp.has_focus() {
+                            rename_focus = true;
+                        }
                         if resp.lost_focus()
                             && ui.input(|i| i.key_pressed(egui::Key::Enter))
                             && !renamed.trim().is_empty()
@@ -3082,6 +3131,9 @@ impl App {
                 }
             }
         });
+        // Прошлый кадр для nav-гейта в update(): фокус живёт, пока TextEdit
+        // активен — дребезга нет (канон консервативного guard'а).
+        self.tracks_rename_focus = rename_focus;
         // Close propagation: Done/Esc/✕ set *win_open=false — propagate to
         // the flag (was dropped in the UX rewrite — Done did nothing)
         if !open {
@@ -3107,6 +3159,9 @@ impl App {
                         if self.config.ui.active_folder == Some(fi) {
                             self.config.ui.active_folder = Some(fi - 1);
                         }
+                        if self.tracks_sel == Some(fi) {
+                            self.tracks_sel = Some(fi - 1);
+                        }
                         let _ = self.config.save();
                         self.refresh_console_list();
                     }
@@ -3116,6 +3171,9 @@ impl App {
                         self.config.ui.perf_folders.swap(fi, fi + 1);
                         if self.config.ui.active_folder == Some(fi) {
                             self.config.ui.active_folder = Some(fi + 1);
+                        }
+                        if self.tracks_sel == Some(fi) {
+                            self.tracks_sel = Some(fi + 1);
                         }
                         let _ = self.config.save();
                         self.refresh_console_list();
@@ -3128,6 +3186,13 @@ impl App {
                             Some(a) if a == fi => self.config.ui.active_folder = None,
                             Some(a) if a > fi => self.config.ui.active_folder = Some(a - 1),
                             _ => {}
+                        }
+                        // sel за пределами после удаления — clamp (канон tracks_window)
+                        if let Some(s) = self.tracks_sel {
+                            if s >= self.config.ui.perf_folders.len() {
+                                self.tracks_sel =
+                                    self.config.ui.perf_folders.len().checked_sub(1);
+                            }
                         }
                         let _ = self.config.save();
                         self.refresh_console_list();

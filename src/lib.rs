@@ -855,6 +855,8 @@ pub fn run_gui(
         drum_beat_flash: None,
         perf_window: 1,
         tracks_window: 0,
+        tracks_sel: None,
+        tracks_rename_focus: false,
         pat_window: 0,
         mute_window: 0,
         drum_undo_atom: c.drum_undo_atom,
