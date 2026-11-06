@@ -1496,6 +1496,22 @@ fn tc_linear_interp_bit_identical_to_canon() {
         assert_eq!(canon.to_bits(), local.to_bits(),
             "linear interp diverges at delay={delay_raw}");
     }
+    // Positive-read ветка (mid-buffer write_pos): канон conditional-subtract
+    // vs любые fmod-варианты (combulator/floaty) — расхождение ловится тут (QW6)
+    for wp in [100usize, 300, 511] {
+        for delay_raw in [0.0f32, 0.5, 1.0, 7.25, 50.0] {
+            let d = delay_raw.clamp(1.0, (n - 2) as f32);
+            let read_f = wp as f32 - d;
+            let read_f = if read_f < 0.0 { read_f + n as f32 } else { read_f };
+            let i0 = read_f as usize % n;
+            let i1 = (i0 + 1) % n;
+            let frac = read_f.fract();
+            let local = buf[i0] * (1.0 - frac) + buf[i1] * frac;
+            let canon = dsp_utils::buf_read_linear(&buf, wp, delay_raw);
+            assert_eq!(canon.to_bits(), local.to_bits(),
+                "linear interp diverges at write_pos={wp} delay={delay_raw}");
+        }
+    }
 }
 
 // ── QW1: CC scope SSOT (2026-11-07 refactor-audit) ──────────────────
