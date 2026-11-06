@@ -106,3 +106,67 @@ fn tc8_no_regression_finger_and_high_brass() {
     let (_, late_b, _) = render(&mut engine_with("Trumpet"), 72);
     assert!(late_b >= 0.2, "brass working band regressed: late {late_b:.3}");
 }
+
+/// #56 roadmap 1: доминантная частота позднего окна (блоки 50..=550)
+/// автокорреляцией. Lag 140..=500 → 96..343 Гц (C3/C4 + старые жучки).
+fn render_freq(e: &mut SynthEngine, note: u8) -> (f32, bool) {
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note, velocity: 127 });
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    let mut sig: Vec<f32> = Vec::with_capacity(4096);
+    let mut finite = true;
+    for blk in 0..550 {
+        l.fill(0.0); r.fill(0.0);
+        e.tick_block(&mut l, &mut r);
+        for i in 0..BLOCK_SIZE {
+            finite &= l[i].is_finite() && r[i].is_finite();
+            if blk >= 50 { sig.push(l[i]); }
+        }
+    }
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note });
+    let n = sig.len();
+    // Периодический сигнал: c(2P) ≈ c(P) — strict-max/descending ловит 2P
+    // (субгармоника). Канон: НАИМЕНЬШИЙ ЛОКАЛЬНЫЙ максимум с c ≥ 0.9·max
+    // = фундаментал.
+    let mut corr: Vec<(usize, f32)> = Vec::with_capacity(361);
+    let mut global_max = 0.0f32;
+    for lag in 140..=500 {
+        let mut c = 0.0f32;
+        for i in lag..n { c += sig[i] * sig[i - lag]; }
+        global_max = global_max.max(c);
+        corr.push((lag, c));
+    }
+    let mut freq = 0.0f32;
+    for (idx, &(lag, c)) in corr.iter().enumerate() {
+        if c < 0.9 * global_max { continue; }
+        let left_ok = idx == 0 || corr[idx - 1].1 < c;
+        let right_ok = idx + 1 == corr.len() || corr[idx + 1].1 < c;
+        if left_ok && right_ok { freq = 48000.0 / lag as f32; break; }
+    }
+    (freq, finite)
+}
+
+#[test]
+fn tc_b1_pitch_c4_is_nominal() {
+    let (f, _) = render_freq(&mut engine_with("Violin"), 60);
+    assert!((f - 261.63).abs() <= 13.0, "C4 dominant {f:.1} Hz (expected ~261.6)");
+}
+
+#[test]
+fn tc_b2_pitch_c3_is_nominal() {
+    let (f, _) = render_freq(&mut engine_with("Violin"), 48);
+    assert!((f - 130.81).abs() <= 7.0, "C3 dominant {f:.1} Hz (expected ~130.8)");
+}
+
+#[test]
+fn tc_b3_5s_hold_stays_finite() {
+    let mut e = engine_with("Violin");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 127 });
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    let mut finite = true;
+    for _ in 0..7500 {
+        l.fill(0.0); r.fill(0.0);
+        e.tick_block(&mut l, &mut r);
+        for i in 0..BLOCK_SIZE { finite &= l[i].is_finite() && r[i].is_finite(); }
+    }
+    assert!(finite, "5s hold went non-finite");
+}
