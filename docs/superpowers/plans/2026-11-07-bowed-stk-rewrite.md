@@ -106,13 +106,22 @@ fn render_freq(e: &mut SynthEngine, note: u8) -> (f32, bool) {
     }
     e.handle_event(MidiEvent::NoteOff { channel: 0, note });
     let n = sig.len();
-    let mut best = (0.0f32, 0usize);
+    // Периодический сигнал: c(2P) ≈ c(P) — strict-max ловит длинный лаг
+    // (субгармоника) на ничьих. Канон: глобальный max, затем ПЕРВЫЙ lag
+    // с c ≥ 0.9·max (fundamental, не субгармоника).
+    let mut global_max = 0.0f32;
+    let mut corr: Vec<(usize, f32)> = Vec::with_capacity(361);
     for lag in (140..=500).rev() {
         let mut c = 0.0f32;
         for i in lag..n { c += sig[i] * sig[i - lag]; }
-        if c > best.0 { best = (c, lag); }
+        global_max = global_max.max(c);
+        corr.push((lag, c));
     }
-    (48000.0 / best.1 as f32, finite)
+    let mut freq = 0.0f32;
+    for (lag, c) in &corr {
+        if *c >= 0.9 * global_max { freq = 48000.0 / *lag as f32; break; }
+    }
+    (freq, finite)
 }
 
 #[test]
@@ -230,8 +239,6 @@ Match :505 (reclaim) — имена полей обновить по новой 
         let beta = bow_position.clamp(0.02, 0.98);
         let n_bridge = ((base_delay * beta) as usize).max(2);
         let n_nut = ((base_delay * (1.0 - beta)) as usize).max(2);
-        let bridge_frac = (base_delay * beta - n_bridge as f32).max(0.0).min(0.99);
-        let nut_frac = (base_delay * (1.0 - beta) - n_nut as f32).max(0.0).min(0.99);
         const BODY_BQ: [[f32; 5]; 6] = [
             [1.0, 1.5667, 0.3133, -0.5509, -0.3925],
             [1.0, -1.9537, 0.9542, -1.6357, 0.8697],
@@ -240,8 +247,11 @@ Match :505 (reclaim) — имена полей обновить по новой 
             [1.0, -1.9299, 0.9621, -1.9354, 0.9590],
             [1.0, -1.9800, 0.9888, -1.9867, 0.9923],
         ];
-        let mut nut_delay = Self::take_buf(&mut self.pool_a, n_nut + 1);
-        let mut bridge_delay = Self::take_buf(&mut self.pool_b, n_bridge + 1);
+        // +1 integer headroom + ceil(2% = max вибрато-сдвиг) — иначе вибрато
+        // modulate read за кольцом → alias-прыжки питча каждую вибрато-фазу
+        let vib_headroom = (0.02 * base_delay).ceil() as usize + 1;
+        let mut nut_delay = Self::take_buf(&mut self.pool_a, n_nut + vib_headroom);
+        let mut bridge_delay = Self::take_buf(&mut self.pool_b, n_bridge + vib_headroom);
         let seed = 0.005 * velocity;
         let mut rng = 0xDEADBEEFu32;
         for s in nut_delay.iter_mut() {
@@ -255,11 +265,10 @@ Match :505 (reclaim) — имена полей обновить по новой 
         self.state = OscState::BowedString {
             bridge_delay,
             bridge_wpos: 0,
-            bridge_frac,
             nut_delay,
             nut_wpos: 0,
-            nut_frac,
             nut_vib: 0.0,
+            vib_phase: 0.0,
             string_filter_state: 0.0,
             body_bq: BODY_BQ,
             body_x1: [0.0; 6],
@@ -312,7 +321,9 @@ Match :505 (reclaim) — имена полей обновить по новой 
 
             // 1) Отражения: ОБЕ инверсии (STK Bowed.cpp) — иначе
             // субгармонический ряд (чужие высоты, #56а)
-            let nut_d = *base_delay * (1.0 - *bow_beta) * (1.0 + *nut_vib);
+            let nut_d = *base_delay * (1.0 - *bow_beta) * (1.0 + *nut_vib)
+                .min(nut_delay.len() as f32 - 1.0)
+                .max(1.0); // guard: чтение всегда внутри кольца
             let bridge_d = *base_delay * *bow_beta;
             let nut_refl = -flush(delay_read(nut_delay, *nut_wpos, nut_d));
             let br_raw = flush(delay_read(bridge_delay, *bridge_wpos, bridge_d));
@@ -379,8 +390,8 @@ git add src/synth/oscillator.rs src/synth/tests.rs tests/physical_models.rs && g
 - [ ] **Step 1: правка** — только пресеты с `"osc_type": 14`:
 
 Run: `grep -l '"osc_type": *14' presets/*.json`
-Ожидание: violin/violin_v2/viola/double_bass (+_v2). В каждом —
-`"amp_attack"` → 0.2.
+Ожидание: violin, violin_v2, viola, cello, cello_v2, double_bass (+_v2 если
+есть). В каждом — `"amp_attack"` → 0.2.
 
 - [ ] **Step 2: быстрый гейт**
 
@@ -398,7 +409,8 @@ git add presets/ && git commit -m "fix: bowed presets — bow onset attack 0.2 s
 - [ ] Гейт: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety`
 - [ ] PR → squash merge → rebuild release → relaunch
 - [ ] Экран (юзер): Violin/Cello на C3/C4 — СВОИ ноты, полноценный
-  смычковый тембр; вибрато MW-колесом работает на bowed-партах
+  смычковый тембр (MW-вибрато на bowed — НЕ работает: base_delay фикс на
+  note-on; известное ограничение, вне скоупа)
 - [ ] TECHDEBT #56а: отметить roadmap 1 ГОТОВО
 
 ## Out of scope
