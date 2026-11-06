@@ -362,6 +362,7 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         drum_rec_atom,
         #[cfg(feature = "gui")]
         drum_pattern_atom,
+        #[cfg(feature = "gui")]
         drum_undo_atom,
         #[cfg(feature = "gui")]
         drum_redo_atom,
