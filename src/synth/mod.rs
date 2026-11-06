@@ -506,7 +506,9 @@ impl GlobalParams {
             "pitch_bend_range" => self.pitch_bend_range = value.clamp(1.0, 24.0),
             "pitch_bend_up"    => self.pitch_bend_up    = value.clamp(0.0, 48.0),
             "pitch_bend_down"  => self.pitch_bend_down  = value.clamp(0.0, 48.0),
-            _ => {}
+            _ => {
+                debug_assert!(false, "GlobalParams::set: unknown key '{key}'");
+            }
         }
     }
 
@@ -1260,7 +1262,7 @@ impl Part {
             // by tests instead of silently no-op'ing live parameter updates.
             // In release builds, ignore (cheap, no audio-thread side effects).
             _ => {
-                debug_assert!(false, "GlobalParams::set: unknown key '{key}'");
+                debug_assert!(false, "Part::set_param: unknown key '{key}'");
             }
         }
     }
