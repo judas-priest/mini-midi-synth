@@ -609,17 +609,11 @@ struct Part {
     sustain_pedal: f32,     // CC64: 0.0 or 1.0
     lowest_held: u8,        // lowest active note (default 60)
     highest_held: u8,       // highest active note (default 60)
-    // Cached mod sources (control-rate, with poly_aftertouch=0) for per-voice re-evaluation
-    cached_mod_sources: mod_matrix::ModSources,
     poly_at_in_matrix: bool,  // true if any mod slot uses PolyAftertouch
     // Cached routing flags — updated on patch load, not per-block
     lfo2_routed: bool,
     lfo3_routed: bool,
     lfo4_routed: bool,
-    // Cached control-rate base values for per-voice ModulationState reconstruction
-    cached_lfo_pitch_offset: f32,  // pitch_offset minus mod_offsets.pitch
-    cached_filter_offset: f32,
-    cached_lfo_amp_base: f32,      // (1 - lfo1_amp) * (1 - lfo2_amp) * seq_amp
 }
 
 impl Part {
@@ -654,25 +648,10 @@ impl Part {
             ignore_pb: false, ignore_mw: false,
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
-            cached_mod_sources: mod_matrix::ModSources {
-                lfo_outputs: [0.0; 4], amp_env: 0.0, filter_env: 0.0,
-                mseg_outputs: [0.0; 2], mod_wheel: 0.0, aftertouch: 0.0,
-                velocity: 1.0, key_track: 0.0, step_seq: 0.0,
-                random_bipolar: 0.0, random_unipolar: 0.5,
-                alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
-                pitch_bend: 0.0, cc: [0.0; 4], breath: 0.0, expression: 1.0,
-                sustain_pedal: 0.0, lowest_key: 0.0, highest_key: 0.0,
-                latest_key: 0.0, poly_aftertouch: 0.0,
-                scene_lfo_outputs: [0.0; 2],
-                macro_vals: [0.0; 8],
-            },
             poly_at_in_matrix: false,
             lfo2_routed: false,
             lfo3_routed: false,
             lfo4_routed: false,
-            cached_lfo_pitch_offset: 0.0,
-            cached_filter_offset: 0.0,
-            cached_lfo_amp_base: 1.0,
         }
     }
 
@@ -3587,12 +3566,6 @@ impl SynthEngine {
                 * (1.0 - part.params.lfo2_amp_depth * 0.5 * (1.0 - lfo2_val))
                 * seq_amp;
             let amp_mod = lfo_amp_base * (1.0 + mod_offsets.amplitude).max(0.0);
-
-            // Cache mod sources and base values for per-voice poly AT re-evaluation
-            part.cached_mod_sources = mod_sources;
-            part.cached_lfo_pitch_offset = lfo_pitch_offset_base;
-            part.cached_filter_offset = filter_offset;
-            part.cached_lfo_amp_base = lfo_amp_base;
 
             layer_mods[li] = ModulationState {
                 pitch_mult, filter_offset, filter_offset_semis: mod_offsets.filter_cutoff, amp_mod,
