@@ -1992,9 +1992,10 @@ impl App {
             self.parts[part].sf2_program = prog;
             let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
                 part, program: prog, bank: 0 });
-            // Persist for parts 0/1 (seeds program on startup) — перенос mod.rs:1198-1200
+            // Persist for parts 0/1 only (startup seeds). part >= 2: no persist —
+            // прежний else затирал layer_b_program с любого парта (QW2).
             if part == 0 { self.config.sf2.layer_a_program = prog; }
-            else { self.config.sf2.layer_b_program = prog; }
+            else if part == 1 { self.config.sf2.layer_b_program = prog; }
             let _ = self.config.save();
             // Применили и играем дальше — окно не закрываем (фидбек 2026-11-01)
         }
