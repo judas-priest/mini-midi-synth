@@ -817,6 +817,11 @@ impl eframe::App for App {
                     self.follow_window(self.drum_current_pattern as usize, false);
                 }
                 led_console::Mode::Tracks => {
+                    // Хвост #57: вход показывает страницу активной папки
+                    // (page_start сам clamp'ит при 0 папок → 0)
+                    self.tracks_window = led_console::page_start(
+                        self.config.ui.active_folder.unwrap_or(0),
+                        self.config.ui.perf_folders.len());
                     // Подсказка входа (#57 UX): как рулить с пэдов
                     self.show_toast("TRACKS: tap a folder — MENU — назад",
                         ToastKind::Info);
