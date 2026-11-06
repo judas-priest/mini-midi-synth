@@ -1562,10 +1562,10 @@ impl eframe::App for App {
                                 self.send_edited_params(part);
                             }
                             ui.separator();
-                            if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{21B6}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
+                            if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{2B05}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
                                 self.undo();
                             }
-                            if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{21B7}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+                            if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{27A1}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
                                 self.redo();
                             }
                         });
@@ -1668,9 +1668,9 @@ impl App {
             ui.horizontal(|ui| {
                 let cur_sf2 = self.parts[part].sf2_mode;
                 let (label, tip) = if cur_sf2 {
-                    ("→ DSP", "Switch this part to the DSP engine")
+                    ("\u{27A1} DSP", "Switch this part to the DSP engine")
                 } else {
-                    ("→ SF2", "Switch this part to the SF2 (soundfont) engine")
+                    ("\u{27A1} SF2", "Switch this part to the SF2 (soundfont) engine")
                 };
                 if ui.button(label).on_hover_text(tip).clicked() {
                     let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
@@ -1779,7 +1779,7 @@ impl App {
                             if searching && matches.is_empty() { continue; }
                             let is_collapsed =
                                 !searching && self.collapsed_categories.contains(cat_name);
-                            let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                            let arrow = if is_collapsed { "\u{25B6}" } else { "\u{2B07}" };
                             if !searching {
                                 if ui.selectable_label(false, format!("{arrow} {cat_name}")).clicked() {
                                     toggled_cat = Some(cat_name.to_string());
@@ -1882,7 +1882,7 @@ impl App {
                                 if cat_idx > 0 && categories[cat_idx - 1].1 == i {
                                     let cat = &categories[cat_idx - 1].0;
                                     let is_collapsed = self.collapsed_categories.contains(cat);
-                                    let arrow = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+                                    let arrow = if is_collapsed { "\u{25B6}" } else { "\u{2B07}" };
                                     if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
                                         toggled_cat = Some(cat.clone());
                                     }
