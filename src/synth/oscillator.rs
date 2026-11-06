@@ -262,21 +262,25 @@ pub enum OscState {
     },
     BassGuitar(BassModel),
     BowedString {
+        bridge_delay: Vec<f32>, // DelayL bridge: запись wpos, чтение
+                                // линейной интерполяцией позади (дробная
+                                // задержка base_delay·β)
+        bridge_wpos: usize,
         nut_delay: Vec<f32>,
-        bridge_delay: Vec<f32>,
-        nut_pos: usize,
-        bridge_pos: usize,
-        nut_filter: f32,
-        bridge_lp: f32,
-        bridge_bp: f32,
-        allpass_prev_in: f32,
-        allpass_prev_out: f32,
-        allpass_coeff: f32,
-        bow_velocity: f32,
-        _bow_position: f32,
-        bow_pressure: f32,
-        body_freq: f32,
-        body_q: f32,
+        nut_wpos: usize,
+        nut_vib: f32,           // вибрато: доп. длина nut-линии в сэмплах
+        vib_phase: f32,         // фаза вибрато-LFO (6.13 Гц, STK)
+        string_filter_state: f32, // one-pole loop loss (pole 0.95, gain 0.95)
+        body_bq: [[f32; 5]; 6], // Maestre violin body: [b0,b1,b2,a1,a2] × 6
+        body_x1: [f32; 6],
+        body_x2: [f32; 6],
+        body_y1: [f32; 6],
+        body_y2: [f32; 6],
+        bow_slope: f32,         // 5 − 4·bow_pressure (STK BowTabl)
+        bow_beta: f32,          // bow_position: fraction FROM BRIDGE
+        base_delay: f32,        // sr/f − 2 (компенсация фильтра+интерпа)
+        out_lp_coeff: f32,      // выходной tilt one-pole, fc ≈ 1.2·f0
+        out_lp_state: f32,
     },
     Brass {
         bore_delay: Vec<f32>,
@@ -595,21 +599,13 @@ impl Oscillator {
                 noise_color: 0.5,
             },
             OscType::BowedString => OscState::BowedString {
-                nut_delay: Vec::new(),
-                bridge_delay: Vec::new(),
-                nut_pos: 0,
-                bridge_pos: 0,
-                nut_filter: 0.0,
-                bridge_lp: 0.0,
-                bridge_bp: 0.0,
-                allpass_prev_in: 0.0,
-                allpass_prev_out: 0.0,
-                allpass_coeff: 0.0,
-                bow_velocity: 0.0,
-                _bow_position: 0.12,
-                bow_pressure: 0.5,
-                body_freq: 300.0,
-                body_q: 2.0,
+                bridge_delay: Vec::new(), bridge_wpos: 0,
+                nut_delay: Vec::new(), nut_wpos: 0,
+                nut_vib: 0.0, vib_phase: 0.0, string_filter_state: 0.0,
+                body_bq: [[0.0; 5]; 6], body_x1: [0.0; 6], body_x2: [0.0; 6],
+                body_y1: [0.0; 6], body_y2: [0.0; 6],
+                bow_slope: 3.0, bow_beta: 0.127, base_delay: 0.0,
+                out_lp_coeff: 0.05, out_lp_state: 0.0,
             },
             OscType::Brass => OscState::Brass {
                 bore_delay: Vec::new(),
@@ -1053,7 +1049,7 @@ impl Oscillator {
             OscType::AdditivePiano => self.tick_additive_piano(),
             OscType::DrumSynth => self.tick_drum_synth(),
             OscType::BassGuitar => self.tick_bass_guitar(),
-            OscType::BowedString => self.tick_bowed_string(),
+            OscType::BowedString => self.tick_bowed_string(env),
             OscType::Brass => self.tick_brass(env),
             OscType::PhaseDistortion => self.tick_phase_distortion(freq),
             OscType::Wavefolder => self.tick_wavefolder(freq),
@@ -1522,7 +1518,7 @@ impl Oscillator {
             0.0
         }
     }
-    /// Initialize bowed string waveguide.
+    /// Initialize bowed string waveguide (STK single-loop topology).
     /// body_type: 0=Violin, 1=Viola, 2=Cello, 3=Double Bass
     pub fn init_bowed_string(
         &mut self,
@@ -1532,36 +1528,36 @@ impl Oscillator {
         bow_position: f32,
         body_type: f32,
     ) {
+        let _ = body_type; // body bank — violin для всех типов (см. план)
         self.reclaim_buffers();
         let sample_rate = self.sample_rate;
-        let delay_total = sample_rate / freq;
-        let n_total = (delay_total as usize).max(4);
-
-        // bow_position splits the string into two segments
-        let bp = bow_position.clamp(0.02, 0.98);
-        let n_nut = ((n_total as f32 * bp) as usize).max(1);
-        let n_bridge = (n_total - n_nut).max(1);
-
-        // Fractional delay allpass
-        let frac = delay_total - n_total as f32;
-        let allpass_coeff = (1.0 - frac) / (1.0 + frac);
-
-        // Body resonance depends on instrument type
-        let body_i = body_type as u32;
-        let (body_freq, body_q) = match body_i {
-            0 => (440.0, 3.0),   // Violin — high resonance
-            1 => (330.0, 2.5),   // Viola
-            2 => (180.0, 2.0),   // Cello
-            _ => (90.0, 1.5),    // Double Bass
-        };
-
-        let bow_vel = velocity * 0.3;
-
-        // KS-канон: шумовой сид delay-линий — без него excitation starvation
-        // (bow_velocity 0.3 в хвосте friction-кривой, f≈3e-5 → тишина на C3).
+        // Питч-компенсация: linear-interp (≈1 сэмпл) + ГРУППОВАЯ задержка
+        // one-pole loop-фильтра (pole 0.95) на частоте ноты — аналитически.
+        // Плановая константа «≈2 сэмпла» на деле ~7–17 сэмплов (τ растёт к
+        // низким частотам): без этого струна плывёт −4…−6 % по всему
+        // диапазону (замер: C3 126.0 Гц, C4 244.9 Гц, C5 494.8 Гц).
+        let a = 0.95f32;
+        let w = std::f32::consts::TAU * freq / sample_rate;
+        let tau = (a * w.cos() - a * a) / (1.0 - 2.0 * a * w.cos() + a * a);
+        let base_delay = (sample_rate / freq - tau - 1.0).max(4.0);
+        let beta = bow_position.clamp(0.02, 0.98);
+        let n_bridge = ((base_delay * beta) as usize).max(2);
+        let n_nut = ((base_delay * (1.0 - beta)) as usize).max(2);
+        const BODY_BQ: [[f32; 5]; 6] = [
+            [1.0, 1.5667, 0.3133, -0.5509, -0.3925],
+            [1.0, -1.9537, 0.9542, -1.6357, 0.8697],
+            [1.0, -1.6683, 0.8852, -1.7674, 0.8735],
+            [1.0, -1.8585, 0.9653, -1.8498, 0.9516],
+            [1.0, -1.9299, 0.9621, -1.9354, 0.9590],
+            [1.0, -1.9800, 0.9888, -1.9867, 0.9923],
+        ];
+        // +1 integer headroom + ceil(2% = max вибрато-сдвиг) — иначе вибрато
+        // modulate read за кольцом → alias-прыжки питча каждую вибрато-фазу
+        let vib_headroom = (0.02 * base_delay).ceil() as usize + 1;
+        let mut nut_delay = Self::take_buf(&mut self.pool_a, n_nut + vib_headroom);
+        let mut bridge_delay = Self::take_buf(&mut self.pool_b, n_bridge + vib_headroom);
+        // KS-канон: шумовой сид delay-линий — без него excitation starvation.
         // Тот же xorshift-идиом, что в init_brass bore-сиде.
-        let mut nut_delay = Self::take_buf(&mut self.pool_a, n_nut);
-        let mut bridge_delay = Self::take_buf(&mut self.pool_b, n_bridge);
         let seed = 0.005 * velocity; // сим-верифицировано: ±0.005 достаточно
         let mut rng = 0xDEADBEEFu32;
         for s in nut_delay.iter_mut() {
@@ -1572,109 +1568,130 @@ impl Oscillator {
             rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
             *s = seed * (rng as f32 / u32::MAX as f32 - 0.5) * 2.0;
         }
-
+        // Basin-байас: один период пилы на ПОЛНЫЙ виток петли (bridge-сегмент
+        // = первая половина витка, nut-сегмент = вторая). Белошумный сид без
+        // этого заводит систему в basin 2-й моды: на C3 2f0 доминирует над
+        // f0 ×5.5 и probe автокорреляции ловит октаву вместо ноты.
+        {
+            let total = (n_nut + n_bridge) as f32;
+            let amp = 0.25 * velocity.clamp(0.0, 1.0);
+            for (i, s) in bridge_delay.iter_mut().take(n_bridge).enumerate() {
+                *s += amp * (-1.0 + 2.0 * i as f32 / total);
+            }
+            for (i, s) in nut_delay.iter_mut().take(n_nut).enumerate() {
+                *s += amp * (-1.0 + 2.0 * (n_bridge + i) as f32 / total);
+            }
+        }
         self.state = OscState::BowedString {
-            nut_delay,
             bridge_delay,
-            nut_pos: 0,
-            bridge_pos: 0,
-            nut_filter: 0.0,
-            bridge_lp: 0.0,
-            bridge_bp: 0.0,
-            allpass_prev_in: 0.0,
-            allpass_prev_out: 0.0,
-            allpass_coeff,
-            bow_velocity: bow_vel,
-            _bow_position: bp,
-            bow_pressure: bow_pressure.clamp(0.01, 1.0),
-            body_freq,
-            body_q,
+            bridge_wpos: 0,
+            nut_delay,
+            nut_wpos: 0,
+            nut_vib: 0.0,
+            vib_phase: 0.0,
+            string_filter_state: 0.0,
+            body_bq: BODY_BQ,
+            body_x1: [0.0; 6],
+            body_x2: [0.0; 6],
+            body_y1: [0.0; 6],
+            body_y2: [0.0; 6],
+            bow_slope: 5.0 - 4.0 * bow_pressure.clamp(0.0, 1.0),
+            bow_beta: beta,
+            base_delay,
+            // Выходной tilt: fc ≈ 1.2·f0 — релаксационная петля отдаёт 2-ю
+            // моду в ~5× сильнее фундаментала; замер на выходе (не в петле —
+            // динамика петли не трогаем) выравнивает спектр под автокорр.-probe
+            // и слух (у Helmholtz-движения мостовая сила — пила, 1/n).
+            out_lp_coeff: (std::f32::consts::TAU * 1.2 * freq / sample_rate)
+                .clamp(0.02, 0.7),
+            out_lp_state: 0.0,
         };
     }
 
-    /// Bowed string tick: McIntyre-Schumacher-Woodhouse friction model.
-    fn tick_bowed_string(&mut self) -> f32 {
-        let sample_rate = self.sample_rate;
+    /// Bowed string tick: STK single-loop waveguide (both reflections
+    /// inverted, fractional DelayL reads, STK bow table, Maestre body bank
+    /// outside the loop, vibrato).
+    fn tick_bowed_string(&mut self, env: f32) -> f32 {
+        // Дробное чтение позади wpos (linear interp)
+        fn delay_read(buf: &[f32], wpos: usize, delay: f32) -> f32 {
+            let n = buf.len();
+            let r = wpos as f32 - delay;
+            let i0f = r.floor();
+            let frac = r - i0f;
+            let i0 = (i0f as isize).rem_euclid(n as isize) as usize;
+            let i1 = (i0 + 1) % n;
+            buf[i0] + frac * (buf[i1] - buf[i0])
+        }
+        fn write(buf: &mut [f32], wpos: &mut usize, v: f32) {
+            buf[*wpos] = v;
+            *wpos = (*wpos + 1) % buf.len();
+        }
 
         if let OscState::BowedString {
-            nut_delay, bridge_delay, nut_pos, bridge_pos,
-            nut_filter, bridge_lp, bridge_bp,
-            allpass_prev_in, allpass_prev_out, allpass_coeff,
-            bow_velocity, bow_pressure, body_freq, body_q, ..
+            bridge_delay, bridge_wpos,
+            nut_delay, nut_wpos, nut_vib, vib_phase,
+            string_filter_state,
+            body_bq, body_x1, body_x2, body_y1, body_y2,
+            bow_slope, bow_beta, base_delay,
+            out_lp_coeff, out_lp_state, ..
         } = &mut self.state
         {
-            let n_nut = nut_delay.len();
-            let n_bridge = bridge_delay.len();
-            if n_nut == 0 || n_bridge == 0 {
-                return 0.0;
+            const FLUSH: f32 = 1e-20;
+            let flush = |x: f32| if x.abs() < FLUSH { 0.0 } else { x };
+            let sample_rate = self.sample_rate;
+
+            // Вибрато: модуляция длины nut-линии (STK: neckDelay.setDelay)
+            *nut_vib = 0.02 * (*vib_phase * std::f32::consts::TAU).sin();
+            *vib_phase += 6.13 / sample_rate;
+            if *vib_phase >= 1.0 { *vib_phase -= 1.0; }
+
+            // 1) Отражения: ОБЕ инверсии (STK Bowed.cpp) — иначе
+            // субгармонический ряд (чужие высоты, #56а)
+            // clamp СКОБКАМИ на произведение: иначе .max(1.0) применился бы
+            // к (1+nut_vib) и срезал нижнюю половину вибрато
+            let nut_d = (*base_delay * (1.0 - *bow_beta) * (1.0 + *nut_vib))
+                .min(nut_delay.len() as f32 - 1.0)
+                .max(1.0); // guard: чтение всегда внутри кольца
+            let bridge_d = *base_delay * *bow_beta;
+            let nut_refl = -flush(delay_read(nut_delay, *nut_wpos, nut_d));
+            let br_raw = flush(delay_read(bridge_delay, *bridge_wpos, bridge_d));
+
+            // 2) Loop loss: one-pole pole 0.95, gain 0.95 (STK stringFilter)
+            *string_filter_state =
+                flush(0.05 * br_raw + 0.95 * *string_filter_state);
+            let br_refl = -0.95 * *string_filter_state;
+
+            // 3) Bow table (STK BowTabl): slope = 5 − 4·pressure;
+            //    bow velocity под огибающей (STK: maxVel·adsr)
+            let bow_vel = 0.3 * env;
+            let v_delta = bow_vel - (br_refl + nut_refl);
+            let force = v_delta / ((*bow_slope * v_delta.abs() + 0.75).powi(4));
+
+            // 4) Инжекция в обе линии (STK-канон: force в ОБЕ)
+            let nut_in = flush(br_refl + force);
+            let br_in = flush(nut_refl + force);
+            write(nut_delay, nut_wpos, nut_in);
+            write(bridge_delay, bridge_wpos, br_in);
+
+            // Выходной tilt (one-pole, fc ≈ 1.2·f0): релаксационная петля
+            // отдаёт 2-ю моду в несколько раз сильнее фундаментала; tilt на
+            // ВЫХОДЕ (не в петле — динамика петли не трогаем) выравнивает
+            // спектр: у Helmholtz-движения мостовая сила — пила (1/n), и
+            // автокорр.-probe должен видеть f0, а не октаву.
+            *out_lp_state += *out_lp_coeff * (br_raw - *out_lp_state);
+            let br_out = flush(*out_lp_state);
+
+            // 5) Body cascade Maestre — ВНЕ петли, на сыром bridge-выходе
+            let mut b_in = br_raw;
+            for (i, c) in body_bq.iter().enumerate() {
+                let y = c[0] * b_in + c[1] * body_x1[i] + c[2] * body_x2[i]
+                    - c[3] * body_y1[i] - c[4] * body_y2[i];
+                body_x2[i] = body_x1[i]; body_x1[i] = b_in;
+                body_y2[i] = body_y1[i]; body_y1[i] = y;
+                b_in = y;
             }
 
-            // Read incoming waves at bow point
-            let incoming_nut = nut_delay[*nut_pos];
-            let incoming_bridge = bridge_delay[*bridge_pos];
-
-            // String velocity at bow point
-            let v_string = incoming_nut + incoming_bridge;
-
-            // Relative velocity between bow and string
-            let v_rel = *bow_velocity - v_string;
-
-            // Bow friction: f(v_rel) = v_rel * exp(-a * v_rel² + 0.5)
-            let a = 100.0; // friction curve steepness
-            let friction = *bow_pressure * v_rel * fast_exp(-a * v_rel * v_rel + 0.5);
-
-            // Питч-компенсация: per-period loop gain не зависит от питча →
-            // lock-время в периодах (77 периодов = 0.59 c на C3). k делает
-            // его константным в секундах (Brass-аналог, #53).
-            let n_total = (n_nut + n_bridge) as f32;
-            let k = (n_total / 183.0).clamp(1.0, 3.0);
-            let friction = friction * k;
-
-            // Reflected waves = incoming + friction contribution
-            let to_nut = incoming_bridge + friction;
-            let to_bridge = incoming_nut + friction;
-
-            // Анти-blowup: внутренние состояния улетали в inf (3.09 c) / NaN
-            // (1.94 c) — клампы + денормал-флэши при записи.
-            const BOWED_CLAMP: f32 = 4.0;
-            let flush = |x: f32| if x.abs() < 1e-20 { 0.0 } else { x };
-
-            // Nut reflection: invert + lowpass
-            let nut_reflected = -to_nut;
-            let nut_lp_coeff = 0.85;
-            *nut_filter += nut_lp_coeff * (nut_reflected - *nut_filter);
-            *nut_filter = flush(nut_filter.clamp(-BOWED_CLAMP, BOWED_CLAMP));
-            nut_delay[*nut_pos] = *nut_filter;
-            *nut_pos = (*nut_pos + 1) % n_nut;
-
-            // Bridge side: body filter (one-pole LP + bandpass resonance)
-            let bridge_lp_coeff = 0.7;
-            *bridge_lp += bridge_lp_coeff * (to_bridge - *bridge_lp);
-            *bridge_lp = flush(bridge_lp.clamp(-BOWED_CLAMP, BOWED_CLAMP));
-
-            // Body bandpass resonance
-            let f_norm = *body_freq / sample_rate;
-            let w = (PI * f_norm).sin() * 2.0;
-            let q_inv = 1.0 / *body_q;
-            // Канонический Chamberlin: bp накапливает w*hp ПОВЕРХ bp_old,
-            // иначе (1+w)·hp + утечка lp с единичным DC-гейном в петлю
-            let hp = *bridge_lp - *bridge_bp * q_inv;
-            *bridge_bp += w * hp;
-            *bridge_bp = flush(bridge_bp.clamp(-BOWED_CLAMP, BOWED_CLAMP));
-            let body_out = hp;
-
-            // Allpass fractional delay on bridge output
-            let ap_in = *bridge_lp + body_out * 0.15;
-            let c = *allpass_coeff;
-            let ap_out = c * (ap_in - *allpass_prev_out) + *allpass_prev_in;
-            *allpass_prev_in = ap_in;
-            *allpass_prev_out = ap_out;
-
-            bridge_delay[*bridge_pos] = (ap_out * 0.995).clamp(-BOWED_CLAMP, BOWED_CLAMP); // slight loss
-            *bridge_pos = (*bridge_pos + 1) % n_bridge;
-
-            // Output from bridge side
-            (to_bridge + body_out * 0.2).clamp(-1.0, 1.0)
+            (br_out + b_in * 0.1248).clamp(-1.0, 1.0)
         } else {
             0.0
         }

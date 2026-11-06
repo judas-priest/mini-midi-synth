@@ -58,13 +58,13 @@ Flute v2	00e4cdef6774e4b4
 Clarinet	00aaed976ca49521
 Shakuhachi (Emulator II Approx)	f5385937ada690a3
 Shakuhachi v2	7ea81b96aa679f71
-Violin	d991b23fa627e525
-Violin v2	3caef6db843150c9
-Viola	47f7809c0e946c5e
-Cello	f3392959640c4520
-Cello v2	52b7cf4de17aebe2
-Double Bass	7d0fdfc0360c9aac
-Double Bass v2	3907ec9a3009e83e
+Violin	f588f96f7b9f3352
+Violin v2	bdc3a32d1fe14025
+Viola	aff49333190a5246
+Cello	4dd842da6fdfbf4c
+Cello v2	a60f0c5f15dcb737
+Double Bass	f81f3e194a6a4907
+Double Bass v2	21f50339f9a70c33
 Synth Brass	2db5ad3b97f28ccd
 Trumpet	4b8a3bdce999adb5
 Trumpet v2	b955e646cbd36486
