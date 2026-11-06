@@ -271,15 +271,11 @@ init `part_drag_src: None,` в lib.rs литерале.
                 }
                 ui.label(egui::RichText::new("\u{2802}").weak());
             });
-            // Подсветка СТРОКИ-источника — по её rect из row_rects (см.
-            // draw_part_rows drop-блок; ui.max_rect() здесь = весь остаток
-            // ScrollArea — НЕ строка), рисуется в drop-детекте mod.rs
+            // Подсветка цели — в drop-детекте draw_part_rows (layers.rs)
+            // по row_rects; ui.max_rect() здесь = остаток ScrollArea, НЕ строка
 ```
 
-  ВНИМАНИЕ borrow: draw_part_row(&mut self) — `self.part_drag_src = Some(i)`
-  внутри — ок (не в замыкании: allocate/label на `ui` — ui приходит
-  параметром, self свободен). egui::Sense::drag на allocate — драг-старт
-  детектится; строка едет С drag point (без repaint переносимого контента —
+  egui::Sense::drag на allocate — драг-старт детектится; строка едет С drag point (без repaint переносимого контента —
   подсветка исходной строки = фидбек).
 
 - [ ] **Step 5: гейт**
