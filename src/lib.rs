@@ -873,6 +873,7 @@ pub fn run_gui(
         led_child: None,
         led_spawn_backoff: None,
         console_prev_mode: None,
+        part_drag_src: None,
         tracks_del_armed: None,
         drum_kit_name: String::new(),
         drum_kit_list: preset::list_drum_kits(),
