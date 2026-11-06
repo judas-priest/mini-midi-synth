@@ -106,20 +106,23 @@ fn render_freq(e: &mut SynthEngine, note: u8) -> (f32, bool) {
     }
     e.handle_event(MidiEvent::NoteOff { channel: 0, note });
     let n = sig.len();
-    // Периодический сигнал: c(2P) ≈ c(P) — strict-max ловит длинный лаг
-    // (субгармоника) на ничьих. Канон: глобальный max, затем ПЕРВЫЙ lag
-    // с c ≥ 0.9·max (fundamental, не субгармоника).
-    let mut global_max = 0.0f32;
+    // Периодический сигнал: c(2P) ≈ c(P) — strict-max/descending ловит 2P
+    // (субгармоника). Канон: НАИМЕНЬШИЙ ЛОКАЛЬНЫЙ максимум с c ≥ 0.9·max
+    // = фундаментал.
     let mut corr: Vec<(usize, f32)> = Vec::with_capacity(361);
-    for lag in (140..=500).rev() {
+    let mut global_max = 0.0f32;
+    for lag in 140..=500 {
         let mut c = 0.0f32;
         for i in lag..n { c += sig[i] * sig[i - lag]; }
         global_max = global_max.max(c);
         corr.push((lag, c));
     }
     let mut freq = 0.0f32;
-    for (lag, c) in &corr {
-        if *c >= 0.9 * global_max { freq = 48000.0 / *lag as f32; break; }
+    for (idx, &(lag, c)) in corr.iter().enumerate() {
+        if c < 0.9 * global_max { continue; }
+        let left_ok = idx == 0 || corr[idx - 1].1 < c;
+        let right_ok = idx + 1 == corr.len() || corr[idx + 1].1 < c;
+        if left_ok && right_ok { freq = 48000.0 / lag as f32; break; }
     }
     (freq, finite)
 }
@@ -179,11 +182,10 @@ git add tests/physical_models.rs && git commit -m "test: bowed pitch regression 
                                 // линейной интерполяцией позади (дробная
                                 // задержка base_delay·β)
         bridge_wpos: usize,
-        bridge_frac: f32,       // дробная часть задержки (0..1)
         nut_delay: Vec<f32>,
         nut_wpos: usize,
-        nut_frac: f32,
         nut_vib: f32,           // вибрато: доп. длина nut-линии в сэмплах
+        vib_phase: f32,         // фаза вибрато-LFO (6.13 Гц, STK)
         string_filter_state: f32, // one-pole loop loss (pole 0.95, gain 0.95)
         body_bq: [[f32; 5]; 6], // Maestre violin body: [b0,b1,b2,a1,a2] × 6
         body_x1: [f32; 6],
@@ -201,9 +203,9 @@ git add tests/physical_models.rs && git commit -m "test: bowed pitch regression 
 
 ```rust
             BowedString {
-                bridge_delay: Vec::new(), bridge_wpos: 0, bridge_frac: 0.0,
-                nut_delay: Vec::new(), nut_wpos: 0, nut_frac: 0.0,
-                nut_vib: 0.0, string_filter_state: 0.0,
+                bridge_delay: Vec::new(), bridge_wpos: 0,
+                nut_delay: Vec::new(), nut_wpos: 0,
+                nut_vib: 0.0, vib_phase: 0.0, string_filter_state: 0.0,
                 body_bq: [[0.0; 5]; 6], body_x1: [0.0; 6], body_x2: [0.0; 6],
                 body_y1: [0.0; 6], body_y2: [0.0; 6],
                 bow_slope: 3.0, bow_beta: 0.127, base_delay: 0.0,
@@ -282,7 +284,9 @@ Match :505 (reclaim) — имена полей обновить по новой 
     }
 ```
 
-(`bridge_frac`/`nut_frac` — дробные части для linear-interp чтения в tick.)
+(Дробность — в delay_read (linear interp по buf[wpos−delay]); frac-полей
+в state нет.)
+
 
 - [ ] **Step 5: tick_bowed_string** — полная замена тела (сигнатура с env):
 
@@ -304,24 +308,27 @@ Match :505 (reclaim) — имена полей обновить по новой 
         }
 
         if let OscState::BowedString {
-            bridge_delay, bridge_wpos, bridge_frac,
-            nut_delay, nut_wpos, nut_frac, nut_vib,
+            bridge_delay, bridge_wpos,
+            nut_delay, nut_wpos, nut_vib, vib_phase,
             string_filter_state,
             body_bq, body_x1, body_x2, body_y1, body_y2,
-            bow_slope, ..
+            bow_slope, bow_beta, base_delay, ..
         } = &mut self.state
         {
             const FLUSH: f32 = 1e-20;
             let flush = |x: f32| if x.abs() < FLUSH { 0.0 } else { x };
+            let sample_rate = self.sample_rate;
 
             // Вибрато: модуляция длины nut-линии (STK: neckDelay.setDelay)
-            *nut_vib = 0.02 * (*vib_phase_v() * std::f32::consts::TAU).sin();
-            *vib_phase_v() += 6.13 / self.sample_rate;
-            if *vib_phase_v() >= 1.0 { *vib_phase_v() -= 1.0; }
+            *nut_vib = 0.02 * (*vib_phase * std::f32::consts::TAU).sin();
+            *vib_phase += 6.13 / sample_rate;
+            if *vib_phase >= 1.0 { *vib_phase -= 1.0; }
 
             // 1) Отражения: ОБЕ инверсии (STK Bowed.cpp) — иначе
             // субгармонический ряд (чужие высоты, #56а)
-            let nut_d = *base_delay * (1.0 - *bow_beta) * (1.0 + *nut_vib)
+            // clamp СКОБКАМИ на произведение: иначе .max(1.0) применился бы
+            // к (1+nut_vib) и срезал нижнюю половину вибрато
+            let nut_d = (*base_delay * (1.0 - *bow_beta) * (1.0 + *nut_vib))
                 .min(nut_delay.len() as f32 - 1.0)
                 .max(1.0); // guard: чтение всегда внутри кольца
             let bridge_d = *base_delay * *bow_beta;
