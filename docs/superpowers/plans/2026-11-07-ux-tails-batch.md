@@ -56,7 +56,8 @@ rename-TextEdit не конфликтует со стрелками; (3) #34/#35
   (page-aligned snap: (9/7)·7 = 7, min(max_w = 5) = 5 → СТЕПЕНЬ-КЛАМП:
   итог 5; папки 5..11, папка 9 на слоте 5). Юнит-пин tc_page_start:
   page_start(9, 12) = 5.
-- TC2 (manager nav): tracks_sel None → ↓ → Some(0); ↓ → Some(1); ↑ → Some(0).
+- TC2 (manager nav, при active_folder = None): tracks_sel None → ↓ →
+  Some(0); ↓ → Some(1); ↑ → Some(0). (При Some(k) — от k: unwrap_or(active).)
 - TC3 (manager Enter): tracks_sel = Some(2), folders ≥ 3 → Enter →
   active_folder = Some(2), config saved, console_list refreshed.
 - TC4 (rename guard): rename-TextEdit в фокусе → ↑/↓/Enter НЕ двигают sel /
