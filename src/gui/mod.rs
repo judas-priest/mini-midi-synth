@@ -3414,6 +3414,36 @@ mod part_undo_tests {
     }
 }
 
+/// Свап партов разрешён только в пределах одной зоны (A↔A, B↔B):
+/// диапазоны/сплит-семантика зоны не переезжают (#54).
+/// (`allow` — до Task 2, который подключает свап в draw_part_rows.)
+#[allow(dead_code)]
+fn swap_check(a: usize, b: usize, zone_size: usize) -> Result<(), &'static str> {
+    if a == b { return Err("same slot"); }
+    if (a / zone_size) != (b / zone_size) { return Err("cross-zone swap"); }
+    Ok(())
+}
+
+#[cfg(test)]
+mod swap_tests {
+    use super::*;
+
+    #[test]
+    fn tc1_same_zone_swap_ok() {
+        assert_eq!(swap_check(3, 5, crate::gui::PARTS_PER_ZONE), Ok(()));
+    }
+
+    #[test]
+    fn tc2_cross_zone_denied() {
+        assert!(swap_check(3, 10, crate::gui::PARTS_PER_ZONE).is_err());
+    }
+
+    #[test]
+    fn tc3_self_swap_denied() {
+        assert!(swap_check(5, 5, crate::gui::PARTS_PER_ZONE).is_err());
+    }
+}
+
 #[cfg(test)]
 mod macro_mirror_tests {
     use super::*;
