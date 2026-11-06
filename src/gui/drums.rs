@@ -42,7 +42,7 @@ impl App {
             let rec_label = if rec { "\u{23FA} Rec" } else { "\u{26AB} Rec" };
             let rec_color = if rec { egui::Color32::RED } else { egui::Color32::GRAY };
             if ui.button(egui::RichText::new(rec_label).color(rec_color))
-                .on_hover_text("Master record: drums → grid, notes → looper (loop = 1 pattern cycle)").clicked()
+                .on_hover_text("Master record: drums \u{27A1} grid, notes \u{27A1} looper (loop = 1 pattern cycle)").clicked()
             {
                 let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
             }
@@ -109,7 +109,7 @@ impl App {
             for p in 0..8u8 {
                 let selected = p == self.drum_current_pattern;
                 let marked = self.drum_chain_on && self.drum_chain_mask & (1 << p) != 0;
-                let label = if marked { format!("\u{2713}{}", p + 1) } else { format!("{}", p + 1) };
+                let label = if marked { format!("\u{2714}{}", p + 1) } else { format!("{}", p + 1) };
                 let resp = ui.selectable_label(selected, if marked {
                     egui::RichText::new(label).strong()
                 } else {

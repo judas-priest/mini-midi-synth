@@ -626,7 +626,7 @@ impl App {
                     });
             });
             changed |= self.param_slider(ui, "pd_depth", "Depth (DCW)", 0.0, 1.0, false);
-            changed |= self.param_slider(ui, "pd_env_amount", "Env → Depth", 0.0, 1.0, false);
+            changed |= self.param_slider(ui, "pd_env_amount", "Env \u{27A1} Depth", 0.0, 1.0, false);
         }
 
         // Wavefolder params
