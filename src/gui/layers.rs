@@ -314,6 +314,19 @@ impl App {
                     self.show_toast(format!("Loaded: {}", perf.name), ToastKind::Success);
                 }
             }
+            // #57: активный трек + кнопка менеджера — в строке перфа,
+            // после выпадающего списка (юзер 2026-11-06)
+            ui.separator();
+            let track_name = self.config.ui.active_folder
+                .and_then(|i| self.config.ui.perf_folders.get(i))
+                .map(|f| f.name.as_str())
+                .unwrap_or("(all)");
+            ui.label(egui::RichText::new(format!("Track: {track_name}")).weak());
+            if ui.small_button("Tracks").on_hover_text(
+                "Track folders (setlists) — organize perfs per song").clicked()
+            {
+                self.show_tracks_manager = true;
+            }
             ui.separator();
         });
     }

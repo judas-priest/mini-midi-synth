@@ -1320,21 +1320,6 @@ impl eframe::App for App {
                 }
             });
             ui.add_space(theme::SP_SM);
-
-            // #57: Tracks — ОТДЕЛЬНАЯ строка под фейдерами (юзер 2026-11-06)
-            ui.horizontal(|ui| {
-                let track_name = self.config.ui.active_folder
-                    .and_then(|i| self.config.ui.perf_folders.get(i))
-                    .map(|f| f.name.as_str())
-                    .unwrap_or("(all)");
-                ui.label(egui::RichText::new(format!("Track: {track_name}")).weak());
-                if ui.small_button("Tracks").on_hover_text(
-                    "Track folders (setlists) — organize perfs per song").clicked()
-                {
-                    self.show_tracks_manager = true;
-                }
-            });
-            ui.add_space(theme::SP_SM);
         });
 
         // Bottom: keyboard
