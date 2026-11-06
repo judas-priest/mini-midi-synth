@@ -776,25 +776,17 @@ S1-S5), S1 RT-safe set_sample_rate (=старый #12), S2 реестр пара
 Файл: REFACTOR_AUDIT.md (корень). Быстрые QW1/QW2 — кандидаты на причину
 клиппинга #19 (аллокации в колбэке = dropouts при игре wavetable-патчей).
 
-## 34. Окно instrument browser: одна позиция + запоминание (2026-10-31, юзер)
+## 34. Окно instrument browser: одна позиция + запоминание — ГОТОВО (ux-tails, 2026-11-07): стабильный Id окна (modal::ModalWindow, константный «inst_browser»), позиция персистится в конфиг (config.ui.inst_browser_pos: restore gui/mod.rs draw_instrument_browser_modal, save рядом). Нюанс: размер окна (default_height 540) живёт только в сессии egui (state по Id), в конфиг не пишется.
 
-Модалка выбора инструмента открывается «каждый раз как бог на душу положит» —
-позиция/размер окна каждый раз новые, непрактично. Хотелка: одно место
-открытия + запоминание позиции/размера (per-window egui state уже сохраняется
-автоматически, если не сбрасывать id; вероятно ломается тем, что окно
-пересоздаётся с другим title per-part — «GM Instrument — Part A1» vs «A2» —
-у каждого свой state). Сделать: стабильный Id окна (не зависящий от парта),
-одна общая позиция; опционально — персист позиции в конфиг. Позже, не в
-раунде 3.
+## 35. Клавиатурная навигация в модалках/настройках: стрелки + Enter — PARTIAL (2026-11-07)
 
-## 35. Клавиатурная навигация в модалках/настройках: стрелки + Enter (2026-10-31, юзер)
+ГОТОВО: instrument browser (стрелки двигают inst_browser_index, поиск-ресет,
+Enter → pick, Esc — modal shell; gui/mod.rs draw_instrument_browser_modal);
+Tracks-менеджер (стрелки двигают tracks_sel, Enter → SetActive с save+refresh,
+rename-TextEdit-фокус — guard; gui/mod.rs update() + draw_tracks_manager).
 
-В «Patch — Part 1» (и во ВСЕХ модалках и в настройках) выбор должен работать
-со стрелок и Enter: ↑/↓ — перемещение по списку, Enter — выбрать, Esc —
-закрыть. Сейчас только мышь. egui: memory().focus + Event::Key — сфокусировать
-первый selectable после открытия, двигать индекс, Enter → picked. Касается:
-instrument browser (DSP + GM деревья),
- Pad Remap, combo-popups перфов, TextEdit-форм (Perf name, kit save).
+ОСТАЛОСЬ: Pad Remap, combo-popups перфов, TextEdit-формы (Perf name, kit save),
+Settings-окно.
 
 ## 36. Отступ над «+ Add part» — ГОТОВО (раунд 5, 4ce2635)
 
