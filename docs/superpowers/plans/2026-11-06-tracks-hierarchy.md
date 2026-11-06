@@ -143,8 +143,10 @@ led_console tests; LoadPerf-глию — экран.
 :151-156; ассерт на c.mode() — getter :301.)
 
 - [ ] **Step 2: красный** — `cargo test --lib tc_tracks_tap tc_folderperfs tc_tracks_menu 2>&1 | tail -6`
-  Expected: tc_tracks_tap PASS (старая семантика эмитит TrackSelect), tc_folderperfs/
-  tc_tracks_menu FAIL (Mode::FolderPerfs нет; Tracks слот 0 → Home).
+  Expected: КОМПИЛЯТОР FAIL (E0599 Mode::FolderPerfs не существует) — красная
+  фаза для новых сущностей; после добавления варианта (Step 3a):
+  tc_folderperfs/tc_tracks_menu FAIL по семантике (Tracks слот 0 → Home),
+  tc_tracks_tap зелёный по Action.
 
 - [ ] **Step 3: реализация.**
 
@@ -158,9 +160,10 @@ led_console tests; LoadPerf-глию — экран.
             if slot == 0 { self.mode = Mode::Menu; return None; }
             // слоты 1..=7 = папки: DRILL-DOWN — режим FolderPerfs ставится
             // ЗДЕСЬ (optimistic: handler в том же кадре ставит active_folder
-            // и обновит console_list до paint); Action несёт window-local слот
+            // и обновит console_list до paint); Action несёт window-local слот.
+            // perf_window = 0 — НЕ ЗДЕСЬ (поле на App, не LedConsole; сброс
+            // делает TrackSelect handler в mod.rs)
             self.mode = Mode::FolderPerfs;
-            self.perf_window = 0; // перф-страница папки с начала (TC8)
             return Some(Action::TrackSelect(slot - 1));
         }
         if self.mode == Mode::FolderPerfs {
@@ -171,7 +174,9 @@ led_console tests; LoadPerf-глию — экран.
         }
 ```
 
-(c) top_colors Mode::Menu arm — плитка 3 = оранжевая TRACKS:
+(c) top_colors Mode::Menu arm — плитка 3 = оранжевая TRACKS (УЖЕ ЕСТЬ в
+текущем коде + тест menu_slot3_led_is_orange_tracks зелёный — шаг no-op,
+НЕ дублировать реализацию):
 
 ```rust
                         3 => [0xFF, 0x80, 0x00], // TRACKS: orange
@@ -237,8 +242,9 @@ git add src/gui/led_console.rs && git commit -m "feat: hierarchical console — 
 
 **Files:**
 - Modify: `src/gui/mod.rs` — TrackSelect handler, paint match (+FolderPerfs),
-  page_window (+FolderPerfs), page_depth (+FolderPerfs), mode-entry sync
-  (FolderPerfs → perf_window = 0), step() комментарий
+  page_window (+FolderPerfs arm; Tracks arm — снять stale `+1`), page_depth
+  (+FolderPerfs), mode-entry sync (FolderPerfs — falls to `_`, отдельного
+  плеча не нужно), step() комментарий
 
 - [ ] **Step 1: TrackSelect = drill-down** — handler заменить:
 
@@ -271,9 +277,16 @@ refresh = алиасы этой папки.)
 
 (Home-плечо не трогать; FolderPerfs = Home-стиль поверх console_list.)
 LoadPerf handler уже читает console_list + perf_window — работает как есть.
-page_window — добавить FolderPerfs-плечо:
+page_window — добавить FolderPerfs-плечо и СНЯТЬ stale `+ 1` в Tracks-плече
+(остаток #78 ALL PERFS-слота: окно могло указывать на пустую страницу):
 
 ```rust
+            led_console::Mode::Tracks => {
+                let max_w = led_console::window_max_start(
+                    self.config.ui.perf_folders.len());
+                self.tracks_window = (self.tracks_window as i32 + delta)
+                    .clamp(0, max_w as i32) as usize;
+            }
             led_console::Mode::FolderPerfs => {
                 let max_w = led_console::window_max_start(self.console_list.len());
                 self.perf_window = (self.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
