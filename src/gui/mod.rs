@@ -2730,8 +2730,17 @@ impl App {
                 }
             }
             led_console::Action::TrackSelect(i) => {
-                // консоль шлёт УЖЕ window-local 0-based (slot-1 из tap())
-                let idx = self.tracks_window + i;
+                // Слот-элемент 0 TRACKS-списка = виртуальный "(ALL PERFS)" —
+                // выход к общим перфам с пэдов (юзер-спека 2026-11-06)
+                if self.tracks_window + i == 0 {
+                    self.config.ui.active_folder = None;
+                    let _ = self.config.save();
+                    self.refresh_console_list();
+                    self.perf_window = 0;
+                    self.console.force_mode(led_console::Mode::Home);
+                    return;
+                }
+                let idx = self.tracks_window + i - 1; // -1: слот ALL PERFS
                 if idx < self.config.ui.perf_folders.len() {
                     self.config.ui.active_folder = Some(idx);
                     let _ = self.config.save();
@@ -2843,8 +2852,9 @@ impl App {
                 self.mute_window = (self.mute_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             led_console::Mode::Tracks => {
-                let max_w =
-                    led_console::window_max_start(self.config.ui.perf_folders.len());
+                // список TRACKS = folders + 1 виртуальный ALL PERFS-слот
+                let max_w = led_console::window_max_start(
+                    self.config.ui.perf_folders.len() + 1);
                 self.tracks_window =
                     (self.tracks_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }

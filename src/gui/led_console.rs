@@ -196,7 +196,7 @@ impl LedConsole {
     /// index of the visible window: slot i (1..=7) shows item window + i - 1.
     /// MUTE slots cover all parts via w_mute paging (PAGE pads 28/29).
     /// Slot 0 is the MENU button (white). No transport-target item since
-    /// #32 фаза 4: transport is always master, menu slot 3 is dark.
+    /// #32 фаза 4: transport is always master; slot 3 = orange TRACKS tile.
     #[allow(clippy::too_many_arguments)] // flat LED snapshot, callers build it inline
     pub fn top_colors(
         &self,
@@ -256,12 +256,13 @@ impl LedConsole {
             Mode::Menu => {
                 // menu items are color-coded to what the row becomes after
                 // picking them: HOME -> blue perfs, PATTERN -> yellow,
-                // MUTE -> green; slot 3 is dark (target toggle removed)
+                // MUTE -> green, TRACKS -> orange folder row
                 for (i, col) in c.iter_mut().enumerate() {
                     *col = match i {
                         0 => AVAIL,              // HOME: blue (perfs)
                         1 => [0xFF, 0xFF, 0x00], // PATTERN: yellow
                         2 => [0x00, 0xFF, 0x00], // MUTE: green
+                        3 => [0xFF, 0x80, 0x00], // TRACKS: orange
                         _ => [0x00, 0x00, 0x00],
                     };
                 }
@@ -322,21 +323,33 @@ impl LedConsole {
         self.mode = m;
     }
 
-    /// Пэды режима Tracks (#57): слот 0 = MENU белый, 1..=7 = папки (активная
-    /// FF00FF пурпур, остальные 0066FF синий, пустые — чёрный).
+    /// Пэды режима Tracks (#57): слот 0 = MENU белый, слот 1 при w==0 =
+    /// виртуальный "(ALL PERFS)" (оранжевый), 1..=7 = папки (активная FF00FF
+    /// пурпур, остальные FF8000 оранжевый, пустые — чёрный).
     pub fn folder_colors(
         &self, active_folder: Option<usize>, filled: usize, w: usize,
     ) -> [[u8; 3]; 8] {
+        // Ряд TRACKS: оранжевые папки (FF8000, validated), активная — пурпур
+        // (канон режимов). Слот 1 при w==0 = виртуальный "(ALL PERFS)" —
+        // выход к общим перфам с пэдов (юзер-спека 2026-11-06).
         let mut out = [[0x00, 0x00, 0x00]; 8];
         out[0] = [0xFF, 0xFF, 0xFF]; // MENU
         for (i, col) in out.iter_mut().enumerate().skip(1) {
             let idx = w + i - 1;
-            if idx >= filled { break; }
-            *col = if active_folder == Some(idx) {
-                [0xFF, 0x00, 0xFF] // selected: magenta
+            if idx == 0 && w == 0 {
+                *col = [0xFF, 0x80, 0x00]; // (ALL PERFS)
+                continue;
+            }
+            let folder = idx - 1; // -1: слот ALL PERFS
+            // ВАЖНО: bound-first — stale active_folder ≥ filled (папка
+            // удалена, конфиг не пересохранён) не должен красить пустой слот
+            if folder >= filled {
+                *col = [0x00, 0x00, 0x00];
+            } else if Some(folder) == active_folder {
+                *col = [0xFF, 0x00, 0xFF]; // active: magenta
             } else {
-                [0x00, 0x66, 0xFF] // available: blue
-            };
+                *col = [0xFF, 0x80, 0x00];
+            }
         }
         out
     }
@@ -510,16 +523,43 @@ mod tests {
     }
 
     #[test]
-    fn menu_slot3_led_is_off() {
+    fn menu_slot3_led_is_orange_tracks() {
         let mut c = LedConsole::new();
         c.mode = Mode::Menu;
         let mutes = [false; 8];
         let menu = c.top_colors(None, 0, 0, &mutes, 0, 0, 0);
-        assert_eq!(menu[3], [0x00, 0x00, 0x00], "slot 3 (ex-target toggle): OFF");
+        assert_eq!(menu[3], [0xFF, 0x80, 0x00], "slot 3: TRACKS tile, orange");
         // остальные пункты меню не изменились
         assert_eq!(menu[0], [0x00, 0x66, 0xFF]); // HOME: blue
         assert_eq!(menu[1], [0xFF, 0xFF, 0x00]); // PATTERN: yellow
         assert_eq!(menu[2], [0x00, 0xFF, 0x00]); // MUTE: green
+    }
+
+    #[test]
+    fn tc_menu_orange_tile() {
+        // #57-полировка: слот 3 MENU = оранжевая плитка TRACKS
+        let mut c = LedConsole::new();
+        c.mode = Mode::Menu;
+        let colors = c.top_colors(None, 0, 0, &[false; 8], 0, 0, 0);
+        assert_eq!(colors[3], [0xFF, 0x80, 0x00], "menu TRACKS tile must be orange");
+    }
+
+    #[test]
+    fn tc_tracks_colors_all_perfs_and_folders() {
+        // Ряд TRACKS: слот 1 (w=0) = ALL PERFS; папки оранжевые; активная пурпур
+        let mut c = LedConsole::new();
+        c.mode = Mode::Tracks;
+        let none = c.folder_colors(None, 2, 0);
+        assert_eq!(none[1], [0xFF, 0x80, 0x00], "ALL PERFS slot must be orange");
+        assert_eq!(none[2], [0xFF, 0x80, 0x00], "folder 0 must be orange");
+        let act = c.folder_colors(Some(0), 2, 0);
+        assert_eq!(act[1], [0xFF, 0x80, 0x00], "ALL PERFS slot");
+        assert_eq!(act[2], [0xFF, 0x00, 0xFF], "active folder 0 must be magenta");
+        // paging w=1: слот 1 = папка 0 (ALL PERFS только на первой странице)
+        let page2 = c.folder_colors(Some(0), 2, 1);
+        assert_eq!(page2[1], [0xFF, 0x00, 0xFF], "folder 0 magenta on page 2");
+        // TC7: ALL PERFS доступен даже с нулём папок
+        assert_eq!(c.folder_colors(None, 0, 0)[1], [0xFF, 0x80, 0x00], "ALL PERFS available even with zero folders");
     }
 
     #[test]
