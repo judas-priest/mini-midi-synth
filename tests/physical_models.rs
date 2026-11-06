@@ -108,28 +108,35 @@ fn tc8_no_regression_finger_and_high_brass() {
 }
 
 /// #56 roadmap 1: доминантная частота позднего окна (блоки 50..=550)
-/// автокорреляцией. Lag 140..=500 → 96..343 Гц (C3/C4 + старые жучки).
-fn render_freq(e: &mut SynthEngine, note: u8) -> (f32, bool) {
+/// автокорреляцией. Lag 60..=760 → 63..800 Гц (C2: период 733 сэмпла —
+/// окно 60..=500 физически не видит фундаментал C2, только гармоники).
+/// Плюс честный sustain-щуп: RMS окна блоков 300..=550 (0.19–0.34 с) —
+/// нота должна ещё звучать, а не лежать в шумовом полу.
+fn render_freq(e: &mut SynthEngine, note: u8) -> (f32, bool, f32) {
     e.handle_event(MidiEvent::NoteOn { channel: 0, note, velocity: 127 });
     let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
     let mut sig: Vec<f32> = Vec::with_capacity(4096);
     let mut finite = true;
+    let mut late_energy = 0.0f64;
+    let mut late_count = 0usize;
     for blk in 0..550 {
         l.fill(0.0); r.fill(0.0);
         e.tick_block(&mut l, &mut r);
         for i in 0..BLOCK_SIZE {
             finite &= l[i].is_finite() && r[i].is_finite();
             if blk >= 50 { sig.push(l[i]); }
+            if blk >= 300 { late_energy += (l[i] as f64) * (l[i] as f64); late_count += 1; }
         }
     }
     e.handle_event(MidiEvent::NoteOff { channel: 0, note });
+    let late_rms = (late_energy / late_count.max(1) as f64).sqrt() as f32;
     let n = sig.len();
     // Периодический сигнал: c(2P) ≈ c(P) — strict-max/descending ловит 2P
     // (субгармоника). Канон: НАИМЕНЬШИЙ ЛОКАЛЬНЫЙ максимум с c ≥ 0.9·max
     // = фундаментал.
-    let mut corr: Vec<(usize, f32)> = Vec::with_capacity(361);
+    let mut corr: Vec<(usize, f32)> = Vec::with_capacity(701);
     let mut global_max = 0.0f32;
-    for lag in 140..=500 {
+    for lag in 60..=760 {
         let mut c = 0.0f32;
         for i in lag..n { c += sig[i] * sig[i - lag]; }
         global_max = global_max.max(c);
@@ -142,19 +149,35 @@ fn render_freq(e: &mut SynthEngine, note: u8) -> (f32, bool) {
         let right_ok = idx + 1 == corr.len() || corr[idx + 1].1 < c;
         if left_ok && right_ok { freq = 48000.0 / lag as f32; break; }
     }
-    (freq, finite)
+    (freq, finite, late_rms)
 }
 
 #[test]
 fn tc_b1_pitch_c4_is_nominal() {
-    let (f, _) = render_freq(&mut engine_with("Violin"), 60);
+    let (f, _, late_rms) = render_freq(&mut engine_with("Violin"), 60);
     assert!((f - 261.63).abs() <= 13.0, "C4 dominant {f:.1} Hz (expected ~261.6)");
+    assert!(late_rms >= 0.03, "C4 dies to noise floor: late rms {late_rms:.5}");
 }
 
 #[test]
 fn tc_b2_pitch_c3_is_nominal() {
-    let (f, _) = render_freq(&mut engine_with("Violin"), 48);
+    let (f, _, late_rms) = render_freq(&mut engine_with("Violin"), 48);
     assert!((f - 130.81).abs() <= 7.0, "C3 dominant {f:.1} Hz (expected ~130.8)");
+    assert!(late_rms >= 0.03, "C3 dies to noise floor: late rms {late_rms:.5}");
+}
+
+#[test]
+fn tc_b4_pitch_c2_is_nominal() {
+    let (f, _, late_rms) = render_freq(&mut engine_with("Violin"), 36);
+    assert!((f - 65.41).abs() <= 4.0, "C2 dominant {f:.1} Hz (expected ~65.4)");
+    assert!(late_rms >= 0.03, "C2 dies to noise floor: late rms {late_rms:.5}");
+}
+
+#[test]
+fn tc_b5_sustains_at_c5() {
+    let (_, finite, late_rms) = render_freq(&mut engine_with("Violin"), 72);
+    assert!(finite, "C5 went non-finite during probe");
+    assert!(late_rms >= 0.02, "C5 dies to noise floor: late rms {late_rms:.5}");
 }
 
 #[test]
@@ -170,3 +193,47 @@ fn tc_b3_5s_hold_stays_finite() {
     }
     assert!(finite, "5s hold went non-finite");
 }
+
+
+#[test]
+#[ignore]
+fn temp_late_pitch_c4() {
+    let mut e = engine_with("Violin");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 127 });
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    for _ in 0..1000 { e.tick_block(&mut l, &mut r); }
+    for (win, blk_start) in [(1, 1000usize), (2, 2000), (3, 3000), (4, 4000), (5, 5000), (6, 6000), (7, 7000)] {
+        let mut sig: Vec<f32> = Vec::new();
+        for _ in 0..500 {
+            l.fill(0.0); r.fill(0.0);
+            e.tick_block(&mut l, &mut r);
+            sig.extend_from_slice(&l);
+        }
+        let mut global = 0.0f32;
+        let mut best = (0usize, 0.0f32);
+        for lag in 100..=200 {
+            let mut c = 0.0f32;
+            for i in lag..sig.len() { c += sig[i] * sig[i - lag]; }
+            global = global.max(c);
+            if c > best.1 { best = (lag, c); }
+        }
+        // fundamental in 150..=250 range? report smallest local max >= 0.9*global
+        let mut freq = 0.0f32;
+        let mut corr = Vec::new();
+        for lag in 100..=200 {
+            let mut c = 0.0f32;
+            for i in lag..sig.len() { c += sig[i] * sig[i - lag]; }
+            corr.push((lag, c));
+        }
+        for (idx, &(lag, c)) in corr.iter().enumerate() {
+            if c < 0.9 * global { continue; }
+            let lo = idx == 0 || corr[idx-1].1 < c;
+            let ro = idx+1 == corr.len() || corr[idx+1].1 < c;
+            if lo && ro { freq = 48000.0 / lag as f32; break; }
+        }
+        let rms = (sig.iter().map(|x| *x as f64 * *x as f64).sum::<f64>() / sig.len() as f64).sqrt();
+        println!("win {win} (blk {blk_start}): freq {freq:.1} rms {rms:.5}");
+        let _ = best;
+    }
+}
+
