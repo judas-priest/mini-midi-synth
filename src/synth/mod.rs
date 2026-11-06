@@ -1096,6 +1096,56 @@ impl Part {
         self.root_active = None;
     }
 
+    /// Pedal-up: разжать pedal-held (не key-held) голоса парта. Общий код
+    /// set_sustain и SetPartSustain (QW10: verbatim ×2 — дрейф запрещён).
+    /// `secs` = static pedal-up release (#7), None = patch release.
+    fn release_pedal_held(&mut self, secs: Option<f32>) {
+        // Latch voices: released unconditionally (см. latch_held контракт —
+        // latched note определяется latch_held, не keys_down).
+        for &n in &self.latch_held {
+            self.keys_down[n as usize] = false;
+        }
+        if let Some(secs) = secs {
+            // Two passes: needs-битмап держит borrows disjoint.
+            let mut needs = [false; 128];
+            for voice in &self.voices {
+                if voice.active && !voice.is_releasing()
+                    && !self.keys_down[voice.src_note as usize]
+                {
+                    needs[voice.note as usize] = true;
+                }
+            }
+            for (note, &held) in needs.iter().enumerate() {
+                if held { self.note_off_for(note as u8, secs); }
+            }
+        } else {
+            for voice in &mut self.voices {
+                if voice.active && !voice.is_releasing()
+                    && !self.keys_down[voice.src_note as usize]
+                {
+                    voice.note_off();
+                }
+            }
+        }
+        self.sustained_notes = [false; 128];
+        // Stale mono/latch entries would resurrect on the next key press.
+        self.note_stack.clear();
+        self.latch_held.clear();
+    }
+
+    /// Latch-mismatch: уход с play_mode==3 (latch) — снять latched голоса.
+    /// Общий код ProgramChange и LoadPatch (QW10). Вызывать ДО swap params.
+    fn release_latch_mismatch(&mut self, new_play_mode: u8) {
+        if self.params.play_mode as u8 == 3 && new_play_mode != 3 {
+            for voice in &mut self.voices {
+                if voice.active && self.latch_held.contains(&voice.src_note) {
+                    voice.note_off();
+                }
+            }
+            self.latch_held.clear();
+        }
+    }
+
     fn update_held_range(&mut self) {
         let mut lo = 255u8;
         let mut hi = 0u8;
@@ -1717,51 +1767,14 @@ impl SynthEngine {
     fn set_sustain(&mut self, value: u8) {
         let on = value >= 64;
         self.sustain.store(on, std::sync::atomic::Ordering::Relaxed);
+        let sr = self.sustain_release;
         for (i, part) in self.parts.iter_mut().enumerate() {
             part.sustain_pedal = if on { 1.0 } else { 0.0 };
             // SF2 voices: rustysynth applies hold-pedal per channel itself —
             // per-part mask, disabled parts get CC64=0 (bass without sustain).
             self.sampler.set_part_sustain(i, on && part.sustain_enabled);
             if !on {
-                // Latch voices are released unconditionally (as before): a
-                // latched note is defined by latch_held, not by a held key —
-                // clearing latch_held below without releasing its keys_down
-                // would leave a voice that its own key-off can never stop
-                // (latch note_off early-returns).
-                for &n in &part.latch_held {
-                    part.keys_down[n as usize] = false;
-                }
-                if let Some(secs) = self.sustain_release {
-                    // Static pedal-up release (TECHDEBT #7): pedal-released
-                    // voices take `secs` instead of the patch release.
-                    // Key-held voices (`keys_down`) are untouched — same
-                    // predicate as the plain path below. Two passes over a
-                    // stack bitmap keep the borrows of `part` disjoint.
-                    let mut needs = [false; 128];
-                    for voice in &part.voices {
-                        if voice.active && !voice.is_releasing()
-                            && !part.keys_down[voice.src_note as usize]
-                        {
-                            needs[voice.note as usize] = true;
-                        }
-                    }
-                    for (note, &held) in needs.iter().enumerate() {
-                        if held { part.note_off_for(note as u8, secs); }
-                    }
-                } else {
-                    for voice in &mut part.voices {
-                        if voice.active && !voice.is_releasing()
-                            && !part.keys_down[voice.src_note as usize]
-                        {
-                            voice.note_off();
-                        }
-                    }
-                }
-                part.sustained_notes = [false; 128];
-                // Pedal-only holds are gone; stale mono/latch entries would
-                // resurrect on the next key press (mono retrigger).
-                part.note_stack.clear();
-                part.latch_held.clear();
+                part.release_pedal_held(sr);
             }
         }
     }
@@ -2376,14 +2389,7 @@ impl SynthEngine {
                         // Seamless switch: same latch-mismatch release as
                         // LoadPatch — must run BEFORE the params swap, while
                         // l.params still holds the OLD play_mode.
-                        if l.params.play_mode as u8 == 3 && params.play_mode as u8 != 3 {
-                            for voice in &mut l.voices {
-                                if voice.active && l.latch_held.contains(&voice.src_note) {
-                                    voice.note_off();
-                                }
-                            }
-                            l.latch_held.clear();
-                        }
+                        l.release_latch_mismatch(params.play_mode as u8);
                         l.params = params;
                         // Диапазон парта — собственность SetPartRange/сплита:
                         // ProgramChange не перетирает его (#41, резидуал —
@@ -2518,14 +2524,7 @@ impl SynthEngine {
                     // Only a latch-mode mismatch releases the latch-held
                     // voices — a non-latch patch cannot toggle them off, and
                     // they would ring forever (audit fact 6).
-                    if l.params.play_mode as u8 == 3 && params.play_mode as u8 != 3 {
-                        for voice in &mut l.voices {
-                            if voice.active && l.latch_held.contains(&voice.src_note) {
-                                voice.note_off();
-                            }
-                        }
-                        l.latch_held.clear();
-                    }
+                    l.release_latch_mismatch(params.play_mode as u8);
                     // Sync macro values from preset into live part state
                     // Load wavetable data if provided. `replace` hands the
                     // previous Arc back into the event instead of dropping the
@@ -2653,43 +2652,7 @@ impl SynthEngine {
                         self.sampler.set_part_sustain(part, on);
                     }
                     if !on && l.sustain_pedal > 0.5 {
-                        // Разжать pedal-held ноты этого парта — паттерн
-                        // pedal-up из set_sustain (включая latch-очистку,
-                        // sustain_release Some-ветку и !keys_down).
-                        for &n in &l.latch_held {
-                            l.keys_down[n as usize] = false;
-                        }
-                        if let Some(secs) = self.sustain_release {
-                            // Static pedal-up release (TECHDEBT #7): pedal-
-                            // released voices take `secs` instead of the patch
-                            // release. Key-held voices (`keys_down`) are
-                            // untouched. Two passes keep borrows disjoint.
-                            let mut needs = [false; 128];
-                            for voice in &l.voices {
-                                if voice.active && !voice.is_releasing()
-                                    && !l.keys_down[voice.src_note as usize]
-                                {
-                                    needs[voice.note as usize] = true;
-                                }
-                            }
-                            for (note, &held) in needs.iter().enumerate() {
-                                if held { l.note_off_for(note as u8, secs); }
-                            }
-                        } else {
-                            for voice in &mut l.voices {
-                                if voice.active && !voice.is_releasing()
-                                    && !l.keys_down[voice.src_note as usize]
-                                {
-                                    voice.note_off();
-                                }
-                            }
-                        }
-                        l.sustained_notes = [false; 128];
-                        // Pedal-only holds are gone; stale mono/latch entries
-                        // would resurrect on the next key press (mono
-                        // retrigger).
-                        l.note_stack.clear();
-                        l.latch_held.clear();
+                        l.release_pedal_held(self.sustain_release);
                     }
                 }
             }
