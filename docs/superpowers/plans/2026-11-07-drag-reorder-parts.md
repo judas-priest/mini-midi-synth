@@ -290,7 +290,7 @@ git add src/gui/mod.rs src/gui/layers.rs src/lib.rs && git commit -m "feat: part
 MoveAliasUp/Down ops + ↑↓ кнопки в alias-строках + apply-arms; TC5/TC6
 оттуда). Верификация — в Task 4.
 
-### Task 4: Верификация### Task 4: Верификация
+### Task 4: Верификация
 
 - [ ] Гейт: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety`
 - [ ] PR → squash merge → rebuild release → relaunch
@@ -312,7 +312,6 @@ MoveAliasUp/Down ops + ↑↓ кнопки в alias-строках + apply-arms;
 - Cross-zone drag (A↔B) — семантика зон/сплита; отдельный дизайн при запросе.
 - Драг алиасов в Tracks (мышкой) — ↑↓ кнопки сейчас (канон keyboard-alt);
   egui_dnd — если фидбек попросит.
-- Undo свапа — two-slot откат ломает single-part snapshot канон; полный
-  откат свапа — отдельная работа (данные персистятся в конфиге).
+- Undo свапа — НЕТ (см. Architecture).
 - Insert-семантика (раздвигание) вместо свапа — слоты партов семантически
   закреплены (A1..B8), свап честнее.
