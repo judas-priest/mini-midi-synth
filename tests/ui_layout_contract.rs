@@ -90,43 +90,70 @@ fn panels_carve_no_overlap_seq_above_keyboard() {
 // в порядке show() — перестановка ломает раскладку молча.
 // При S4-разрезе gui/mod.rs скан расширить на все файлы gui/.
 
-#[test]
-fn panel_registration_order_matches_source_contract() {
-    const MOD_RS: &str = include_str!("../src/gui/mod.rs");
-    // Ожидаемый порядок (id, вид). top-панели карверт сверху вниз,
-    // bottom — снизу вверх; CentralPanel забирает остаток.
-    const EXPECTED: &[(&str, &str)] = &[
-        ("midi_learn_bar", "top"),
-        ("header", "top"),
-        ("global_controls", "top"),
-        ("keyboard_panel", "bottom"),
-        ("pad_perf_bar", "bottom"),
-        ("drum_seq_panel", "bottom"),
-    ];
-    // Слить top/bottom в ПОРЯДОК ФАЙЛА (не по видам): повторный проход
-    let mut seq: Vec<(String, &str)> = Vec::new();
-    let mut rest = MOD_RS;
+const EXPECTED_PANELS: &[(&str, &str)] = &[
+    ("midi_learn_bar", "top"),
+    ("header", "top"),
+    ("global_controls", "top"),
+    ("keyboard_panel", "bottom"),
+    ("pad_perf_bar", "bottom"),
+    ("drum_seq_panel", "bottom"),
+];
+
+/// Все gui-исходники одним буфером: при S4-разрезе регистрация панелей
+/// может переехать в дочерний модуль — пин обязан её найти (QW9).
+/// include_str! принимает только литералы — потому явный format!, не цикл.
+fn panel_sources() -> String {
+    // Скан по 9 файлам; остальные 6 (confirm, keybinds, led_console,
+    // modal, note_flash, theme) не создают панелей сегодня — расширить
+    // список при регистрации панели в них
+    format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        include_str!("../src/gui/mod.rs"),
+        include_str!("../src/gui/layers.rs"),
+        include_str!("../src/gui/drums.rs"),
+        include_str!("../src/gui/settings.rs"),
+        include_str!("../src/gui/keyboard.rs"),
+        include_str!("../src/gui/midi_seq.rs"),
+        include_str!("../src/gui/fx_chain.rs"),
+        include_str!("../src/gui/macros.rs"),
+        include_str!("../src/gui/params.rs"),
+    )
+}
+
+fn panel_registration_order_matches_source_contract_impl(src: &str) -> Vec<(String, &'static str)> {
+    const TOP: &str = "TopBottomPanel::top(\"";
+    const BOTTOM: &str = "TopBottomPanel::bottom(\"";
+    let mut seq = Vec::new();
+    let mut rest = src;
     loop {
-        let t = rest.find("TopBottomPanel::top(\"");
-        let b = rest.find("TopBottomPanel::bottom(\"");
-        match (t, b) {
+        match (rest.find(TOP), rest.find(BOTTOM)) {
             (None, None) => break,
-            (Some(i), None) => { seq.push(extract_id(&rest[i + 21..], "top")); rest = &rest[i + 21..]; }
-            (None, Some(j)) => { seq.push(extract_id(&rest[j + 24..], "bottom")); rest = &rest[j + 24..]; }
+            (Some(i), None) => { seq.push(extract_id(&rest[i + TOP.len()..], "top")); rest = &rest[i + TOP.len()..]; }
+            (None, Some(j)) => { seq.push(extract_id(&rest[j + BOTTOM.len()..], "bottom")); rest = &rest[j + BOTTOM.len()..]; }
             (Some(i), Some(j)) => {
-                if i < j { seq.push(extract_id(&rest[i + 21..], "top")); rest = &rest[i + 21..]; }
-                else { seq.push(extract_id(&rest[j + 24..], "bottom")); rest = &rest[j + 24..]; }
+                if i < j { seq.push(extract_id(&rest[i + TOP.len()..], "top")); rest = &rest[i + TOP.len()..]; }
+                else { seq.push(extract_id(&rest[j + BOTTOM.len()..], "bottom")); rest = &rest[j + BOTTOM.len()..]; }
             }
         }
     }
-    let expected: Vec<(String, &str)> = EXPECTED.iter()
-        .map(|(id, k)| (id.to_string(), *k)).collect();
-    assert_eq!(seq, expected,
-        "panel registration order changed — egui carves in show() order; \
-         update EXPECTED only with layout-diff review");
+    seq
 }
 
 fn extract_id(s: &str, kind: &'static str) -> (String, &'static str) {
     let id = &s[..s.find('"').expect("unterminated panel id")];
     (id.to_string(), kind)
+}
+
+#[test]
+fn panel_registration_order_matches_source_contract() {
+    let src = panel_sources();
+    let expected: Vec<(String, &str)> = EXPECTED_PANELS.iter()
+        .map(|(id, k)| (id.to_string(), *k)).collect();
+    let seq = panel_registration_order_matches_source_contract_impl(&src);
+    assert_eq!(seq, expected,
+        "panel registration order changed — egui carves in show() order; \
+         update EXPECTED_PANELS only with layout-diff review");
+    // CentralPanel строго после последней bottom-панели (карв-канон)
+    let central = src.find("CentralPanel::default()").expect("CentralPanel must exist");
+    let last_bottom = src.rfind("TopBottomPanel::bottom(\"").expect("bottom panels must exist");
+    assert!(central > last_bottom, "CentralPanel must be registered last");
 }
