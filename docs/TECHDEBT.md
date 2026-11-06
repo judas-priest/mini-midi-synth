@@ -1051,7 +1051,18 @@ CLAP/Rust канон): vendor-rustysynth `Voice::is_in_release()` +
 Аксессоры НЕ в RT-пути. Вендор-правки переносить при обновлении rustysynth
 (CLAUDE.md-канон).
 
-## 54. Перфы: менять расположение партов (drag-and-drop / up-down в списке партов) — НОВОЕ (2026-11-03, юзер; гугл практик сделан)
+## 54. Перфы: менять расположение партов — ГОТОВО (PR #81, 2026-11-06; research: egui_dnd/egui Sense::drag/NN/g-handle канон)
+Реализовано: drag-хендл ⠿ в строке парта (Sense::drag, строки плотные с
+чекбоксами/слайдерами — whole-row драг конфликтует, хендл — канон NN/g);
+drop = СВАП слотов одной зоны (cross-zone запрещён — семантика зон/сплита);
+пурпур-рамка цели (StrokeKind::Inside, egui 0.31 4-arg); полный пуш состояния
+обоих слотов (push_full_part_state + send_edited_params — канон
+reset_and_push_part); active_part следует через set_active_part (atom sync);
+swap_check юнит-тесты. Ограничения (осознанно): undo НЕТ (одно-слотовый
+snapshot канон; свап обратим повторным свапом); свап не переживает
+рестарт/Load (apply_performance восстанавливает по индексам — полный персист
+порядка = перезаписать перф Save); held-notes остаются на слоте. Alias ↑↓ в
+Tracks — уже в f9c9b31.
 Юзер хочет менять порядок партов внутри перфа (сейчас слоты фиксированы A1..B8).
 Лучшие практики (Tavily 2026-11-03: FL Studio channel rack, saasui/pixso/pencil&paper DnD-гайды):
 1. Drag-and-drop строк парта — основной путь (Pencil&Paper: direct manipulation
