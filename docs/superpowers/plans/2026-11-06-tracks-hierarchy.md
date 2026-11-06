@@ -8,16 +8,16 @@ anchor-checked: 2026-11-06 (база = master ae1cbe8; факты вычитан
 верхнее меню (синий/жёлтый/зелёный/оранжевый) → TRACKS (список папок) → папка
 (пэды = ТОЛЬКО перфы этой папки, тап = загрузить) → MENU назад.
 
-**Architecture:** Новый `Mode::FolderPerfs` — перфы активной папки (console_list
-уже = папка при установленном active_folder; вход в папку ставит active_folder +
-refresh). MENU-тап (слот 0): FolderPerfs → Tracks; Tracks → Menu (верхнее);
-Home/Pattern/Mute → Menu (как сейчас). Пад 17 = «up» повсеместно.
+**Architecture:** Новый `Mode::FolderPerfs` — перфы активной папки. Переход
+Tracks→FolderPerfs ставит state-машина в tap() (optimistic, ДО handler:
+handler в том же кадре ставит active_folder + refresh_console_list).
+MENU-тап (слот 0) = НАЗАД на уровень: FolderPerfs → Tracks; Tracks → Menu
+(верхнее); Home/Pattern/Mute → Menu (как сейчас). Пад 17 = «up» повсеместно.
 ALL PERFS-виртуальный слот УДАЛЁН. ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ (осознанно):
 выход «к общим перфам» с пэдов = верхнее меню → синяя плитка HOME; при
 активной папке HOME-пэды продолжают показывать её алиасы (active_folder
-сохраняется). Полный сброс — GUI Track-селектор → (all). Автосброс из
-tap() невозможен (config у App), handler-хук — по фидбеку юзера. `Mode::Tracks` = только список папок (оранжевые,
-активная папка пурпур-маркер последнего загруженного перфа не нужен).
+сохраняется). Полный сброс — GUI Track-селектор → (all).
+`Mode::Tracks` = только список папок (оранжевые, последняя посещённая — пурпур).
 
 **Tech Stack:** Rust/egui; TDD — tap()-навигация и цвета чисто тестируемы в
 led_console tests; LoadPerf-глию — экран.
@@ -171,24 +171,20 @@ led_console tests; LoadPerf-глию — экран.
         }
 ```
 
-(c) top_colors Mode::Menu arm — плитка 3 = оранжевая TRACKS (заодно
-КОМПИЛЯТОР-форснутые плечи от нового Mode::FolderPerfs:
-- внутренний match top_colors (:222-272): плечо `Mode::Tracks => {}` остаётся
-  (mod.rs красит Tracks через folder_colors), добавить
-  `Mode::FolderPerfs => {}`-аналог НЕНУЖЕН — см. mod.rs paint: FolderPerfs
-  красится через top_colors КАК Home ⇒ в top_colors плечо
-  `Mode::Home | Mode::FolderPerfs =>` (общее тело: синие AVAIL + пурпур SEL
-  по w_perf);
-- led_console.rs:~178 (`Mode::Tracks | Mode::Menu => unreachable!()` внутри
-  folder_colors? — НЕТ, это другой match; реализатору: скомпилирует, все
-  нематченные сайты mode-match поправить по месту — top_colors внутренний
-  match: добавить `Mode::Home | Mode::FolderPerfs =>` ОБЩЕЕ плечо (синие
-  AVAIL + пурпур SEL по w_perf — тело существующего Home arm), Tracks arm
-  `{}` остаётся (mod.rs красит folder_colors);
+(c) top_colors Mode::Menu arm — плитка 3 = оранжевая TRACKS:
 
 ```rust
                         3 => [0xFF, 0x80, 0x00], // TRACKS: orange
 ```
+
+(c2) КОМПИЛЯТОР-форснутые плечи от нового Mode::FolderPerfs (реализатору:
+компиляция перечислит все нематченные mode-match сайты):
+- top_colors внутренний match (:222-272): добавить ОБЩЕЕ плечо
+  `Mode::Home | Mode::FolderPerfs =>` — тело существующего Home arm
+  (синие AVAIL + пурпур SEL по w_perf): FolderPerfs красится через
+  top_colors КАК Home (см. Task 2 Step 2);
+- все прочие mode-match сайты поправить по месту (Tracks arm `{}` в
+  top_colors остаётся — mod.rs красит Tracks через folder_colors).
 
 (d) folder_colors — убрать ALL PERFS-слот (папки 1..=7 = `w + i - 1`,
 оранжевые, активная папка пурпур):
