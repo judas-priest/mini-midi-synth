@@ -74,6 +74,9 @@ Tracks-менеджер: ↑↓ кнопки на алиасах (drag там �
 - drag начат, но pointer.y вернулся в исходную строку — отмена (no-op).
 - TrackSelect/LoadPerf во время драга — драг живёт в GUI-фрейме (локальное
   состояние drag_src: Option<usize>), консольные события не пересекаются.
+- свап при зажатых нотах моно-парта — engine-side note_stack/latch_held
+  остаются на слоте (не переезжают с партом): note-off после свапа роутится
+  по новым диапазонам. Крайний кейс, осознанно (доигрывает в старом слоте).
 - RT: свап — mem::swap двух Vec-содержащих структур в GUI-потоке; движок
   получает пуш по каналам — RT не трогается.
 
@@ -204,8 +207,10 @@ init `part_drag_src: None,` в lib.rs литерале.
         let mut row_rects: Vec<(usize, egui::Rect)> = Vec::new();
 ```
   — параметр `row_rects: &mut Vec<(usize, egui::Rect)>` протащить в
-  draw_part_row и пушить `row_rects.push((i, ui.min_rect()))` в конце строки
-  (после отрисовки всех контролов). После обоих циклов зон:
+  draw_part_row. ОБОА вызова draw_part_row — layers.rs:139 (зона A) и
+  :161 (зона B), оба внутри `ui.push_id` замыканий ScrollArea — замыкания
+  захватывают `&mut row_rects`; в каждом draw_part_row в конце строки:
+  `row_rects.push((i, ui.min_rect()));`. После обоих циклов зон:
 
 ```rust
         // #54: drag part row — hit-test + drop. РАЗМЕЩЕНИЕ: в САМОМ КОНЦЕ
@@ -236,8 +241,10 @@ init `part_drag_src: None,` в lib.rs литерале.
                     if r.contains(pointer) && (i / crate::gui::PARTS_PER_ZONE)
                         == (src / crate::gui::PARTS_PER_ZONE) && *i != src
                     {
+                        // 4-й аргумент StrokeKind ОБЯЗАТЕЛЕН в egui 0.31.1
                         ui.painter().rect_stroke(*r, 4.0,
-                            egui::Stroke::new(2.0, egui::Color32::from_rgb(0xFF, 0x00, 0xFF)));
+                            egui::Stroke::new(2.0, egui::Color32::from_rgb(0xFF, 0x00, 0xFF)),
+                            egui::StrokeKind::Inside);
                     }
                 }
             }
@@ -255,7 +262,7 @@ init `part_drag_src: None,` в lib.rs литерале.
             // #54: drag-хендл (⠿) — Sense::drag, старт драга ставит
             // part_drag_src; сам контент строки обычный (drag живёт на
             // хендле, не на всей строке — канон строк с чекбоксами/слайдерами)
-            let inner = ui.horizontal(|ui| {
+            ui.horizontal(|ui| {
                 let (_rect, resp) = ui.allocate_exact_size(
                     egui::vec2(14.0, 22.0),
                     egui::Sense::drag());
