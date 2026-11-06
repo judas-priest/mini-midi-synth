@@ -1507,23 +1507,19 @@ fn tc_registry_global_keys_have_global_scope() {
             assert_eq!(m.scope, crate::cc_map::ParamScope::Global,
                 "registry scope contradicts GLOBAL_PARAM_KEYS for '{}'", m.key);
         }
+        if m.scope == crate::cc_map::ParamScope::Global {
+            assert!(crate::cc_map::is_global_param(m.key),
+                "registry Global '{}' missing from GLOBAL_PARAM_KEYS", m.key);
+        }
     }
 }
 
 #[test]
 fn tc_cc_scope_survives_config_roundtrip() {
-    let mut config = crate::config::Config::default();
-    let bindings: std::collections::BTreeMap<u8, crate::cc_map::CcBindingRaw> =
-        crate::cc_map::CcMap::default_map().bindings.iter().enumerate()
-            .filter_map(|(cc, b)| {
-                let b = (*b)?;
-                Some((cc as u8, crate::cc_map::CcBindingRaw {
-                    param_key: b.param_key.to_string(),
-                    min_val: b.min_val, max_val: b.max_val,
-                    logarithmic: b.logarithmic, scope: b.scope,
-                }))
-            }).collect();
-    config.cc_map = Some(crate::cc_map::CcMapRaw { bindings: bindings.clone() });
+    let config = crate::config::Config {
+        cc_map: Some(crate::cc_map::CcMapRaw::from_cc_map(&crate::cc_map::CcMap::default_map())),
+        ..Default::default()
+    };
     let map = crate::cc_map::CcMap::from_config(&config);
     for cc in [54u8, 66] {
         let b = map.bindings[cc as usize].expect("binding present");
@@ -1531,9 +1527,9 @@ fn tc_cc_scope_survives_config_roundtrip() {
             "CC{cc} {} must stay Global after roundtrip", b.param_key);
     }
     // SSOT-forcing: конфиг со СТАРОЙ записью scope=Patch — реестр правит
-    let mut stale = bindings;
-    stale.get_mut(&66).unwrap().scope = crate::cc_map::ParamScope::Patch;
-    let cfg2 = crate::config::Config { cc_map: Some(crate::cc_map::CcMapRaw { bindings: stale }), ..Default::default() };
+    let mut raw = crate::cc_map::CcMapRaw::from_cc_map(&crate::cc_map::CcMap::default_map());
+    raw.bindings.get_mut(&66).unwrap().scope = crate::cc_map::ParamScope::Patch;
+    let cfg2 = crate::config::Config { cc_map: Some(raw), ..Default::default() };
     let map2 = crate::cc_map::CcMap::from_config(&cfg2);
     assert_eq!(map2.bindings[66].as_ref().unwrap().scope,
         crate::cc_map::ParamScope::Global,
