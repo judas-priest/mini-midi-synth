@@ -3074,10 +3074,10 @@ impl App {
                                 }
                             });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("\u{2193}").on_hover_text("Move setlist down").clicked() {
+                            if ui.small_button("\u{2B07}").on_hover_text("Move setlist down").clicked() {
                                 ops.push(Op::MoveDown(fi));
                             }
-                            if ui.small_button("\u{2191}").on_hover_text("Move setlist up").clicked() {
+                            if ui.small_button("\u{2B06}").on_hover_text("Move setlist up").clicked() {
                                 ops.push(Op::MoveUp(fi));
                             }
                             let mut armed_now = armed;
@@ -3108,11 +3108,11 @@ impl App {
                                     ops.push(Op::DelPerf(fi, pi));
                                 }
                                 if pi + 1 < self.config.ui.perf_folders[fi].perfs.len()
-                                    && ui.small_button("\u{2193}").clicked()
+                                    && ui.small_button("\u{2B07}").clicked()
                                 {
                                     ops.push(Op::MoveAliasDown(fi, pi));
                                 }
-                                if pi > 0 && ui.small_button("\u{2191}").clicked() {
+                                if pi > 0 && ui.small_button("\u{2B06}").clicked() {
                                     ops.push(Op::MoveAliasUp(fi, pi));
                                 }
                             });

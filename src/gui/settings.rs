@@ -523,7 +523,7 @@ impl App {
         let pickup = self.pickup_indicators.get(key).copied();
         let display_label = match (cc_info, pickup) {
             (Some(cc), Some(knob_pos)) => {
-                let arrow = if knob_pos < val { "\u{2193}" } else { "\u{2191}" }; // ↓ or ↑
+                let arrow = if knob_pos < val { "\u{2B07}" } else { "\u{2B06}" }; // ↓ or ↑
                 format!("{label} [CC{cc} {arrow}]")
             }
             (Some(cc), None) => format!("{label} [CC{cc}]"),
