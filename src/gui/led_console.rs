@@ -88,6 +88,12 @@ pub(crate) fn follow_start(idx: usize, start: usize, len: usize) -> Option<usize
     }
 }
 
+/// Стартовая страница окна, содержащая элемент idx (page-aligned,
+/// зажатая последней валидной страницей). Канон follow_start + page-snap.
+pub(crate) fn page_start(idx: usize, len: usize) -> usize {
+    ((idx / CONSOLE_VISIBLE) * CONSOLE_VISIBLE).min(window_max_start(len))
+}
+
 pub struct LedConsole {
     mode: Mode,
     /// Currently pressed pads (multi-touch: several simultaneous taps each
@@ -630,6 +636,19 @@ mod tests {
         assert_eq!(window_max_start(16), 9);  // мьюты: 16 партов
         assert_eq!(window_max_start(30), 23); // перфы
         assert_eq!(window_max_start(3), 0);   // короче окна — одна страница
+    }
+
+    #[test]
+    fn tc_page_start() {
+        // активная 9 из 12: page-aligned (9/7)·7 = 7 → clamp max_w = 5 → 5
+        // (папка 9 на слоте 4: 9 − 5 = 4)
+        assert_eq!(page_start(9, 12), 5);
+        // активная 6 — страница 0
+        assert_eq!(page_start(6, 12), 0);
+        // clamp: idx за пределами → последняя страница
+        assert_eq!(page_start(14, 15), 8);
+        // пустой список → 0
+        assert_eq!(page_start(0, 0), 0);
     }
 
     #[test]
