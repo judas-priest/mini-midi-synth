@@ -11,9 +11,12 @@ anchor-checked: 2026-11-06 (база = master ae1cbe8; факты вычитан
 **Architecture:** Новый `Mode::FolderPerfs` — перфы активной папки (console_list
 уже = папка при установленном active_folder; вход в папку ставит active_folder +
 refresh). MENU-тап (слот 0): FolderPerfs → Tracks; Tracks → Menu (верхнее);
-Home/Pattern/Mute → Menu (как сейчас). Пад 17 = «up» повсеместно. Убирается
-ALL PERFS-виртуальный слот (выход к общим перфам = верхнее меню → синий HOME —
-пэды показывают полный список). `Mode::Tracks` = только список папок (оранжевые,
+Home/Pattern/Mute → Menu (как сейчас). Пад 17 = «up» повсеместно.
+ALL PERFS-виртуальный слот УДАЛЁН. ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ (осознанно):
+выход «к общим перфам» с пэдов = верхнее меню → синяя плитка HOME; при
+активной папке HOME-пэды продолжают показывать её алиасы (active_folder
+сохраняется). Полный сброс — GUI Track-селектор → (all). Автосброс из
+tap() невозможен (config у App), handler-хук — по фидбеку юзера. `Mode::Tracks` = только список папок (оранжевые,
 активная папка пурпур-маркер последнего загруженного перфа не нужен).
 
 **Tech Stack:** Rust/egui; TDD — tap()-навигация и цвета чисто тестируемы в
@@ -81,10 +84,11 @@ led_console tests; LoadPerf-глию — экран.
 - tracks_window/folder window при удалении папки — tracks_window clamp при
   page_window; папок меньше окна — слоты тёмные.
 - (Init) — алиасом быть МОЖЕТ (load_performance_by_name спец-кейс есть).
-- active_folder = None + Mode::FolderPerfs — невозможно: вход в FolderPerfs
-  только тапом папки в Tracks, который ставит active_folder. Несогласованное
-  состояние из битого конфига — paint по console_list (= полный список при
-  None), не паникуем.
+- FolderPerfs при None/stale active_folder (optimistic mode-set до handler,
+  битый конфиг) — paint по console_list (= полный список при None), тапы
+  грузят по perf_window; не паникуем.
+- active_folder НЕ сбрасывается на выходе из иерархии (осознанное
+  ограничение: полный сброс — GUI-селектором (all)).
 - дубликат имён папок — режим индексный, безразлично.
 - RT: всё GUI-поток; новые поля — usize/bool.
 
@@ -102,15 +106,14 @@ led_console tests; LoadPerf-глию — экран.
 ```rust
     #[test]
     fn tc_tracks_tap_drills_into_folder() {
-        // #57 UX: тап папки в TRACKS = вход в перфы папки (не stay)
+        // #57 UX: тап папки в TRACKS = DRILL-DOWN — режим FolderPerfs
+        // ставится state-машиной ЗДЕСЬ, Action несёт window-local слот
         let mut c = LedConsole::new();
         c.mode = Mode::Tracks;
         assert_eq!(c.on_event(PadEvent::Down(1), Instant::now()), None);
         assert_eq!(c.on_event(PadEvent::Up(1), Instant::now() + Duration::from_millis(50)),
                    Some(Action::TrackSelect(0)));
-        // TrackSelect handler — GUI-сторона; state-машина: тап папки в Tracks
-        // эмитит TrackSelect, а Mode::FolderPerfs ставится в mod.rs через
-        // force_mode. Здесь пиним только Action.
+        assert_eq!(c.mode(), Mode::FolderPerfs);
     }
 
     #[test]
@@ -153,8 +156,11 @@ led_console tests; LoadPerf-глию — экран.
         if self.mode == Mode::Tracks {
             // слот 0 = MENU (белый) — НАЗАД на уровень: верхнее меню
             if slot == 0 { self.mode = Mode::Menu; return None; }
-            // слоты 1..=7 = папки: тап = вход в перфы папки (drill-down);
-            // TrackSelect handler (gui/mod.rs) ставит active_folder
+            // слоты 1..=7 = папки: DRILL-DOWN — режим FolderPerfs ставится
+            // ЗДЕСЬ (optimistic: handler в том же кадре ставит active_folder
+            // и обновит console_list до paint); Action несёт window-local слот
+            self.mode = Mode::FolderPerfs;
+            self.perf_window = 0; // перф-страница папки с начала (TC8)
             return Some(Action::TrackSelect(slot - 1));
         }
         if self.mode == Mode::FolderPerfs {
@@ -165,7 +171,20 @@ led_console tests; LoadPerf-глию — экран.
         }
 ```
 
-(c) top_colors Mode::Menu arm — плитка 3 = оранжевая TRACKS:
+(c) top_colors Mode::Menu arm — плитка 3 = оранжевая TRACKS (заодно
+КОМПИЛЯТОР-форснутые плечи от нового Mode::FolderPerfs:
+- внутренний match top_colors (:222-272): плечо `Mode::Tracks => {}` остаётся
+  (mod.rs красит Tracks через folder_colors), добавить
+  `Mode::FolderPerfs => {}`-аналог НЕНУЖЕН — см. mod.rs paint: FolderPerfs
+  красится через top_colors КАК Home ⇒ в top_colors плечо
+  `Mode::Home | Mode::FolderPerfs =>` (общее тело: синие AVAIL + пурпур SEL
+  по w_perf);
+- led_console.rs:~178 (`Mode::Tracks | Mode::Menu => unreachable!()` внутри
+  folder_colors? — НЕТ, это другой match; реализатору: скомпилирует, все
+  нематченные сайты mode-match поправить по месту — top_colors внутренний
+  match: добавить `Mode::Home | Mode::FolderPerfs =>` ОБЩЕЕ плечо (синие
+  AVAIL + пурпур SEL по w_perf — тело существующего Home arm), Tracks arm
+  `{}` остаётся (mod.rs красит folder_colors);
 
 ```rust
                         3 => [0xFF, 0x80, 0x00], // TRACKS: orange
@@ -198,12 +217,16 @@ led_console tests; LoadPerf-глию — экран.
 
 ( `folder >= filled` break сохранён — старый bound-first эквивалентен break.)
 
-- [ ] **Step 4: зелёный по led_console** — обновить СТАРЫЕ тесты
-  spec-driven: `tracks_slot_tap_selects_folder` — теперь пинит drill-down
-  (Action::TrackSelect(0) остаётся; комментарий обновить: «tap = вход в
-  папку»); `tc_tracks_colors_*` из #78-плана (жёлтый ALL PERFS + shift-маппинг
-  active+1/len+1) — УДАЛИТЬ/перезаписать под новую folder_colors (оранжевые +
-  пурпур по active_folder без shift).
+- [ ] **Step 4: зелёный по led_console** — обновить СТАРЫЕ тесты spec-driven:
+  `tracks_slot_tap_selects_folder` (Action::TrackSelect(0) остаётся; после
+  тапа добавить `assert_eq!(c.mode(), Mode::FolderPerfs);` — комментарий
+  «tap = вход в папку»); **`tracks_menu_slot_tap_returns_home`** — старый
+  контракт Tracks слот 0 → Home; теперь → Mode::Menu: переименовать в
+  `tracks_menu_slot_tap_back_to_top_menu` (меню-экран: слот 0 = HOME синий —
+  выход к общим перфам); `tc_tracks_colors_*` (#78-версия: жёлтый ALL PERFS +
+  shift-маппинг active+1/len+1) — ПЕРЕЗАПИСАТЬ под новую folder_colors
+  (оранжевые папки + пурпур по active_folder, без shift; ALL PERFS-слота
+  нет — иерархия заменила его).
 
 Run: `cargo test --lib led_console 2>&1 | tail -4`
 Expected: все led_console зелёные.
@@ -281,7 +304,8 @@ git add src/gui/mod.rs && git commit -m "feat: FolderPerfs — pads load folder 
 - [ ] PR → squash merge → rebuild release → relaunch
 - [ ] Экран (юзер): MENU → оранжевый → список папок → тап папки → ЕЁ перфы
   синими/пурпур (загружен) → тап перфа = загрузить → MENU = назад к папкам →
-  MENU = верхнее меню → синяя плитка = все перфы
+  MENU = верхнее меню → синяя плитка = перфы активной папки (известное
+  ограничение: полный список — GUI-селектором (all))
 - [ ] TECHDEBT #57: дописать иерархию (MENU = up, drill-down), отметить
   отказ от ALL PERFS-слота
 
