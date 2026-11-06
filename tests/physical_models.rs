@@ -106,3 +106,127 @@ fn tc8_no_regression_finger_and_high_brass() {
     let (_, late_b, _) = render(&mut engine_with("Trumpet"), 72);
     assert!(late_b >= 0.2, "brass working band regressed: late {late_b:.3}");
 }
+
+/// #56 roadmap 1: доминантная частота позднего окна (блоки 50..=550)
+/// автокорреляцией. Lag 60..=760 → 63..800 Гц (C2: период 733 сэмпла —
+/// окно 60..=500 физически не видит фундаментал C2, только гармоники).
+/// Плюс честный sustain-щуп: RMS окна блоков 300..=550 (0.19–0.34 с) —
+/// нота должна ещё звучать, а не лежать в шумовом полу.
+/// lag-диапазон автокорреляции задаёт полосу фундаментала
+/// (48Гц = lag 500 → 96 Гц; lag 120 → 400 Гц; lag 40 → 1200 Гц).
+/// (60..=760) = 63..800 Гц — C2..C5; (40..=120) — для 600..1200 Гц.
+fn render_freq_lag(e: &mut SynthEngine, note: u8, lag_lo: usize, lag_hi: usize) -> (f32, bool, f32) {
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note, velocity: 127 });
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    let mut sig: Vec<f32> = Vec::with_capacity(4096);
+    let mut finite = true;
+    let mut late_energy = 0.0f64;
+    let mut late_count = 0usize;
+    for blk in 0..550 {
+        l.fill(0.0); r.fill(0.0);
+        e.tick_block(&mut l, &mut r);
+        for i in 0..BLOCK_SIZE {
+            finite &= l[i].is_finite() && r[i].is_finite();
+            if blk >= 50 { sig.push(l[i]); }
+            if blk >= 300 { late_energy += (l[i] as f64) * (l[i] as f64); late_count += 1; }
+        }
+    }
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note });
+    let late_rms = (late_energy / late_count.max(1) as f64).sqrt() as f32;
+    let n = sig.len();
+    // Периодический сигнал: c(2P) ≈ c(P) — strict-max/descending ловит 2P
+    // (субгармоника). Канон: НАИМЕНЬШИЙ ЛОКАЛЬНЫЙ максимум с c ≥ 0.9·max
+    // = фундаментал.
+    let mut corr: Vec<(usize, f32)> = Vec::with_capacity(lag_hi - lag_lo + 1);
+    let mut global_max = 0.0f32;
+    for lag in lag_lo..=lag_hi {
+        let mut c = 0.0f32;
+        for i in lag..n { c += sig[i] * sig[i - lag]; }
+        global_max = global_max.max(c);
+        corr.push((lag, c));
+    }
+    let mut freq = 0.0f32;
+    for (idx, &(lag, c)) in corr.iter().enumerate() {
+        if c < 0.9 * global_max { continue; }
+        let left_ok = idx == 0 || corr[idx - 1].1 < c;
+        let right_ok = idx + 1 == corr.len() || corr[idx + 1].1 < c;
+        if left_ok && right_ok { freq = 48000.0 / lag as f32; break; }
+    }
+    (freq, finite, late_rms)
+}
+
+/// Дефолтный диапазон (60..=760) = 63..800 Гц — C2..C5.
+fn render_freq(e: &mut SynthEngine, note: u8) -> (f32, bool, f32) {
+    render_freq_lag(e, note, 60, 760)
+}
+
+#[test]
+fn tc_b1_pitch_c4_is_nominal() {
+    let (f, _, late_rms) = render_freq(&mut engine_with("Violin"), 60);
+    assert!((f - 261.63).abs() <= 13.0, "C4 dominant {f:.1} Hz (expected ~261.6)");
+    assert!(late_rms >= 0.03, "C4 dies to noise floor: late rms {late_rms:.5}");
+}
+
+#[test]
+fn tc_b2_pitch_c3_is_nominal() {
+    let (f, _, late_rms) = render_freq(&mut engine_with("Violin"), 48);
+    assert!((f - 130.81).abs() <= 7.0, "C3 dominant {f:.1} Hz (expected ~130.8)");
+    assert!(late_rms >= 0.03, "C3 dies to noise floor: late rms {late_rms:.5}");
+}
+
+#[test]
+fn tc_b4_pitch_c2_is_nominal() {
+    let (f, _, late_rms) = render_freq(&mut engine_with("Violin"), 36);
+    assert!((f - 65.41).abs() <= 4.0, "C2 dominant {f:.1} Hz (expected ~65.4)");
+    assert!(late_rms >= 0.03, "C2 dies to noise floor: late rms {late_rms:.5}");
+}
+
+#[test]
+fn tc_b5_pitch_c5_is_nominal() {
+    // C5: период ≈ 91.7 сэмпла; диапазон (40..=500) = 96..1200 Гц.
+    let (f, finite, late_rms) = render_freq_lag(&mut engine_with("Violin"), 72, 40, 500);
+    assert!(finite, "C5 went non-finite during probe");
+    assert!((f - 523.25).abs() <= 20.0, "C5 dominant {f:.1} Hz (expected ~523.3)");
+    assert!(late_rms >= 0.02, "C5 dies to noise floor: late rms {late_rms:.5}");
+}
+
+/// #56a round-2 дефектная зона: ноты 49–51 (D3±1) запирались на 4·f0.
+#[test]
+fn tc_b6_pitch_d3_is_nominal() {
+    let (f, _, late_rms) = render_freq_lag(&mut engine_with("Violin"), 50, 40, 500);
+    assert!((f - 146.83).abs() <= 8.0, "D3 dominant {f:.1} Hz (expected ~146.8)");
+    assert!(late_rms >= 0.03, "D3 dies to noise floor: late rms {late_rms:.5}");
+}
+
+/// #56a round-2 дефектная зона: нота 62 (D4) запиралась на 2·f0 (~587 Гц).
+#[test]
+fn tc_b7_pitch_d4_is_nominal() {
+    let (f, _, late_rms) = render_freq_lag(&mut engine_with("Violin"), 62, 40, 500);
+    assert!((f - 293.66).abs() <= 10.0, "D4 dominant {f:.1} Hz (expected ~293.7)");
+    assert!(late_rms >= 0.03, "D4 dies to noise floor: late rms {late_rms:.5}");
+}
+
+/// #56a round-2 дефектная зона: ноты 81–84 запирались на ~0.55·f0.
+/// C6 ≈ 1046.5 Гц: период ≈ 45.9 сэмпла — отдельный щуп (40..=120) =
+/// 400..1200 Гц; нижние ноты этим щупом не меряются.
+#[test]
+fn tc_b8_pitch_c6_is_nominal() {
+    let (f, finite, late_rms) = render_freq_lag(&mut engine_with("Violin"), 84, 40, 120);
+    assert!(finite, "C6 went non-finite during probe");
+    assert!((f - 1046.5).abs() <= 30.0, "C6 dominant {f:.1} Hz (expected ~1046.5)");
+    assert!(late_rms >= 0.02, "C6 dies to noise floor: late rms {late_rms:.5}");
+}
+
+#[test]
+fn tc_b3_5s_hold_stays_finite() {
+    let mut e = engine_with("Violin");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 127 });
+    let mut l = [0.0f32; BLOCK_SIZE]; let mut r = [0.0f32; BLOCK_SIZE];
+    let mut finite = true;
+    for _ in 0..7500 {
+        l.fill(0.0); r.fill(0.0);
+        e.tick_block(&mut l, &mut r);
+        for i in 0..BLOCK_SIZE { finite &= l[i].is_finite() && r[i].is_finite(); }
+    }
+    assert!(finite, "5s hold went non-finite");
+}
