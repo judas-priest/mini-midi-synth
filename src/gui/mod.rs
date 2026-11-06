@@ -471,6 +471,9 @@ pub struct App {
     /// Drag-and-drop part swap (#54): исходный слот драга за хендл ⠿,
     /// живёт в пределах GUI-фрейма/драга (Some пока pointer down).
     pub part_drag_src: Option<usize>,
+    /// #54: цель драга (строка под pointer во время драга) — commit на
+    /// drag_stopped хендла
+    pub part_drag_dst: Option<usize>,
     /// Track Folders: armed delete confirmation (auto-disarm) — #57 UX.
     pub tracks_del_armed: Option<std::time::Instant>,
     // Drum kit save/load

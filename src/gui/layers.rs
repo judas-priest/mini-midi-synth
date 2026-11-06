@@ -176,30 +176,28 @@ impl App {
             // ScrollArea-замыкания (после "+ Add part" зоны B) — return здесь
             // обрезал бы зону B и row_rects.
             if let Some(src) = self.part_drag_src {
-                let (Some(pointer), dragging) = (
-                    ui.ctx().pointer_interact_pos(),
-                    ui.ctx().input(|i| i.pointer.any_down()),
-                ) else { self.part_drag_src = None; return; };
-                if !dragging {
-                    // drop: целевой слот = строка под pointer
+                // Цель = строка под pointer (drag живёт на хендле — commit
+                // в его drag_stopped); здесь только расчёт цели + подсветка
+                let pointer = ui.ctx().pointer_interact_pos();
+                let mut new_dst = None;
+                if let Some(p) = pointer {
                     for (i, r) in &row_rects {
-                        if r.contains(pointer) {
+                        if r.contains(p) {
                             let dst = *i;
                             let src_zone = src / crate::gui::PARTS_PER_ZONE;
                             let dst_zone = dst / crate::gui::PARTS_PER_ZONE;
                             if src_zone == dst_zone && src != dst {
-                                self.swap_parts(src, dst);
+                                new_dst = Some(dst);
                             }
                             break;
                         }
                     }
-                    self.part_drag_src = None;
-                } else {
-                    // подсветка слота-цели в той же зоне
+                }
+                self.part_drag_dst = new_dst;
+                // подсветка слота-цели в той же зоне
+                if let Some(dst) = self.part_drag_dst {
                     for (i, r) in &row_rects {
-                        if r.contains(pointer) && (i / crate::gui::PARTS_PER_ZONE)
-                            == (src / crate::gui::PARTS_PER_ZONE) && *i != src
-                        {
+                        if *i == dst {
                             // 4-й аргумент StrokeKind ОБЯЗАТЕЛЕН в egui 0.31.1
                             ui.painter().rect_stroke(*r, 4.0,
                                 egui::Stroke::new(2.0, egui::Color32::from_rgb(0xFF, 0x00, 0xFF)),
@@ -330,18 +328,36 @@ impl App {
         let num = (i % PARTS_PER_ZONE) + 1;
 
         ui.horizontal(|ui| {
-            // #54: drag-хендл (⠿) — Sense::drag, старт драга ставит
-            // part_drag_src; сам контент строки обычный (drag живёт на
-            // хендле, не на всей строке — канон строк с чекбоксами/слайдерами)
-            ui.horizontal(|ui| {
-                let (_rect, resp) = ui.allocate_exact_size(
-                    egui::vec2(14.0, 22.0),
-                    egui::Sense::drag());
-                if resp.drag_started() {
-                    self.part_drag_src = Some(i);
+            // #54: drag-хендл — рисованный грип (3×2 точки painter'ом:
+            // U+2802 в шрифте egui НЕТ — канон глиф-граблей) + Sense::drag.
+            // Commit на drag_stopped ХЕНДЛА (egui гарантирует доставку
+            // drag-событий виджету, начавшему драг, до release — надёжнее
+            // release-frame hit-test'а); цель — part_drag_dst из drop-детекта.
+            let (grip_rect, grip) = ui.allocate_exact_size(
+                egui::vec2(14.0, 22.0),
+                egui::Sense::drag());
+            let grip = grip.on_hover_cursor(egui::CursorIcon::Grab);
+            let gc = grip_rect.center();
+            for (dx, dy) in [(-3.0, -4.0), (0.0, -4.0), (3.0, -4.0),
+                             (-3.0, 0.0),  (0.0, 0.0),  (3.0, 0.0),
+                             (-3.0, 4.0),  (0.0, 4.0),  (3.0, 4.0)] {
+                ui.painter().circle_filled(
+                    gc + egui::vec2(dx, dy), 1.1, theme::TEXT_MUTED);
+            }
+            if grip.drag_started() {
+                self.part_drag_src = Some(i);
+                self.part_drag_dst = None;
+            }
+            if grip.drag_stopped() && self.part_drag_src == Some(i) {
+                // drop на хендле: свап с последней подсвеченной целью
+                if let (Some(src), Some(dst)) =
+                    (self.part_drag_src, self.part_drag_dst)
+                {
+                    if src != dst { self.swap_parts(src, dst); }
                 }
-                ui.label(egui::RichText::new("\u{2802}").weak());
-            });
+                self.part_drag_src = None;
+                self.part_drag_dst = None;
+            }
             // Подсветка цели — в drop-детекте draw_part_rows (layers.rs)
             // по row_rects; ui.max_rect() здесь = остаток ScrollArea, НЕ строка
 
