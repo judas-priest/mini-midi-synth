@@ -293,8 +293,12 @@ page_window — добавить FolderPerfs-плечо и СНЯТЬ stale `+ 1
             }
 ```
 
-page_depth — FolderPerfs arm `self.perf_window / 7`. step() — FolderPerfs
-попадает в `_` arm (StepPerf по console_list = шаг по папке) — ОСОЗНАННО.
+page_depth — FolderPerfs arm `self.perf_window / 7` (сейчас falls to `_`
+с тем же поведением — явное плечо для самодокументации, no-op);
+step() — FolderPerfs попадает в `_` arm (StepPerf по console_list = шаг
+по папке) — ОСОЗНАННО.
+Toast в Tracks-mode-entry: текст «MENU returns» → «MENU — назад»
+(MENU теперь возвращает к верхнему меню, не в HOME).
 
 - [ ] **Step 3: гейт**
 
