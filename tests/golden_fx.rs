@@ -304,3 +304,42 @@ fn golden_engine_fx_chain_slots() {
     }
     check_golden("fx_chain_engine_hashes.txt", &entries);
 }
+
+// ── S2 pre-pin: parameter sweep golden (2026-11-07) ─────────────────────
+// Для каждого ключа to_map: экстремум-значение → полный рендер → хэш.
+// Пинит build_voice_params (magic scalings вида `* 4.0 + 0.5`) и
+// CachedFxParams::from_preset — ровно то, что переписывает реестр S2.
+// Расхождение = реестр изменил семантику масштаба. Осознанное
+// обновление goldens — только с diff-ревью звучания.
+
+fn render_param_sweep(preset_name: &str) -> Vec<(String, u64)> {
+    let patches = preset::load_all_patches();
+    let patch = patches.iter().find(|p| p.name.eq_ignore_ascii_case(preset_name))
+        .unwrap_or_else(|| panic!("preset '{}' not found", preset_name));
+    let mut entries = Vec::new();
+    // JSON пресетов sparse (только отклонения) — свип поверх ПОЛНОГО
+    // дефолтного набора ключей, оверлей значениями пресета
+    let mut base = mini_midi_synth::synth::PatchParams::default().to_map();
+    for (k, v) in &patch.params {
+        base.insert(k.clone(), *v);
+    }
+    for (k, v) in &base {
+        let mut m = base.clone();
+        // Экстремум, отличный от текущего; клампы from_map легитимны
+        m.insert(k.clone(), if *v == 0.5 { 0.25 } else { 0.5 });
+        let mut p = patch.clone();
+        p.params = m;
+        entries.push((format!("{preset_name}|{k}"), render_preset_hash(&p)));
+    }
+    entries
+}
+
+#[test]
+fn golden_param_sweep_hashes_match() {
+    let mut entries = Vec::new();
+    for name in ["Init", "Chorus Pad"] {
+        entries.extend(render_param_sweep(name));
+    }
+    assert!(entries.len() > 300, "sweep too small: {}", entries.len());
+    check_golden("param_sweep_hashes.txt", &entries);
+}

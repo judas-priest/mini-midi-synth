@@ -1,0 +1,838 @@
+Init|accordion_bellows	0971fbb926b05641
+Init|accordion_register	0971fbb926b05641
+Init|airwindows_drive	0971fbb926b05641
+Init|airwindows_mix	44f4e90a9dd63f49
+Init|airwindows_mode	0971fbb926b05641
+Init|alias_crush	0971fbb926b05641
+Init|alias_wave_type	0971fbb926b05641
+Init|amp_attack	52823687d609043d
+Init|amp_decay	44c344235ae4e111
+Init|amp_hold	944908bf686e5695
+Init|amp_release	0971fbb926b05641
+Init|amp_sustain	be0920d99d51acc1
+Init|arp_enabled	0971fbb926b05641
+Init|arp_gate	0971fbb926b05641
+Init|arp_latch	0971fbb926b05641
+Init|arp_mode	0971fbb926b05641
+Init|arp_octaves	0971fbb926b05641
+Init|arp_rate	0971fbb926b05641
+Init|bass_body	0971fbb926b05641
+Init|bass_pickup	0971fbb926b05641
+Init|bass_style	0971fbb926b05641
+Init|bass_tone	0971fbb926b05641
+Init|bell_type	0971fbb926b05641
+Init|blowing_pressure	0971fbb926b05641
+Init|body_type	0971fbb926b05641
+Init|bonsai_asym	0971fbb926b05641
+Init|bonsai_drive	0971fbb926b05641
+Init|bonsai_mix	4d9c8f854c80cf5d
+Init|bonsai_mode	0971fbb926b05641
+Init|bonsai_tone	0971fbb926b05641
+Init|bow_position	0971fbb926b05641
+Init|bow_pressure	0971fbb926b05641
+Init|chorus_mix	ad2690be4e380caa
+Init|combulator_feedback	0971fbb926b05641
+Init|combulator_freq	0971fbb926b05641
+Init|combulator_mix	0fc27be3f8b0e71c
+Init|combulator_offset2	0971fbb926b05641
+Init|combulator_offset3	0971fbb926b05641
+Init|combulator_tone	0971fbb926b05641
+Init|conditioner_bass_cut	0971fbb926b05641
+Init|conditioner_mix	08aa28f163d7191d
+Init|conditioner_threshold	0971fbb926b05641
+Init|conditioner_width	0971fbb926b05641
+Init|conv_reverb_damping	0971fbb926b05641
+Init|conv_reverb_mix	860cfcdc9135e42d
+Init|conv_reverb_predelay	0971fbb926b05641
+Init|conv_reverb_room	0971fbb926b05641
+Init|delay_feedback	0971fbb926b05641
+Init|delay_filter	0971fbb926b05641
+Init|delay_mix	0971fbb926b05641
+Init|delay_ping_pong	0971fbb926b05641
+Init|delay_time_l	0971fbb926b05641
+Init|delay_time_r	0971fbb926b05641
+Init|drawbar_1	0971fbb926b05641
+Init|drawbar_2	0971fbb926b05641
+Init|drawbar_3	0971fbb926b05641
+Init|drawbar_4	0971fbb926b05641
+Init|drawbar_5	0971fbb926b05641
+Init|drawbar_6	0971fbb926b05641
+Init|drawbar_7	0971fbb926b05641
+Init|drawbar_8	0971fbb926b05641
+Init|drawbar_9	0971fbb926b05641
+Init|drum_noise_color	0971fbb926b05641
+Init|drum_noise_decay	0971fbb926b05641
+Init|drum_noise_level	0971fbb926b05641
+Init|drum_pitch_amount	0971fbb926b05641
+Init|drum_pitch_decay	0971fbb926b05641
+Init|ensemble_depth	0971fbb926b05641
+Init|ensemble_mix	730d285384371fad
+Init|ensemble_rate	0971fbb926b05641
+Init|env_attack_shape	0971fbb926b05641
+Init|env_decay_shape	0971fbb926b05641
+Init|env_release_shape	0971fbb926b05641
+Init|epiano_type	0971fbb926b05641
+Init|exciter_drive	0971fbb926b05641
+Init|exciter_freq	0971fbb926b05641
+Init|exciter_mix	1b988247911e2c91
+Init|exciter_presence	0971fbb926b05641
+Init|filter2_cutoff	0971fbb926b05641
+Init|filter2_resonance	0971fbb926b05641
+Init|filter2_type	0971fbb926b05641
+Init|filter_attack	0971fbb926b05641
+Init|filter_cutoff	dc205c31059b5d89
+Init|filter_decay	0971fbb926b05641
+Init|filter_drive	0971fbb926b05641
+Init|filter_env_amount	0818b39e0a0a52b1
+Init|filter_env_attack_shape	0971fbb926b05641
+Init|filter_env_decay_shape	0971fbb926b05641
+Init|filter_env_release_shape	0971fbb926b05641
+Init|filter_env_semitones	e62b67f11b77a8d5
+Init|filter_hold	0971fbb926b05641
+Init|filter_key_track	0971fbb926b05641
+Init|filter_release	0971fbb926b05641
+Init|filter_resonance	039c4ac40ddc7305
+Init|filter_routing	0971fbb926b05641
+Init|filter_starve	0971fbb926b05641
+Init|filter_sustain	0971fbb926b05641
+Init|filter_type	0971fbb926b05641
+Init|floaty_damp	0971fbb926b05641
+Init|floaty_feedback	0971fbb926b05641
+Init|floaty_mix	148dafa952fc8c39
+Init|floaty_rate	0971fbb926b05641
+Init|floaty_time	0971fbb926b05641
+Init|floaty_wobble	0971fbb926b05641
+Init|fm_cross_depth	0971fbb926b05641
+Init|fm_env_amount	0971fbb926b05641
+Init|fm_index	0971fbb926b05641
+Init|fm_ratio	0971fbb926b05641
+Init|fold_amount	0971fbb926b05641
+Init|fold_source	0971fbb926b05641
+Init|fold_symmetry	0971fbb926b05641
+Init|formant_voice	0971fbb926b05641
+Init|formant_vowel	0971fbb926b05641
+Init|freq_shift_delay	0971fbb926b05641
+Init|freq_shift_feedback	0971fbb926b05641
+Init|freq_shift_hz	0971fbb926b05641
+Init|freq_shift_mix	f8285dcce4ea65d5
+Init|fx0_en	0971fbb926b05641
+Init|fx0_mix	0971fbb926b05641
+Init|fx0_p0	0971fbb926b05641
+Init|fx0_p1	0971fbb926b05641
+Init|fx0_p2	0971fbb926b05641
+Init|fx0_p3	0971fbb926b05641
+Init|fx0_type	0971fbb926b05641
+Init|fx10_en	0971fbb926b05641
+Init|fx10_mix	0971fbb926b05641
+Init|fx10_p0	0971fbb926b05641
+Init|fx10_p1	0971fbb926b05641
+Init|fx10_p2	0971fbb926b05641
+Init|fx10_p3	0971fbb926b05641
+Init|fx10_type	0971fbb926b05641
+Init|fx11_en	0971fbb926b05641
+Init|fx11_mix	0971fbb926b05641
+Init|fx11_p0	0971fbb926b05641
+Init|fx11_p1	0971fbb926b05641
+Init|fx11_p2	0971fbb926b05641
+Init|fx11_p3	0971fbb926b05641
+Init|fx11_type	0971fbb926b05641
+Init|fx12_en	0971fbb926b05641
+Init|fx12_mix	0971fbb926b05641
+Init|fx12_p0	0971fbb926b05641
+Init|fx12_p1	0971fbb926b05641
+Init|fx12_p2	0971fbb926b05641
+Init|fx12_p3	0971fbb926b05641
+Init|fx12_type	0971fbb926b05641
+Init|fx13_en	0971fbb926b05641
+Init|fx13_mix	0971fbb926b05641
+Init|fx13_p0	0971fbb926b05641
+Init|fx13_p1	0971fbb926b05641
+Init|fx13_p2	0971fbb926b05641
+Init|fx13_p3	0971fbb926b05641
+Init|fx13_type	0971fbb926b05641
+Init|fx14_en	0971fbb926b05641
+Init|fx14_mix	0971fbb926b05641
+Init|fx14_p0	0971fbb926b05641
+Init|fx14_p1	0971fbb926b05641
+Init|fx14_p2	0971fbb926b05641
+Init|fx14_p3	0971fbb926b05641
+Init|fx14_type	0971fbb926b05641
+Init|fx15_en	0971fbb926b05641
+Init|fx15_mix	0971fbb926b05641
+Init|fx15_p0	0971fbb926b05641
+Init|fx15_p1	0971fbb926b05641
+Init|fx15_p2	0971fbb926b05641
+Init|fx15_p3	0971fbb926b05641
+Init|fx15_type	0971fbb926b05641
+Init|fx1_en	0971fbb926b05641
+Init|fx1_mix	0971fbb926b05641
+Init|fx1_p0	0971fbb926b05641
+Init|fx1_p1	0971fbb926b05641
+Init|fx1_p2	0971fbb926b05641
+Init|fx1_p3	0971fbb926b05641
+Init|fx1_type	0971fbb926b05641
+Init|fx2_en	0971fbb926b05641
+Init|fx2_mix	0971fbb926b05641
+Init|fx2_p0	0971fbb926b05641
+Init|fx2_p1	0971fbb926b05641
+Init|fx2_p2	0971fbb926b05641
+Init|fx2_p3	0971fbb926b05641
+Init|fx2_type	0971fbb926b05641
+Init|fx3_en	0971fbb926b05641
+Init|fx3_mix	0971fbb926b05641
+Init|fx3_p0	0971fbb926b05641
+Init|fx3_p1	0971fbb926b05641
+Init|fx3_p2	0971fbb926b05641
+Init|fx3_p3	0971fbb926b05641
+Init|fx3_type	0971fbb926b05641
+Init|fx4_en	0971fbb926b05641
+Init|fx4_mix	0971fbb926b05641
+Init|fx4_p0	0971fbb926b05641
+Init|fx4_p1	0971fbb926b05641
+Init|fx4_p2	0971fbb926b05641
+Init|fx4_p3	0971fbb926b05641
+Init|fx4_type	0971fbb926b05641
+Init|fx5_en	0971fbb926b05641
+Init|fx5_mix	0971fbb926b05641
+Init|fx5_p0	0971fbb926b05641
+Init|fx5_p1	0971fbb926b05641
+Init|fx5_p2	0971fbb926b05641
+Init|fx5_p3	0971fbb926b05641
+Init|fx5_type	0971fbb926b05641
+Init|fx6_en	0971fbb926b05641
+Init|fx6_mix	0971fbb926b05641
+Init|fx6_p0	0971fbb926b05641
+Init|fx6_p1	0971fbb926b05641
+Init|fx6_p2	0971fbb926b05641
+Init|fx6_p3	0971fbb926b05641
+Init|fx6_type	0971fbb926b05641
+Init|fx7_en	0971fbb926b05641
+Init|fx7_mix	0971fbb926b05641
+Init|fx7_p0	0971fbb926b05641
+Init|fx7_p1	0971fbb926b05641
+Init|fx7_p2	0971fbb926b05641
+Init|fx7_p3	0971fbb926b05641
+Init|fx7_type	0971fbb926b05641
+Init|fx8_en	0971fbb926b05641
+Init|fx8_mix	0971fbb926b05641
+Init|fx8_p0	0971fbb926b05641
+Init|fx8_p1	0971fbb926b05641
+Init|fx8_p2	0971fbb926b05641
+Init|fx8_p3	0971fbb926b05641
+Init|fx8_type	0971fbb926b05641
+Init|fx9_en	0971fbb926b05641
+Init|fx9_mix	0971fbb926b05641
+Init|fx9_p0	0971fbb926b05641
+Init|fx9_p1	0971fbb926b05641
+Init|fx9_p2	0971fbb926b05641
+Init|fx9_p3	0971fbb926b05641
+Init|fx9_type	0971fbb926b05641
+Init|geq_0	c7c3cef466cd74cd
+Init|geq_1	9993e5bfee148241
+Init|geq_10	a5f7fa609e0e6285
+Init|geq_2	52dc40c665017db5
+Init|geq_3	2f460e427a7ca2b5
+Init|geq_4	896da7716ad31e61
+Init|geq_5	85f83f46b88d2949
+Init|geq_6	2b5e59b59c31fe1d
+Init|geq_7	31d90df6b0f06a95
+Init|geq_8	5f324fc8ad87f465
+Init|geq_9	3f0071390ec46031
+Init|graphic_eq_output	0afa8de3c72de88d
+Init|inter_ws_drive	0971fbb926b05641
+Init|inter_ws_mix	0971fbb926b05641
+Init|inter_ws_mode	0971fbb926b05641
+Init|ks_brightness	0971fbb926b05641
+Init|ks_feedback	0971fbb926b05641
+Init|lfo1_retrigger	0971fbb926b05641
+Init|lfo1_tempo_sync	0971fbb926b05641
+Init|lfo1_trigger_mode	0971fbb926b05641
+Init|lfo1_unipolar	0971fbb926b05641
+Init|lfo2_amp_depth	6d6f6ac51a97c7e1
+Init|lfo2_deform	0971fbb926b05641
+Init|lfo2_filter_depth	d677d8ff7a9d939d
+Init|lfo2_pitch_depth	ff337f69d27b1629
+Init|lfo2_rate	0971fbb926b05641
+Init|lfo2_retrigger	0971fbb926b05641
+Init|lfo2_tempo_sync	0971fbb926b05641
+Init|lfo2_trigger_mode	0971fbb926b05641
+Init|lfo2_unipolar	0971fbb926b05641
+Init|lfo2_waveform	0971fbb926b05641
+Init|lfo3_deform	0971fbb926b05641
+Init|lfo3_rate	0971fbb926b05641
+Init|lfo3_retrigger	0971fbb926b05641
+Init|lfo3_tempo_sync	0971fbb926b05641
+Init|lfo3_trigger_mode	0971fbb926b05641
+Init|lfo3_unipolar	0971fbb926b05641
+Init|lfo3_waveform	0971fbb926b05641
+Init|lfo4_deform	0971fbb926b05641
+Init|lfo4_rate	0971fbb926b05641
+Init|lfo4_retrigger	0971fbb926b05641
+Init|lfo4_tempo_sync	0971fbb926b05641
+Init|lfo4_trigger_mode	0971fbb926b05641
+Init|lfo4_unipolar	0971fbb926b05641
+Init|lfo4_waveform	0971fbb926b05641
+Init|lfo_amp_depth	6d6f6ac51a97c7e1
+Init|lfo_deform	0971fbb926b05641
+Init|lfo_filter_depth	d677d8ff7a9d939d
+Init|lfo_pitch_depth	ff337f69d27b1629
+Init|lfo_rate	0971fbb926b05641
+Init|lfo_waveform	0971fbb926b05641
+Init|lip_tension	0971fbb926b05641
+Init|macro_0	0971fbb926b05641
+Init|macro_1	0971fbb926b05641
+Init|macro_2	0971fbb926b05641
+Init|macro_3	0971fbb926b05641
+Init|macro_4	0971fbb926b05641
+Init|macro_5	0971fbb926b05641
+Init|macro_6	0971fbb926b05641
+Init|macro_7	0971fbb926b05641
+Init|master_volume	0971fbb926b05641
+Init|max_note	0971fbb926b05641
+Init|min_note	0971fbb926b05641
+Init|modal_brightness	0971fbb926b05641
+Init|modal_damping	0971fbb926b05641
+Init|modal_material	0971fbb926b05641
+Init|modal_strike_pos	0971fbb926b05641
+Init|ms_mid_gain	0971fbb926b05641
+Init|ms_mix	0971fbb926b05641
+Init|ms_rotation	0971fbb926b05641
+Init|ms_side_gain	0971fbb926b05641
+Init|mseg_enabled	0971fbb926b05641
+Init|neuron_asym	0971fbb926b05641
+Init|neuron_bias	0971fbb926b05641
+Init|neuron_comb_freq	0971fbb926b05641
+Init|neuron_comb_sep	0971fbb926b05641
+Init|neuron_drive	0971fbb926b05641
+Init|neuron_mix	d358aa762ac02361
+Init|neuron_squash	0971fbb926b05641
+Init|neuron_stab	0971fbb926b05641
+Init|nimbus_density	0971fbb926b05641
+Init|nimbus_mix	148dafa952fc8c39
+Init|nimbus_pitch	0971fbb926b05641
+Init|nimbus_position	0971fbb926b05641
+Init|nimbus_size	0971fbb926b05641
+Init|nimbus_spread	0971fbb926b05641
+Init|nimbus_texture	0971fbb926b05641
+Init|noise_level	75dd01fc479ce739
+Init|osc1_level	82450ed8d62e2b39
+Init|osc2_detune	0971fbb926b05641
+Init|osc2_level	0971fbb926b05641
+Init|osc2_type	0971fbb926b05641
+Init|osc3_detune	0971fbb926b05641
+Init|osc3_level	0971fbb926b05641
+Init|osc3_type	0971fbb926b05641
+Init|osc_count	0971fbb926b05641
+Init|osc_detune	cb7fa4227791ceb5
+Init|osc_type	0971fbb926b05641
+Init|osc_ws_drive	0971fbb926b05641
+Init|osc_ws_mix	156507d1faa1ffed
+Init|osc_ws_mode	0971fbb926b05641
+Init|pd_depth	0971fbb926b05641
+Init|pd_env_amount	0971fbb926b05641
+Init|pd_shape	0971fbb926b05641
+Init|pitch_bend_down	0971fbb926b05641
+Init|pitch_bend_up	0971fbb926b05641
+Init|play_mode	0971fbb926b05641
+Init|portamento_mode	0971fbb926b05641
+Init|portamento_time	0971fbb926b05641
+Init|pulse_width	0971fbb926b05641
+Init|resonator_decay	0971fbb926b05641
+Init|resonator_freq	0971fbb926b05641
+Init|resonator_mix	a22447648e555f0b
+Init|reverb2_damping	0971fbb926b05641
+Init|reverb2_decay	0971fbb926b05641
+Init|reverb2_mix	e9e43134153e329f
+Init|reverb2_size	0971fbb926b05641
+Init|reverb_damping	0971fbb926b05641
+Init|reverb_mix	6edad75435d1c6df
+Init|reverb_pre_delay	0971fbb926b05641
+Init|reverb_room_size	0971fbb926b05641
+Init|reverb_type	0971fbb926b05641
+Init|reverb_width	0971fbb926b05641
+Init|ring_mod_bias	0971fbb926b05641
+Init|ring_mod_freq	0971fbb926b05641
+Init|ring_mod_linear	0971fbb926b05641
+Init|ring_mod_mix	33efeb79b482e181
+Init|ring_mod_shape	0971fbb926b05641
+Init|rotary_mix	de878ee3bd0c799d
+Init|rotary_speed	0971fbb926b05641
+Init|sax_blow_pressure	0971fbb926b05641
+Init|sax_embouchure	0971fbb926b05641
+Init|sax_reed_stiffness	0971fbb926b05641
+Init|sax_type	0971fbb926b05641
+Init|seq_pitch_depth	0971fbb926b05641
+Init|slfo1_deform	0971fbb926b05641
+Init|slfo1_rate	0971fbb926b05641
+Init|slfo1_tempo_sync	0971fbb926b05641
+Init|slfo1_unipolar	0971fbb926b05641
+Init|slfo1_waveform	0971fbb926b05641
+Init|slfo2_deform	0971fbb926b05641
+Init|slfo2_rate	0971fbb926b05641
+Init|slfo2_tempo_sync	0971fbb926b05641
+Init|slfo2_unipolar	0971fbb926b05641
+Init|slfo2_waveform	0971fbb926b05641
+Init|spring_chaos	0971fbb926b05641
+Init|spring_damping	0971fbb926b05641
+Init|spring_decay	0971fbb926b05641
+Init|spring_mix	0971fbb926b05641
+Init|spring_reflections	0971fbb926b05641
+Init|spring_size	0971fbb926b05641
+Init|spring_spin	0971fbb926b05641
+Init|supersaw_detune	0971fbb926b05641
+Init|supersaw_mix	0971fbb926b05641
+Init|sustain_mode	0971fbb926b05641
+Init|svf_morph	0971fbb926b05641
+Init|sync_ratio	0971fbb926b05641
+Init|sync_shape	0971fbb926b05641
+Init|tape_bias	0971fbb926b05641
+Init|tape_drive	0971fbb926b05641
+Init|tape_mix	fbc2389e529cc491
+Init|tape_saturation	0971fbb926b05641
+Init|tape_speed	0971fbb926b05641
+Init|tape_tone	0971fbb926b05641
+Init|treemonster_mix	4e1e113f690a6691
+Init|treemonster_ring_mix	0971fbb926b05641
+Init|treemonster_shift	0971fbb926b05641
+Init|treemonster_threshold	0971fbb926b05641
+Init|twist_aux_mix	0971fbb926b05641
+Init|twist_engine	0971fbb926b05641
+Init|twist_harmonics	0971fbb926b05641
+Init|twist_lpg_colour	0971fbb926b05641
+Init|twist_lpg_decay	0971fbb926b05641
+Init|twist_morph	0971fbb926b05641
+Init|twist_timbre	0971fbb926b05641
+Init|unison_detune	0971fbb926b05641
+Init|unison_spread	0971fbb926b05641
+Init|unison_voices	0971fbb926b05641
+Init|vel_to_filter	c10cdac4fa236729
+Init|velocity_curve	0971fbb926b05641
+Init|vocoder_env_follow	0971fbb926b05641
+Init|vocoder_gate	0971fbb926b05641
+Init|vocoder_mix	0f570142aadac569
+Init|wave_shaper_bias	0971fbb926b05641
+Init|wave_shaper_drive	0971fbb926b05641
+Init|wave_shaper_mix	786930b1d04ffd41
+Init|wave_shaper_mode	0971fbb926b05641
+Init|window_formant	0971fbb926b05641
+Init|window_morph	0971fbb926b05641
+Init|window_type	0971fbb926b05641
+Chorus Pad|accordion_bellows	28b29eb08d82ab68
+Chorus Pad|accordion_register	28b29eb08d82ab68
+Chorus Pad|airwindows_drive	28b29eb08d82ab68
+Chorus Pad|airwindows_mix	6114b8e156a231df
+Chorus Pad|airwindows_mode	28b29eb08d82ab68
+Chorus Pad|alias_crush	28b29eb08d82ab68
+Chorus Pad|alias_wave_type	28b29eb08d82ab68
+Chorus Pad|amp_attack	2b518f3e0a57714b
+Chorus Pad|amp_decay	28b29eb08d82ab68
+Chorus Pad|amp_hold	28b29eb08d82ab68
+Chorus Pad|amp_release	28b29eb08d82ab68
+Chorus Pad|amp_sustain	28b29eb08d82ab68
+Chorus Pad|arp_enabled	28b29eb08d82ab68
+Chorus Pad|arp_gate	28b29eb08d82ab68
+Chorus Pad|arp_latch	28b29eb08d82ab68
+Chorus Pad|arp_mode	28b29eb08d82ab68
+Chorus Pad|arp_octaves	28b29eb08d82ab68
+Chorus Pad|arp_rate	28b29eb08d82ab68
+Chorus Pad|bass_body	28b29eb08d82ab68
+Chorus Pad|bass_pickup	28b29eb08d82ab68
+Chorus Pad|bass_style	28b29eb08d82ab68
+Chorus Pad|bass_tone	28b29eb08d82ab68
+Chorus Pad|bell_type	28b29eb08d82ab68
+Chorus Pad|blowing_pressure	28b29eb08d82ab68
+Chorus Pad|body_type	28b29eb08d82ab68
+Chorus Pad|bonsai_asym	28b29eb08d82ab68
+Chorus Pad|bonsai_drive	28b29eb08d82ab68
+Chorus Pad|bonsai_mix	1628b6c9316572fa
+Chorus Pad|bonsai_mode	28b29eb08d82ab68
+Chorus Pad|bonsai_tone	28b29eb08d82ab68
+Chorus Pad|bow_position	28b29eb08d82ab68
+Chorus Pad|bow_pressure	28b29eb08d82ab68
+Chorus Pad|chorus_mix	6ed3ba6d6f8b25e6
+Chorus Pad|combulator_feedback	28b29eb08d82ab68
+Chorus Pad|combulator_freq	28b29eb08d82ab68
+Chorus Pad|combulator_mix	4fc53fc5949a3ab5
+Chorus Pad|combulator_offset2	28b29eb08d82ab68
+Chorus Pad|combulator_offset3	28b29eb08d82ab68
+Chorus Pad|combulator_tone	28b29eb08d82ab68
+Chorus Pad|conditioner_bass_cut	28b29eb08d82ab68
+Chorus Pad|conditioner_mix	a7ba56d23fcfcc61
+Chorus Pad|conditioner_threshold	28b29eb08d82ab68
+Chorus Pad|conditioner_width	28b29eb08d82ab68
+Chorus Pad|conv_reverb_damping	28b29eb08d82ab68
+Chorus Pad|conv_reverb_mix	4d6dba245549dce1
+Chorus Pad|conv_reverb_predelay	28b29eb08d82ab68
+Chorus Pad|conv_reverb_room	28b29eb08d82ab68
+Chorus Pad|delay_feedback	28b29eb08d82ab68
+Chorus Pad|delay_filter	28b29eb08d82ab68
+Chorus Pad|delay_mix	28b29eb08d82ab68
+Chorus Pad|delay_ping_pong	28b29eb08d82ab68
+Chorus Pad|delay_time_l	28b29eb08d82ab68
+Chorus Pad|delay_time_r	28b29eb08d82ab68
+Chorus Pad|drawbar_1	28b29eb08d82ab68
+Chorus Pad|drawbar_2	28b29eb08d82ab68
+Chorus Pad|drawbar_3	28b29eb08d82ab68
+Chorus Pad|drawbar_4	28b29eb08d82ab68
+Chorus Pad|drawbar_5	28b29eb08d82ab68
+Chorus Pad|drawbar_6	28b29eb08d82ab68
+Chorus Pad|drawbar_7	28b29eb08d82ab68
+Chorus Pad|drawbar_8	28b29eb08d82ab68
+Chorus Pad|drawbar_9	28b29eb08d82ab68
+Chorus Pad|drum_noise_color	28b29eb08d82ab68
+Chorus Pad|drum_noise_decay	28b29eb08d82ab68
+Chorus Pad|drum_noise_level	28b29eb08d82ab68
+Chorus Pad|drum_pitch_amount	28b29eb08d82ab68
+Chorus Pad|drum_pitch_decay	28b29eb08d82ab68
+Chorus Pad|ensemble_depth	28b29eb08d82ab68
+Chorus Pad|ensemble_mix	a2d397fa718651dd
+Chorus Pad|ensemble_rate	28b29eb08d82ab68
+Chorus Pad|env_attack_shape	28b29eb08d82ab68
+Chorus Pad|env_decay_shape	28b29eb08d82ab68
+Chorus Pad|env_release_shape	28b29eb08d82ab68
+Chorus Pad|epiano_type	28b29eb08d82ab68
+Chorus Pad|exciter_drive	28b29eb08d82ab68
+Chorus Pad|exciter_freq	28b29eb08d82ab68
+Chorus Pad|exciter_mix	5e9e1bed2415c583
+Chorus Pad|exciter_presence	28b29eb08d82ab68
+Chorus Pad|filter2_cutoff	28b29eb08d82ab68
+Chorus Pad|filter2_resonance	28b29eb08d82ab68
+Chorus Pad|filter2_type	28b29eb08d82ab68
+Chorus Pad|filter_attack	c0b741ce8d40aab8
+Chorus Pad|filter_cutoff	16dffb5cf617de50
+Chorus Pad|filter_decay	28b29eb08d82ab68
+Chorus Pad|filter_drive	28b29eb08d82ab68
+Chorus Pad|filter_env_amount	b47c2a2c40ecf493
+Chorus Pad|filter_env_attack_shape	28b29eb08d82ab68
+Chorus Pad|filter_env_decay_shape	28b29eb08d82ab68
+Chorus Pad|filter_env_release_shape	28b29eb08d82ab68
+Chorus Pad|filter_env_semitones	1a059d79687b547f
+Chorus Pad|filter_hold	28b29eb08d82ab68
+Chorus Pad|filter_key_track	28b29eb08d82ab68
+Chorus Pad|filter_release	28b29eb08d82ab68
+Chorus Pad|filter_resonance	0549524149507908
+Chorus Pad|filter_routing	28b29eb08d82ab68
+Chorus Pad|filter_starve	28b29eb08d82ab68
+Chorus Pad|filter_sustain	28b29eb08d82ab68
+Chorus Pad|filter_type	28b29eb08d82ab68
+Chorus Pad|floaty_damp	28b29eb08d82ab68
+Chorus Pad|floaty_feedback	28b29eb08d82ab68
+Chorus Pad|floaty_mix	e8cf321b158a1a97
+Chorus Pad|floaty_rate	28b29eb08d82ab68
+Chorus Pad|floaty_time	28b29eb08d82ab68
+Chorus Pad|floaty_wobble	28b29eb08d82ab68
+Chorus Pad|fm_cross_depth	5e1090be3c65e90b
+Chorus Pad|fm_env_amount	28b29eb08d82ab68
+Chorus Pad|fm_index	28b29eb08d82ab68
+Chorus Pad|fm_ratio	28b29eb08d82ab68
+Chorus Pad|fold_amount	28b29eb08d82ab68
+Chorus Pad|fold_source	28b29eb08d82ab68
+Chorus Pad|fold_symmetry	28b29eb08d82ab68
+Chorus Pad|formant_voice	28b29eb08d82ab68
+Chorus Pad|formant_vowel	28b29eb08d82ab68
+Chorus Pad|freq_shift_delay	28b29eb08d82ab68
+Chorus Pad|freq_shift_feedback	28b29eb08d82ab68
+Chorus Pad|freq_shift_hz	28b29eb08d82ab68
+Chorus Pad|freq_shift_mix	a5f64a2ead3d46c1
+Chorus Pad|fx0_en	28b29eb08d82ab68
+Chorus Pad|fx0_mix	28b29eb08d82ab68
+Chorus Pad|fx0_p0	28b29eb08d82ab68
+Chorus Pad|fx0_p1	28b29eb08d82ab68
+Chorus Pad|fx0_p2	28b29eb08d82ab68
+Chorus Pad|fx0_p3	28b29eb08d82ab68
+Chorus Pad|fx0_type	28b29eb08d82ab68
+Chorus Pad|fx10_en	28b29eb08d82ab68
+Chorus Pad|fx10_mix	28b29eb08d82ab68
+Chorus Pad|fx10_p0	28b29eb08d82ab68
+Chorus Pad|fx10_p1	28b29eb08d82ab68
+Chorus Pad|fx10_p2	28b29eb08d82ab68
+Chorus Pad|fx10_p3	28b29eb08d82ab68
+Chorus Pad|fx10_type	28b29eb08d82ab68
+Chorus Pad|fx11_en	28b29eb08d82ab68
+Chorus Pad|fx11_mix	28b29eb08d82ab68
+Chorus Pad|fx11_p0	28b29eb08d82ab68
+Chorus Pad|fx11_p1	28b29eb08d82ab68
+Chorus Pad|fx11_p2	28b29eb08d82ab68
+Chorus Pad|fx11_p3	28b29eb08d82ab68
+Chorus Pad|fx11_type	28b29eb08d82ab68
+Chorus Pad|fx12_en	28b29eb08d82ab68
+Chorus Pad|fx12_mix	28b29eb08d82ab68
+Chorus Pad|fx12_p0	28b29eb08d82ab68
+Chorus Pad|fx12_p1	28b29eb08d82ab68
+Chorus Pad|fx12_p2	28b29eb08d82ab68
+Chorus Pad|fx12_p3	28b29eb08d82ab68
+Chorus Pad|fx12_type	28b29eb08d82ab68
+Chorus Pad|fx13_en	28b29eb08d82ab68
+Chorus Pad|fx13_mix	28b29eb08d82ab68
+Chorus Pad|fx13_p0	28b29eb08d82ab68
+Chorus Pad|fx13_p1	28b29eb08d82ab68
+Chorus Pad|fx13_p2	28b29eb08d82ab68
+Chorus Pad|fx13_p3	28b29eb08d82ab68
+Chorus Pad|fx13_type	28b29eb08d82ab68
+Chorus Pad|fx14_en	28b29eb08d82ab68
+Chorus Pad|fx14_mix	28b29eb08d82ab68
+Chorus Pad|fx14_p0	28b29eb08d82ab68
+Chorus Pad|fx14_p1	28b29eb08d82ab68
+Chorus Pad|fx14_p2	28b29eb08d82ab68
+Chorus Pad|fx14_p3	28b29eb08d82ab68
+Chorus Pad|fx14_type	28b29eb08d82ab68
+Chorus Pad|fx15_en	28b29eb08d82ab68
+Chorus Pad|fx15_mix	28b29eb08d82ab68
+Chorus Pad|fx15_p0	28b29eb08d82ab68
+Chorus Pad|fx15_p1	28b29eb08d82ab68
+Chorus Pad|fx15_p2	28b29eb08d82ab68
+Chorus Pad|fx15_p3	28b29eb08d82ab68
+Chorus Pad|fx15_type	28b29eb08d82ab68
+Chorus Pad|fx1_en	28b29eb08d82ab68
+Chorus Pad|fx1_mix	28b29eb08d82ab68
+Chorus Pad|fx1_p0	28b29eb08d82ab68
+Chorus Pad|fx1_p1	28b29eb08d82ab68
+Chorus Pad|fx1_p2	28b29eb08d82ab68
+Chorus Pad|fx1_p3	28b29eb08d82ab68
+Chorus Pad|fx1_type	28b29eb08d82ab68
+Chorus Pad|fx2_en	28b29eb08d82ab68
+Chorus Pad|fx2_mix	28b29eb08d82ab68
+Chorus Pad|fx2_p0	28b29eb08d82ab68
+Chorus Pad|fx2_p1	28b29eb08d82ab68
+Chorus Pad|fx2_p2	28b29eb08d82ab68
+Chorus Pad|fx2_p3	28b29eb08d82ab68
+Chorus Pad|fx2_type	28b29eb08d82ab68
+Chorus Pad|fx3_en	28b29eb08d82ab68
+Chorus Pad|fx3_mix	28b29eb08d82ab68
+Chorus Pad|fx3_p0	28b29eb08d82ab68
+Chorus Pad|fx3_p1	28b29eb08d82ab68
+Chorus Pad|fx3_p2	28b29eb08d82ab68
+Chorus Pad|fx3_p3	28b29eb08d82ab68
+Chorus Pad|fx3_type	28b29eb08d82ab68
+Chorus Pad|fx4_en	28b29eb08d82ab68
+Chorus Pad|fx4_mix	28b29eb08d82ab68
+Chorus Pad|fx4_p0	28b29eb08d82ab68
+Chorus Pad|fx4_p1	28b29eb08d82ab68
+Chorus Pad|fx4_p2	28b29eb08d82ab68
+Chorus Pad|fx4_p3	28b29eb08d82ab68
+Chorus Pad|fx4_type	28b29eb08d82ab68
+Chorus Pad|fx5_en	28b29eb08d82ab68
+Chorus Pad|fx5_mix	28b29eb08d82ab68
+Chorus Pad|fx5_p0	28b29eb08d82ab68
+Chorus Pad|fx5_p1	28b29eb08d82ab68
+Chorus Pad|fx5_p2	28b29eb08d82ab68
+Chorus Pad|fx5_p3	28b29eb08d82ab68
+Chorus Pad|fx5_type	28b29eb08d82ab68
+Chorus Pad|fx6_en	28b29eb08d82ab68
+Chorus Pad|fx6_mix	28b29eb08d82ab68
+Chorus Pad|fx6_p0	28b29eb08d82ab68
+Chorus Pad|fx6_p1	28b29eb08d82ab68
+Chorus Pad|fx6_p2	28b29eb08d82ab68
+Chorus Pad|fx6_p3	28b29eb08d82ab68
+Chorus Pad|fx6_type	28b29eb08d82ab68
+Chorus Pad|fx7_en	28b29eb08d82ab68
+Chorus Pad|fx7_mix	28b29eb08d82ab68
+Chorus Pad|fx7_p0	28b29eb08d82ab68
+Chorus Pad|fx7_p1	28b29eb08d82ab68
+Chorus Pad|fx7_p2	28b29eb08d82ab68
+Chorus Pad|fx7_p3	28b29eb08d82ab68
+Chorus Pad|fx7_type	28b29eb08d82ab68
+Chorus Pad|fx8_en	28b29eb08d82ab68
+Chorus Pad|fx8_mix	28b29eb08d82ab68
+Chorus Pad|fx8_p0	28b29eb08d82ab68
+Chorus Pad|fx8_p1	28b29eb08d82ab68
+Chorus Pad|fx8_p2	28b29eb08d82ab68
+Chorus Pad|fx8_p3	28b29eb08d82ab68
+Chorus Pad|fx8_type	28b29eb08d82ab68
+Chorus Pad|fx9_en	28b29eb08d82ab68
+Chorus Pad|fx9_mix	28b29eb08d82ab68
+Chorus Pad|fx9_p0	28b29eb08d82ab68
+Chorus Pad|fx9_p1	28b29eb08d82ab68
+Chorus Pad|fx9_p2	28b29eb08d82ab68
+Chorus Pad|fx9_p3	28b29eb08d82ab68
+Chorus Pad|fx9_type	28b29eb08d82ab68
+Chorus Pad|geq_0	b37ce007b6412d1f
+Chorus Pad|geq_1	a91336d069c9d450
+Chorus Pad|geq_10	e0e4594b3fa1482d
+Chorus Pad|geq_2	7da30abf11682da6
+Chorus Pad|geq_3	08f3fc95c1cfe3ea
+Chorus Pad|geq_4	608078325357b3a8
+Chorus Pad|geq_5	2ce51388507a04b4
+Chorus Pad|geq_6	38693e19cd782241
+Chorus Pad|geq_7	55394d908253e853
+Chorus Pad|geq_8	952bfd9b63180fa2
+Chorus Pad|geq_9	13394a7b5f0ddc03
+Chorus Pad|graphic_eq_output	5956308b3b315227
+Chorus Pad|inter_ws_drive	28b29eb08d82ab68
+Chorus Pad|inter_ws_mix	28b29eb08d82ab68
+Chorus Pad|inter_ws_mode	28b29eb08d82ab68
+Chorus Pad|ks_brightness	28b29eb08d82ab68
+Chorus Pad|ks_feedback	28b29eb08d82ab68
+Chorus Pad|lfo1_retrigger	28b29eb08d82ab68
+Chorus Pad|lfo1_tempo_sync	28b29eb08d82ab68
+Chorus Pad|lfo1_trigger_mode	28b29eb08d82ab68
+Chorus Pad|lfo1_unipolar	28b29eb08d82ab68
+Chorus Pad|lfo2_amp_depth	c4158fd19565e964
+Chorus Pad|lfo2_deform	28b29eb08d82ab68
+Chorus Pad|lfo2_filter_depth	9ef6cdeacd12c3ea
+Chorus Pad|lfo2_pitch_depth	1ef177ad378f19d2
+Chorus Pad|lfo2_rate	28b29eb08d82ab68
+Chorus Pad|lfo2_retrigger	28b29eb08d82ab68
+Chorus Pad|lfo2_tempo_sync	28b29eb08d82ab68
+Chorus Pad|lfo2_trigger_mode	28b29eb08d82ab68
+Chorus Pad|lfo2_unipolar	28b29eb08d82ab68
+Chorus Pad|lfo2_waveform	28b29eb08d82ab68
+Chorus Pad|lfo3_deform	28b29eb08d82ab68
+Chorus Pad|lfo3_rate	28b29eb08d82ab68
+Chorus Pad|lfo3_retrigger	28b29eb08d82ab68
+Chorus Pad|lfo3_tempo_sync	28b29eb08d82ab68
+Chorus Pad|lfo3_trigger_mode	28b29eb08d82ab68
+Chorus Pad|lfo3_unipolar	28b29eb08d82ab68
+Chorus Pad|lfo3_waveform	28b29eb08d82ab68
+Chorus Pad|lfo4_deform	28b29eb08d82ab68
+Chorus Pad|lfo4_rate	28b29eb08d82ab68
+Chorus Pad|lfo4_retrigger	28b29eb08d82ab68
+Chorus Pad|lfo4_tempo_sync	28b29eb08d82ab68
+Chorus Pad|lfo4_trigger_mode	28b29eb08d82ab68
+Chorus Pad|lfo4_unipolar	28b29eb08d82ab68
+Chorus Pad|lfo4_waveform	28b29eb08d82ab68
+Chorus Pad|lfo_amp_depth	c4158fd19565e964
+Chorus Pad|lfo_deform	28b29eb08d82ab68
+Chorus Pad|lfo_filter_depth	9ef6cdeacd12c3ea
+Chorus Pad|lfo_pitch_depth	1ef177ad378f19d2
+Chorus Pad|lfo_rate	28b29eb08d82ab68
+Chorus Pad|lfo_waveform	28b29eb08d82ab68
+Chorus Pad|lip_tension	28b29eb08d82ab68
+Chorus Pad|macro_0	28b29eb08d82ab68
+Chorus Pad|macro_1	28b29eb08d82ab68
+Chorus Pad|macro_2	28b29eb08d82ab68
+Chorus Pad|macro_3	28b29eb08d82ab68
+Chorus Pad|macro_4	28b29eb08d82ab68
+Chorus Pad|macro_5	28b29eb08d82ab68
+Chorus Pad|macro_6	28b29eb08d82ab68
+Chorus Pad|macro_7	28b29eb08d82ab68
+Chorus Pad|master_volume	28b29eb08d82ab68
+Chorus Pad|max_note	28b29eb08d82ab68
+Chorus Pad|min_note	28b29eb08d82ab68
+Chorus Pad|modal_brightness	28b29eb08d82ab68
+Chorus Pad|modal_damping	28b29eb08d82ab68
+Chorus Pad|modal_material	28b29eb08d82ab68
+Chorus Pad|modal_strike_pos	28b29eb08d82ab68
+Chorus Pad|ms_mid_gain	28b29eb08d82ab68
+Chorus Pad|ms_mix	557bb48e9e35735d
+Chorus Pad|ms_rotation	28b29eb08d82ab68
+Chorus Pad|ms_side_gain	28b29eb08d82ab68
+Chorus Pad|mseg_enabled	28b29eb08d82ab68
+Chorus Pad|neuron_asym	28b29eb08d82ab68
+Chorus Pad|neuron_bias	28b29eb08d82ab68
+Chorus Pad|neuron_comb_freq	28b29eb08d82ab68
+Chorus Pad|neuron_comb_sep	28b29eb08d82ab68
+Chorus Pad|neuron_drive	28b29eb08d82ab68
+Chorus Pad|neuron_mix	0fa82eca6fd2fabc
+Chorus Pad|neuron_squash	28b29eb08d82ab68
+Chorus Pad|neuron_stab	28b29eb08d82ab68
+Chorus Pad|nimbus_density	28b29eb08d82ab68
+Chorus Pad|nimbus_mix	e8cf321b158a1a97
+Chorus Pad|nimbus_pitch	28b29eb08d82ab68
+Chorus Pad|nimbus_position	28b29eb08d82ab68
+Chorus Pad|nimbus_size	28b29eb08d82ab68
+Chorus Pad|nimbus_spread	28b29eb08d82ab68
+Chorus Pad|nimbus_texture	28b29eb08d82ab68
+Chorus Pad|noise_level	ea1da1d995361d7a
+Chorus Pad|osc1_level	fd674124cab0f430
+Chorus Pad|osc2_detune	5836643ed8a11793
+Chorus Pad|osc2_level	a490d176aa1ab39a
+Chorus Pad|osc2_type	48afa9efd76844ba
+Chorus Pad|osc3_detune	730b7792bc9f42f9
+Chorus Pad|osc3_level	f129e9e3354f19ac
+Chorus Pad|osc3_type	b2273743d4174394
+Chorus Pad|osc_count	35b7373718a33af0
+Chorus Pad|osc_detune	229dd18a773a6986
+Chorus Pad|osc_type	7e2d67c564875962
+Chorus Pad|osc_ws_drive	28b29eb08d82ab68
+Chorus Pad|osc_ws_mix	1eef44414ab894d0
+Chorus Pad|osc_ws_mode	28b29eb08d82ab68
+Chorus Pad|pd_depth	28b29eb08d82ab68
+Chorus Pad|pd_env_amount	28b29eb08d82ab68
+Chorus Pad|pd_shape	28b29eb08d82ab68
+Chorus Pad|pitch_bend_down	28b29eb08d82ab68
+Chorus Pad|pitch_bend_up	28b29eb08d82ab68
+Chorus Pad|play_mode	28b29eb08d82ab68
+Chorus Pad|portamento_mode	28b29eb08d82ab68
+Chorus Pad|portamento_time	28b29eb08d82ab68
+Chorus Pad|pulse_width	28b29eb08d82ab68
+Chorus Pad|resonator_decay	28b29eb08d82ab68
+Chorus Pad|resonator_freq	28b29eb08d82ab68
+Chorus Pad|resonator_mix	f79c1cce8af3a5eb
+Chorus Pad|reverb2_damping	28b29eb08d82ab68
+Chorus Pad|reverb2_decay	28b29eb08d82ab68
+Chorus Pad|reverb2_mix	e4b569ebccaeb3f2
+Chorus Pad|reverb2_size	28b29eb08d82ab68
+Chorus Pad|reverb_damping	28b29eb08d82ab68
+Chorus Pad|reverb_mix	ea67de763759743b
+Chorus Pad|reverb_pre_delay	28b29eb08d82ab68
+Chorus Pad|reverb_room_size	28b29eb08d82ab68
+Chorus Pad|reverb_type	28b29eb08d82ab68
+Chorus Pad|reverb_width	28b29eb08d82ab68
+Chorus Pad|ring_mod_bias	28b29eb08d82ab68
+Chorus Pad|ring_mod_freq	28b29eb08d82ab68
+Chorus Pad|ring_mod_linear	28b29eb08d82ab68
+Chorus Pad|ring_mod_mix	45b89107e7153f9d
+Chorus Pad|ring_mod_shape	28b29eb08d82ab68
+Chorus Pad|rotary_mix	2cba826949f32f64
+Chorus Pad|rotary_speed	28b29eb08d82ab68
+Chorus Pad|sax_blow_pressure	28b29eb08d82ab68
+Chorus Pad|sax_embouchure	28b29eb08d82ab68
+Chorus Pad|sax_reed_stiffness	28b29eb08d82ab68
+Chorus Pad|sax_type	28b29eb08d82ab68
+Chorus Pad|seq_pitch_depth	28b29eb08d82ab68
+Chorus Pad|slfo1_deform	28b29eb08d82ab68
+Chorus Pad|slfo1_rate	28b29eb08d82ab68
+Chorus Pad|slfo1_tempo_sync	28b29eb08d82ab68
+Chorus Pad|slfo1_unipolar	28b29eb08d82ab68
+Chorus Pad|slfo1_waveform	28b29eb08d82ab68
+Chorus Pad|slfo2_deform	28b29eb08d82ab68
+Chorus Pad|slfo2_rate	28b29eb08d82ab68
+Chorus Pad|slfo2_tempo_sync	28b29eb08d82ab68
+Chorus Pad|slfo2_unipolar	28b29eb08d82ab68
+Chorus Pad|slfo2_waveform	28b29eb08d82ab68
+Chorus Pad|spring_chaos	28b29eb08d82ab68
+Chorus Pad|spring_damping	28b29eb08d82ab68
+Chorus Pad|spring_decay	28b29eb08d82ab68
+Chorus Pad|spring_mix	28b29eb08d82ab68
+Chorus Pad|spring_reflections	28b29eb08d82ab68
+Chorus Pad|spring_size	28b29eb08d82ab68
+Chorus Pad|spring_spin	28b29eb08d82ab68
+Chorus Pad|supersaw_detune	28b29eb08d82ab68
+Chorus Pad|supersaw_mix	28b29eb08d82ab68
+Chorus Pad|sustain_mode	28b29eb08d82ab68
+Chorus Pad|svf_morph	28b29eb08d82ab68
+Chorus Pad|sync_ratio	28b29eb08d82ab68
+Chorus Pad|sync_shape	28b29eb08d82ab68
+Chorus Pad|tape_bias	28b29eb08d82ab68
+Chorus Pad|tape_drive	28b29eb08d82ab68
+Chorus Pad|tape_mix	7d74c4cbc28a4f77
+Chorus Pad|tape_saturation	28b29eb08d82ab68
+Chorus Pad|tape_speed	28b29eb08d82ab68
+Chorus Pad|tape_tone	28b29eb08d82ab68
+Chorus Pad|treemonster_mix	88a62884b07ba3f2
+Chorus Pad|treemonster_ring_mix	28b29eb08d82ab68
+Chorus Pad|treemonster_shift	28b29eb08d82ab68
+Chorus Pad|treemonster_threshold	28b29eb08d82ab68
+Chorus Pad|twist_aux_mix	28b29eb08d82ab68
+Chorus Pad|twist_engine	28b29eb08d82ab68
+Chorus Pad|twist_harmonics	28b29eb08d82ab68
+Chorus Pad|twist_lpg_colour	28b29eb08d82ab68
+Chorus Pad|twist_lpg_decay	28b29eb08d82ab68
+Chorus Pad|twist_morph	28b29eb08d82ab68
+Chorus Pad|twist_timbre	28b29eb08d82ab68
+Chorus Pad|unison_detune	28b29eb08d82ab68
+Chorus Pad|unison_spread	28b29eb08d82ab68
+Chorus Pad|unison_voices	28b29eb08d82ab68
+Chorus Pad|vel_to_filter	c4d3241668148671
+Chorus Pad|velocity_curve	28b29eb08d82ab68
+Chorus Pad|vocoder_env_follow	28b29eb08d82ab68
+Chorus Pad|vocoder_gate	28b29eb08d82ab68
+Chorus Pad|vocoder_mix	1931d4cb82567827
+Chorus Pad|wave_shaper_bias	28b29eb08d82ab68
+Chorus Pad|wave_shaper_drive	28b29eb08d82ab68
+Chorus Pad|wave_shaper_mix	cc08562e4befd1dc
+Chorus Pad|wave_shaper_mode	28b29eb08d82ab68
+Chorus Pad|window_formant	28b29eb08d82ab68
+Chorus Pad|window_morph	28b29eb08d82ab68
+Chorus Pad|window_type	28b29eb08d82ab68
