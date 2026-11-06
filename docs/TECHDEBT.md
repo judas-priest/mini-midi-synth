@@ -1135,7 +1135,17 @@ delete/reorder папок, add current/perf-from-list, remove alias — КАЖД
 мутация persist + refresh). Flat fallback: без папок — прежнее поведение.
 Тесты: config_folders 4/4, led_console +3 (Tracks-семантика), 183 lib.
 Out of scope: drag-reorder (egui_dnd), UUID, экспорт сетлистов, CBOR.
-Полироль 2 (PR #79, 2026-11-06): ИЕРАРХИЯ вместо плоского фильтра —
+Полироль 3 (PR #80, 2026-11-07): BOWED ITERATION 3 — 5 накопленных
+дефектов устранены (нашёл независимый свип 36..84): (1) DelayA Thiran-canon
+allpass pairing (старая пара давала ceil+frac вместо ceil−frac → flat −20..−50
+центов); (2) `.min(len−1)` guard restore (len−2 резал вибрато-хедрум → ноты
+≥89 мертвы, 84 +72 цента); (3) STK BowTable canon clamp friction [0.01, 0.98]
+(THE mode-stabilizer: без min force обрушался δ⁻³ в slip → 4×f0 локи 49-51);
+(4) frac guard linear-fallback у целых frac; (5) loop trim: bow_vel 0.15,
+loop gain 0.97, bow_pressure 0.6 (violin/viola). Итог: ноты 36..84 — ВСЕ
+свои высоты (худшие +17 центов), sustain rms 0.08+ везде, zero octave/sub
+локов. 16 постоянных пинов, goldens реген только bowed (7). Хвост-полироль:
+ ИЕРАРХИЯ вместо плоского фильтра —
 MENU = «назад на уровень»: верхнее меню → TRACKS (оранжевые папки, тап =
 drill-down) → FolderPerfs (пэды = ТОЛЬКО перфы папки, тап = загрузить) →
 MENU назад. ALL PERFS-слот удалён (общие перфы = верхнее меню → синяя
