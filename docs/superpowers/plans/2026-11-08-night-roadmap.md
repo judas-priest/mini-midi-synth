@@ -26,7 +26,11 @@ Tavily-исследование лучших практик → план (writin
       31/31 (golden_engine_fx_chain_slots, behavior-preserving PR). САМО
       ПОВЕДЕНИЕ (байпас legacy, Critical дублирование) — НЕ ночью: требует
       diff-ревью звука юзером утром. Утро: юзер слушает → потом behavior PR.
-- [ ] 3b. S6 дедуп (M, независимый) — если время после 3-prep.
+- [x] 3b. S6 дедуп — ГОТОВО (PR #95, master 02d33ac, 2026-11-08): xorshift32
+      канон ×31 call-site (14 файлов), phase advance ×10 (7 файлов),
+      soft_clip/fast_exp канон + dead вариант удалён. Goldens байт-стабильны
+      на каждой задаче. Осталось S6b: DC-blocker ×13, cubic, combulator/floaty
+      linear (причины в плане stage3b).
 - [ ] 4. ST5 — S4 разрез god-файлов: ночью ограничиться lib.rs сплитом
       (init/headless + App::new) — compiler-enforced; gui/synth сплиты — день.
 - [ ] 4. ST5 — S4 разрез god-файлов: lib.rs → init/headless/android_jni + App::new;
@@ -66,6 +70,9 @@ Tavily-исследование лучших практик → план (writin
   сессия Claude (не переживает перезапуск терминала/машины). Итоговый отчёт —
   в конце этого файла по завершении всех стадий.
 
+
+### После стадии 3b (PR #95): звука НЕ коснулось (bit-identity goldens) —
+проверять нечего, но прогнать пресеты на слух по фану можно.
 
 ### После стадии 2a (PR #93)
 6. MIDI-learn: назначить CC на chorus_mix (или любой из ~27 ранее
