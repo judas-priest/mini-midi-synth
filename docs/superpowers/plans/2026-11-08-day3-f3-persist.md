@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
+status: executed 2026-11-08 (29 сайтов → 1 точка записи; ST8 отложен — отдельная сессия)
+
 anchor-checked: 2026-11-08 (база = master d3813a3; канон — Tavily 2026-11-08:
 «периодический батч-save как middle ground» — erdosmiller; аудит F3: 61 точка
 записи, каждый чекбокс = полный JSON на диск)
@@ -62,7 +64,7 @@ save_global_to_config/save_config остаются — они станут dirty
 `src/gui/layers.rs`, `src/gui/drums.rs` (вызовы persist_parts_state и
 save_global_to_config — остаются, станут маркерами).
 
-- [ ] Step 1: App поля: `config_dirty: bool` (init false в App::new);
+- [x] Step 1: App поля: `config_dirty: bool` (init false в App::new);
   `fn mark_config_dirty(&mut self) { self.config_dirty = true; }`;
   `fn flush_config(&mut self, force: bool)`:
 ```rust
@@ -82,7 +84,7 @@ save_global_to_config — остаются, станут маркерами).
 ```
   (тип last_config_save сверить: если Option<Instant> — ок; если не Option —
   адаптировать.)
-- [ ] Step 2: конвертация ВСЕХ точек (grep `.config.save()\|self.save_config()\|save_global_to_config()\|persist_parts_state()` в src/gui/): каждая
+- [x] Step 2: конвертация ВСЕХ точек (grep `.config.save()\|self.save_config()\|save_global_to_config()\|persist_parts_state()` в src/gui/): каждая
   → `self.mark_config_dirty();` ВНУТРИ обёрток: save_config/save_global_to_config/
   persist_parts_state тела заменяют дисковую запись на mark_config_dirty
   (остальная логика обёрток — копирование полей — остаётся). Прямые
@@ -92,16 +94,16 @@ save_global_to_config — остаются, станут маркерами).
   в config?) — проверить, что идут через config.save — тоже маркер.
   ИСКЛЮЧЕНИЯ (остаются мгновенными): save_performance_file (preset.rs) —
   не в gui.
-- [ ] Step 3: update() конец (после CentralPanel): `self.flush_config(false);`
+- [x] Step 3: update() конец (после CentralPanel): `self.flush_config(false);`
   on_exit: `self.flush_config(true);`.
-- [ ] Step 4: grep-пин TC3 вручную + гейт полный.
-- [ ] Step 5: коммит `refactor: config persistence boundary — dirty flag + 2s debounce + on_exit force (F3)`.
+- [x] Step 4: grep-пин TC3 вручную + гейт полный.
+- [x] Step 5: коммит `refactor: config persistence boundary — dirty flag + 2s debounce + on_exit force (F3)`.
 
 ### Task 2: Верификация стадии
 
-- [ ] Step 1: полный гейт.
-- [ ] Step 2: PR → squash → rebuild → launch-check.
-- [ ] Step 3: roadmap + TECHDEBT + «УТРОМ: изменение громкости → 3 с → kill →
+- [x] Step 1: полный гейт.
+- [x] Step 2: PR → squash → rebuild → launch-check.
+- [x] Step 3: roadmap + TECHDEBT + «УТРОМ: изменение громкости → 3 с → kill →
   restart → сохранилось».
 
 ## Out of scope

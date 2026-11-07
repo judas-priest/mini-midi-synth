@@ -152,7 +152,7 @@ impl App {
         }
         self.config.sf2.keys_file_path = Some(path.to_string_lossy().to_string());
         self.config.sf2.file_path = self.config.sf2.keys_file_path.clone(); // compat
-        let _ = self.config.save();
+        self.mark_config_dirty();
     }
 
     pub(crate) fn load_sf2_drums(&mut self, idx: usize) {
@@ -203,7 +203,7 @@ impl App {
         }
         self.push_drum_pad_vel();
         self.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
-        let _ = self.config.save();
+        self.mark_config_dirty();
     }
 
     pub(crate) fn unload_sf2_keys(&mut self) {
@@ -216,7 +216,7 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::UnloadKeysSoundFont);
         self.config.sf2.keys_file_path = None;
         self.config.sf2.file_path = None;
-        let _ = self.config.save();
+        self.mark_config_dirty();
     }
 
     pub(crate) fn unload_sf2_drums(&mut self) {
@@ -233,6 +233,6 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
         let _ = self.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);
         self.config.sf2.drums_file_path = None;
-        let _ = self.config.save();
+        self.mark_config_dirty();
     }
 }

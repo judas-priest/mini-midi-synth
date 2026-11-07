@@ -4,8 +4,9 @@ use super::*;
 impl App {
     /// #57: менеджер папок-треков (сетлистов). egui-замыкания не могут держать
     /// &mut self — решения собираются в ops во время отрисовки (copy-then-act),
-    /// применяются после закрытия окна; КАЖДАЯ мутация — config.save()
-    /// (event-driven, на выходе не гарантирован) + refresh_console_list.
+    /// применяются после закрытия окна; КАЖДАЯ мутация — mark_config_dirty()
+    /// (F3: запись на диск отложена до flush_config, форс на выходе) +
+    /// refresh_console_list.
     pub(crate) fn draw_tracks_manager(&mut self, ctx: &egui::Context) {
         enum Op {
             SetActive(usize),
@@ -188,13 +189,13 @@ impl App {
                     if fi < self.config.ui.perf_folders.len() {
                         self.config.ui.active_folder = Some(fi);
                         self.perf_window = 0;
-                        let _ = self.config.save();
+                        self.mark_config_dirty();
                         self.refresh_console_list();
                     }
                 }
                 Op::Rename(fi, nm) => {
                     if let Some(f) = self.config.ui.perf_folders.get_mut(fi) { f.name = nm; }
-                    let _ = self.config.save();
+                    self.mark_config_dirty();
                 }
                 Op::MoveUp(fi) => {
                     if fi > 0 && fi < self.config.ui.perf_folders.len() {
@@ -205,7 +206,7 @@ impl App {
                         if self.tracks_sel == Some(fi) {
                             self.tracks_sel = Some(fi - 1);
                         }
-                        let _ = self.config.save();
+                        self.mark_config_dirty();
                         self.refresh_console_list();
                     }
                 }
@@ -218,7 +219,7 @@ impl App {
                         if self.tracks_sel == Some(fi) {
                             self.tracks_sel = Some(fi + 1);
                         }
-                        let _ = self.config.save();
+                        self.mark_config_dirty();
                         self.refresh_console_list();
                     }
                 }
@@ -237,7 +238,7 @@ impl App {
                                     self.config.ui.perf_folders.len().checked_sub(1);
                             }
                         }
-                        let _ = self.config.save();
+                        self.mark_config_dirty();
                         self.refresh_console_list();
                     }
                 }
@@ -245,7 +246,7 @@ impl App {
                     if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
                         if pi > 0 && pi < f.perfs.len() {
                             f.perfs.swap(pi - 1, pi);
-                            let _ = self.config.save();
+                            self.mark_config_dirty();
                         }
                     }
                 }
@@ -253,7 +254,7 @@ impl App {
                     if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
                         if pi + 1 < f.perfs.len() {
                             f.perfs.swap(pi, pi + 1);
-                            let _ = self.config.save();
+                            self.mark_config_dirty();
                         }
                     }
                 }
@@ -261,21 +262,21 @@ impl App {
                     if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
                         if pi < f.perfs.len() { f.perfs.remove(pi); }
                     }
-                    let _ = self.config.save();
+                    self.mark_config_dirty();
                     self.refresh_console_list();
                 }
                 Op::AddCur(fi) => {
                     if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
                         f.perfs.push(cur_perf.clone());
                     }
-                    let _ = self.config.save();
+                    self.mark_config_dirty();
                     self.refresh_console_list();
                 }
                 Op::AddPerf(fi, n) => {
                     if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
                         f.perfs.push(n);
                     }
-                    let _ = self.config.save();
+                    self.mark_config_dirty();
                     self.refresh_console_list();
                 }
                 Op::New => {
@@ -284,7 +285,7 @@ impl App {
                         name: format!("Track {n}"),
                         perfs: Vec::new(),
                     });
-                    let _ = self.config.save();
+                    self.mark_config_dirty();
                 }
             }
         }
