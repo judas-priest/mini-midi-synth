@@ -1009,259 +1009,10 @@ impl eframe::App for App {
         }
         self.drum_prev_step = step_now;
 
-        // Bank-2 console pads -> state machine -> actions
-        let mut acts: Vec<led_console::Action> = Vec::new();
-        if let Some(rx) = &self.console_rx {
-            while let Ok((note, is_on)) = rx.try_recv() {
-                let now = std::time::Instant::now();
-                let ev = match (note, is_on) {
-                    (60..=67, true) => Some(led_console::PadEvent::Down((note - 60) as usize)),
-                    (60..=67, false) => Some(led_console::PadEvent::Up((note - 60) as usize)),
-                    (75, true) => Some(led_console::PadEvent::UndoDown),
-                    (75, false) => Some(led_console::PadEvent::UndoUp),
-                    (78, true) => Some(led_console::PadEvent::Prev),
-                    (79, true) => Some(led_console::PadEvent::Next),
-                    (80, true) => Some(led_console::PadEvent::PageBack),
-                    (76, true) => Some(led_console::PadEvent::PageForward),
-                    _ => None,
-                };
-                if let Some(ev) = ev {
-                    if let Some(a) = self.console.on_event(ev, now) {
-                        acts.push(a);
-                    }
-                }
-            }
-        }
-        let _ = self.console.tick(std::time::Instant::now()); // hold -> Menu (snapshot below)
-        for a in acts {
-            self.execute_console_action(a);
-        }
-        // Смена режима консоли: окно режима открывается на текущем выборе
-        // (finding 4: stale-страница при входе; идемпотентно, раз в смену).
-        // refresh_console_list здесь же покрывает первый кадр (prev = None)
-        // и все изменения perf_list/папок до входа консоли в режим (#57).
-        let m = self.console.mode();
-        if self.console_prev_mode != Some(m) {
-            self.console_prev_mode = Some(m);
-            self.refresh_console_list();
-            match m {
-                led_console::Mode::Pattern => {
-                    self.follow_window(self.drum_current_pattern as usize, false);
-                }
-                led_console::Mode::Tracks => {
-                    // Хвост #57: вход показывает страницу активной папки
-                    // (page_start сам clamp'ит при 0 папок → 0)
-                    self.tracks_window = led_console::page_start(
-                        self.config.ui.active_folder.unwrap_or(0),
-                        self.config.ui.perf_folders.len());
-                    // Подсказка входа (#57 UX): как рулить с пэдов
-                    self.show_toast("TRACKS: tap a folder — MENU — назад",
-                        ToastKind::Info);
-                }
-                led_console::Mode::Mute => self.mute_window = 0,
-                led_console::Mode::Home => {
-                    if let Some(i) = self.active_perf_console() {
-                        self.follow_window(i, true);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Companion process lifecycle (TECHDEBT #16): spawn on toggle-on /
-        // first need, kill only OUR child on toggle-off, respawn with 5s
-        // backoff if it dies while enabled.
-        if !self.config.ui.led_companion {
-            if let Some(mut child) = self.led_child.take() {
-                log::info!("[console] killing companion child");
-                if let Err(e) = child.kill() {
-                    log::warn!("[console] companion kill: {e}");
-                }
-                if let Err(e) = child.wait() {
-                    log::warn!("[console] companion wait: {e}");
-                }
-            }
-            self.led_spawn_backoff = None;
-        } else {
-            // reap exited child (crash, foreign kill, guard-exit 0)
-            if let Some(mut child) = self.led_child.take() {
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        log::info!("[console] companion child exited: {status}");
-                        self.led_spawn_backoff = Some(std::time::Instant::now());
-                    }
-                    Ok(None) => self.led_child = Some(child),
-                    Err(e) => log::warn!("[console] companion try_wait: {e}"),
-                }
-            }
-            // Spawn only when nothing connected AND a connect attempt already
-            // failed (a live foreign companion serves the socket within the
-            // 2s retry window — spawning earlier creates a duplicate that
-            // fights the foreign one over BLE).
-            let backoff_ok = self.led_spawn_backoff
-                .map(|t| t.elapsed() > std::time::Duration::from_secs(5))
-                .unwrap_or(true);
-            if self.led_child.is_none()
-                && self.led_socket.is_none()
-                && self.led_socket_failed_at.is_some()
-                && backoff_ok
-            {
-                let path = crate::config::expand_home(&self.config.ui.led_companion_cmd);
-                match std::process::Command::new("python3").arg(&path).spawn() {
-                    Ok(child) => {
-                        log::info!("[console] spawned companion: {}", path.display());
-                        self.led_child = Some(child);
-                    }
-                    Err(e) => {
-                        log::warn!("[console] companion spawn failed: {e}");
-                        self.led_spawn_backoff = Some(std::time::Instant::now());
-                    }
-                }
-            }
-        }
-
-        // LED companion socket lifecycle.
-        // Connect runs on a helper thread: a unix connect() BLOCKS when the
-        // peer's accept backlog is full — on the GUI thread that froze the
-        // whole app before the first frame (observed with a companion stuck
-        // in BLE reconnect).
-        if !self.config.ui.led_companion {
-            if self.led_socket.take().is_some() {
-                log::info!("[console] companion disabled");
-            }
-            self.led_connecting = None;
-        } else if self.led_socket.is_none()
-            && self.led_socket_failed_at
-                .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
-                .unwrap_or(true)
-            && self.led_connecting.is_none()
-        {
-            let (tx, rx) =
-                std::sync::mpsc::channel::<std::io::Result<std::os::unix::net::UnixStream>>();
-            self.led_connecting = Some(rx);
-            std::thread::spawn(move || {
-                let res = std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock");
-                let _ = tx.send(res);
-            });
-        }
-        if self.led_socket.is_none() {
-            if let Some(rx) = &mut self.led_connecting {
-                match rx.try_recv() {
-                    Ok(Ok(stream)) => {
-                        self.led_connecting = None;
-                        let (tx, rx) = std::sync::mpsc::channel::<String>();
-                        // fresh AtomicBool на каждый коннект: старый writer не может
-                        // перезаписать флаг нового (spurious reconnect)
-                        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-                        self.led_socket_alive = Some(alive.clone());
-                        std::thread::spawn(move || {
-                            use std::io::Write;
-                            let mut stream = stream;
-                            for msg in rx {
-                                if stream.write_all(msg.as_bytes()).is_err() {
-                                    alive.store(false, std::sync::atomic::Ordering::Relaxed);
-                                    break;
-                                }
-                            }
-                            alive.store(false, std::sync::atomic::Ordering::Relaxed);
-                        });
-                        self.led_socket = Some(tx);
-                        self.led_socket_failed_at = None;
-                        self.led_dirty = true; // отправить полный STATE сразу после коннекта
-                        log::info!("[console] companion connected");
-                    }
-                    Ok(Err(_)) => {
-                        self.led_connecting = None;
-                        self.led_socket_failed_at = Some(std::time::Instant::now());
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        self.led_connecting = None;
-                        self.led_socket_failed_at = Some(std::time::Instant::now());
-                    }
-                }
-            }
-        }
-        // writer умер (компаньон перезапускается) — забыть сокет, retry через 2с
-        let socket_dead = match &self.led_socket_alive {
-            Some(a) => !a.load(std::sync::atomic::Ordering::Relaxed),
-            None => false,
-        };
-        if self.led_socket.is_some() && socket_dead {
-            self.led_socket = None;
-            self.led_socket_alive = None;
-            self.led_socket_failed_at = Some(std::time::Instant::now());
-        }
-
-        // LED snapshot (16 slots = pads 17..=32, top row first)
-        {
-            // Bottom row shows the MASTER transport (single transport, #32
-            // фаза 4): the union — LED reflects "something runs".
-            let lstate = crate::synth::looper::LooperState::from_u8(
-                self.looper_atoms.state.load(Ordering::Relaxed));
-            let (playing, recording) = (
-                self.drum_playing
-                    || matches!(lstate, crate::synth::looper::LooperState::Playing
-                            | crate::synth::looper::LooperState::Overdubbing
-                            | crate::synth::looper::LooperState::Recording),
-                self.drum_recording
-                    || matches!(lstate, crate::synth::looper::LooperState::Recording
-                            | crate::synth::looper::LooperState::Overdubbing),
-            );
-            let mut mutes = [false; 16];
-            for (i, part) in self.parts.iter().enumerate().take(16) {
-                mutes[i] = part.mute;
-            }
-            let filled = self.console_active_list().len();
-            let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
-            let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
-            let page_depth = match self.console.mode() {
-                led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
-                led_console::Mode::Mute => self.mute_window / 7,
-                led_console::Mode::Tracks => self.tracks_window / 7,
-                // FolderPerfs: PAGE-глубина по перф-страницам — явное плечо
-                // (то же, что `_`; самодокументация)
-                led_console::Mode::FolderPerfs => self.perf_window / 7,
-                _ => self.perf_window / 7,
-            };
-            let top = match self.console.mode() {
-                led_console::Mode::Tracks => self.console.folder_colors(
-                    self.config.ui.active_folder,
-                    self.config.ui.perf_folders.len(), self.tracks_window),
-                led_console::Mode::FolderPerfs => self.console.top_colors(
-                    self.active_perf_console(), self.folder_console_list.len(),
-                    self.drum_current_pattern as usize, &mutes,
-                    self.perf_window, self.pat_window, self.mute_window),
-                _ => self.console.top_colors(self.active_perf_console(), filled,
-                                             self.drum_current_pattern as usize, &mutes,
-                                             self.perf_window, self.pat_window,
-                                             self.mute_window),
-            };
-            let bottom = self.console.bottom_colors(playing, recording, page_depth,
-                                                    undo_avail, redo_avail);
-            let mut snap = [[0u8; 3]; 16];
-            snap[..8].copy_from_slice(&top);
-            snap[8..].copy_from_slice(&bottom);
-            // Send on change, plus a 2s heartbeat: heals dropped writes and
-            // reconnects after a companion restart (otherwise nothing is sent
-            // while the state is idle and the console shows stale colors).
-            let heartbeat_due = self.led_last_send
-                .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
-                .unwrap_or(true);
-            if snap != self.led_snapshot || self.led_dirty || heartbeat_due {
-                self.led_snapshot = snap;
-                self.led_dirty = false;
-                self.led_last_send = Some(std::time::Instant::now());
-                if let Some(sock) = &self.led_socket {
-                    let mut msg = String::from("STATE");
-                    for c in &snap {
-                        msg.push_str(&format!(" {:02X}{:02X}{:02X}", c[0], c[1], c[2]));
-                    }
-                    msg.push('\n');
-                    let _ = sock.send(msg);
-                }
-            }
-        }
+        self.console_event_pump();
+        self.led_companion_lifecycle();
+        self.led_socket_lifecycle();
+        self.led_snapshot_send();
 
         // MIDI Learn indicator
         if let Some(target_name) = self.midi_learn_target {
@@ -1804,6 +1555,265 @@ impl eframe::App for App {
 }
 
 impl App {
+
+    fn console_event_pump(&mut self) {
+        // Bank-2 console pads -> state machine -> actions
+        let mut acts: Vec<led_console::Action> = Vec::new();
+        if let Some(rx) = &self.console_rx {
+            while let Ok((note, is_on)) = rx.try_recv() {
+                let now = std::time::Instant::now();
+                let ev = match (note, is_on) {
+                    (60..=67, true) => Some(led_console::PadEvent::Down((note - 60) as usize)),
+                    (60..=67, false) => Some(led_console::PadEvent::Up((note - 60) as usize)),
+                    (75, true) => Some(led_console::PadEvent::UndoDown),
+                    (75, false) => Some(led_console::PadEvent::UndoUp),
+                    (78, true) => Some(led_console::PadEvent::Prev),
+                    (79, true) => Some(led_console::PadEvent::Next),
+                    (80, true) => Some(led_console::PadEvent::PageBack),
+                    (76, true) => Some(led_console::PadEvent::PageForward),
+                    _ => None,
+                };
+                if let Some(ev) = ev {
+                    if let Some(a) = self.console.on_event(ev, now) {
+                        acts.push(a);
+                    }
+                }
+            }
+        }
+        let _ = self.console.tick(std::time::Instant::now()); // hold -> Menu (snapshot below)
+        for a in acts {
+            self.execute_console_action(a);
+        }
+        // Смена режима консоли: окно режима открывается на текущем выборе
+        // (finding 4: stale-страница при входе; идемпотентно, раз в смену).
+        // refresh_console_list здесь же покрывает первый кадр (prev = None)
+        // и все изменения perf_list/папок до входа консоли в режим (#57).
+        let m = self.console.mode();
+        if self.console_prev_mode != Some(m) {
+            self.console_prev_mode = Some(m);
+            self.refresh_console_list();
+            match m {
+                led_console::Mode::Pattern => {
+                    self.follow_window(self.drum_current_pattern as usize, false);
+                }
+                led_console::Mode::Tracks => {
+                    // Хвост #57: вход показывает страницу активной папки
+                    // (page_start сам clamp'ит при 0 папок → 0)
+                    self.tracks_window = led_console::page_start(
+                        self.config.ui.active_folder.unwrap_or(0),
+                        self.config.ui.perf_folders.len());
+                    // Подсказка входа (#57 UX): как рулить с пэдов
+                    self.show_toast("TRACKS: tap a folder — MENU — назад",
+                        ToastKind::Info);
+                }
+                led_console::Mode::Mute => self.mute_window = 0,
+                led_console::Mode::Home => {
+                    if let Some(i) = self.active_perf_console() {
+                        self.follow_window(i, true);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    fn led_companion_lifecycle(&mut self) {
+        // Companion process lifecycle (TECHDEBT #16): spawn on toggle-on /
+        // first need, kill only OUR child on toggle-off, respawn with 5s
+        // backoff if it dies while enabled.
+        if !self.config.ui.led_companion {
+            if let Some(mut child) = self.led_child.take() {
+                log::info!("[console] killing companion child");
+                if let Err(e) = child.kill() {
+                    log::warn!("[console] companion kill: {e}");
+                }
+                if let Err(e) = child.wait() {
+                    log::warn!("[console] companion wait: {e}");
+                }
+            }
+            self.led_spawn_backoff = None;
+        } else {
+            // reap exited child (crash, foreign kill, guard-exit 0)
+            if let Some(mut child) = self.led_child.take() {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        log::info!("[console] companion child exited: {status}");
+                        self.led_spawn_backoff = Some(std::time::Instant::now());
+                    }
+                    Ok(None) => self.led_child = Some(child),
+                    Err(e) => log::warn!("[console] companion try_wait: {e}"),
+                }
+            }
+            // Spawn only when nothing connected AND a connect attempt already
+            // failed (a live foreign companion serves the socket within the
+            // 2s retry window — spawning earlier creates a duplicate that
+            // fights the foreign one over BLE).
+            let backoff_ok = self.led_spawn_backoff
+                .map(|t| t.elapsed() > std::time::Duration::from_secs(5))
+                .unwrap_or(true);
+            if self.led_child.is_none()
+                && self.led_socket.is_none()
+                && self.led_socket_failed_at.is_some()
+                && backoff_ok
+            {
+                let path = crate::config::expand_home(&self.config.ui.led_companion_cmd);
+                match std::process::Command::new("python3").arg(&path).spawn() {
+                    Ok(child) => {
+                        log::info!("[console] spawned companion: {}", path.display());
+                        self.led_child = Some(child);
+                    }
+                    Err(e) => {
+                        log::warn!("[console] companion spawn failed: {e}");
+                        self.led_spawn_backoff = Some(std::time::Instant::now());
+                    }
+                }
+            }
+        }
+    }
+    fn led_socket_lifecycle(&mut self) {
+        // LED companion socket lifecycle.
+        // Connect runs on a helper thread: a unix connect() BLOCKS when the
+        // peer's accept backlog is full — on the GUI thread that froze the
+        // whole app before the first frame (observed with a companion stuck
+        // in BLE reconnect).
+        if !self.config.ui.led_companion {
+            if self.led_socket.take().is_some() {
+                log::info!("[console] companion disabled");
+            }
+            self.led_connecting = None;
+        } else if self.led_socket.is_none()
+            && self.led_socket_failed_at
+                .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
+                .unwrap_or(true)
+            && self.led_connecting.is_none()
+        {
+            let (tx, rx) =
+                std::sync::mpsc::channel::<std::io::Result<std::os::unix::net::UnixStream>>();
+            self.led_connecting = Some(rx);
+            std::thread::spawn(move || {
+                let res = std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock");
+                let _ = tx.send(res);
+            });
+        }
+        if self.led_socket.is_none() {
+            if let Some(rx) = &mut self.led_connecting {
+                match rx.try_recv() {
+                    Ok(Ok(stream)) => {
+                        self.led_connecting = None;
+                        let (tx, rx) = std::sync::mpsc::channel::<String>();
+                        // fresh AtomicBool на каждый коннект: старый writer не может
+                        // перезаписать флаг нового (spurious reconnect)
+                        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                        self.led_socket_alive = Some(alive.clone());
+                        std::thread::spawn(move || {
+                            use std::io::Write;
+                            let mut stream = stream;
+                            for msg in rx {
+                                if stream.write_all(msg.as_bytes()).is_err() {
+                                    alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                                    break;
+                                }
+                            }
+                            alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                        });
+                        self.led_socket = Some(tx);
+                        self.led_socket_failed_at = None;
+                        self.led_dirty = true; // отправить полный STATE сразу после коннекта
+                        log::info!("[console] companion connected");
+                    }
+                    Ok(Err(_)) => {
+                        self.led_connecting = None;
+                        self.led_socket_failed_at = Some(std::time::Instant::now());
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.led_connecting = None;
+                        self.led_socket_failed_at = Some(std::time::Instant::now());
+                    }
+                }
+            }
+        }
+        // writer умер (компаньон перезапускается) — забыть сокет, retry через 2с
+        let socket_dead = match &self.led_socket_alive {
+            Some(a) => !a.load(std::sync::atomic::Ordering::Relaxed),
+            None => false,
+        };
+        if self.led_socket.is_some() && socket_dead {
+            self.led_socket = None;
+            self.led_socket_alive = None;
+            self.led_socket_failed_at = Some(std::time::Instant::now());
+        }
+    }
+    fn led_snapshot_send(&mut self) {
+        // LED snapshot (16 slots = pads 17..=32, top row first)
+        {
+            // Bottom row shows the MASTER transport (single transport, #32
+            // фаза 4): the union — LED reflects "something runs".
+            let lstate = crate::synth::looper::LooperState::from_u8(
+                self.looper_atoms.state.load(Ordering::Relaxed));
+            let (playing, recording) = (
+                self.drum_playing
+                    || matches!(lstate, crate::synth::looper::LooperState::Playing
+                            | crate::synth::looper::LooperState::Overdubbing
+                            | crate::synth::looper::LooperState::Recording),
+                self.drum_recording
+                    || matches!(lstate, crate::synth::looper::LooperState::Recording
+                            | crate::synth::looper::LooperState::Overdubbing),
+            );
+            let mut mutes = [false; 16];
+            for (i, part) in self.parts.iter().enumerate().take(16) {
+                mutes[i] = part.mute;
+            }
+            let filled = self.console_active_list().len();
+            let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
+            let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
+            let page_depth = match self.console.mode() {
+                led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
+                led_console::Mode::Mute => self.mute_window / 7,
+                led_console::Mode::Tracks => self.tracks_window / 7,
+                // FolderPerfs: PAGE-глубина по перф-страницам — явное плечо
+                // (то же, что `_`; самодокументация)
+                led_console::Mode::FolderPerfs => self.perf_window / 7,
+                _ => self.perf_window / 7,
+            };
+            let top = match self.console.mode() {
+                led_console::Mode::Tracks => self.console.folder_colors(
+                    self.config.ui.active_folder,
+                    self.config.ui.perf_folders.len(), self.tracks_window),
+                led_console::Mode::FolderPerfs => self.console.top_colors(
+                    self.active_perf_console(), self.folder_console_list.len(),
+                    self.drum_current_pattern as usize, &mutes,
+                    self.perf_window, self.pat_window, self.mute_window),
+                _ => self.console.top_colors(self.active_perf_console(), filled,
+                                             self.drum_current_pattern as usize, &mutes,
+                                             self.perf_window, self.pat_window,
+                                             self.mute_window),
+            };
+            let bottom = self.console.bottom_colors(playing, recording, page_depth,
+                                                    undo_avail, redo_avail);
+            let mut snap = [[0u8; 3]; 16];
+            snap[..8].copy_from_slice(&top);
+            snap[8..].copy_from_slice(&bottom);
+            // Send on change, plus a 2s heartbeat: heals dropped writes and
+            // reconnects after a companion restart (otherwise nothing is sent
+            // while the state is idle and the console shows stale colors).
+            let heartbeat_due = self.led_last_send
+                .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
+                .unwrap_or(true);
+            if snap != self.led_snapshot || self.led_dirty || heartbeat_due {
+                self.led_snapshot = snap;
+                self.led_dirty = false;
+                self.led_last_send = Some(std::time::Instant::now());
+                if let Some(sock) = &self.led_socket {
+                    let mut msg = String::from("STATE");
+                    for c in &snap {
+                        msg.push_str(&format!(" {:02X}{:02X}{:02X}", c[0], c[1], c[2]));
+                    }
+                    msg.push('\n');
+                    let _ = sock.send(msg);
+                }
+            }
+        }
+    }
     /// Запомнить «что сейчас крутят» — для индикатора в правом углу топ-бара
     /// (#39/#44: значение видно весь drag, тултип не обязателен). Каждый тик
     /// сбрасывает таймер авто-скрытия (2 с, как OSD volume).
