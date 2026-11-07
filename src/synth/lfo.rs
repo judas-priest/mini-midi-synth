@@ -376,7 +376,7 @@ impl Lfo {
                 super::dsp_utils::xorshift32(&mut self.noise_state);
                 let raw = (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
                 // deform 0=very smooth (coeff~0.999), 1=less smooth (coeff~0.9)
-                // deform < -0.091 давал coeff > 1 = неустойчивый полюс
+                // deform < -0.0101 давал coeff > 1 = неустойчивый полюс
                 // (экспоненциальный разлёт → inf → NaN навсегда). Клэмп
                 // держит полюс внутри единичного круга.
                 let coeff = (0.999 - deform * 0.099).min(0.999);
