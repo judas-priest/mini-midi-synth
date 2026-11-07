@@ -79,35 +79,36 @@ cargo deny check
 Логи: `adb logcat -s MiniMidiSynth`.
 Символизация краша: `adb logcat | ndk-stack -sym android/symbols/arm64-v8a`.
 
-## Гайдлайны рефакторинга (выстрадано 2026-11-07/08, 12 PR)
+## Refactoring guidelines (earned 2026-11-07/08, 12 PRs)
 
-1. **Golden-канон.** Behavior-preserving изменение обязано держать goldens
-   (`tests/golden/`) байт-в-байт. Красный golden = найденный баг — СТОП и
-   разбор, НЕ регенерация. `MINI_MIDI_GOLDEN_UPDATE=1` — только для
-   осознанного изменения звука + ревью диффа.
-2. **Bit-identity в DSP.** Копии примитивов сливать только при идентичном
-   порядке операций. ULP-сдвиг в feedback-петлях накапливается. Формула
-   отличается (clamp/wrap/порядок множителей, tuple-state) — НЕ сливать
-   (кейсы: bonsai, combulator/floaty, cubic-flanger).
-3. **SSOT параметров.** CC-параметр добавляется одной строкой в
-   `cc_patch_params!` (patch_params.rs) — getter/setter/ranges генерируются.
-   Один ключ может иметь РАЗНЫЕ диапазоны в разных движках (ks_brightness:
-   KarplusStrong vs PianoModel) — это не дрейф, пин `tc_ks_ranges`.
-4. **RT-контракт.** Box-события не распаковывать в аудио-колбэке (free на
-   RT-потоке): old payload возвращается в событии (canon LoadPatch), new — в
-   trash. Мульти-событийный жест GUI = одна транзакция (canon SetPartFull).
-5. **Персист.** Запись конфига — только `flush_config` (dirty + 2 с дебаунс,
-   force на exit). Прямые `config.save()` в gui запрещены. Краш теряет ≤2 с
-   настроек — осознанный трейд-офф.
-6. **Глифы.** Иконки — только из emoji-icon-font, проверить cmap (fontTools)
-   до вставки. Тонкие стрелки ↑↓, ⠿, ▼, ✓ в шрифтах egui НЕ существуют.
-7. **Рефактор-процесс.** План (docs/superpowers/plans/, status-заголовок) →
-   ревью плана субагентом → реализация: implementer + spec review + quality
-   review на задачу → финальный ревью ветки → PR squash (локальный merge в
-   master запрещён). Move-only шаги: goldens байт-стабильны = доказательство.
-8. **Пины.** Source-parse пины (match_arms_between / include_str) переезжают
-   вместе с кодом: меняется путь, не семантика assert'а. Полный rewrite
-   пинов — осознанно и с комментарием.
-9. **Панели.** Порядок egui-панелей пинится из исходника
-   (ui_layout_contract): при разрезе gui — панели остаются в update() ЛИБО
-   расширить список файлов в пине; CentralPanel — последней.
+1. **Golden canon.** Behavior-preserving changes must keep `tests/golden/`
+   byte-identical. Red golden = found bug — STOP and investigate, do NOT
+   regenerate. `MINI_MIDI_GOLDEN_UPDATE=1` only for intentional sound changes
+   + diff review.
+2. **DSP bit-identity.** Merge primitive copies only with identical op order.
+   ULP drift accumulates in feedback loops. Different formula shape
+   (clamp/wrap/multiplier order/tuple-state) = do NOT merge
+   (cases: bonsai, combulator/floaty, cubic-flanger).
+3. **Param SSOT.** Add a CC param as ONE line in `cc_patch_params!`
+   (patch_params.rs) — getter/setter/ranges are generated. One key may have
+   DIFFERENT ranges per engine (ks_brightness: KarplusStrong vs PianoModel) —
+   that is not drift, pin `tc_ks_ranges`.
+4. **RT contract.** Never unpack Box events in the audio callback (free on
+   RT thread): old payload returns inside the event (LoadPatch canon), new
+   payload goes to trash. Multi-event GUI gestures = one transaction
+   (SetPartFull canon).
+5. **Persistence.** Config writes only via `flush_config` (dirty + 2 s
+   debounce, force on exit). Direct `config.save()` in gui is forbidden.
+   A crash loses ≤2 s of settings — accepted trade-off.
+6. **Glyphs.** Icons only from emoji-icon-font; verify cmap (fontTools)
+   before use. Thin arrows ↑↓, ⠿, ▼, ✓ do NOT exist in egui fonts.
+7. **Refactor process.** Plan (docs/superpowers/plans/, status header) →
+   plan review by subagent → per-task: implementer + spec review + quality
+   review → final branch review → squash PR (local merge to master forbidden).
+   Move-only steps: byte-stable goldens = correctness proof.
+8. **Pins.** Source-parse pins (match_arms_between / include_str) move with
+   the code: change the path, not the assert semantics. Full pin rewrites
+   are deliberate and commented.
+9. **Panels.** egui panel order is pinned from source (ui_layout_contract):
+   when splitting gui, panels stay in update() OR extend the pin's file
+   list; CentralPanel stays last.
