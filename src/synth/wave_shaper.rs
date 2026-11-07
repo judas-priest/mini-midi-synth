@@ -7,7 +7,7 @@
 //!
 //! Inspired by Surge XT's Wave Shaper effect.
 use std::f32::consts::PI;
-use super::dsp_utils::fast_tanh;
+use super::dsp_utils::{dc_block, fast_tanh};
 
 pub struct WaveShaper {
     sample_rate: f32,
@@ -67,12 +67,8 @@ impl WaveShaper {
     #[inline(always)]
     fn dc_block(&mut self, x_l: f32, x_r: f32) -> (f32, f32) {
         let r = self.dc_coeff;
-        let y_l = x_l - self.dc_x1_l + r * self.dc_y1_l;
-        let y_r = x_r - self.dc_x1_r + r * self.dc_y1_r;
-        self.dc_x1_l = x_l;
-        self.dc_y1_l = y_l;
-        self.dc_x1_r = x_r;
-        self.dc_y1_r = y_r;
+        let y_l = dc_block(x_l, &mut self.dc_x1_l, &mut self.dc_y1_l, r);
+        let y_r = dc_block(x_r, &mut self.dc_x1_r, &mut self.dc_y1_r, r);
         (y_l, y_r)
     }
 

@@ -388,9 +388,7 @@ impl PianoModel {
         let with_sb = out * 0.85 + self.sb_bp * 0.15;
 
         // ── DC blocker ──
-        let dc_out = with_sb - self.dc_x + 0.9975 * self.dc_y;
-        self.dc_x = with_sb;
-        self.dc_y = dc_out;
+        let dc_out = super::dsp_utils::dc_block(with_sb, &mut self.dc_x, &mut self.dc_y, 0.9975);
 
         dc_out.clamp(-1.0, 1.0)
     }

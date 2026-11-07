@@ -1329,9 +1329,7 @@ impl Oscillator {
             let with_sb = raw * 0.82 + *sb_bp * 0.18;
 
             // ── DC blocker ──
-            let dc_out = with_sb - *dc_x + 0.9975 * *dc_y;
-            *dc_x = with_sb;
-            *dc_y = dc_out;
+            let dc_out = super::dsp_utils::dc_block(with_sb, dc_x, dc_y, 0.9975);
 
             dc_out.clamp(-1.0, 1.0)
         } else {
@@ -2521,9 +2519,7 @@ impl Oscillator {
             let shaped = driven * 0.55 + *lp_state * 0.45;
 
             // DC blocker
-            let dc_out = shaped - *dc_x + 0.995 * *dc_y;
-            *dc_x = shaped;
-            *dc_y = dc_out;
+            let dc_out = super::dsp_utils::dc_block(shaped, dc_x, dc_y, 0.995);
 
             dc_out.clamp(-1.0, 1.0)
         } else {
@@ -2628,9 +2624,7 @@ impl Oscillator {
             let radiated = (delay_out - *bell_lp) * 4.0;
 
             // DC blocker
-            let dc_out = radiated - *dc_x + 0.995 * *dc_y;
-            *dc_x = radiated;
-            *dc_y = dc_out;
+            let dc_out = super::dsp_utils::dc_block(radiated, dc_x, dc_y, 0.995);
 
             dc_out.clamp(-1.0, 1.0)
         } else {

@@ -248,9 +248,7 @@ impl ElectricPianoModel {
         let out = pickup_out / self.pickup_drive.sqrt() + noise_out;
 
         // ── DC blocker ──
-        let dc_out = out - self.dc_x + 0.9975 * self.dc_y;
-        self.dc_x = out;
-        self.dc_y = dc_out;
+        let dc_out = super::dsp_utils::dc_block(out, &mut self.dc_x, &mut self.dc_y, 0.9975);
 
         dc_out.clamp(-1.0, 1.0)
     }
