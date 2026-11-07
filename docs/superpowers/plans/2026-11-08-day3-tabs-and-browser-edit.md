@@ -132,8 +132,6 @@ goldens не затрагиваются (рендер аудио); ui_layout_con
 ```
 - [ ] Step 3: гейт (ui_layout_contract входит) + коммит
   `feat: instrument browser — preset params editor below the list (DSP parts)`.
-- [ ] Step 2: гейт (ui_layout_contract входит) + коммит
-  `feat: instrument browser — preset params editor below the list (DSP parts)`.
 
 ### Task 4: главная вкладка — компактный вид
 
