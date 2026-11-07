@@ -213,9 +213,11 @@ pub struct UiSettings {
     /// Companion spawn command path (python3 hardcoded); `~/` expands to HOME.
     #[serde(default = "default_led_companion_cmd")]
     pub led_companion_cmd: String,
-    /// Keybindings: egui key name → action string.
+    /// Keybindings: egui key name → action string. `None` = key absent from
+    /// config (use defaults); `Some(map)` — even empty — is the user's
+    /// explicit bind set (empty = user unbound everything).
     #[serde(default)]
-    pub keybinds: std::collections::HashMap<String, String>,
+    pub keybinds: Option<std::collections::HashMap<String, String>>,
     /// (#44) Top-bar telemetry (host/SR/buf/dsp load, drops/errs). Hidden by default.
     #[serde(default)]
     pub show_telemetry: bool,
@@ -295,7 +297,7 @@ impl Default for Config {
                 led_companion: false,
                 led_companion_cmd: default_led_companion_cmd(),
             parts_state: Vec::new(),
-                keybinds: std::collections::HashMap::new(),
+                keybinds: None,
                 show_telemetry: false,
                 dock_bottom_unit: true,
                 inst_browser_pos: None,

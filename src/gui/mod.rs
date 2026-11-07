@@ -706,7 +706,7 @@ impl App {
             looper_part_mutes: [false; 16],
             seq_target_atom: c.handles.seq_target_atom,
             active_part_atom: c.handles.active_part_atom,
-            keybinds: keybinds::Keybinds::from_config(&c.config.ui.keybinds),
+            keybinds: keybinds::Keybinds::from_config(c.config.ui.keybinds.as_ref()),
             show_keybinds_window: false,
             keybind_capturing: None,
             keybinds_reset_confirm: None,
@@ -922,7 +922,7 @@ impl eframe::App for App {
                 if key != egui::Key::Escape {
                     if let Some(action) = self.keybind_capturing.take() {
                         let stolen = self.keybinds.set_key_for_action(&action, key);
-                        self.config.ui.keybinds = self.keybinds.to_config();
+                        self.config.ui.keybinds = Some(self.keybinds.to_config());
                         self.mark_config_dirty();
                         if let Some(victim) = stolen {
                             self.show_toast(
@@ -1912,7 +1912,7 @@ impl App {
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
         self.config.ui.split_point = Some(self.split_point);
-        self.config.ui.keybinds = self.keybinds.to_config();
+        self.config.ui.keybinds = Some(self.keybinds.to_config());
         self.mark_config_dirty();
     }
 
@@ -2074,7 +2074,7 @@ impl App {
                             if armed {
                                 if let Some(key) = self.keybinds.key_for_action(&action) {
                                     self.keybinds.binds_mut().retain(|(k, _)| *k != key);
-                                    self.config.ui.keybinds = self.keybinds.to_config();
+                                    self.config.ui.keybinds = Some(self.keybinds.to_config());
                                     self.mark_config_dirty();
                                 }
                                 self.unbind_confirm = None;
@@ -2088,7 +2088,7 @@ impl App {
                 ui.add_space(theme::SP_SM);
                 if confirm::confirm_button(ui, "Reset Defaults", &mut self.keybinds_reset_confirm, true, "Restore default keybindings (custom binds are lost)") {
                     self.keybinds = keybinds::Keybinds::defaults();
-                    self.config.ui.keybinds = self.keybinds.to_config();
+                    self.config.ui.keybinds = Some(self.keybinds.to_config());
                     self.mark_config_dirty();
                     self.keybind_capturing = None;
                 }
