@@ -15,15 +15,20 @@ Tavily-исследование лучших практик → план (writin
       +1 кейс (SetPartFull+patch в assert_no_alloc). План: 2026-11-08-stage1-
       transactions-handles.md (executed). Tavily-постчек: boxed payload + trash —
       приоритет 1 канона (исследование 2026-11-08), расхождений нет.
-- [ ] 2. ST3 — S2: SSOT-реестр параметров (таблица key→label/range/log/scope/
-      default/transform; kill set_param 107 arm / build_voice_params 111 копий /
-      CachedFxParams 111 / слайдеры 150 мест / check_pickup 4/32 / range-дрейф
-      ks_brightness). Поверхность защищена sweep-golden (1642 хэша).
-- [ ] 3. ST4 — S3: FX консолидация. ПРЕГОТОВКА: slot goldens 31/31 (сейчас 5/31,
-      golden_engine_fx_chain_slots). Потом: байпас legacy при активной цепочке
-      (Critical: эффекты дублируются), нормализованные контракты 5 семейств,
-      конвертер 15/31+43 поля. ЗВУК ИЗМЕНИТСЯ ОСОЗНАННО — отдельные PR на
-      преготовку и на behavior change, diff ревью, goldens регенерация явная.
+- [~] 2. ST3 — S2: подсечение 2a ГОТОВО (PR #93, master ecf283d, 2026-11-08):
+      cc_patch_params! SSOT (31 ключ → cc_value_of/cc_set_param/ranges),
+      check_pickup 4/32 → все ключи (behavior fix: pickup от реального
+      значения), пины registry↔таблица (mutation-verified). ОСТАЛОСЬ 2b
+      (GUI-слайдеры 150 мест — требует визуальной проверки, УТРОМ) и 2c
+      (build_voice_params/CachedFxParams генерация). Range-дрейф ks_brightness
+      живёт в GUI-слайдерах — уйдёт в 2b.
+- [ ] 3. ST4 — S3: FX консолидация. НОЧЬЮ: ТОЛЬКО преготовка — slot goldens
+      31/31 (golden_engine_fx_chain_slots, behavior-preserving PR). САМО
+      ПОВЕДЕНИЕ (байпас legacy, Critical дублирование) — НЕ ночью: требует
+      diff-ревью звука юзером утром. Утро: юзер слушает → потом behavior PR.
+- [ ] 3b. S6 дедуп (M, независимый) — если время после 3-prep.
+- [ ] 4. ST5 — S4 разрез god-файлов: ночью ограничиться lib.rs сплитом
+      (init/headless + App::new) — compiler-enforced; gui/synth сплиты — день.
 - [ ] 4. ST5 — S4 разрез god-файлов: lib.rs → init/headless/android_jni + App::new;
       synth/mod.rs → Part::update_mods extract + handle_control по подсистемам;
       gui/mod.rs → console_lifecycle/browser/sf2/tracks/performance. ПОСЛЕ S2/S3.
@@ -61,6 +66,10 @@ Tavily-исследование лучших практик → план (writin
   сессия Claude (не переживает перезапуск терминала/машины). Итоговый отчёт —
   в конце этого файла по завершении всех стадий.
 
+
+### После стадии 2a (PR #93)
+6. MIDI-learn: назначить CC на chorus_mix (или любой из ~27 ранее
+   непокрытых ключей) — pickup подхватывает БЕЗ прыжка в ноль.
 
 ## УТРОМ: что проверить на экране
 
