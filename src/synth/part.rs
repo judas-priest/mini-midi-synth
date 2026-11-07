@@ -923,7 +923,11 @@ impl Part {
             || self.params.lfo_amp_depth > 0.001
             || inputs.aftertouch_smooth > 0.001;
         let lfo1_val = if lfo1_active {
-            self.lfos[0].tick_with_deform(self.params.lfo_rate * bl, lfo1_wf, self.params.lfo_deform)
+            // tempo_sync ждёт ИНДЕКС деления 0..15 (lfo.rs), а не герцы; GUI-пикера
+            // нет — фича спит (0 пользователей в пресетах/конфиге); полный дизайн —
+            // отдельная задача.
+            let rate = if self.lfos[0].tempo_sync { self.params.lfo_rate } else { self.params.lfo_rate * bl };
+            self.lfos[0].tick_with_deform(rate, lfo1_wf, self.params.lfo_deform)
         } else { 0.0 };
 
         // LFO 2 — also active when routed through mod matrix or in StepSeq mode
@@ -933,17 +937,20 @@ impl Part {
             || self.params.lfo2_filter_depth > 0.001
             || self.params.lfo2_amp_depth > 0.001;
         let lfo2_val = if lfo2_active {
-            self.lfos[1].tick_with_deform(self.params.lfo2_rate * bl, lfo2_wf, self.params.lfo2_deform)
+            let rate = if self.lfos[1].tempo_sync { self.params.lfo2_rate } else { self.params.lfo2_rate * bl };
+            self.lfos[1].tick_with_deform(rate, lfo2_wf, self.params.lfo2_deform)
         } else { 0.0 };
 
         // LFO 3 & 4 — tick when routed or in StepSeq mode
         let lfo3_wf = LfoWaveform::from_param(self.params.lfo3_waveform);
         let lfo3_val = if lfo3_wf == LfoWaveform::StepSeq || self.lfo3_routed {
-            self.lfos[2].tick_with_deform(self.params.lfo3_rate * bl, lfo3_wf, self.params.lfo3_deform)
+            let rate = if self.lfos[2].tempo_sync { self.params.lfo3_rate } else { self.params.lfo3_rate * bl };
+            self.lfos[2].tick_with_deform(rate, lfo3_wf, self.params.lfo3_deform)
         } else { 0.0 };
         let lfo4_wf = LfoWaveform::from_param(self.params.lfo4_waveform);
         let lfo4_val = if lfo4_wf == LfoWaveform::StepSeq || self.lfo4_routed {
-            self.lfos[3].tick_with_deform(self.params.lfo4_rate * bl, lfo4_wf, self.params.lfo4_deform)
+            let rate = if self.lfos[3].tempo_sync { self.params.lfo4_rate } else { self.params.lfo4_rate * bl };
+            self.lfos[3].tick_with_deform(rate, lfo4_wf, self.params.lfo4_deform)
         } else { 0.0 };
 
         // Step sequencer envelope retrigger from any LFO in StepSeq mode
