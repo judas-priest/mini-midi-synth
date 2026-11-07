@@ -281,9 +281,18 @@ fn golden_preset_hashes_match() {
 // ── TC5: engine-level 16-slot fx_chain goldens ───────────────────────────────
 
 /// (slot type number, FxSlotType name) — fx_chain.rs:11-51 (repr u8).
+/// All 31 non-None variants, canonical by type number.
 const CHAIN_SLOTS: &[(f32, &str)] = &[
-    (13.0, "Delay"), (7.0, "Chorus"), (17.0, "SpringReverb"),
-    (19.0, "Nimbus"), (26.0, "Vocoder"),
+    (1.0, "Overdrive"), (2.0, "Tape"), (3.0, "Neuron"), (4.0, "Bonsai"),
+    (5.0, "WaveShaper"), (6.0, "Airwindows"), (7.0, "Chorus"),
+    (8.0, "BbdEnsemble"), (9.0, "Flanger"), (10.0, "Phaser"),
+    (11.0, "Tremolo"), (12.0, "Rotary"), (13.0, "Delay"),
+    (14.0, "FloatyDelay"), (15.0, "Reverb"), (16.0, "Reverb2"),
+    (17.0, "SpringReverb"), (18.0, "ConvReverb"), (19.0, "Nimbus"),
+    (20.0, "RingMod"), (21.0, "FreqShift"), (22.0, "Bitcrusher"),
+    (23.0, "Resonator"), (24.0, "Combulator"), (25.0, "Treemonster"),
+    (26.0, "Vocoder"), (27.0, "GraphicEq"), (28.0, "Compressor"),
+    (29.0, "MsTool"), (30.0, "Conditioner"), (31.0, "Exciter"),
 ];
 
 #[test]
