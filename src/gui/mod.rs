@@ -589,7 +589,7 @@ impl App {
         layer_b: PartState,
         parts_extra: Vec<PartState>,
     ) -> Self {
-        Self {
+        let mut app = Self {
             patches: c.patches,
             note_state: c.note_state,
             pad_state: c.pad_state,
@@ -645,16 +645,7 @@ impl App {
             drum_slot_mutes_view: [false; NUM_DRUM_SLOTS],
             drum_remap: core::array::from_fn(|i| 36 + i as u8),
             drum_pad_vel: [0u8; 16],
-            drum_kit_names: {
-                let mut n: [String; 26] = Default::default();
-                for (i, entry) in n.iter_mut().enumerate() {
-                    let note = 30 + i as u8;
-                    *entry = if (36..=51).contains(&note) {
-                        crate::synth::drum::DRUM_NAMES[(note - 36) as usize].to_string()
-                    } else { String::new() };
-                }
-                n
-            },
+            drum_kit_names: Default::default(), // filled by reset_kit_names() below
             show_drum_remap: false,
             remap_pad: None,
             drum_volume: c.config.ui.drum_volume,
@@ -797,7 +788,9 @@ impl App {
             midi_tx_shared: c.midi_tx_shared.clone(),
             engine_trash_rx: c.engine_trash_rx,
             cb_trash_rx: c.cb_trash_rx,
-        }
+        };
+        app.reset_kit_names();
+        app
     }
 }
 
@@ -1832,7 +1825,7 @@ impl App {
                 // migrate legacy slot-encoded values (0..16) to kit notes (+36)
                 let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
                 let mut t = [0u8; 16];
-                for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or((36 + i) as u8).min(55); }
+                for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or((36 + i) as u8).clamp(30, 55); }
                 self.drum_remap = t;
             }
             if let Some(v) = self.config.sf2.drums_vels.get("internal") {
