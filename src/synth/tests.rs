@@ -1447,6 +1447,21 @@ fn tc_cc_bindings_target_set_param_arms() {
 }
 
 #[test]
+fn tc_registry_ranges_match_cc_table() {
+    for m in crate::cc_map::PARAM_REGISTRY {
+        if m.scope == crate::cc_map::ParamScope::Global
+            && (m.key == "master_volume" || m.key == "master_tone"
+                || m.key == "pitch_bend_range") { continue; }
+        let r = crate::synth::patch_params::CC_PARAM_RANGES
+            .iter().find(|(k, ..)| *k == m.key)
+            .unwrap_or_else(|| panic!("registry key '{}' not in CC_PARAM_RANGES", m.key));
+        assert_eq!((m.min, m.max, m.logarithmic), (r.1, r.2, r.3),
+            "range drift for '{}'", m.key);
+    }
+    assert_eq!(crate::synth::patch_params::CC_PATCH_KEYS.len(), 31);
+}
+
+#[test]
 fn tc_global_set_fullness() {
     let arms = match_arms_between(MOD_SRC, "fn set(&mut self, key: &str");
     assert_eq!(arms.len(), 7, "GlobalParams arms changed — update this pin: {arms:?}");
