@@ -644,6 +644,24 @@ struct Part {
     lfo4_routed: bool,
 }
 
+/// Control-rate входы движка для мод-прекомпьюта (Copy; S4-synth 2).
+#[derive(Clone, Copy)]
+pub struct EngineModInputs {
+    pub mod_wheel: f32,
+    pub aftertouch_smooth: f32,
+    pub cc_values: [f32; 4],
+    pub pitch_bend_semitones: f32,
+    pub seq_bpm: f32,
+    pub block_len: usize,
+    pub sample_rate: f32,
+    /// Сквозной инпут: lfo_rate ПЕРВОЙ включённой части (cross-part,
+    /// tick_block) — Part не может пересчитать сам.
+    pub lfo_rate: f32,
+    /// Готовое значение вибрато LFO (фаза vibrato_phase живёт в engine,
+    /// инкремент остаётся в tick_block).
+    pub vibrato_val: f32,
+}
+
 impl Part {
     fn new(sample_rate: f32) -> Self {
         let voices = (0..VOICES_PER_LAYER).map(|_| Voice::new(sample_rate)).collect();
@@ -1324,6 +1342,189 @@ impl Part {
             }
         }
     }
+
+    /// Control-rate mod precompute for this part (S4-synth 2). Тело — бывший
+    /// цикл из tick_block verbatim; порядок вычислений сохранён:
+    /// seq_evt → LFO1-4 → scene LFOs → MSEGs → mod matrix → offsets.
+    /// Вызывается ТОЛЬКО для включённых частей (гвард `!part.enabled` остался
+    /// в tick_block — заморозка состояния выключенных).
+    fn update_mods(&mut self, inputs: &EngineModInputs, _li: usize) -> ModulationState {
+        // Step sequencer (control rate)
+        let seq_evt = self.pitch_seq.tick(inputs.sample_rate, inputs.seq_bpm, inputs.block_len);
+        if seq_evt.stepped && seq_evt.gate {
+            for voice in &mut self.voices {
+                if voice.active && !voice.is_releasing() {
+                    voice.retrigger_envelope();
+                }
+            }
+        }
+        if seq_evt.stepped && !seq_evt.gate {
+            for voice in &mut self.voices {
+                if voice.active && !voice.is_releasing() {
+                    voice.note_off();
+                }
+            }
+        }
+        let seq_raw = if self.pitch_seq.enabled { seq_evt.pitch_offset / 24.0 } else { 0.0 };
+        let seq_pitch = seq_raw * 24.0 * self.params.seq_pitch_depth;
+        let seq_amp = if self.pitch_seq.enabled && !seq_evt.gate { 0.0 } else { 1.0 };
+
+        let bl = inputs.block_len as f32;
+
+        // Set BPM, tempo sync, unipolar on all LFOs
+        let lfo_tempo_syncs = [self.params.lfo1_tempo_sync, self.params.lfo2_tempo_sync,
+                               self.params.lfo3_tempo_sync, self.params.lfo4_tempo_sync];
+        let lfo_unipolars = [self.params.lfo1_unipolar, self.params.lfo2_unipolar,
+                             self.params.lfo3_unipolar, self.params.lfo4_unipolar];
+        for i in 0..4 {
+            self.lfos[i].set_bpm(inputs.seq_bpm);
+            self.lfos[i].tempo_sync = lfo_tempo_syncs[i] > 0.5;
+            self.lfos[i].unipolar = lfo_unipolars[i] > 0.5;
+        }
+
+        // LFO 1
+        let lfo1_wf = LfoWaveform::from_param(self.params.lfo_waveform);
+        let lfo1_active = lfo1_wf == LfoWaveform::StepSeq
+            || self.lfo1_routed
+            || self.params.lfo_pitch_depth > 0.001
+            || self.params.lfo_filter_depth > 0.001
+            || self.params.lfo_amp_depth > 0.001
+            || inputs.aftertouch_smooth > 0.001;
+        let lfo1_val = if lfo1_active {
+            self.lfos[0].tick_with_deform(inputs.lfo_rate * bl, lfo1_wf, self.params.lfo_deform)
+        } else { 0.0 };
+
+        // LFO 2 — also active when routed through mod matrix or in StepSeq mode
+        let lfo2_wf = LfoWaveform::from_param(self.params.lfo2_waveform);
+        let lfo2_active = lfo2_wf == LfoWaveform::StepSeq || self.lfo2_routed
+            || self.params.lfo2_pitch_depth > 0.001
+            || self.params.lfo2_filter_depth > 0.001
+            || self.params.lfo2_amp_depth > 0.001;
+        let lfo2_val = if lfo2_active {
+            self.lfos[1].tick_with_deform(self.params.lfo2_rate * bl, lfo2_wf, self.params.lfo2_deform)
+        } else { 0.0 };
+
+        // LFO 3 & 4 — tick when routed or in StepSeq mode
+        let lfo3_wf = LfoWaveform::from_param(self.params.lfo3_waveform);
+        let lfo3_val = if lfo3_wf == LfoWaveform::StepSeq || self.lfo3_routed {
+            self.lfos[2].tick_with_deform(self.params.lfo3_rate * bl, lfo3_wf, self.params.lfo3_deform)
+        } else { 0.0 };
+        let lfo4_wf = LfoWaveform::from_param(self.params.lfo4_waveform);
+        let lfo4_val = if lfo4_wf == LfoWaveform::StepSeq || self.lfo4_routed {
+            self.lfos[3].tick_with_deform(self.params.lfo4_rate * bl, lfo4_wf, self.params.lfo4_deform)
+        } else { 0.0 };
+
+        // Step sequencer envelope retrigger from any LFO in StepSeq mode
+        let lfo_wfs = [lfo1_wf, lfo2_wf, lfo3_wf, lfo4_wf];
+        for (i, &wf) in lfo_wfs.iter().enumerate() {
+            if wf == LfoWaveform::StepSeq {
+                let evt = self.lfos[i].last_step_event();
+                if evt.stepped && (evt.retrigger_aeg || evt.retrigger_feg) {
+                    for voice in &mut self.voices {
+                        if voice.active && !voice.is_releasing() {
+                            if evt.retrigger_aeg && evt.retrigger_feg {
+                                voice.retrigger_envelope();
+                            } else if evt.retrigger_aeg {
+                                voice.retrigger_amp_env();
+                            } else {
+                                voice.retrigger_filter_env();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Scene LFOs — always tick regardless of note state, never retrigger
+        let slfo1_wf = LfoWaveform::from_param(self.params.slfo1_waveform);
+        self.scene_lfos[0].set_bpm(inputs.seq_bpm);
+        self.scene_lfos[0].tempo_sync = self.params.slfo1_tempo_sync > 0.5;
+        self.scene_lfos[0].unipolar  = self.params.slfo1_unipolar  > 0.5;
+        let slfo1_val = if self.scene_lfo_routed[0] || slfo1_wf == LfoWaveform::StepSeq {
+            let rate = if self.scene_lfos[0].tempo_sync {
+                self.params.slfo1_rate
+            } else {
+                self.params.slfo1_rate * bl
+            };
+            self.scene_lfos[0].tick_with_deform(rate, slfo1_wf, self.params.slfo1_deform)
+        } else { 0.0 };
+
+        let slfo2_wf = LfoWaveform::from_param(self.params.slfo2_waveform);
+        self.scene_lfos[1].set_bpm(inputs.seq_bpm);
+        self.scene_lfos[1].tempo_sync = self.params.slfo2_tempo_sync > 0.5;
+        self.scene_lfos[1].unipolar  = self.params.slfo2_unipolar  > 0.5;
+        let slfo2_val = if self.scene_lfo_routed[1] || slfo2_wf == LfoWaveform::StepSeq {
+            let rate = if self.scene_lfos[1].tempo_sync {
+                self.params.slfo2_rate
+            } else {
+                self.params.slfo2_rate * bl
+            };
+            self.scene_lfos[1].tick_with_deform(rate, slfo2_wf, self.params.slfo2_deform)
+        } else { 0.0 };
+
+        // MSEGs
+        let mseg1_val = if self.params.mseg_enabled > 0.5 {
+            self.mseg1_state.tick(&self.mseg1)
+        } else { 0.0 };
+        let mseg2_val = if self.params.mseg_enabled > 0.5 {
+            self.mseg2_state.tick(&self.mseg2)
+        } else { 0.0 };
+
+        // Mod matrix
+        let key_track = (self.last_note as f32 - 60.0) / 48.0;
+        let mod_sources = mod_matrix::ModSources {
+            lfo_outputs: [lfo1_val, lfo2_val, lfo3_val, lfo4_val],
+            scene_lfo_outputs: [slfo1_val, slfo2_val],
+            macro_vals: self.macro_vals,
+            amp_env: 0.0, filter_env: 0.0,
+            mseg_outputs: [mseg1_val, mseg2_val],
+            mod_wheel: effective_mw(self.ignore_mw, inputs.mod_wheel),
+            aftertouch: inputs.aftertouch_smooth,
+            velocity: self.last_velocity,
+            key_track,
+            step_seq: seq_raw,
+            random_bipolar: self.rand_bipolar,
+            random_unipolar: self.rand_unipolar,
+            alt_bipolar: self.alt_bipolar,
+            alt_unipolar: self.alt_unipolar,
+            release_vel: self.release_vel,
+            pitch_bend: effective_pb(self.ignore_pb, inputs.pitch_bend_semitones) / 2.0, // normalize -1..+1
+            cc: inputs.cc_values,
+            breath: self.breath,
+            expression: self.expression,
+            sustain_pedal: self.sustain_pedal,
+            lowest_key: (self.lowest_held as f32 - 60.0) / 48.0,
+            highest_key: (self.highest_held as f32 - 60.0) / 48.0,
+            latest_key: (self.last_note as f32 - 60.0) / 48.0,
+            poly_aftertouch: 0.0, // per-voice; 0 for part-level evaluation
+        };
+        let mod_offsets = self.mod_matrix.evaluate(&mod_sources);
+
+        // Per-part ignore (TECHDEBT #55): маска PB/MW-вкладов
+        let pb_eff = effective_pb(self.ignore_pb, inputs.pitch_bend_semitones);
+        let mw_eff = effective_mw(self.ignore_mw, inputs.mod_wheel);
+        let lfo_pitch_offset_base = pb_eff
+            + lfo1_val * self.params.lfo_pitch_depth * 2.0
+            + lfo2_val * self.params.lfo2_pitch_depth * 2.0
+            + mw_eff * 0.5 * inputs.vibrato_val
+            + inputs.aftertouch_smooth * 0.3 * lfo1_val
+            + seq_pitch;
+        let pitch_offset = lfo_pitch_offset_base + mod_offsets.pitch;
+        let pitch_mult = if pitch_offset.abs() < 0.001 { 1.0 } else { (pitch_offset / 12.0).exp2() };
+        // filter_offset is Hz-only (LFO direct routing, aftertouch)
+        // filter_offset_semis is exponential (mod matrix)
+        let filter_offset = lfo1_val * self.params.lfo_filter_depth * 4000.0
+            + lfo2_val * self.params.lfo2_filter_depth * 4000.0
+            + inputs.aftertouch_smooth * 2000.0;
+        let lfo_amp_base = (1.0 - self.params.lfo_amp_depth * 0.5 * (1.0 - lfo1_val))
+            * (1.0 - self.params.lfo2_amp_depth * 0.5 * (1.0 - lfo2_val))
+            * seq_amp;
+        let amp_mod = lfo_amp_base * (1.0 + mod_offsets.amplitude).max(0.0);
+
+        ModulationState {
+            pitch_mult, filter_offset, filter_offset_semis: mod_offsets.filter_cutoff, amp_mod,
+        }
+    }
 }
 
 pub struct SynthEngine {
@@ -1444,9 +1645,6 @@ pub struct SynthEngine {
     /// 1 = SF2 took it, 2 = drums. Note-offs must follow the note-on's
     /// route, even if the track instrument changed mid-note.
     seq_route: [u8; 16],
-    /// Per-part modulation state, refilled each block in `tick_block`.
-    /// Held as a struct field to avoid per-block `Vec` allocation.
-    layer_mods: [ModulationState; MAX_PARTS],
 }
 
 /// Cached effect parameters — extracted once per block from PatchParams.
@@ -1721,9 +1919,6 @@ impl SynthEngine {
             midi_player: midi_player::MidiPlayer::new(),
             midi_seq_buf: Vec::new(),
             seq_route: [0u8; 16],
-            layer_mods: [ModulationState {
-                pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
-            }; MAX_PARTS],
         }
     }
 
@@ -3613,196 +3808,32 @@ impl SynthEngine {
             }
         }
 
-        // Pre-compute modulation state for each part (control rate).
-        // `layer_mods` lives on the engine (zero-alloc); disabled parts retain
-        // whatever previous-block values they had — never read while disabled.
-        { let layer_mods = &mut self.layer_mods;
+        // Pre-compute modulation state for each part (control rate). Engine-level
+        // входы собраны один раз ДО цикла (S4-synth 2); disabled parts не
+        // трогаются — их предыдущие значения остаются (never read while disabled).
+        let inputs = EngineModInputs {
+            mod_wheel: self.mod_wheel,
+            aftertouch_smooth: self.aftertouch_smooth,
+            cc_values: self.cc_values,
+            pitch_bend_semitones: self.pitch_bend_semitones,
+            seq_bpm,
+            block_len,
+            sample_rate: self.sample_rate,
+            lfo_rate,
+            vibrato_val,
+        };
+        // Stack copy (ModulationState is Copy, 8 x 16 B): итерация
+        // self.parts.iter_mut() без конфликта заимствований.
+        // Поле layer_mods удалено (S4-synth 2, ревью: других читателей нет);
+        // выключенные части не читаются, поэтому дефолты вместо «заморозки»
+        // наблюдаемо не отличаются.
+        let mut layer_mods_snapshot = [ModulationState {
+            pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
+        }; MAX_PARTS];
         for (li, part) in self.parts.iter_mut().enumerate() {
-            if !part.enabled { continue; }
-
-            // Step sequencer (control rate)
-            let seq_evt = part.pitch_seq.tick(self.sample_rate, seq_bpm, block_len);
-            if seq_evt.stepped && seq_evt.gate {
-                for voice in &mut part.voices {
-                    if voice.active && !voice.is_releasing() {
-                        voice.retrigger_envelope();
-                    }
-                }
-            }
-            if seq_evt.stepped && !seq_evt.gate {
-                for voice in &mut part.voices {
-                    if voice.active && !voice.is_releasing() {
-                        voice.note_off();
-                    }
-                }
-            }
-            let seq_raw = if part.pitch_seq.enabled { seq_evt.pitch_offset / 24.0 } else { 0.0 };
-            let seq_pitch = seq_raw * 24.0 * part.params.seq_pitch_depth;
-            let seq_amp = if part.pitch_seq.enabled && !seq_evt.gate { 0.0 } else { 1.0 };
-
-            let bl = block_len as f32;
-
-            // Set BPM, tempo sync, unipolar on all LFOs
-            let lfo_tempo_syncs = [part.params.lfo1_tempo_sync, part.params.lfo2_tempo_sync,
-                                   part.params.lfo3_tempo_sync, part.params.lfo4_tempo_sync];
-            let lfo_unipolars = [part.params.lfo1_unipolar, part.params.lfo2_unipolar,
-                                 part.params.lfo3_unipolar, part.params.lfo4_unipolar];
-            for i in 0..4 {
-                part.lfos[i].set_bpm(seq_bpm);
-                part.lfos[i].tempo_sync = lfo_tempo_syncs[i] > 0.5;
-                part.lfos[i].unipolar = lfo_unipolars[i] > 0.5;
-            }
-
-            // LFO 1
-            let lfo1_wf = LfoWaveform::from_param(part.params.lfo_waveform);
-            let lfo1_active = lfo1_wf == LfoWaveform::StepSeq
-                || part.lfo1_routed
-                || part.params.lfo_pitch_depth > 0.001
-                || part.params.lfo_filter_depth > 0.001
-                || part.params.lfo_amp_depth > 0.001
-                || self.aftertouch_smooth > 0.001;
-            let lfo1_val = if lfo1_active {
-                part.lfos[0].tick_with_deform(lfo_rate * bl, lfo1_wf, part.params.lfo_deform)
-            } else { 0.0 };
-
-            // LFO 2 — also active when routed through mod matrix or in StepSeq mode
-            let lfo2_wf = LfoWaveform::from_param(part.params.lfo2_waveform);
-            let lfo2_active = lfo2_wf == LfoWaveform::StepSeq || part.lfo2_routed
-                || part.params.lfo2_pitch_depth > 0.001
-                || part.params.lfo2_filter_depth > 0.001
-                || part.params.lfo2_amp_depth > 0.001;
-            let lfo2_val = if lfo2_active {
-                part.lfos[1].tick_with_deform(part.params.lfo2_rate * bl, lfo2_wf, part.params.lfo2_deform)
-            } else { 0.0 };
-
-            // LFO 3 & 4 — tick when routed or in StepSeq mode
-            let lfo3_wf = LfoWaveform::from_param(part.params.lfo3_waveform);
-            let lfo3_val = if lfo3_wf == LfoWaveform::StepSeq || part.lfo3_routed {
-                part.lfos[2].tick_with_deform(part.params.lfo3_rate * bl, lfo3_wf, part.params.lfo3_deform)
-            } else { 0.0 };
-            let lfo4_wf = LfoWaveform::from_param(part.params.lfo4_waveform);
-            let lfo4_val = if lfo4_wf == LfoWaveform::StepSeq || part.lfo4_routed {
-                part.lfos[3].tick_with_deform(part.params.lfo4_rate * bl, lfo4_wf, part.params.lfo4_deform)
-            } else { 0.0 };
-
-            // Step sequencer envelope retrigger from any LFO in StepSeq mode
-            let lfo_wfs = [lfo1_wf, lfo2_wf, lfo3_wf, lfo4_wf];
-            for (i, &wf) in lfo_wfs.iter().enumerate() {
-                if wf == LfoWaveform::StepSeq {
-                    let evt = part.lfos[i].last_step_event();
-                    if evt.stepped && (evt.retrigger_aeg || evt.retrigger_feg) {
-                        for voice in &mut part.voices {
-                            if voice.active && !voice.is_releasing() {
-                                if evt.retrigger_aeg && evt.retrigger_feg {
-                                    voice.retrigger_envelope();
-                                } else if evt.retrigger_aeg {
-                                    voice.retrigger_amp_env();
-                                } else {
-                                    voice.retrigger_filter_env();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Scene LFOs — always tick regardless of note state, never retrigger
-            let slfo1_wf = LfoWaveform::from_param(part.params.slfo1_waveform);
-            part.scene_lfos[0].set_bpm(seq_bpm);
-            part.scene_lfos[0].tempo_sync = part.params.slfo1_tempo_sync > 0.5;
-            part.scene_lfos[0].unipolar  = part.params.slfo1_unipolar  > 0.5;
-            let slfo1_val = if part.scene_lfo_routed[0] || slfo1_wf == LfoWaveform::StepSeq {
-                let rate = if part.scene_lfos[0].tempo_sync {
-                    part.params.slfo1_rate
-                } else {
-                    part.params.slfo1_rate * bl
-                };
-                part.scene_lfos[0].tick_with_deform(rate, slfo1_wf, part.params.slfo1_deform)
-            } else { 0.0 };
-
-            let slfo2_wf = LfoWaveform::from_param(part.params.slfo2_waveform);
-            part.scene_lfos[1].set_bpm(seq_bpm);
-            part.scene_lfos[1].tempo_sync = part.params.slfo2_tempo_sync > 0.5;
-            part.scene_lfos[1].unipolar  = part.params.slfo2_unipolar  > 0.5;
-            let slfo2_val = if part.scene_lfo_routed[1] || slfo2_wf == LfoWaveform::StepSeq {
-                let rate = if part.scene_lfos[1].tempo_sync {
-                    part.params.slfo2_rate
-                } else {
-                    part.params.slfo2_rate * bl
-                };
-                part.scene_lfos[1].tick_with_deform(rate, slfo2_wf, part.params.slfo2_deform)
-            } else { 0.0 };
-
-            // MSEGs
-            let mseg1_val = if part.params.mseg_enabled > 0.5 {
-                part.mseg1_state.tick(&part.mseg1)
-            } else { 0.0 };
-            let mseg2_val = if part.params.mseg_enabled > 0.5 {
-                part.mseg2_state.tick(&part.mseg2)
-            } else { 0.0 };
-
-            // Mod matrix
-            let key_track = (part.last_note as f32 - 60.0) / 48.0;
-            let mod_sources = mod_matrix::ModSources {
-                lfo_outputs: [lfo1_val, lfo2_val, lfo3_val, lfo4_val],
-                scene_lfo_outputs: [slfo1_val, slfo2_val],
-                macro_vals: part.macro_vals,
-                amp_env: 0.0, filter_env: 0.0,
-                mseg_outputs: [mseg1_val, mseg2_val],
-                mod_wheel: effective_mw(part.ignore_mw, self.mod_wheel),
-                aftertouch: self.aftertouch_smooth,
-                velocity: part.last_velocity,
-                key_track,
-                step_seq: seq_raw,
-                random_bipolar: part.rand_bipolar,
-                random_unipolar: part.rand_unipolar,
-                alt_bipolar: part.alt_bipolar,
-                alt_unipolar: part.alt_unipolar,
-                release_vel: part.release_vel,
-                pitch_bend: effective_pb(part.ignore_pb, self.pitch_bend_semitones) / 2.0, // normalize -1..+1
-                cc: self.cc_values,
-                breath: part.breath,
-                expression: part.expression,
-                sustain_pedal: part.sustain_pedal,
-                lowest_key: (part.lowest_held as f32 - 60.0) / 48.0,
-                highest_key: (part.highest_held as f32 - 60.0) / 48.0,
-                latest_key: (part.last_note as f32 - 60.0) / 48.0,
-                poly_aftertouch: 0.0, // per-voice; 0 for part-level evaluation
-            };
-            let mod_offsets = part.mod_matrix.evaluate(&mod_sources);
-
-            // Per-part ignore (TECHDEBT #55): маска PB/MW-вкладов
-            let pb_eff = effective_pb(part.ignore_pb, self.pitch_bend_semitones);
-            let mw_eff = effective_mw(part.ignore_mw, self.mod_wheel);
-            let lfo_pitch_offset_base = pb_eff
-                + lfo1_val * part.params.lfo_pitch_depth * 2.0
-                + lfo2_val * part.params.lfo2_pitch_depth * 2.0
-                + mw_eff * 0.5 * vibrato_val
-                + self.aftertouch_smooth * 0.3 * lfo1_val
-                + seq_pitch;
-            let pitch_offset = lfo_pitch_offset_base + mod_offsets.pitch;
-            let pitch_mult = if pitch_offset.abs() < 0.001 { 1.0 } else { (pitch_offset / 12.0).exp2() };
-            // filter_offset is Hz-only (LFO direct routing, aftertouch)
-            // filter_offset_semis is exponential (mod matrix)
-            let filter_offset = lfo1_val * part.params.lfo_filter_depth * 4000.0
-                + lfo2_val * part.params.lfo2_filter_depth * 4000.0
-                + self.aftertouch_smooth * 2000.0;
-            let lfo_amp_base = (1.0 - part.params.lfo_amp_depth * 0.5 * (1.0 - lfo1_val))
-                * (1.0 - part.params.lfo2_amp_depth * 0.5 * (1.0 - lfo2_val))
-                * seq_amp;
-            let amp_mod = lfo_amp_base * (1.0 + mod_offsets.amplitude).max(0.0);
-
-            layer_mods[li] = ModulationState {
-                pitch_mult, filter_offset, filter_offset_semis: mod_offsets.filter_cutoff, amp_mod,
-            };
+            if !part.enabled { continue; } // заморозка выключенных частей
+            layer_mods_snapshot[li] = part.update_mods(&inputs, li);
         }
-        } // end of layer_mods borrow scope
-
-        // Snapshot of per-part modulation for the voice tick loop below.
-        // `ModulationState` is `Copy` and the array is small (8 × 16 B);
-        // this stack copy lets us iterate `self.parts.iter_mut()` without
-        // a borrow conflict on `self.layer_mods`.
-        let layer_mods_snapshot = self.layer_mods;
 
         // Cache effect params (once per block)
         let ep = self.parts.iter().find(|l| l.enabled).map(|l| &l.params);
