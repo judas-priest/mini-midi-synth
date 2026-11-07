@@ -15,6 +15,7 @@ use mini_midi_synth::synth::{
     bonsai, chorus, combulator, delay, exciter, neuron, nimbus, resonator, reverb,
     spring_reverb, vocoder, ControlEvent, MidiEvent, SynthEngine, BLOCK_SIZE,
 };
+use mini_midi_synth::synth::fx_chain;
 
 const SR: f32 = 48_000.0;
 /// 0.25 s per preset — matches the runtime budget of all_presets_no_nan_no_silence.
@@ -393,6 +394,24 @@ fn sweep_contexts() -> Vec<SweepCtx> {
         ], |k| k.starts_with("lfo1_") || k.starts_with("lfo_") && !k.starts_with("lfo2")),
     ];
     c.extend(fam);
+    // Слот-FX (Task 9, S3 prereq): каждый тип с ≥1 помеченным параметром.
+    // 31 не-None тип, без меток 6 (Chorus, Flanger, Phaser, Tremolo,
+    // Compressor, Bitcrusher) → 25 контекстов (план говорил «24 из 31» —
+    // пересчёт param_labels даёт 25; проверено assert'ом ниже).
+    // Имя контекста = FxSlotType::name() — ТОТ ЖЕ источник имён, что и в
+    // slot_dead_scalings_stay_dead (не ручной ввод).
+    let mut slots_with_params = 0usize;
+    for t in 1..=31u8 {
+        let ty = fx_chain::FxSlotType::from_u8(t);
+        if !ty.param_labels().iter().any(|l| l.is_some()) { continue; }
+        slots_with_params += 1;
+        c.push((
+            ty.name().to_string(),
+            vec![("fx0_type", t as f32), ("fx0_en", 1.0), ("fx0_mix", 1.0)],
+            |k| k.starts_with("fx0_p"),
+        ));
+    }
+    assert_eq!(slots_with_params, 25, "GUI-labeled slot params changed — resync slot sweep contexts");
     c
 }
 
@@ -404,4 +423,29 @@ fn golden_param_sweep_hashes_match() {
     }
     assert!(entries.len() > 600, "sweep too small: {}", entries.len());
     check_golden("param_sweep_hashes.txt", &entries);
+}
+
+/// Мёртвые масштабы слотов (аудит 2026-11-08): эти (тип, pN) НЕ должны
+/// появляться в свипе (hash == baseline). Если появился — масштаб починили
+/// → осознанная регенерация + прослушивание.
+/// Имена — из FxSlotType::name(), тот же источник, что и контексты свипа
+/// (ключ НЕ набивается руками).
+#[test]
+fn slot_dead_scalings_stay_dead() {
+    let dead: [(fx_chain::FxSlotType, usize); 6] = [
+        (fx_chain::FxSlotType::WaveShaper, 0),
+        (fx_chain::FxSlotType::Exciter,    1),
+        (fx_chain::FxSlotType::Neuron,     3),
+        (fx_chain::FxSlotType::MsTool,     0),
+        (fx_chain::FxSlotType::MsTool,     1),
+        (fx_chain::FxSlotType::MsTool,     2),
+    ];
+    let file = std::fs::read_to_string(golden_path("param_sweep_hashes.txt")).unwrap();
+    for (ty, p) in dead {
+        let key = format!("{}|fx0_p{}", ty.name(), p);
+        assert!(
+            !file.contains(&key),
+            "dead scaling now live: {key} — regen goldens + listening review"
+        );
+    }
 }
