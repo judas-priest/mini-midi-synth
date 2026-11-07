@@ -679,11 +679,14 @@ impl App {
                 // Restart-required — состояние (настройки ≠ активные), а не
                 // событие: один persistent-баннер, никакого toast. Backend
                 // тоже требует рестарта — включён в сравнение.
+                #[cfg(not(target_os = "android"))]
                 let pending_backend = self
                     .available_hosts
                     .get(self.selected_host_idx)
                     .map(|(_, name)| self.config.audio.backend != *name)
                     .unwrap_or(false);
+                #[cfg(target_os = "android")]
+                let pending_backend = false; // нет выбора backend на android
                 let pending = pending_backend
                     || self.selected_sample_rate != self.config.audio.sample_rate
                     || self.selected_buffer_size != self.config.audio.buffer_size;
