@@ -686,7 +686,7 @@ impl App {
 
         let enabled = self.pitch_seq_enabled[part];
 
-        egui::CollapsingHeader::new("Step Sequencer")
+        egui::CollapsingHeader::new("Pitch Sequencer (ноты парта)")
             .default_open(enabled)
             .show(ui, |ui| {
                 // Controls row

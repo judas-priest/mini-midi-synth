@@ -1468,10 +1468,14 @@ impl eframe::App for App {
                         use crate::synth::sampler::GM_PROGRAM_NAMES;
                         let prog = self.parts[part].sf2_program;
                         let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
+                        // SF2-парт: DSP-параметров нет — статус + подсказка
                         ui.colored_label(
                             theme::TEXT_SF2_STATUS,
-                            format!("SF2: {} | {}: {} | Effects chain applies", self.sf2_keys_loaded_name, prog, name),
+                            format!("SF2-парт (семплы): {} — {} | параметры DSP не применяются",
+                                self.sf2_keys_loaded_name, name),
                         );
+                        ui.label(egui::RichText::new(
+                            "Настройка тембра — браузер (кнопка с именем пресета) или ⇨ DSP").weak());
                     } else {
                         // Header: patch name + Init/Rnd/Undo/Redo
                         ui.horizontal(|ui| {
