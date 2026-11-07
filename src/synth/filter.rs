@@ -199,6 +199,10 @@ pub struct Filter {
 
 impl Filter {
     pub fn new(sample_rate: f32) -> Self {
+        // init_state() below assigns every remaining field (54 of 55; only
+        // the heap-owned comb_buf stays out of it), so the literal just
+        // needs type-correct values. They mirror init_state's targets as a
+        // safety net anyway.
         let mut f = Self {
             filter_type: FilterType::LowPass,
             cutoff: 8000.0,
@@ -227,8 +231,8 @@ impl Filter {
             diode_gain_comp: 1.0,
             // Comb filter state
             comb_buf: Box::new([0.0; 512]),
-            comb_write: 0,
-            comb_delay: 100,
+            comb_write: 0usize,
+            comb_delay: 100usize,
             comb_feedback: 0.0,
             comb_dc_x1: 0.0,
             comb_dc_y1: 0.0,
@@ -263,18 +267,17 @@ impl Filter {
             pv_res: 0.0,
             pv_drive: 0.0,
             pv_starve: 0.0,
-            coeff_counter: 7, // so first tick after set_cutoff/set_resonance triggers update
+            coeff_counter: 7u8, // so first tick after set_cutoff/set_resonance triggers update
         };
-        f.update_coefficients();
+        f.init_state(sample_rate);
         f
     }
 
-    /// In-place equivalent of `*self = Self::new(sample_rate)` (RT-safe: runs
-    /// in the audio callback on SR change). Replicates every field assignment
-    /// of `Filter::new` without replacing the heap-owned `comb_buf` — it is
-    /// zeroed in place instead. After this call the filter is identical to a
-    /// freshly constructed one.
-    pub fn reset_for_sr(&mut self, sample_rate: f32) {
+    /// Shared state initializer: assigns every field of `Filter` except the
+    /// heap-owned `comb_buf` (which `new` allocates and `reset_for_sr` zeroes
+    /// in place). Ends with `update_coefficients()` so the filter is ready to
+    /// tick immediately.
+    fn init_state(&mut self, sample_rate: f32) {
         self.filter_type = FilterType::LowPass;
         self.cutoff = 8000.0;
         self.resonance = 0.0;
@@ -300,8 +303,7 @@ impl Filter {
         self.diode_tune = 0.0;
         self.diode_res = 0.0;
         self.diode_gain_comp = 1.0;
-        // Comb filter state — comb_buf is Box-allocated in new(); zero in place.
-        self.comb_buf.fill(0.0);
+        // Comb filter state (comb_buf handled by the caller)
         self.comb_write = 0;
         self.comb_delay = 100;
         self.comb_feedback = 0.0;
@@ -340,6 +342,16 @@ impl Filter {
         self.pv_starve = 0.0;
         self.coeff_counter = 7; // so first tick after set_cutoff/set_resonance triggers update
         self.update_coefficients();
+    }
+
+    /// In-place equivalent of `*self = Self::new(sample_rate)` (RT-safe: runs
+    /// in the audio callback on SR change). The heap-owned `comb_buf` is
+    /// zeroed in place instead of being replaced; every other field is reset
+    /// by `init_state`. After this call the filter is identical to a freshly
+    /// constructed one.
+    pub fn reset_for_sr(&mut self, sample_rate: f32) {
+        self.comb_buf.fill(0.0);
+        self.init_state(sample_rate);
     }
 
     pub fn set_type(&mut self, ft: FilterType) {
