@@ -1284,3 +1284,62 @@ tick_block = рендер на активный слот. ControlEvent: LoadKeys
 SetPartSoundFont{part,id}; механика Displaced/trash переиспользуется как
 есть. GUI: выбор файла+пресета на part. Персист: part → (sf2_path, bank,
 program) в patch/perf. Оценка M.
+
+
+## РЕФАКТОРИНГ ЗАВЕРШЁН — итоговая запись (2026-11-08, master b47a5d0+)
+
+### Что сделано за две сессии (ночь + день, 13 PR: #91-#103)
+- Аудиты: REFACTOR_AUDIT_2026-11-07.md, REFACTOR_AUDIT_2026-11-07b.md (вечер),
+  REFACTOR_AUDIT.md (старый). Гайдлайны: CLAUDE.md «Refactoring guidelines».
+- **S4-lib** (#96): lib.rs 1141→219 → init.rs/headless.rs/android_jni.rs.
+- **S4-synth** (#98): synth/mod.rs 4340→2800 → events.rs/part.rs/cached_fx.rs;
+  handle_control → 5 подсистем; borrow-хак layer_mods растворён
+  (Part::update_mods + EngineModInputs).
+- **S4-gui** (#99): gui/mod.rs 3812→2740 → browser.rs/sf2.rs/tracks.rs/
+  performance.rs; console-lifecycle → 4 метода.
+- **S6a/S6b** (#95, #101): dsp_utils каноны — xorshift32 ×31 сайт,
+  advance_phase ×10, soft_clip/fast_exp, dc_block ×14. Bit-safe
+  (goldens байт-в-байт на каждом шаге).
+- **ST1/ST2** (#92): EngineHandles (17×6→3 места), SetPartFull транзакции
+  (свап 44-46→2 событий).
+- **F3** (#102): персист-граница — 29 config.save() → flush_config
+  (dirty + 2 с дебаунс + force на exit). Краш теряет ≤2 с настроек — осознанно.
+- **S2a** (#93): cc_patch_params! SSOT (31 CC-ключ → getter/setter/ranges);
+  check_pickup 4/32 → все ключи.
+- **S3 prereq** (#94 + QW2-batch Task 9): слот goldens 31/31 + слот-параметр
+  свип (25 типов) + манифест мёртвых масштабов.
+- **QW-батчи** (#91 #103): 11 + 12 верифицированных фиксов (все тезисы
+  ре-аудита прогнаны через 4 параллельных верификатора; 2 опровергнуты).
+  Баги: CC-pickup 4/32→все, LFO1 cross-part rate, matrix-undo,
+  ProgramChange арп+макросы, remap clamp, unbind-all персист,
+  optimistic pattern writes, flush error-log, tempo-sync механика.
+- **Закрыто решением юзера**: S3 behavior (двоения не слышит — рецепт в
+  «Двойные эффекты» записи), ST8 headless (не использует).
+
+### ОСТАЛОСЬ (осознанные остатки, каждый с причиной)
+- **Слотовые мёртвые масштабы**: WaveShaper p0 87.5%, Exciter p1 100%,
+  Neuron p3 100% (GUI-значения), MsTool p0/p1 75% + p2 ~99%, Treemonster p1
+  верх 25%, Combulator p0 верх 50%, Bitcrusher слот целиком (GUI ручек не
+  показывает). Починка = behavior change → нужен PR + прослушивание юзером.
+  Манифест-пин slot_dead_scalings_stay_dead делает починку заметной.
+- **tick_block монолит** (~540 строк): looper-capture машина (130 строк,
+  7 полей looper_*) → MidiLooper::capture_tick(); пререквизит —
+  characterization-тесты capture-семантики (сейчас 0). См. ре-аудит
+  Strategic 3.
+- **S4-gui/synth остатки**: App ~180 полей → сабструкры; LED-socket lifecycle
+  → led_console.rs; params.rs draw_params_editable (1430) разрезать. См.
+  ре-аудит Strategic 10.
+- **S2c declined**: build_voice_params (111 копий) + CachedFxParams — макро
+  сложнее выгоды; риск прикрыт sweep-golden. См. day-roadmap.
+- **Крупные однотематические файлы** (осознанно): oscillator.rs 2933 (29
+  движков), airwindows.rs 2684 (порт, blanket-allow; разрез по команде —
+  goldens защищают), gui/params.rs 1677.
+- **RT-аллокации** (известный долг, пины #[ignore]): SF2-load в колбэке,
+  midi_player.load, pool-clobber 7 волноводных семейств, Twist первый
+  note-on, drum undo Box ×2. См. ре-аудит Strategic 4/5.
+- **GUI-thread I/O**: SF2/midi-файл парс синхронно — фриз по размеру файла
+  (worker + mpsc; паттерн midi_seq_file_pick есть). Ре-аудит Strategic 12.
+- **Per-sample exp/powf кластер** (Android-важно): exciter/vocoder/
+  bbd_ensemble/resonator/mute_fade. Ре-аудит Strategic 13.
+- **Mod-matrix 24/30 dest вычисляются и не читаются** — фича-решение юзера
+  (подключить пути или спрятать из GUI). Ре-аудит QW5/Strategic.
