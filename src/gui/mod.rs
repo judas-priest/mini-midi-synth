@@ -2418,11 +2418,6 @@ impl App {
         ));
     }
 
-    fn send_part_enabled(&mut self, part: usize) {
-        let enabled = self.parts[part].enabled;
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled });
-    }
-
     fn send_part_volume(&mut self, part: usize) {
         let volume = self.parts[part].volume;
         let _ = self.ctrl_tx.push(ControlEvent::SetPartVolume { part, volume });
@@ -2442,41 +2437,22 @@ impl App {
     /// Пуш полного состояния ОДНОГО парта в движок (enabled + все параметры).
     /// Используется при спавне/включении парта и при аудио-реконнекте.
     fn push_full_part_state(&mut self, part: usize) {
+        // ST2: 1 слот кольца вместо 13-21 события. Патч не входит (None) —
+        // его несёт send_edited_params отдельным heap-событием, как раньше.
         let p = &self.parts[part];
-        let (enabled, mute, volume) = (p.enabled, p.mute, p.volume);
-        let (min_note, max_note) = (p.min_note, p.max_note);
-        let (vel_min, vel_max) = (p.vel_min, p.vel_max);
-        let (pan, transpose) = (p.pan, p.transpose);
-        let (sf2_mode, sf2_program) = (p.sf2_mode, p.sf2_program);
-        let note_mode = p.note_mode;
-        let sustain_enabled = p.sustain_enabled;
-        let (ignore_pb, ignore_mw) = (p.ignore_pb, p.ignore_mw);
-
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part, mute });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartVolume { part, volume });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartRange { part, min_note, max_note });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange { part, vel_min, vel_max });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: transpose });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part, mode: note_mode });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part, on: sustain_enabled });
-        // #55: без этих пушей аудио-реконнект молча откатывал бы флаги в false
-        // (класс stale-бага #40)
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnorePb { part, on: ignore_pb });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnoreMw { part, on: ignore_mw });
-        // Явный SetPartSf2Mode в ОБЕ стороны: слот движка наследует sf2_mode
-        // прежнего жильца (remove не чистит) — фикс #40 (bug: «DSP, а звучит SF2»).
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2_mode });
-        for (index, value) in p.macro_vals.iter().enumerate() {
-            let _ = self.ctrl_tx.push(ControlEvent::SetMacro { part, index, value: *value });
-        }
-        if sf2_mode {
-            // Фикс #43b: rustysynth-канал стартует с program 0 — высылаем хранимый.
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                part, program: sf2_program, bank: 0,
-            });
-        }
+        let state = crate::synth::PartFullState {
+            enabled: p.enabled, mute: p.mute, volume: p.volume,
+            min_note: p.min_note, max_note: p.max_note,
+            vel_min: p.vel_min, vel_max: p.vel_max,
+            pan: p.pan, transpose: p.transpose,
+            note_mode: p.note_mode,
+            sustain_enabled: p.sustain_enabled,
+            ignore_pb: p.ignore_pb, ignore_mw: p.ignore_mw,
+            sf2_mode: p.sf2_mode, sf2_program: p.sf2_program,
+            macro_vals: p.macro_vals,
+            patch: None,
+        };
+        let _ = self.ctrl_tx.push(ControlEvent::SetPartFull { part, state: Box::new(state) });
     }
 
     /// Сброс GUI-слота в дефолты + полный пуш в движок (фикс #40-43a:
@@ -2520,14 +2496,35 @@ impl App {
     }
 
     fn do_swap_parts_push(&mut self, a: usize, b: usize) {
-        // Движку — полное состояние обоих слотов (канон reset_and_push_part):
-        // sf2/volume/pan/etc через push_full_part_state, патч — через
-        // send_edited_params (LoadPatch). MIDI-ноты, игравшие в момент свапа,
-        // доигрывают в старом слоте (их перенос — out of scope).
-        self.push_full_part_state(a);
-        self.push_full_part_state(b);
-        self.send_edited_params(a);
-        self.send_edited_params(b);
+        // ST2: свап = 2 транзакции с патчем внутри (было 28-44 события;
+        // разрыв кольца больше не даёт half-swap). Порядок «state потом patch»
+        // внутри одной транзакции = прежний порядок «full state, потом
+        // LoadPatch» — GUI-порядок сохранён. MIDI-ноты, игравшие в момент
+        // свапа, доигрывают в старом слоте (их перенос — out of scope).
+        for part in [a, b] {
+            let p = &self.parts[part];
+            let patch = ControlEvent::load_patch_from_edited(
+                part, &p.edited_params,
+                self.patches.get(p.patch_idx),
+            );
+            let patch = match patch {
+                ControlEvent::LoadPatch(boxed) => Some(boxed),
+                _ => unreachable!(),
+            };
+            let state = crate::synth::PartFullState {
+                enabled: p.enabled, mute: p.mute, volume: p.volume,
+                min_note: p.min_note, max_note: p.max_note,
+                vel_min: p.vel_min, vel_max: p.vel_max,
+                pan: p.pan, transpose: p.transpose,
+                note_mode: p.note_mode,
+                sustain_enabled: p.sustain_enabled,
+                ignore_pb: p.ignore_pb, ignore_mw: p.ignore_mw,
+                sf2_mode: p.sf2_mode, sf2_program: p.sf2_program,
+                macro_vals: p.macro_vals,
+                patch,
+            };
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartFull { part, state: Box::new(state) });
+        }
         self.persist_parts_state();
     }
 
@@ -3363,29 +3360,37 @@ impl App {
             self.parts[i].ignore_mw = part.ignore_mw;
             self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
             self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
-            self.send_edited_params(i);
-            self.send_part_enabled(i);
-            self.send_part_volume(i);
-            self.send_part_range(i);
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan: part.pan });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: part.transpose });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: part.mute });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode: part.note_mode });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: part.sustain_enabled });
-            // #55: при включении игнора SF2-каналу немедленно сбрасывается
-            // PB/MW (центр/ноль) — обработчик события; при выключении
-            // пересылаются текущие значения движка
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnorePb { part: i, on: part.ignore_pb });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnoreMw { part: i, on: part.ignore_mw });
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange {
-                part: i, vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max });
-            // Restore SF2 mode for this part
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: part.sf2_mode });
-            if part.sf2_mode {
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                    part: i, program: part.sf2_program, bank: 0,
-                });
-            }
+            // ST2: один SetPartFull вместо 13-14 пушей. Источники те же, что у
+            // старого блока: scalar-поля из структуры перфа (part), vel_min/max
+            // — уже clamped значения self.parts[i], macro_vals — зеркало
+            // edited_params перфа, min/max_note — из self.parts[i] (stale
+            // до-сплит значения — ровно то, что пушит send_part_range;
+            // apply_split_ranges в хвосте перепушит диапазоны по сплиту).
+            // Порядковая инверсия ПРОВЕРЕНА: раньше LoadPatch уходил ПЕРВЫМ
+            // (send_edited_params), в транзакции — ПОСЛЕДНИМ; end-state не
+            // расходится, LoadPatch не трогает volume/pan/range/сэмплер-каналы.
+            // bank жёстко 0 — как в старом SetPartSf2Program arm:е (bank: 0).
+            let patch = ControlEvent::load_patch_from_edited(
+                i, &self.parts[i].edited_params,
+                self.patches.get(self.parts[i].patch_idx),
+            );
+            let patch = match patch {
+                ControlEvent::LoadPatch(boxed) => Some(boxed),
+                _ => unreachable!(),
+            };
+            let state = crate::synth::PartFullState {
+                enabled: part.enabled, mute: part.mute, volume: part.volume,
+                min_note: self.parts[i].min_note, max_note: self.parts[i].max_note,
+                vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max,
+                pan: part.pan, transpose: part.transpose,
+                note_mode: part.note_mode,
+                sustain_enabled: part.sustain_enabled,
+                ignore_pb: part.ignore_pb, ignore_mw: part.ignore_mw,
+                sf2_mode: part.sf2_mode, sf2_program: part.sf2_program,
+                macro_vals: self.parts[i].macro_vals,
+                patch,
+            };
+            let _ = self.ctrl_tx.push(ControlEvent::SetPartFull { part: i, state: Box::new(state) });
         }
         // Parts absent from the performance must not keep playing
         // the previous patch with their old voices.
