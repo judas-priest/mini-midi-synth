@@ -603,7 +603,7 @@ impl App {
                 self.parts[part].patch_idx = self.patches.len() - 1;
             }
             self.parts[part].params_dirty = false;
-            self.save_config();
+            self.snapshot_preset_and_mark_dirty();
         }
     }
 
@@ -699,13 +699,13 @@ impl App {
                         self.config.audio.backend = host_name.to_string();
                         self.config.audio.sample_rate = self.selected_sample_rate;
                         self.config.audio.buffer_size = self.selected_buffer_size;
-                        self.save_config();
+                        self.snapshot_preset_and_mark_dirty();
                     }
                     #[cfg(target_os = "android")]
                     {
                         self.config.audio.sample_rate = self.selected_sample_rate;
                         self.config.audio.buffer_size = self.selected_buffer_size;
-                        self.save_config();
+                        self.snapshot_preset_and_mark_dirty();
                     }
                 }
                 ui.separator();
@@ -744,7 +744,7 @@ impl App {
                             .step_by(0.5).suffix(" dB")).changed() {
                             self.config.audio.dsp_trim_db = dsp_db;
                             let _ = self.ctrl_tx.push(ControlEvent::SetDspTrim { db: dsp_db });
-                            self.save_config();
+                            self.snapshot_preset_and_mark_dirty();
                         }
                         ui.end_row();
 
@@ -754,7 +754,7 @@ impl App {
                             .step_by(0.5).suffix(" dB")).changed() {
                             self.config.audio.sf2_trim_db = sf2_db;
                             let _ = self.ctrl_tx.push(ControlEvent::SetSf2Trim { db: sf2_db });
-                            self.save_config();
+                            self.snapshot_preset_and_mark_dirty();
                         }
                         ui.end_row();
                     });
@@ -961,7 +961,7 @@ impl App {
                         self.midi_connected_port = Some(port_name.clone());
                         self.config.midi.port_name = Some(port_name.clone());
                         self.show_toast(format!("MIDI: {port_name}"), ToastKind::Success);
-                        self.save_config();
+                        self.snapshot_preset_and_mark_dirty();
                     }
                     Err(e) => { self.show_toast(format!("MIDI error: {e}"), ToastKind::Error); }
                 }
@@ -970,7 +970,7 @@ impl App {
             self.midi_connected_port = None;
             self.config.midi.port_name = None;
             self.show_toast("MIDI disconnected", ToastKind::Info);
-            self.save_config();
+            self.snapshot_preset_and_mark_dirty();
         }
     }
 }

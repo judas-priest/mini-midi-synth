@@ -930,6 +930,7 @@ impl eframe::App for App {
                     if let Some(action) = self.keybind_capturing.take() {
                         let stolen = self.keybinds.set_key_for_action(&action, key);
                         self.config.ui.keybinds = self.keybinds.to_config();
+                        self.mark_config_dirty();
                         if let Some(victim) = stolen {
                             self.show_toast(
                                 format!("{}: key was reassigned from {}",
@@ -1890,7 +1891,9 @@ impl App {
         }
         let due = self.last_config_save.elapsed().as_secs_f32() >= 2.0;
         if force || due {
-            let _ = self.config.save();
+            if let Err(e) = self.config.save() {
+                log::warn!("[config] flush failed ({e}) — will retry after next change");
+            }
             self.last_config_save = std::time::Instant::now();
             self.config_dirty = false;
         }
@@ -2000,7 +2003,7 @@ impl App {
                         self.parts[part].patch_idx = idx - 1;
                         self.load_edited_params(part);
                         self.send_edited_params(part);
-                        self.save_config();
+                        self.snapshot_preset_and_mark_dirty();
                     }
                 }
                 KeyAction::NextPreset => {
@@ -2011,7 +2014,7 @@ impl App {
                         self.parts[part].patch_idx = idx + 1;
                         self.load_edited_params(part);
                         self.send_edited_params(part);
-                        self.save_config();
+                        self.snapshot_preset_and_mark_dirty();
                     }
                 }
                 KeyAction::TogglePadPerf => {
@@ -2079,6 +2082,7 @@ impl App {
                                 if let Some(key) = self.keybinds.key_for_action(&action) {
                                     self.keybinds.binds_mut().retain(|(k, _)| *k != key);
                                     self.config.ui.keybinds = self.keybinds.to_config();
+                                    self.mark_config_dirty();
                                 }
                                 self.unbind_confirm = None;
                             } else {
@@ -2092,6 +2096,7 @@ impl App {
                 if confirm::confirm_button(ui, "Reset Defaults", &mut self.keybinds_reset_confirm, true, "Restore default keybindings (custom binds are lost)") {
                     self.keybinds = keybinds::Keybinds::defaults();
                     self.config.ui.keybinds = self.keybinds.to_config();
+                    self.mark_config_dirty();
                     self.keybind_capturing = None;
                 }
             });
@@ -2177,7 +2182,7 @@ impl App {
         // #49: last_preset зеркалит parts[0]; undo патча парта 0 иначе
         // оставляет конфиг на до-undo патче — рестарт вернёт откаченное
         if part == 0 {
-            self.save_config();
+            self.snapshot_preset_and_mark_dirty();
         }
         self.set_active_part(part);
     }
@@ -2389,7 +2394,8 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetPartRange { part, min_note, max_note });
     }
 
-    fn save_config(&mut self) {
+    /// Snapshot last_preset + mark dirty (disk write via flush_config).
+    fn snapshot_preset_and_mark_dirty(&mut self) {
         self.config.ui.last_preset = self
             .patches
             .get(self.parts[0].patch_idx)
