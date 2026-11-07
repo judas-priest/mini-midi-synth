@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+status: executed 2026-11-08 (xorshift ×31 call-sites, phase ×9/10, soft_clip/fast_exp; DC-blocker/cubic/combulator-floaty — осталось с причинами)
+
 anchor-checked: 2026-11-08 (база = master 2269037; кластеры и сайты — отчёт
 dsp-utils аудитора 2026-11-07, свежие анкоры; канон — Tavily 2026-11-08:
 merge only bit-identical op order, ULP-drift в feedback-петлях недопустим)
@@ -83,7 +85,7 @@ mod.rs vibrato_phase (другая семантика).
 
 ### Task 1: xorshift32 канон ×27
 **Files:** Modify `src/synth/dsp_utils.rs` (+fn), 14 файлов-потребителей.
-- [ ] Step 1: в dsp_utils.rs:
+- [x] Step 1: в dsp_utils.rs:
 ```rust
 /// Canonical xorshift32 (13/17/5). Возвращает сырой state; конверсию float
 /// делает сайт (bipolar/unipolar — per-site, НЕ канонизировать).
@@ -95,7 +97,7 @@ pub fn xorshift32(state: &mut u32) -> u32 {
     *state
 }
 ```
-- [ ] Step 2: юнит-пин в synth/tests.rs:
+- [x] Step 2: юнит-пин в synth/tests.rs:
 ```rust
 #[test]
 fn tc_xorshift32_canon_sequence() {
@@ -107,17 +109,17 @@ fn tc_xorshift32_canon_sequence() {
 (значения ВЫЧИСЛИТЬ исполнителю прогоном ДО замены сайтов — пин на канон;
 если реальные отличаются — записать фактические, главная константа:
 детерминизм.)
-- [ ] Step 3: заменить все ×27 сайтов на `dsp_utils::xorshift32(&mut x)` с
+- [x] Step 3: заменить все ×27 сайтов на `dsp_utils::xorshift32(&mut x)` с
   СОХРАНЕНИЕМ per-site конверсий. airwindows.rs/drum.rs локальные fn — удалить.
   КАЖДЫЙ сайт: grep, прочитать ±5 строк, заменить только shift-ядро.
   patch_params.rs:631 — не трогать.
-- [ ] Step 4: гейт: clippy + cargo test + goldens byte-stable + rt_safety.
+- [x] Step 4: гейт: clippy + cargo test + goldens byte-stable + rt_safety.
   Красные goldens = op-order изменился → откат сайта, разбор.
-- [ ] Step 5: коммит `refactor: xorshift32 canon — 27 sites, per-site conversions preserved (S6)`.
+- [x] Step 5: коммит `refactor: xorshift32 canon — 27 sites, per-site conversions preserved (S6)`.
 
 ### Task 2: LFO phase if-wrap канон ×13
 **Files:** Modify `src/synth/dsp_utils.rs` — уже есть `advance_phase`; 11-13 сайтов.
-- [ ] Step 1: каждый сайт (список выше): проверить инвариант inc<1 (rate/sr
+- [x] Step 1: каждый сайт (список выше): проверить инвариант inc<1 (rate/sr
   для этих LFO/модуляторов — да); заменить две строки на
   `dsp_utils::advance_phase(&mut phase, rate, sample_rate)` — ВНИМАНИЕ:
   advance_phase(phase, rate_hz, sample_rate) сам делит; если сайт уже имеет
@@ -127,33 +129,33 @@ fn tc_xorshift32_canon_sequence() {
   как `rate/sample_rate` ранее — заменить `+= dt; if wrap` на вызов с (rate,
   sample_rate) только если rate/sample_rate доступно в scope, ИНАЧЕ оставить
   сайт (посчитать в отчёт). Bit-identity: `rate/sample_rate` тот же div.
-- [ ] Step 2: oscillator.rs:2181-2183 и подобные if+floor — если floor-семантика
+- [x] Step 2: oscillator.rs:2181-2183 и подобные if+floor — если floor-семантика
   → пропустить (отчёт).
-- [ ] Step 3: гейт (goldens byte-stable!) + коммит `refactor: LFO phase advance via dsp_utils::advance_phase — bit-safe sites (S6)`.
+- [x] Step 3: гейт (goldens byte-stable!) + коммит `refactor: LFO phase advance via dsp_utils::advance_phase — bit-safe sites (S6)`.
 
 ### Task 3: soft_clip + fast_exp + dead code
 **Files:** dsp_utils.rs (+soft_clip, +fast_exp), drum.rs, overdrive.rs,
 oscillator.rs (delete dead), bass.rs, neuron.rs/epiano.rs (optional inline —
 ЕСЛИ op-order идентичен; иначе оставить).
-- [ ] Step 1: dsp_utils::soft_clip(x) = x/(1.0+x.abs()); заменить drum.rs:65-67
+- [x] Step 1: dsp_utils::soft_clip(x) = x/(1.0+x.abs()); заменить drum.rs:65-67
   и overdrive.rs:8-10 (fn → делегация или удаление локальных + прямой вызов —
   выбрать меньший дифф: локальные fn оставить как one-line делегаты НЕЛЬЗЯ
   (дрейф) — заменить вызовы, fn удалить).
-- [ ] Step 2: dsp_utils::fast_exp (clamp −20, 8 squarings, max(0.0)) —
+- [x] Step 2: dsp_utils::fast_exp (clamp −20, 8 squarings, max(0.0)) —
   oscillator.rs:2467-2479 и bass.rs:517-523 → канон; локальные удалить.
   СРАВНИТЬ тела бит-в-бит до слияния (если отличаются хоть в чём-то —
   оставить, отчёт).
-- [ ] Step 3: удалить dead exp-knee soft_clip oscillator.rs:2973-2981 (+allow).
-- [ ] Step 4: neuron.rs sigmoid/epiano inline — сравнить op-order; идентичен →
+- [x] Step 3: удалить dead exp-knee soft_clip oscillator.rs:2973-2981 (+allow).
+- [x] Step 4: neuron.rs sigmoid/epiano inline — сравнить op-order; идентичен →
   канон, нет → оставить (отчёт).
-- [ ] Step 5: гейт (goldens!) + коммит `refactor: soft_clip/fast_exp canon — bit-identical sites merged, dead variant deleted (S6)`.
+- [x] Step 5: гейт (goldens!) + коммит `refactor: soft_clip/fast_exp canon — bit-identical sites merged, dead variant deleted (S6)`.
 
 ### Task 4: Верификация стадии
-- [ ] Step 1: полный гейт + ВСЕ goldens байт-равны (git status tests/golden пуст).
-- [ ] Step 2: PR → squash → rebuild → launch-check.
-- [ ] Step 3: TECHDEBT подсекция S6 (частично: сделаны 4 кластера; DC-blocker/
+- [x] Step 1: полный гейт + ВСЕ goldens байт-равны (git status tests/golden пуст).
+- [x] Step 2: PR → squash → rebuild → launch-check.
+- [x] Step 3: TECHDEBT подсекция S6 (частично: сделаны 4 кластера; DC-blocker/
   cubic/combulator-floaty linear — осталось, с причинами).
-- [ ] Step 4: roadmap чекбокс 3b + Tavily постчек (уже покрыт пре-ресёрчем).
+- [x] Step 4: roadmap чекбокс 3b + Tavily постчек (уже покрыт пре-ресёрчем).
 
 ## Out of scope (причины)
 - DC-blocker ×13 — per-site константы + mono/stereo: S6b, отдельный план.
