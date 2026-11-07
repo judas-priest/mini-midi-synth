@@ -50,6 +50,52 @@ fn loading_a_patch_does_not_free_on_the_audio_thread() {
 }
 
 #[test]
+fn set_part_full_transaction_does_not_allocate_or_free_in_rt() {
+    // ST2a: one ring slot carries 12 plain sub-events + 8 macros + LoadPatch.
+    // Inside the guard the handler must neither allocate nor free: the state
+    // box leaves via the trash queue (Trash::PartFull), the spent LoadPatch
+    // box comes back out of the guarded region — the exact contract the
+    // LoadPatch test above pins, one level up.
+    let patches = preset::load_all_patches();
+    let patch = patches.first().expect("factory presets are compiled in").clone();
+    let mut engine = SynthEngine::new(SR);
+    engine.set_patches(patches);
+    let spent = engine.handle_control(ControlEvent::load_patch_from(0, &patch));
+    drop(spent);
+    let _ = engine.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+
+    // The transaction box is consumed INSIDE handle_control: without a real
+    // trash queue it would be freed right there (the guard catches both ops).
+    let (trash_tx, mut trash_rx) = mini_midi_synth::trash::channel();
+    engine.set_trash_tx(trash_tx);
+
+    let patch_ev = match ControlEvent::load_patch_from(0, &patch) {
+        ControlEvent::LoadPatch(boxed) => boxed,
+        _ => unreachable!(),
+    };
+    let state = mini_midi_synth::synth::PartFullState {
+        enabled: true, mute: false, volume: 0.8,
+        min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
+        pan: 0.0, transpose: 0,
+        note_mode: mini_midi_synth::synth::NOTE_MODE_POLY,
+        sustain_enabled: false, ignore_pb: false, ignore_mw: false,
+        sf2_mode: false, sf2_program: 0,
+        macro_vals: [0.0; 8],
+        patch: Some(patch_ev),
+    };
+    // Box::new allocates — build the event OUTSIDE the guarded region, same
+    // as the GUI thread does before pushing it into the ring.
+    let event = ControlEvent::SetPartFull { part: 0, state: Box::new(state) };
+    let mut spent = None;
+    assert_no_alloc(|| {
+        spent = engine.handle_control(event);
+    });
+    assert!(spent.is_some(), "patch-carrying transaction returns the spent LoadPatch box");
+    drop(spent);
+    assert_eq!(trash_rx.drain(), 1, "state box must be handed to the trash queue");
+}
+
+#[test]
 fn metronome_click_does_not_allocate() {
     // 400 BPM → beat every 7200 samples; 800 blocks = 25600 samples
     // crosses 3 beat boundaries with click triggers inside the guarded region.

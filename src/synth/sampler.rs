@@ -404,6 +404,13 @@ impl SamplerEngine {
         self.part_channel.get(part).copied().flatten()
     }
 
+    /// Cached per-part program — what `set_part_program` last delivered to
+    /// this part's channel. Addressed by part (same convention as
+    /// `set_part_program`), out-of-range reads as 0. Test/diagnostic view.
+    pub fn part_program(&self, part: usize) -> u8 {
+        self.part_program.get(part).copied().unwrap_or(0)
+    }
+
     /// Re-send bank+program for every SF2-enabled part that owns a channel.
     /// With `skip_seq_channels`, channels currently owned by the MIDI-file
     /// sequencer are left alone: the sequencer owns the program there while

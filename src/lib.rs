@@ -77,6 +77,44 @@ fn find_midi_port(port_names: &[String], saved_name: &str) -> Option<usize> {
     port_names.iter().position(|n| n == saved_name)
 }
 
+/// Единый бандл общих хэндлов движка (ST1: 17 хэндлов × 6 мест → 3).
+/// Клон = клон Arc'ов (GUI-поток). Новый хэндл: поле здесь + строка в
+/// `SynthEngine::handles()` + присвоение потребителю — больше нигде.
+#[derive(Clone)]
+pub struct EngineHandles {
+    #[cfg(feature = "gui")]
+    pub drum_step_atom: Arc<AtomicU8>,
+    #[cfg(feature = "gui")]
+    pub drum_play_atom: Arc<AtomicU8>,
+    #[cfg(feature = "gui")]
+    pub drum_rec_atom: Arc<AtomicU8>,
+    #[cfg(feature = "gui")]
+    pub drum_pattern_atom: Arc<AtomicU8>,
+    #[cfg(feature = "gui")]
+    pub drum_undo_atom: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(feature = "gui")]
+    pub drum_redo_atom: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(feature = "gui")]
+    pub looper_atoms: Arc<synth::looper::LooperAtoms>,
+    #[cfg(feature = "gui")]
+    pub looper_display: Arc<std::sync::Mutex<synth::looper::LooperDisplay>>,
+    pub seq_target_atom: Arc<AtomicU8>,
+    pub active_part_atom: Arc<AtomicU8>,
+    #[cfg(feature = "gui")]
+    pub sustain_atom: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(feature = "gui")]
+    pub master_rec_state_atom: Arc<std::sync::atomic::AtomicU8>,
+    pub master_rec_cycle_atom: Arc<AtomicU8>,
+    #[cfg(feature = "gui")]
+    pub pitch_seq_step_atoms: Vec<Arc<AtomicU8>>,
+    #[cfg(feature = "gui")]
+    pub scope_buf: Arc<synth::ScopeBuffer>,
+    #[cfg(feature = "gui")]
+    pub midi_seq_play_atom: Arc<AtomicU8>,
+    #[cfg(feature = "gui")]
+    pub midi_seq_pos_atom: Arc<std::sync::atomic::AtomicU32>,
+}
+
 /// Common initialization shared by GUI and headless modes.
 struct CommonInit {
     config: Config,
@@ -101,37 +139,8 @@ struct CommonInit {
     ctrl_tx: metrics::CountingProducer<synth::ControlEvent>,
     feedback_rx: rtrb::Consumer<synth::ParamFeedback>,
     program_change_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    sustain_atom: Arc<std::sync::atomic::AtomicBool>,
-    #[cfg(feature = "gui")]
-    master_rec_state_atom: Arc<std::sync::atomic::AtomicU8>,
-    master_rec_cycle_atom: Arc<std::sync::atomic::AtomicU8>,
-    #[cfg(feature = "gui")]
-    drum_step_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    drum_play_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    drum_rec_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    drum_pattern_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    drum_undo_atom: Arc<std::sync::atomic::AtomicBool>,
-    #[cfg(feature = "gui")]
-    drum_redo_atom: Arc<std::sync::atomic::AtomicBool>,
-    #[cfg(feature = "gui")]
-    looper_atoms: Arc<synth::looper::LooperAtoms>,
-    #[cfg(feature = "gui")]
-    looper_display: Arc<std::sync::Mutex<synth::looper::LooperDisplay>>,
-    seq_target_atom: Arc<AtomicU8>,
-    active_part_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    pitch_seq_step_atoms: Vec<Arc<AtomicU8>>,
-    #[cfg(feature = "gui")]
-    scope_buf: Arc<synth::ScopeBuffer>,
-    #[cfg(feature = "gui")]
-    midi_seq_play_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    midi_seq_pos_atom: Arc<std::sync::atomic::AtomicU32>,
+    /// Общие хэндлы движка (ST1): один бандл вместо 17 полей.
+    handles: EngineHandles,
     #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     midi_port_names: Vec<String>,
     midi_conn: Option<MidiInputConnection<()>>,
@@ -221,37 +230,7 @@ pub(crate) fn init_common() -> Result<CommonInit> {
     engine.set_feedback_tx(feedback_tx);
     engine.set_trash_tx(engine_trash_tx);
     engine.set_program_change_atom(program_change_atom.clone());
-    #[cfg(feature = "gui")]
-    let drum_step_atom = engine.drum_engine.step_atom();
-    #[cfg(feature = "gui")]
-    let drum_play_atom = engine.drum_engine.play_atom();
-    #[cfg(feature = "gui")]
-    let drum_rec_atom = engine.drum_engine.rec_atom();
-    #[cfg(feature = "gui")]
-    let drum_pattern_atom = engine.drum_engine.pattern_atom();
-    #[cfg(feature = "gui")]
-    let drum_undo_atom = engine.drum_engine.undo_atom();
-    #[cfg(feature = "gui")]
-    let drum_redo_atom = engine.drum_engine.redo_atom();
-    #[cfg(feature = "gui")]
-    let looper_atoms = engine.looper.atoms();
-    #[cfg(feature = "gui")]
-    let looper_display = engine.looper.display();
-    let seq_target_atom = engine.seq_target_atom();
-    let active_part_atom = engine.active_part_atom();
-    #[cfg(feature = "gui")]
-    let sustain_atom = engine.sustain_atom();
-    #[cfg(feature = "gui")]
-    let master_rec_state_atom = engine.master_rec_state_atom();
-    let master_rec_cycle_atom = engine.master_rec_cycle_atom();
-    #[cfg(feature = "gui")]
-    let pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
-    #[cfg(feature = "gui")]
-    let scope_buf = engine.scope_buffer();
-    #[cfg(feature = "gui")]
-    let midi_seq_play_atom = engine.midi_player_play_atom();
-    #[cfg(feature = "gui")]
-    let midi_seq_pos_atom = engine.midi_player_pos_atom();
+    let h = engine.handles();
 
     let amidi_port = {
         let port = std::sync::Arc::new(crate::amidi::AmidiPort::new());
@@ -348,38 +327,7 @@ pub(crate) fn init_common() -> Result<CommonInit> {
         ctrl_tx: metrics::CountingProducer::new(ctrl_tx),
         feedback_rx,
         program_change_atom,
-        #[cfg(feature = "gui")]
-        sustain_atom,
-        #[cfg(feature = "gui")]
-        master_rec_state_atom,
-        master_rec_cycle_atom,
-        #[cfg(feature = "gui")]
-        #[cfg(feature = "gui")]
-        drum_step_atom,
-        #[cfg(feature = "gui")]
-        drum_play_atom,
-        #[cfg(feature = "gui")]
-        drum_rec_atom,
-        #[cfg(feature = "gui")]
-        drum_pattern_atom,
-        #[cfg(feature = "gui")]
-        drum_undo_atom,
-        #[cfg(feature = "gui")]
-        drum_redo_atom,
-        #[cfg(feature = "gui")]
-        looper_atoms,
-        #[cfg(feature = "gui")]
-        looper_display,
-        seq_target_atom,
-        active_part_atom,
-        #[cfg(feature = "gui")]
-        pitch_seq_step_atoms,
-        #[cfg(feature = "gui")]
-        scope_buf,
-        #[cfg(feature = "gui")]
-        midi_seq_play_atom,
-        #[cfg(feature = "gui")]
-        midi_seq_pos_atom,
+        handles: h,
         midi_port_names,
         midi_conn,
         midi_connected_name,
@@ -539,7 +487,7 @@ pub fn run_headless() -> Result<()> {
     );
     #[cfg(not(target_os = "linux"))]
     let kb_rx: Option<(std::thread::JoinHandle<()>, std::sync::mpsc::Receiver<key_action::KeyAction>)> = None;
-    let seq_target_local: Arc<AtomicU8> = c.seq_target_atom.clone();
+    let seq_target_local: Arc<AtomicU8> = c.handles.seq_target_atom.clone();
     let mut drum_playing = false;
 
     // --- Main loop: MIDI reconnect + Program Change + keyboard actions ---
@@ -572,7 +520,7 @@ pub fn run_headless() -> Result<()> {
             while let Ok(action) = rx.try_recv() {
                 match &action {
                     KeyAction::SwitchPart(p) => {
-                        c.active_part_atom.store(*p, Ordering::Relaxed);
+                        c.handles.active_part_atom.store(*p, Ordering::Relaxed);
                         seq_target_local.store(1, Ordering::Relaxed);
                         eprintln!("[input] Part A{}", p + 1);
                     }
@@ -803,9 +751,9 @@ pub fn run_gui(
         midi_learn_target: None,
         pending_remove_part: None,
         _program_change_atom: c.program_change_atom,
-        sustain_atom: c.sustain_atom,
-        master_rec_state: c.master_rec_state_atom,
-        master_rec_cycle: c.master_rec_cycle_atom,
+        sustain_atom: c.handles.sustain_atom,
+        master_rec_state: c.handles.master_rec_state_atom,
+        master_rec_cycle: c.handles.master_rec_cycle_atom,
         sustain_release: c.config.ui.sustain_release,
         sf2_release_scale: c.config.ui.sf2_release_scale,
         show_help: false,
@@ -845,10 +793,10 @@ pub fn run_gui(
         drum_playing: false,
         drum_recording: false,
         drum_current_pattern: 0,
-        drum_step_atom: c.drum_step_atom,
-        drum_play_atom: c.drum_play_atom,
-        drum_rec_atom: c.drum_rec_atom,
-        drum_pattern_atom: c.drum_pattern_atom,
+        drum_step_atom: c.handles.drum_step_atom,
+        drum_play_atom: c.handles.drum_play_atom,
+        drum_rec_atom: c.handles.drum_rec_atom,
+        drum_pattern_atom: c.handles.drum_pattern_atom,
         drum_chain_on: false,
         drum_chain_mask: 0,
         drum_metronome: c.config.ui.drum_metronome,
@@ -860,8 +808,8 @@ pub fn run_gui(
         tracks_rename_focus: false,
         pat_window: 0,
         mute_window: 0,
-        drum_undo_atom: c.drum_undo_atom,
-        drum_redo_atom: c.drum_redo_atom,
+        drum_undo_atom: c.handles.drum_undo_atom,
+        drum_redo_atom: c.handles.drum_redo_atom,
         console: gui::led_console::LedConsole::default(),
         console_rx: Some(c.console_rx),
         flash: gui::note_flash::NoteFlashState::new(),
@@ -882,8 +830,8 @@ pub fn run_gui(
         drum_kit_name: String::new(),
         drum_kit_list: preset::list_drum_kits(),
         drum_midi_import_path: String::new(),
-        looper_atoms: c.looper_atoms,
-        looper_display: c.looper_display,
+        looper_atoms: c.handles.looper_atoms,
+        looper_display: c.handles.looper_display,
         looper_bars: 4,
         looper_quantize: 0,
         looper_clear_confirm: None,
@@ -894,8 +842,8 @@ pub fn run_gui(
         looper_solo_layer: None,
         looper_source_mix: true,
         looper_part_mutes: [false; 16],
-        seq_target_atom: c.seq_target_atom,
-        active_part_atom: c.active_part_atom,
+        seq_target_atom: c.handles.seq_target_atom,
+        active_part_atom: c.handles.active_part_atom,
         keybinds: gui::keybinds::Keybinds::from_config(&c.config.ui.keybinds),
         show_keybinds_window: false,
         keybind_capturing: None,
@@ -939,7 +887,7 @@ pub fn run_gui(
         sf2_drums_soundfont: None,
         sf2_block_size: c.config.sf2.block_size,
         sf2_sample_offset_ms: c.config.sf2.sample_offset_ms,
-        pitch_seq_step_atoms: c.pitch_seq_step_atoms,
+        pitch_seq_step_atoms: c.handles.pitch_seq_step_atoms,
         pitch_seq_enabled: [false; 2],
         pitch_seq_steps: [[synth::step_seq::PitchStep::default(); 16]; 2],
         pitch_seq_length: [16; 2],
@@ -952,7 +900,7 @@ pub fn run_gui(
         inst_browser_seeded: false,
         inst_browser_last_search: String::new(),
         inst_browser_scroll: false,
-        scope_buf: c.scope_buf,
+        scope_buf: c.handles.scope_buf,
         last_scope_write: 0,
         split_point: c.config.ui.split_point.unwrap_or(60),
         show_fx_chain: false,
@@ -962,8 +910,8 @@ pub fn run_gui(
         midi_seq_playing: false,
         midi_seq_looping: true,
         midi_seq_bpm: None,
-        midi_seq_play_atom: c.midi_seq_play_atom,
-        midi_seq_pos_atom: c.midi_seq_pos_atom,
+        midi_seq_play_atom: c.handles.midi_seq_play_atom,
+        midi_seq_pos_atom: c.handles.midi_seq_pos_atom,
         midi_seq_file_pick: None,
         undo_stack: std::collections::VecDeque::new(),
         redo_stack: Vec::new(),
