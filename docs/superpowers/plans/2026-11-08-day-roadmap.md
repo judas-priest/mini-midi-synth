@@ -17,7 +17,11 @@
       (c) events/GlobalParams/Part в отдельные файлы (events.rs / part.rs) —
       как разрешат borrow'ы. ПОРЯДОК b → a → c: b минимально рискован
       (ручные sub-методы), a требует EngineModInputs, c механика.
-- [ ] 2. S4-gui — разрез gui/mod.rs (3812): console_lifecycle (786-1038),
+- [x] 2. S4-gui — ГОТОВО (PR #99, master 1b48ae9, 2026-11-08): console lifecycle
+      → 4 метода; browser.rs 433 / sf2.rs 238 / tracks.rs 292 / performance.rs
+      144; mod.rs 3812→2740. Панели не тронуты (пин зелёный). План:
+      2026-11-08-day2-s4-gui.md.
+- [ ] 2-old. S4-gui — разрез gui/mod.rs (3812): console_lifecycle (786-1038),
       browser (1593-2018), sf2 (2113-2785), tracks (2982-3264), performance
       (3274-3403) → файлы impl App. Панельный пин (ui_layout_contract) уже
       сканирует все gui-файлы — move-safe.
