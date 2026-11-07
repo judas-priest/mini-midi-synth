@@ -2439,7 +2439,6 @@ impl App {
                 // консоль шлёт УЖЕ window-local 0-based (slot-1 из tap())
                 let idx = self.pat_window + i;
                 if idx < 8 {
-                    self.drum_current_pattern = idx as u8;
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: idx as u8 });
                     self.follow_window(idx, false);
                 }
@@ -2488,7 +2487,6 @@ impl App {
             }
             led_console::Action::StepPattern(dir) => {
                 let next = (self.drum_current_pattern as i32 + dir).rem_euclid(8);
-                self.drum_current_pattern = next as u8;
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: next as u8 });
                 // follow снапится на границу страницы — degenerate window 7
                 // больше не возникает (#50-фикс)
