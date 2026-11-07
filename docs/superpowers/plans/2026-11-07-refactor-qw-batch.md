@@ -1,6 +1,8 @@
 # Refactor Quick Wins Batch (QW1-QW11) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+
+status: executed 2026-11-07 (PR: QW-батч, субагентно; 3 багфикса + 8 рефакторов)
 
 anchor-checked: 2026-11-07 (база = master ed992a0; анкоры из refactor-audit отчёта этого же дня, все Critical/High перепроверены вручную; канон-исследование — Tavily 2026-11-07: SSOT-параметры JUCE APVTS, dead-code sweep, characterization)
 
@@ -58,7 +60,7 @@ anchor-checked: 2026-11-07 (база = master ed992a0; анкоры из refacto
 - Modify: `src/cc_map.rs:50,55` — scope Patch→Global для delay_mix/reverb_mix
 - Test: `src/synth/tests.rs` (новые пины в конец)
 
-- [ ] **Step 1: падающие тесты** — в конец src/synth/tests.rs:
+- [x] **Step 1: падающие тесты** — в конец src/synth/tests.rs:
 
 ```rust
 
@@ -107,12 +109,12 @@ fn tc_cc_scope_survives_config_roundtrip() {
 }
 ```
 
-- [ ] **Step 2: красный**
+- [x] **Step 2: красный**
 
 Run: `cargo test --lib tc_registry_global tc_cc_scope 2>&1 | tail -6`
 Expected: tc_registry_global_keys_have_global_scope FAIL (delay_mix/reverb_mix Patch); tc_cc_scope_survives_config_roundtrip FAIL.
 
-- [ ] **Step 3: фикс** — cc_map.rs: в PARAM_REGISTRY заменить scope для двух записей:
+- [x] **Step 3: фикс** — cc_map.rs: в PARAM_REGISTRY заменить scope для двух записей:
 
 ```rust
     ParamMeta { key: "delay_mix", label: "Delay Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Global },
@@ -123,12 +125,12 @@ Expected: tc_registry_global_keys_have_global_scope FAIL (delay_mix/reverb_mix P
 
 Комментарий над ними обновить: `// Global (persist across patch changes)` — оба уже в GLOBAL_PARAM_KEYS.
 
-- [ ] **Step 4: зелёный + полный гейт**
+- [x] **Step 4: зелёный + полный гейт**
 
 Run: `cargo test --lib tc_registry_global tc_cc_scope 2>&1 | tail -3 && cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok"`
 Expected: оба теста PASS, clippy чист, все suite'ы зелёные (существующий пин tc_cc_bindings_target_set_param_arms остаётся зелёным).
 
-- [ ] **Step 5: коммит**
+- [x] **Step 5: коммит**
 
 ```bash
 git add src/cc_map.rs src/synth/tests.rs && git commit -m "fix: CC scope SSOT — reverb_mix/delay_mix Global in PARAM_REGISTRY, faders survive cc_map roundtrip (QW1)"
@@ -139,7 +141,7 @@ git add src/cc_map.rs src/synth/tests.rs && git commit -m "fix: CC scope SSOT �
 **Files:**
 - Modify: `src/gui/mod.rs:1995-1997`
 
-- [ ] **Step 1: фикс** — заменить:
+- [x] **Step 1: фикс** — заменить:
 
 ```rust
             // Persist for parts 0/1 (seeds program on startup) — перенос mod.rs:1198-1200
@@ -156,12 +158,12 @@ git add src/cc_map.rs src/synth/tests.rs && git commit -m "fix: CC scope SSOT �
             else if part == 1 { self.config.sf2.layer_b_program = prog; }
 ```
 
-- [ ] **Step 2: гейт**
+- [x] **Step 2: гейт**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok"`
 Expected: чисто, зелёные. (Экранная проверка юзером отдельно: GM-pick на части ≥2 не меняет seed части 1.)
 
-- [ ] **Step 3: коммит**
+- [x] **Step 3: коммит**
 
 ```bash
 git add src/gui/mod.rs && git commit -m "fix: GM browser pick on parts >=2 no longer clobbers layer_b_program seed (QW2)"
@@ -172,19 +174,19 @@ git add src/gui/mod.rs && git commit -m "fix: GM browser pick on parts >=2 no lo
 **Files:**
 - Modify: `src/synth/mod.rs:613,620-622` (decl), `:657-675` (init), `:3592-3595` (writes), комментарии вокруг
 
-- [ ] **Step 1: verify zero reads** (обязательный повтор перед удалением):
+- [x] **Step 1: verify zero reads** (обязательный повтор перед удалением):
 
 Run: `grep -rn "cached_mod_sources\|cached_lfo_pitch_offset\|cached_filter_offset\|cached_lfo_amp_base" src/ tests/ | grep -v "mod.rs:613\|mod.rs:62\|mod.rs:359\|mod.rs:65[0-9]\|mod.rs:67[0-9]"`
 Expected: ПУСТО (только decl/init/writes). Если есть чтения — STOP, задача отменяется.
 
-- [ ] **Step 2: удалить** — 4 decl-строки (:620-622 + коммент «Cached control-rate base values...»); init: `cached_mod_sources` — 11-строчный struct literal (:657-667) + 3 строки (:673-675), НЕ трогая перемешанные с ними `poly_at_in_matrix`/`lfo2/3/4_routed` init (:669-672); 4 write-строки (:3592-3595 `part.cached_mod_sources = mod_sources;` и соседние).
+- [x] **Step 2: удалить** — 4 decl-строки (:620-622 + коммент «Cached control-rate base values...»); init: `cached_mod_sources` — 11-строчный struct literal (:657-667) + 3 строки (:673-675), НЕ трогая перемешанные с ними `poly_at_in_matrix`/`lfo2/3/4_routed` init (:669-672); 4 write-строки (:3592-3595 `part.cached_mod_sources = mod_sources;` и соседние).
 
-- [ ] **Step 3: гейт — goldens ОБЯЗАНЫ остаться идентичными**
+- [x] **Step 3: гейт — goldens ОБЯЗАНЫ остаться идентичными**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test --test golden_fx 2>&1 | tail -2 && cargo test 2>&1 | grep -cE "test result: ok"`
 Expected: всё зелёное, goldens не тронуты (поля write-only — рендер байт-в-байт тот же). Красные goldens = найдено скрытое чтение → откат и разбор.
 
-- [ ] **Step 4: коммит**
+- [x] **Step 4: коммит**
 
 ```bash
 git add src/synth/mod.rs && git commit -m "refactor: delete write-only Part::cached_* fields (QW3, zero reads, goldens unchanged)"
@@ -195,12 +197,12 @@ git add src/synth/mod.rs && git commit -m "refactor: delete write-only Part::cac
 **Files:**
 - Modify: `src/lib.rs:365` (+ все места, которые вывалит check)
 
-- [ ] **Step 1: воспроизвести красный**
+- [x] **Step 1: воспроизвести красный**
 
 Run: `cargo check --lib --no-default-features 2>&1 | grep -E "^error" | head -8`
 Expected: E0425/E0560 вокруг drum_undo_atom (lib.rs:365) — возможно ещё места того же класса.
 
-- [ ] **Step 2: фикс** — lib.rs:365:
+- [x] **Step 2: фикс** — lib.rs:365:
 
 ```rust
         #[cfg(feature = "gui")]
@@ -209,12 +211,12 @@ Expected: E0425/E0560 вокруг drum_undo_atom (lib.rs:365) — возмож�
 
 и все остальные ошибки того же класса из Step 1 (unguarded литералы gui-полей) — тем же паттерном.
 
-- [ ] **Step 3: зелёный**
+- [x] **Step 3: зелёный**
 
 Run: `cargo check --lib --no-default-features 2>&1 | tail -1 && cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok"`
 Expected: check ok, всё зелёное.
 
-- [ ] **Step 4: коммит**
+- [x] **Step 4: коммит**
 
 ```bash
 git add src/lib.rs && git commit -m "fix: gui-less build — missing cfg on CommonInit literal fields (QW4)"
@@ -225,7 +227,7 @@ git add src/lib.rs && git commit -m "fix: gui-less build — missing cfg on Comm
 **Files:**
 - Modify: `src/synth/mod.rs:1482-1598` (from_preset)
 
-- [ ] **Step 1: механический рефактор** — шапку from_preset заменить на:
+- [x] **Step 1: механический рефактор** — шапку from_preset заменить на:
 
 ```rust
     fn from_preset(p: Option<&PatchParams>, global: &GlobalParams) -> Self {
@@ -244,12 +246,12 @@ git add src/lib.rs && git commit -m "fix: gui-less build — missing cfg on Comm
 - Два global-override (:1513-1517): обёртку `global.X.unwrap_or_else(...)` сохранить; внутренний `p.map(|p| p.X).unwrap_or(LIT)` схлопнется скриптом в `p.X` — это ок (семантика идентична, «как есть» относится только к самой глобальной обёртке).
 Итого 111 `p.map` сайтов = 108 plain + 2 override-inner + 1 cast (скрипт покрывает 110, cast — руками).
 
-- [ ] **Step 2: гейт — goldens ОБЯЗАНЫ остаться идентичными**
+- [x] **Step 2: гейт — goldens ОБЯЗАНЫ остаться идентичными**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test --test golden_fx 2>&1 | tail -2 && cargo test 2>&1 | grep -cE "test result: ok"`
 Expected: всё зелёное без регенерации (дрифт литералов от default() = 0, проверено). Красные goldens → откат: где-то литерал ≠ default (найди и разбери).
 
-- [ ] **Step 3: коммит**
+- [x] **Step 3: коммит**
 
 ```bash
 git add src/synth/mod.rs && git commit -m "refactor: CachedFxParams::from_preset reads PatchParams defaults directly — 109 duplicated literals removed (QW5, goldens unchanged)"
@@ -260,7 +262,7 @@ git add src/synth/mod.rs && git commit -m "refactor: CachedFxParams::from_preset
 **Files:**
 - Modify: `src/synth/tests.rs` (tc_linear_interp_bit_identical_to_canon, :1475-1499)
 
-- [ ] **Step 1: расширить тест** — после существующего цикла добавить:
+- [x] **Step 1: расширить тест** — после существующего цикла добавить:
 
 ```rust
     // Wrap-ветка при положительном read_f (mid-buffer write_pos): ловит
@@ -281,12 +283,12 @@ git add src/synth/mod.rs && git commit -m "refactor: CachedFxParams::from_preset
     }
 ```
 
-- [ ] **Step 2: зелёный** (тест пинит канон; расхождение fmod-вариантов он ЗАФИКСИРУЕТ когда дойдёт до их слияния в S6)
+- [x] **Step 2: зелёный** (тест пинит канон; расхождение fmod-вариантов он ЗАФИКСИРУЕТ когда дойдёт до их слияния в S6)
 
 Run: `cargo test --lib tc_linear_interp 2>&1 | tail -2`
 Expected: PASS.
 
-- [ ] **Step 3: коммит**
+- [x] **Step 3: коммит**
 
 ```bash
 git add src/synth/tests.rs && git commit -m "test: linear-interp pin covers positive-read wrap branch (QW6, S6 guard)"
@@ -297,19 +299,19 @@ git add src/synth/tests.rs && git commit -m "test: linear-interp pin covers posi
 **Files:**
 - Modify: `src/audio.rs:377`, `src/synth/graphic_eq.rs:126`, `src/synth/compressor.rs:52,54`, `src/synth/filter.rs:120`, `src/synth/sampler.rs:327,329`, `src/synth/drum.rs:1393`, `src/synth/lfo.rs:64,259,266`, `src/gui/theme.rs:121,125` (+ их `#[allow(dead_code)]`)
 
-- [ ] **Step 1: verify zero refs** (для КАЖДОГО имени перед удалением):
+- [x] **Step 1: verify zero refs** (для КАЖДОГО имени перед удалением):
 
 Run: `for f in default_output_device_name update_gains set_attack set_release is_k35 keys_loaded drums_loaded slot_name TEMPO_SYNC_NAMES trigger_envelope release_envelope PAD_CYAN PAD_PINK; do echo "== $f"; grep -rn "$f" src/ tests/ --include="*.rs" | grep -v "pub fn $f\|pub const $f" | head -3; done`
 Expected: для каждого из 13 — пусто или только комменты/allow-строки. ЛОЖНЫЕ СРАБАТЫВАНИЯ-декой (одноимённые префиксы, НЕ эти функции): `set_attack_shape`/`set_release_time_scale` (voice.rs:496,506; mod.rs:3065; sampler.rs:302,350), `retrigger_envelope` (lfo.rs), `sf2_keys_loaded_name`/`sf2_drums_loaded_name` (sampler.rs). Они остаются. Если есть реальный вызов именно цели — пункт НЕ удалять.
 
-- [ ] **Step 2: удалить** — тела функций/констант + их `#[allow(dead_code)]` строки. Внимание: compressor set_attack/set_release — пара; theme PAD_CYAN/PAD_PINK — константы палитры (проверить, что не в макросах).
+- [x] **Step 2: удалить** — тела функций/констант + их `#[allow(dead_code)]` строки. Внимание: compressor set_attack/set_release — пара; theme PAD_CYAN/PAD_PINK — константы палитры (проверить, что не в макросах).
 
-- [ ] **Step 3: гейт**
+- [x] **Step 3: гейт**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok"`
 Expected: чисто, зелёные.
 
-- [ ] **Step 4: коммит**
+- [x] **Step 4: коммит**
 
 ```bash
 git add -u && git commit -m "refactor: delete 13 dead pub API items (QW7, zero refs verified per item)"
@@ -320,7 +322,7 @@ git add -u && git commit -m "refactor: delete 13 dead pub API items (QW7, zero r
 **Files:**
 - Modify: `src/synth/mod.rs:1283-1285`, `:509-510`
 
-- [ ] **Step 1: правки**
+- [x] **Step 1: правки**
 
 mod.rs:1284 — сообщение на честное:
 ```rust
@@ -334,12 +336,12 @@ mod.rs:507-510 — fallback GlobalParams::set:
             }
 ```
 
-- [ ] **Step 2: гейт** (тесты шлют только arm-ключи; продовые сендеры — 5-7 ключей из arm'ов; если debug_assert сработает в тестах — найден настоящий рассинхрон сендера, разбор а не откат)
+- [x] **Step 2: гейт** (тесты шлют только arm-ключи; продовые сендеры — 5-7 ключей из arm'ов; если debug_assert сработает в тестах — найден настоящий рассинхрон сендера, разбор а не откат)
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok"`
 Expected: зелёные.
 
-- [ ] **Step 3: коммит**
+- [x] **Step 3: коммит**
 
 ```bash
 git add src/synth/mod.rs && git commit -m "fix: honest debug_assert messages — Part::set_param fallback named correctly, GlobalParams::set fail-loud in debug (QW8)"
@@ -350,7 +352,7 @@ git add src/synth/mod.rs && git commit -m "fix: honest debug_assert messages —
 **Files:**
 - Modify: `tests/ui_layout_contract.rs:93-127` (panel_registration_order_matches_source_contract)
 
-- [ ] **Step 1: переписать скан** — ЗАМЕНИТЬ целиком старый тест `panel_registration_order_matches_source_contract`, старую константу `EXPECTED` и старый `extract_id` на:
+- [x] **Step 1: переписать скан** — ЗАМЕНИТЬ целиком старый тест `panel_registration_order_matches_source_contract`, старую константу `EXPECTED` и старый `extract_id` на:
 
 ```rust
 const EXPECTED_PANELS: &[(&str, &str)] = &[
@@ -422,12 +424,12 @@ fn panel_registration_order_matches_source_contract() {
 
 Примечание: длина иглы берётся из констант TOP/BOTTOM (`.len()` в `i + TOP.len()..`) — прежние magic 21/24 удалены. Скан ищет во всех gui-файлах; если появятся false-positive вызовы в дочерних модулях (панели создаются только в mod.rs::update) — сузить список файлов panel_sources() до реально содержащих TopBottomPanel.
 
-- [ ] **Step 2: зелёный**
+- [x] **Step 2: зелёный**
 
 Run: `cargo test --test ui_layout_contract 2>&1 | tail -3`
 Expected: 2 passed (geometry mirror + новый скан). Если скан находит панели в НЕ-mod.rs файлах — сверить с реальной регистрацией (в false-positive случае сузить список файлов до реально содержащих TopBottomPanel).
 
-- [ ] **Step 3: коммит**
+- [x] **Step 3: коммит**
 
 ```bash
 git add tests/ui_layout_contract.rs && git commit -m "test: panel-order pin scans all gui files, derived needle lengths, asserts CentralPanel-last (QW9)"
@@ -438,7 +440,7 @@ git add tests/ui_layout_contract.rs && git commit -m "test: panel-order pin scan
 **Files:**
 - Modify: `src/synth/mod.rs` — impl Part: новый `release_pedal_held` + `release_latch_mismatch`; call sites :1740-1780, :2670-2708, :2394-2401, :2536-2543
 
-- [ ] **Step 1: release_pedal_held** — в impl Part (рядом с drain_notes :1103):
+- [x] **Step 1: release_pedal_held** — в impl Part (рядом с drain_notes :1103):
 
 ```rust
     /// Pedal-up: разжать pedal-held (не key-held) голоса парта. Общий код
@@ -492,14 +494,14 @@ git add tests/ui_layout_contract.rs && git commit -m "test: panel-order pin scan
     }
 ```
 
-- [ ] **Step 2: заменить 4 call-site** — set_sustain (:1740-1780): захватить `let sr = self.sustain_release;` ДО цикла `for (i, part) in self.parts.iter_mut()`, тело `if !on { ... }` → `if !on { part.release_pedal_held(sr); }` (SF2-строка :1739 остаётся). SetPartSustain (:2670-2708): тело `if !on && l.sustain_pedal > 0.5 { ... }` → `{ l.release_pedal_held(self.sustain_release); }` (set_part_sustain :2668 остаётся). ProgramChange (:2394-2401) → `l.release_latch_mismatch(params.play_mode as u8);`. LoadPatch (:2536-2543) → так же.
+- [x] **Step 2: заменить 4 call-site** — set_sustain (:1740-1780): захватить `let sr = self.sustain_release;` ДО цикла `for (i, part) in self.parts.iter_mut()`, тело `if !on { ... }` → `if !on { part.release_pedal_held(sr); }` (SF2-строка :1739 остаётся). SetPartSustain (:2670-2708): тело `if !on && l.sustain_pedal > 0.5 { ... }` → `{ l.release_pedal_held(self.sustain_release); }` (set_part_sustain :2668 остаётся). ProgramChange (:2394-2401) → `l.release_latch_mismatch(params.play_mode as u8);`. LoadPatch (:2536-2543) → так же.
 
-- [ ] **Step 3: гейт — behavior-preserving**
+- [x] **Step 3: гейт — behavior-preserving**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok" && cargo test --features rt-assert --test rt_safety 2>&1 | tail -1`
 Expected: всё зелёное (sustain_audit.rs и sustain-тесты пинят семантику).
 
-- [ ] **Step 4: коммит**
+- [x] **Step 4: коммит**
 
 ```bash
 git add src/synth/mod.rs && git commit -m "refactor: extract Part::release_pedal_held/release_latch_mismatch — verbatim dup blocks (QW10)"
@@ -511,7 +513,7 @@ git add src/synth/mod.rs && git commit -m "refactor: extract Part::release_pedal
 - Modify: `src/synth/mod.rs` — Part поле `lfo1_routed` (:617-621 рядом с lfo2/3/4), init (:655-676), update_routing_cache (:681-694), гейт (:3455-3459)
 - Test: `src/synth/tests.rs`
 
-- [ ] **Step 1: падающий тест** — в конец src/synth/tests.rs:
+- [x] **Step 1: падающий тест** — в конец src/synth/tests.rs:
 
 ```rust
 
@@ -542,12 +544,12 @@ fn tc_lfo1_routed_cache() {
 
 (Если ModSlot/ModDest поля называются иначе — сверить с mod_matrix.rs и подставить реальные; `..Default::default()` убрать, если ModSlot без Default — заполнить поля явно.)
 
-- [ ] **Step 2: красный**
+- [x] **Step 2: красный**
 
 Run: `cargo test --lib tc_lfo1_routed 2>&1 | tail -4`
 Expected: FAIL — поля `lfo1_routed` не существует (E0560/E0609).
 
-- [ ] **Step 3: реализация** — три точки:
+- [x] **Step 3: реализация** — три точки:
 (a) decl рядом с lfo2_routed (:617-621):
 ```rust
     lfo1_routed: bool,
@@ -571,12 +573,12 @@ Expected: FAIL — поля `lfo1_routed` не существует (E0560/E0609
                 || self.aftertouch_smooth > 0.001;
 ```
 
-- [ ] **Step 4: зелёный + goldens**
+- [x] **Step 4: зелёный + goldens**
 
 Run: `cargo test --lib tc_lfo1_routed 2>&1 | tail -2 && cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok"`
 Expected: тест PASS, всё зелёное. ЕСЛИ preset goldens красные — это ОЖИДАЕМОЕ behavior-fix (фабричный пресет маршрутизирует Lfo1): прогнать `MINI_MIDI_GOLDEN_UPDATE=1 cargo test --test golden_fx`, в коммит-сообщение записать «intentional behavior fix: LFO1 matrix routing now audible, goldens regenerated» + экранную проверку юзером.
 
-- [ ] **Step 5: коммит**
+- [x] **Step 5: коммит**
 
 ```bash
 git add src/synth/mod.rs src/synth/tests.rs && git commit -m "fix: LFO1 audible when routed via mod matrix only — lfo1_routed cache + gate (QW11)"
@@ -584,16 +586,16 @@ git add src/synth/mod.rs src/synth/tests.rs && git commit -m "fix: LFO1 audible 
 
 ### Task 12: Верификация + релизный цикл
 
-- [ ] **Step 1: полный гейт**
+- [x] **Step 1: полный гейт**
 
 Run: `cargo clippy --all-targets -- -D warnings && cargo test && cargo test --features rt-assert --test rt_safety && cargo deny check`
 Expected: всё зелёное.
 
-- [ ] **Step 2: PR → squash merge → rebuild release → relaunch** (канон; сеть — `unset LD_PRELOAD` для gh/push).
+- [x] **Step 2: PR → squash merge → rebuild release → relaunch** (канон; сеть — `unset LD_PRELOAD` для gh/push).
 
-- [ ] **Step 3: Экран (юзер)** — фейдеры reverb/delay (CC66/CC54) работают после рестарта с сохранённым cc_map; GM-pick на части ≥2 не портит seed; LFO1-маршрутизация слышна (если в пресетах есть).
+- [x] **Step 3: Экран (юзер)** — фейдеры reverb/delay (CC66/CC54) работают после рестарта с сохранённым cc_map; GM-pick на части ≥2 не портит seed; LFO1-маршрутизация слышна (если в пресетах есть).
 
-- [ ] **Step 4: TECHDEBT.md** — добавить НОВУЮ датированную подсекцию «## QW-батч 2026-11-07 (refactor-audit) — ГОТОВО» со списком QW1-QW11 и 3 закрытых бага (CC scope flip, GM-pick layer_b, LFO1-matrix) с якорями. НЕ трогать старую статус-строку REFACTOR_AUDIT (docs/TECHDEBT.md:767) — там ДРУГАЯ нумерация QW (старый аудит: QW1=wavetable alloc и т.д.), пометка «QW1-QW11 done» falsely закроет старые QW4/QW5/QW7.
+- [x] **Step 4: TECHDEBT.md** — добавить НОВУЮ датированную подсекцию «## QW-батч 2026-11-07 (refactor-audit) — ГОТОВО» со списком QW1-QW11 и 3 закрытых бага (CC scope flip, GM-pick layer_b, LFO1-matrix) с якорями. НЕ трогать старую статус-строку REFACTOR_AUDIT (docs/TECHDEBT.md:767) — там ДРУГАЯ нумерация QW (старый аудит: QW1=wavetable alloc и т.д.), пометка «QW1-QW11 done» falsely закроет старые QW4/QW5/QW7.
 
 ## Out of scope
 
