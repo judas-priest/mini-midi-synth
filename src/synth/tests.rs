@@ -1872,3 +1872,23 @@ fn tc_xorshift32_canon_sequence() {
     let seq: Vec<u32> = (0..5).map(|_| dsp_utils::xorshift32(&mut x)).collect();
     assert_eq!(seq, [270369, 67634689, 2647435461, 307599695, 2398689233]);
 }
+
+// ── S2b: осознанно разные диапазоны одного ключа (ревью 2026-11-08) ──
+// ks_brightness/ks_feedback используются ДВУМЯ движками с РАЗНЫми
+// диапазонами: KarplusStrong (Brightness 0.05..1.0 / Feedback 0.9..0.9999)
+// и PianoModel (Brightness (Strike) 0.0..1.0 / Sustain 0.0..1.0).
+// Это НЕ дрейф — пин фиксирует осознанные значения (GUI params.rs).
+
+#[test]
+fn tc_ks_ranges_intentionally_diverged() {
+    // Маркеры источников (grep params.rs): обе пары присутствуют и различны.
+    let src = include_str!("../gui/params.rs");
+    let ks = "self.param_slider(ui, \"ks_brightness\", \"Brightness\", 0.05, 1.0, false)";
+    let ks_fb = "self.param_slider(ui, \"ks_feedback\", \"Feedback\", 0.9, 0.9999, false)";
+    let pm = "self.param_slider(ui, \"ks_brightness\", \"Brightness (Strike)\", 0.0, 1.0, false)";
+    let pm_fb = "self.param_slider(ui, \"ks_feedback\", \"Sustain\", 0.0, 1.0, false)";
+    for (marker, what) in [(ks, "KS brightness"), (ks_fb, "KS feedback"),
+                           (pm, "PianoModel strike"), (pm_fb, "PianoModel sustain")] {
+        assert!(src.contains(marker), "missing intentional range: {what}");
+    }
+}
