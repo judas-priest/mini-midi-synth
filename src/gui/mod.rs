@@ -1499,7 +1499,13 @@ impl eframe::App for App {
                                 self.redo();
                             }
                         });
-                        self.draw_params_editable(ui);
+                        // Компактная главная: макро-строка (сетка 4×2 + XY-пад)
+                        // вместо 1430-строчного редактора; полный редактор —
+                        // в браузере (кнопка с именем патча на строке парта).
+                        self.draw_macros(ui); // обёртка: active_part
+                        ui.add_space(theme::SP_SM);
+                        ui.label(egui::RichText::new(
+                            "Полные параметры пресета — кнопка с именем патча на строке парта").weak());
                     }
                 });
             }

@@ -1663,8 +1663,4 @@ impl App {
         });
     }
 
-    /// Обёртка для главного экрана: активный парт.
-    pub(super) fn draw_params_editable(&mut self, ui: &mut egui::Ui) {
-        self.draw_params_editable_for(ui, self.active_part);
-    }
 }
