@@ -1094,6 +1094,18 @@ impl SynthEngine {
                             l.mod_matrix.load_from_params(&patch.params);
                             l.pitch_seq.load_from_params(&patch.params);
                         }
+                        l.macro_vals = params.macro_vals;
+                        self.arpeggiator.set_params(
+                            params.arp_enabled > 0.5,
+                            params.arp_mode as u8,
+                            params.arp_rate as u8,
+                            params.arp_octaves as u8,
+                            params.arp_gate,
+                        );
+                        self.arpeggiator.set_latch(params.arp_latch > 0.5);
+                        // PC switches params/matrix/pitch-seq/macros/arp;
+                        // MSEG/wavetable/LFO-stepseq need full LoadPatch —
+                        // design limit
                         l.update_routing_cache();
                     }
                     self.reset_preset_pickups();

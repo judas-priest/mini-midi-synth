@@ -1892,3 +1892,35 @@ fn tc_ks_ranges_intentionally_diverged() {
         assert!(src.contains(marker), "missing intentional range: {what}");
     }
 }
+
+// ── Task 8 (QW2-batch): ProgramChange parity with LoadPatch ─────────────
+
+#[test]
+fn program_change_applies_macros_and_arp() {
+    let mut patches = crate::preset::load_factory_patches();
+    let mut target = patches
+        .iter()
+        .find(|p| p.name.eq_ignore_ascii_case("init"))
+        .expect("init preset exists")
+        .clone();
+    target.name = "pc_macros_target".into();
+    target.params.insert("macro_0".into(), 0.5);
+    target.params.insert("arp_enabled".into(), 1.0);
+    target.params.insert("arp_latch".into(), 1.0);
+    target.params.insert("arp_gate".into(), 0.8);
+    patches.insert(1, target);
+
+    let mut e = SynthEngine::new(48_000.0);
+    e.set_patches(patches);
+    // Negative pre-state: PC must be the thing that flips these.
+    assert_eq!(e.parts[0].macro_vals[0], 0.0, "fresh part macros must be 0");
+    assert!(!e.arpeggiator.enabled, "fresh arp must be disabled");
+    assert!(!e.arpeggiator.latch_enabled(), "fresh arp must be unlatched");
+
+    e.handle_event(MidiEvent::ProgramChange { channel: 0, program: 1 });
+
+    assert_eq!(e.parts[0].macro_vals[0], 0.5, "PC must apply patch macros");
+    assert!(e.arpeggiator.enabled, "PC must apply arp_enabled");
+    assert!(e.arpeggiator.latch_enabled(), "PC must apply arp_latch");
+    assert_eq!(e.parts[0].params.arp_gate, 0.8, "PC must swap part params");
+}
