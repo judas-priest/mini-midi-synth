@@ -118,17 +118,6 @@ impl GraphicEq {
     ///
     /// `gains` — per-band gain in dB (-12..+12), length 11.
     /// `output_gain` — linear output gain applied after all bands.
-    ///
-    /// Call this once per block (not per sample) when gains change; the
-    /// coefficients are recomputed only when the gains array differs from
-    /// the last call.
-    #[allow(dead_code)]
-    pub fn update_gains(&mut self, gains: &[f32; 11]) {
-        if gains != &self.last_gains {
-            self.rebuild_all(gains);
-        }
-    }
-
     pub fn tick(&mut self, in_l: f32, in_r: f32, gains: &[f32; 11], output_gain: f32) -> (f32, f32) {
         // Lazily recompute coefficients if gains changed
         if gains != &self.last_gains {

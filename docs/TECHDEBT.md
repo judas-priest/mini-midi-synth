@@ -764,6 +764,24 @@ Swing, слайдеры L/T/D/P (DSP-only), vel ranges, pan.
 Без потери функциональности: ничего не удаляется, раскладка по частоте
 использования. Дополнения #30 выше (looper docked, тоггл docked/in-tab, полный
 юнит) — входят в этот дизайн.
+## QW-батч 2026-11-07 (refactor-audit 2026-11-07) — ГОТОВО
+
+11 Quick wins по свежему аудиту (REFACTOR_AUDIT_2026-11-07.md; НОВАЯ нумерация
+QW, НЕ совпадает со старой секцией REFACTOR_AUDIT ниже — там своя QW1-QW10):
+QW1 CC scope SSOT (баг: reverb_mix/delay_mix фейдеры умирали после save/load
+cc_map; PARAM_REGISTRY → Global, пины roundtrip+bidirectional); QW2 GM-pick
+браузера на партах ≥2 затирал layer_b_program seed (gui/mod.rs, guard part≤1);
+QW3 delete write-only Part::cached_* (zero reads, goldens byte-stable); QW4
+gui-less сборка --no-default-features починена (cfg на drum_undo_atom);
+QW5 CachedFxParams::from_preset — 111 дублированных дефолтов → прямой p.X;
+QW6 linear-interp пин + positive-read ветка (guard S6); QW7 13 dead pub API
+удалены (+каскад env_triggered); QW8 честные debug_assert (Part::set_param,
+GlobalParams::set fail-loud debug); QW9 панельный пин: скан 9 gui-файлов,
+derived needle len, CentralPanel-last; QW10 extract release_pedal_held /
+release_latch_mismatch (verbatim ×2 → методы); QW11 LFO1 слышим при
+маршрутизации через mod-matrix (lfo1_routed кэш+гейт — behavior fix, goldens
+не пострадали). Полный отчёт: REFACTOR_AUDIT_2026-11-07.md.
+
 ## REFACTOR_AUDIT (2026-10-30) — статусы по аудиту 2026-10-31: ГОТОВО QW1/QW2/QW3/QW6/QW8/QW9/QW10(код), S0, S1, S5; НЕ НАЧАТО QW4/QW5/QW7, S2/S3/S4/S6/S7/S8; QW10 хвост — carried-список не вычищен
 6 аудиторов + сверка 2-й итерацией. Quick wins (RT/GUI perf + латентные баги):
 QW1 wavetable alloc на каждый note-on (8KB+13k sin, CONFIRMED), QW2 LFO LUT

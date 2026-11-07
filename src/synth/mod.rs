@@ -506,7 +506,9 @@ impl GlobalParams {
             "pitch_bend_range" => self.pitch_bend_range = value.clamp(1.0, 24.0),
             "pitch_bend_up"    => self.pitch_bend_up    = value.clamp(0.0, 48.0),
             "pitch_bend_down"  => self.pitch_bend_down  = value.clamp(0.0, 48.0),
-            _ => {}
+            _ => {
+                debug_assert!(false, "GlobalParams::set: unknown key '{key}'");
+            }
         }
     }
 
@@ -609,17 +611,12 @@ struct Part {
     sustain_pedal: f32,     // CC64: 0.0 or 1.0
     lowest_held: u8,        // lowest active note (default 60)
     highest_held: u8,       // highest active note (default 60)
-    // Cached mod sources (control-rate, with poly_aftertouch=0) for per-voice re-evaluation
-    cached_mod_sources: mod_matrix::ModSources,
     poly_at_in_matrix: bool,  // true if any mod slot uses PolyAftertouch
     // Cached routing flags — updated on patch load, not per-block
+    lfo1_routed: bool,
     lfo2_routed: bool,
     lfo3_routed: bool,
     lfo4_routed: bool,
-    // Cached control-rate base values for per-voice ModulationState reconstruction
-    cached_lfo_pitch_offset: f32,  // pitch_offset minus mod_offsets.pitch
-    cached_filter_offset: f32,
-    cached_lfo_amp_base: f32,      // (1 - lfo1_amp) * (1 - lfo2_amp) * seq_amp
 }
 
 impl Part {
@@ -654,31 +651,19 @@ impl Part {
             ignore_pb: false, ignore_mw: false,
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
-            cached_mod_sources: mod_matrix::ModSources {
-                lfo_outputs: [0.0; 4], amp_env: 0.0, filter_env: 0.0,
-                mseg_outputs: [0.0; 2], mod_wheel: 0.0, aftertouch: 0.0,
-                velocity: 1.0, key_track: 0.0, step_seq: 0.0,
-                random_bipolar: 0.0, random_unipolar: 0.5,
-                alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
-                pitch_bend: 0.0, cc: [0.0; 4], breath: 0.0, expression: 1.0,
-                sustain_pedal: 0.0, lowest_key: 0.0, highest_key: 0.0,
-                latest_key: 0.0, poly_aftertouch: 0.0,
-                scene_lfo_outputs: [0.0; 2],
-                macro_vals: [0.0; 8],
-            },
             poly_at_in_matrix: false,
+            lfo1_routed: false,
             lfo2_routed: false,
             lfo3_routed: false,
             lfo4_routed: false,
-            cached_lfo_pitch_offset: 0.0,
-            cached_filter_offset: 0.0,
-            cached_lfo_amp_base: 1.0,
         }
     }
 
     /// Update cached routing flags from mod matrix slots. Call after loading a patch
     /// or changing mod matrix routing to avoid per-block scanning.
     fn update_routing_cache(&mut self) {
+        self.lfo1_routed = self.mod_matrix.slots.iter()
+            .any(|s| s.source == mod_matrix::ModSource::Lfo1 && s.depth.abs() > 0.001);
         self.lfo2_routed = self.mod_matrix.slots.iter()
             .any(|s| s.source == mod_matrix::ModSource::Lfo2 && s.depth.abs() > 0.001);
         self.lfo3_routed = self.mod_matrix.slots.iter()
@@ -1115,6 +1100,56 @@ impl Part {
         self.root_active = None;
     }
 
+    /// Pedal-up: разжать pedal-held (не key-held) голоса парта. Общий код
+    /// set_sustain и SetPartSustain (QW10: verbatim ×2 — дрейф запрещён).
+    /// `secs` = static pedal-up release (#7), None = patch release.
+    fn release_pedal_held(&mut self, secs: Option<f32>) {
+        // Latch voices: released unconditionally (см. latch_held контракт —
+        // latched note определяется latch_held, не keys_down).
+        for &n in &self.latch_held {
+            self.keys_down[n as usize] = false;
+        }
+        if let Some(secs) = secs {
+            // Two passes: needs-битмап держит borrows disjoint.
+            let mut needs = [false; 128];
+            for voice in &self.voices {
+                if voice.active && !voice.is_releasing()
+                    && !self.keys_down[voice.src_note as usize]
+                {
+                    needs[voice.note as usize] = true;
+                }
+            }
+            for (note, &held) in needs.iter().enumerate() {
+                if held { self.note_off_for(note as u8, secs); }
+            }
+        } else {
+            for voice in &mut self.voices {
+                if voice.active && !voice.is_releasing()
+                    && !self.keys_down[voice.src_note as usize]
+                {
+                    voice.note_off();
+                }
+            }
+        }
+        self.sustained_notes = [false; 128];
+        // Stale mono/latch entries would resurrect on the next key press.
+        self.note_stack.clear();
+        self.latch_held.clear();
+    }
+
+    /// Latch-mismatch: уход с play_mode==3 (latch) — снять latched голоса.
+    /// Общий код ProgramChange и LoadPatch (QW10). Вызывать ДО swap params.
+    fn release_latch_mismatch(&mut self, new_play_mode: u8) {
+        if self.params.play_mode as u8 == 3 && new_play_mode != 3 {
+            for voice in &mut self.voices {
+                if voice.active && self.latch_held.contains(&voice.src_note) {
+                    voice.note_off();
+                }
+            }
+            self.latch_held.clear();
+        }
+    }
+
     fn update_held_range(&mut self) {
         let mut lo = 255u8;
         let mut hi = 0u8;
@@ -1281,7 +1316,7 @@ impl Part {
             // by tests instead of silently no-op'ing live parameter updates.
             // In release builds, ignore (cheap, no audio-thread side effects).
             _ => {
-                debug_assert!(false, "GlobalParams::set: unknown key '{key}'");
+                debug_assert!(false, "Part::set_param: unknown key '{key}'");
             }
         }
     }
@@ -1480,120 +1515,124 @@ struct CachedFxParams {
 
 impl CachedFxParams {
     fn from_preset(p: Option<&PatchParams>, global: &GlobalParams) -> Self {
+        // Нет включённой части → PatchParams::default() (один источник
+        // дефолтов; прежние 111 unwrap_or-литералов дублировали его).
+        let default_params = PatchParams::default();
+        let p = p.unwrap_or(&default_params);
         Self {
-            tape_drive: p.map(|p| p.tape_drive).unwrap_or(0.0),
-            tape_saturation: p.map(|p| p.tape_saturation).unwrap_or(0.5),
-            tape_bias: p.map(|p| p.tape_bias).unwrap_or(0.5),
-            tape_tone: p.map(|p| p.tape_tone).unwrap_or(0.5),
-            tape_speed: p.map(|p| p.tape_speed).unwrap_or(0.5),
-            tape_mix: p.map(|p| p.tape_mix).unwrap_or(0.0),
-            neuron_drive: p.map(|p| p.neuron_drive).unwrap_or(0.0),
-            neuron_squash: p.map(|p| p.neuron_squash).unwrap_or(0.5),
-            neuron_stab: p.map(|p| p.neuron_stab).unwrap_or(0.5),
-            neuron_asym: p.map(|p| p.neuron_asym).unwrap_or(0.0),
-            neuron_bias: p.map(|p| p.neuron_bias).unwrap_or(0.5),
-            neuron_comb_freq: p.map(|p| p.neuron_comb_freq).unwrap_or(200.0),
-            neuron_comb_sep: p.map(|p| p.neuron_comb_sep).unwrap_or(0.5),
-            neuron_mix: p.map(|p| p.neuron_mix).unwrap_or(0.0),
-            ring_mod_freq: p.map(|p| p.ring_mod_freq).unwrap_or(440.0),
-            ring_mod_shape: p.map(|p| p.ring_mod_shape).unwrap_or(0.0),
-            ring_mod_bias: p.map(|p| p.ring_mod_bias).unwrap_or(0.5),
-            ring_mod_linear: p.map(|p| p.ring_mod_linear).unwrap_or(0.5),
-            ring_mod_mix: p.map(|p| p.ring_mod_mix).unwrap_or(0.0),
-            freq_shift_hz: p.map(|p| p.freq_shift_hz).unwrap_or(0.0),
-            freq_shift_feedback: p.map(|p| p.freq_shift_feedback).unwrap_or(0.0),
-            freq_shift_delay: p.map(|p| p.freq_shift_delay).unwrap_or(0.0),
-            freq_shift_mix: p.map(|p| p.freq_shift_mix).unwrap_or(0.0),
-            chorus_mix: p.map(|p| p.chorus_mix).unwrap_or(0.0),
-            delay_time_l: p.map(|p| p.delay_time_l).unwrap_or(0.3),
-            delay_time_r: p.map(|p| p.delay_time_r).unwrap_or(0.4),
-            delay_feedback: p.map(|p| p.delay_feedback).unwrap_or(0.4),
-            delay_filter: p.map(|p| p.delay_filter).unwrap_or(0.3),
-            delay_ping_pong: p.map(|p| p.delay_ping_pong).unwrap_or(0.0),
+            tape_drive: p.tape_drive,
+            tape_saturation: p.tape_saturation,
+            tape_bias: p.tape_bias,
+            tape_tone: p.tape_tone,
+            tape_speed: p.tape_speed,
+            tape_mix: p.tape_mix,
+            neuron_drive: p.neuron_drive,
+            neuron_squash: p.neuron_squash,
+            neuron_stab: p.neuron_stab,
+            neuron_asym: p.neuron_asym,
+            neuron_bias: p.neuron_bias,
+            neuron_comb_freq: p.neuron_comb_freq,
+            neuron_comb_sep: p.neuron_comb_sep,
+            neuron_mix: p.neuron_mix,
+            ring_mod_freq: p.ring_mod_freq,
+            ring_mod_shape: p.ring_mod_shape,
+            ring_mod_bias: p.ring_mod_bias,
+            ring_mod_linear: p.ring_mod_linear,
+            ring_mod_mix: p.ring_mod_mix,
+            freq_shift_hz: p.freq_shift_hz,
+            freq_shift_feedback: p.freq_shift_feedback,
+            freq_shift_delay: p.freq_shift_delay,
+            freq_shift_mix: p.freq_shift_mix,
+            chorus_mix: p.chorus_mix,
+            delay_time_l: p.delay_time_l,
+            delay_time_r: p.delay_time_r,
+            delay_feedback: p.delay_feedback,
+            delay_filter: p.delay_filter,
+            delay_ping_pong: p.delay_ping_pong,
             delay_mix: global.delay_mix
-                .unwrap_or_else(|| p.map(|p| p.delay_mix).unwrap_or(0.0)),
-            reverb_type: p.map(|p| p.reverb_type).unwrap_or(0.0),
+                .unwrap_or(p.delay_mix),
+            reverb_type: p.reverb_type,
             reverb_mix: global.reverb_mix
-                .unwrap_or_else(|| p.map(|p| p.reverb_mix).unwrap_or(0.0)),
-            reverb_room_size: p.map(|p| p.reverb_room_size).unwrap_or(0.5),
-            reverb_damping: p.map(|p| p.reverb_damping).unwrap_or(0.5),
-            reverb_width: p.map(|p| p.reverb_width).unwrap_or(1.0),
-            reverb_pre_delay: p.map(|p| p.reverb_pre_delay).unwrap_or(0.02),
-            spring_size: p.map(|p| p.spring_size).unwrap_or(0.5),
-            spring_decay: p.map(|p| p.spring_decay).unwrap_or(0.5),
-            spring_reflections: p.map(|p| p.spring_reflections).unwrap_or(0.5),
-            spring_damping: p.map(|p| p.spring_damping).unwrap_or(0.5),
-            spring_spin: p.map(|p| p.spring_spin).unwrap_or(0.3),
-            spring_chaos: p.map(|p| p.spring_chaos).unwrap_or(0.0),
-            spring_mix: p.map(|p| p.spring_mix).unwrap_or(0.0),
-            rotary_speed: p.map(|p| p.rotary_speed).unwrap_or(0.0),
-            rotary_mix: p.map(|p| p.rotary_mix).unwrap_or(0.0),
-            ensemble_depth: p.map(|p| p.ensemble_depth).unwrap_or(0.5),
-            ensemble_rate: p.map(|p| p.ensemble_rate).unwrap_or(0.5),
-            ensemble_mix: p.map(|p| p.ensemble_mix).unwrap_or(0.0),
-            resonator_freq: p.map(|p| p.resonator_freq).unwrap_or(440.0),
-            resonator_decay: p.map(|p| p.resonator_decay).unwrap_or(0.7),
-            resonator_mix: p.map(|p| p.resonator_mix).unwrap_or(0.0),
-            bonsai_drive: p.map(|p| p.bonsai_drive).unwrap_or(0.5),
-            bonsai_tone: p.map(|p| p.bonsai_tone).unwrap_or(0.5),
-            bonsai_asym: p.map(|p| p.bonsai_asym).unwrap_or(0.0),
-            bonsai_mode: p.map(|p| p.bonsai_mode).unwrap_or(0.0),
-            bonsai_mix: p.map(|p| p.bonsai_mix).unwrap_or(0.0),
-            wave_shaper_drive: p.map(|p| p.wave_shaper_drive).unwrap_or(0.5),
-            wave_shaper_mode: p.map(|p| p.wave_shaper_mode).unwrap_or(0.0),
-            wave_shaper_bias: p.map(|p| p.wave_shaper_bias).unwrap_or(0.0),
-            wave_shaper_mix: p.map(|p| p.wave_shaper_mix).unwrap_or(0.0),
-            ms_mid_gain: p.map(|p| p.ms_mid_gain).unwrap_or(1.0),
-            ms_side_gain: p.map(|p| p.ms_side_gain).unwrap_or(1.0),
-            ms_rotation: p.map(|p| p.ms_rotation).unwrap_or(0.0),
-            ms_mix: p.map(|p| p.ms_mix).unwrap_or(0.0),
-            graphic_eq_gains: p.map(|p| p.graphic_eq_gains).unwrap_or([0.0; 11]),
-            graphic_eq_output: p.map(|p| p.graphic_eq_output).unwrap_or(1.0),
-            conditioner_bass_cut: p.map(|p| p.conditioner_bass_cut).unwrap_or(20.0),
-            conditioner_width: p.map(|p| p.conditioner_width).unwrap_or(1.0),
-            conditioner_threshold: p.map(|p| p.conditioner_threshold).unwrap_or(1.0),
-            conditioner_mix: p.map(|p| p.conditioner_mix).unwrap_or(0.0),
-            exciter_drive: p.map(|p| p.exciter_drive).unwrap_or(0.5),
-            exciter_freq: p.map(|p| p.exciter_freq).unwrap_or(3000.0),
-            exciter_presence: p.map(|p| p.exciter_presence).unwrap_or(0.5),
-            exciter_mix: p.map(|p| p.exciter_mix).unwrap_or(0.0),
-            floaty_time: p.map(|p| p.floaty_time).unwrap_or(0.3),
-            floaty_feedback: p.map(|p| p.floaty_feedback).unwrap_or(0.3),
-            floaty_wobble: p.map(|p| p.floaty_wobble).unwrap_or(0.3),
-            floaty_rate: p.map(|p| p.floaty_rate).unwrap_or(0.5),
-            floaty_damp: p.map(|p| p.floaty_damp).unwrap_or(0.5),
-            floaty_mix: p.map(|p| p.floaty_mix).unwrap_or(0.0),
-            reverb2_decay: p.map(|p| p.reverb2_decay).unwrap_or(0.5),
-            reverb2_damping: p.map(|p| p.reverb2_damping).unwrap_or(0.5),
-            reverb2_size: p.map(|p| p.reverb2_size).unwrap_or(0.5),
-            reverb2_mix: p.map(|p| p.reverb2_mix).unwrap_or(0.0),
-            combulator_freq: p.map(|p| p.combulator_freq).unwrap_or(440.0),
-            combulator_offset2: p.map(|p| p.combulator_offset2).unwrap_or(5.0),
-            combulator_offset3: p.map(|p| p.combulator_offset3).unwrap_or(-7.0),
-            combulator_feedback: p.map(|p| p.combulator_feedback).unwrap_or(0.5),
-            combulator_tone: p.map(|p| p.combulator_tone).unwrap_or(0.5),
-            combulator_mix: p.map(|p| p.combulator_mix).unwrap_or(0.0),
-            treemonster_threshold: p.map(|p| p.treemonster_threshold).unwrap_or(0.5),
-            treemonster_shift: p.map(|p| p.treemonster_shift).unwrap_or(0.0),
-            treemonster_ring_mix: p.map(|p| p.treemonster_ring_mix).unwrap_or(0.5),
-            treemonster_mix: p.map(|p| p.treemonster_mix).unwrap_or(0.0),
-            nimbus_position: p.map(|p| p.nimbus_position).unwrap_or(0.5),
-            nimbus_size: p.map(|p| p.nimbus_size).unwrap_or(0.5),
-            nimbus_pitch: p.map(|p| p.nimbus_pitch).unwrap_or(0.0),
-            nimbus_density: p.map(|p| p.nimbus_density).unwrap_or(0.5),
-            nimbus_spread: p.map(|p| p.nimbus_spread).unwrap_or(0.5),
-            nimbus_texture: p.map(|p| p.nimbus_texture).unwrap_or(0.5),
-            nimbus_mix: p.map(|p| p.nimbus_mix).unwrap_or(0.0),
-            vocoder_env_follow: p.map(|p| p.vocoder_env_follow).unwrap_or(0.5),
-            vocoder_gate: p.map(|p| p.vocoder_gate).unwrap_or(0.0),
-            vocoder_mix: p.map(|p| p.vocoder_mix).unwrap_or(0.0),
-            conv_reverb_room: p.map(|p| p.conv_reverb_room).unwrap_or(0.5),
-            conv_reverb_damping: p.map(|p| p.conv_reverb_damping).unwrap_or(0.5),
-            conv_reverb_predelay: p.map(|p| p.conv_reverb_predelay).unwrap_or(0.02),
-            conv_reverb_mix: p.map(|p| p.conv_reverb_mix).unwrap_or(0.0),
-            airwindows_mode: p.map(|p| p.airwindows_mode as u32).unwrap_or(0),
-            airwindows_drive: p.map(|p| p.airwindows_drive).unwrap_or(0.5),
-            airwindows_mix: p.map(|p| p.airwindows_mix).unwrap_or(0.0),
+                .unwrap_or(p.reverb_mix),
+            reverb_room_size: p.reverb_room_size,
+            reverb_damping: p.reverb_damping,
+            reverb_width: p.reverb_width,
+            reverb_pre_delay: p.reverb_pre_delay,
+            spring_size: p.spring_size,
+            spring_decay: p.spring_decay,
+            spring_reflections: p.spring_reflections,
+            spring_damping: p.spring_damping,
+            spring_spin: p.spring_spin,
+            spring_chaos: p.spring_chaos,
+            spring_mix: p.spring_mix,
+            rotary_speed: p.rotary_speed,
+            rotary_mix: p.rotary_mix,
+            ensemble_depth: p.ensemble_depth,
+            ensemble_rate: p.ensemble_rate,
+            ensemble_mix: p.ensemble_mix,
+            resonator_freq: p.resonator_freq,
+            resonator_decay: p.resonator_decay,
+            resonator_mix: p.resonator_mix,
+            bonsai_drive: p.bonsai_drive,
+            bonsai_tone: p.bonsai_tone,
+            bonsai_asym: p.bonsai_asym,
+            bonsai_mode: p.bonsai_mode,
+            bonsai_mix: p.bonsai_mix,
+            wave_shaper_drive: p.wave_shaper_drive,
+            wave_shaper_mode: p.wave_shaper_mode,
+            wave_shaper_bias: p.wave_shaper_bias,
+            wave_shaper_mix: p.wave_shaper_mix,
+            ms_mid_gain: p.ms_mid_gain,
+            ms_side_gain: p.ms_side_gain,
+            ms_rotation: p.ms_rotation,
+            ms_mix: p.ms_mix,
+            graphic_eq_gains: p.graphic_eq_gains,
+            graphic_eq_output: p.graphic_eq_output,
+            conditioner_bass_cut: p.conditioner_bass_cut,
+            conditioner_width: p.conditioner_width,
+            conditioner_threshold: p.conditioner_threshold,
+            conditioner_mix: p.conditioner_mix,
+            exciter_drive: p.exciter_drive,
+            exciter_freq: p.exciter_freq,
+            exciter_presence: p.exciter_presence,
+            exciter_mix: p.exciter_mix,
+            floaty_time: p.floaty_time,
+            floaty_feedback: p.floaty_feedback,
+            floaty_wobble: p.floaty_wobble,
+            floaty_rate: p.floaty_rate,
+            floaty_damp: p.floaty_damp,
+            floaty_mix: p.floaty_mix,
+            reverb2_decay: p.reverb2_decay,
+            reverb2_damping: p.reverb2_damping,
+            reverb2_size: p.reverb2_size,
+            reverb2_mix: p.reverb2_mix,
+            combulator_freq: p.combulator_freq,
+            combulator_offset2: p.combulator_offset2,
+            combulator_offset3: p.combulator_offset3,
+            combulator_feedback: p.combulator_feedback,
+            combulator_tone: p.combulator_tone,
+            combulator_mix: p.combulator_mix,
+            treemonster_threshold: p.treemonster_threshold,
+            treemonster_shift: p.treemonster_shift,
+            treemonster_ring_mix: p.treemonster_ring_mix,
+            treemonster_mix: p.treemonster_mix,
+            nimbus_position: p.nimbus_position,
+            nimbus_size: p.nimbus_size,
+            nimbus_pitch: p.nimbus_pitch,
+            nimbus_density: p.nimbus_density,
+            nimbus_spread: p.nimbus_spread,
+            nimbus_texture: p.nimbus_texture,
+            nimbus_mix: p.nimbus_mix,
+            vocoder_env_follow: p.vocoder_env_follow,
+            vocoder_gate: p.vocoder_gate,
+            vocoder_mix: p.vocoder_mix,
+            conv_reverb_room: p.conv_reverb_room,
+            conv_reverb_damping: p.conv_reverb_damping,
+            conv_reverb_predelay: p.conv_reverb_predelay,
+            conv_reverb_mix: p.conv_reverb_mix,
+            airwindows_mode: p.airwindows_mode as u32,
+            airwindows_drive: p.airwindows_drive,
+            airwindows_mix: p.airwindows_mix,
         }
     }
 }
@@ -1732,51 +1771,14 @@ impl SynthEngine {
     fn set_sustain(&mut self, value: u8) {
         let on = value >= 64;
         self.sustain.store(on, std::sync::atomic::Ordering::Relaxed);
+        let sr = self.sustain_release;
         for (i, part) in self.parts.iter_mut().enumerate() {
             part.sustain_pedal = if on { 1.0 } else { 0.0 };
             // SF2 voices: rustysynth applies hold-pedal per channel itself —
             // per-part mask, disabled parts get CC64=0 (bass without sustain).
             self.sampler.set_part_sustain(i, on && part.sustain_enabled);
             if !on {
-                // Latch voices are released unconditionally (as before): a
-                // latched note is defined by latch_held, not by a held key —
-                // clearing latch_held below without releasing its keys_down
-                // would leave a voice that its own key-off can never stop
-                // (latch note_off early-returns).
-                for &n in &part.latch_held {
-                    part.keys_down[n as usize] = false;
-                }
-                if let Some(secs) = self.sustain_release {
-                    // Static pedal-up release (TECHDEBT #7): pedal-released
-                    // voices take `secs` instead of the patch release.
-                    // Key-held voices (`keys_down`) are untouched — same
-                    // predicate as the plain path below. Two passes over a
-                    // stack bitmap keep the borrows of `part` disjoint.
-                    let mut needs = [false; 128];
-                    for voice in &part.voices {
-                        if voice.active && !voice.is_releasing()
-                            && !part.keys_down[voice.src_note as usize]
-                        {
-                            needs[voice.note as usize] = true;
-                        }
-                    }
-                    for (note, &held) in needs.iter().enumerate() {
-                        if held { part.note_off_for(note as u8, secs); }
-                    }
-                } else {
-                    for voice in &mut part.voices {
-                        if voice.active && !voice.is_releasing()
-                            && !part.keys_down[voice.src_note as usize]
-                        {
-                            voice.note_off();
-                        }
-                    }
-                }
-                part.sustained_notes = [false; 128];
-                // Pedal-only holds are gone; stale mono/latch entries would
-                // resurrect on the next key press (mono retrigger).
-                part.note_stack.clear();
-                part.latch_held.clear();
+                part.release_pedal_held(sr);
             }
         }
     }
@@ -2391,14 +2393,7 @@ impl SynthEngine {
                         // Seamless switch: same latch-mismatch release as
                         // LoadPatch — must run BEFORE the params swap, while
                         // l.params still holds the OLD play_mode.
-                        if l.params.play_mode as u8 == 3 && params.play_mode as u8 != 3 {
-                            for voice in &mut l.voices {
-                                if voice.active && l.latch_held.contains(&voice.src_note) {
-                                    voice.note_off();
-                                }
-                            }
-                            l.latch_held.clear();
-                        }
+                        l.release_latch_mismatch(params.play_mode as u8);
                         l.params = params;
                         // Диапазон парта — собственность SetPartRange/сплита:
                         // ProgramChange не перетирает его (#41, резидуал —
@@ -2533,14 +2528,7 @@ impl SynthEngine {
                     // Only a latch-mode mismatch releases the latch-held
                     // voices — a non-latch patch cannot toggle them off, and
                     // they would ring forever (audit fact 6).
-                    if l.params.play_mode as u8 == 3 && params.play_mode as u8 != 3 {
-                        for voice in &mut l.voices {
-                            if voice.active && l.latch_held.contains(&voice.src_note) {
-                                voice.note_off();
-                            }
-                        }
-                        l.latch_held.clear();
-                    }
+                    l.release_latch_mismatch(params.play_mode as u8);
                     // Sync macro values from preset into live part state
                     // Load wavetable data if provided. `replace` hands the
                     // previous Arc back into the event instead of dropping the
@@ -2668,43 +2656,7 @@ impl SynthEngine {
                         self.sampler.set_part_sustain(part, on);
                     }
                     if !on && l.sustain_pedal > 0.5 {
-                        // Разжать pedal-held ноты этого парта — паттерн
-                        // pedal-up из set_sustain (включая latch-очистку,
-                        // sustain_release Some-ветку и !keys_down).
-                        for &n in &l.latch_held {
-                            l.keys_down[n as usize] = false;
-                        }
-                        if let Some(secs) = self.sustain_release {
-                            // Static pedal-up release (TECHDEBT #7): pedal-
-                            // released voices take `secs` instead of the patch
-                            // release. Key-held voices (`keys_down`) are
-                            // untouched. Two passes keep borrows disjoint.
-                            let mut needs = [false; 128];
-                            for voice in &l.voices {
-                                if voice.active && !voice.is_releasing()
-                                    && !l.keys_down[voice.src_note as usize]
-                                {
-                                    needs[voice.note as usize] = true;
-                                }
-                            }
-                            for (note, &held) in needs.iter().enumerate() {
-                                if held { l.note_off_for(note as u8, secs); }
-                            }
-                        } else {
-                            for voice in &mut l.voices {
-                                if voice.active && !voice.is_releasing()
-                                    && !l.keys_down[voice.src_note as usize]
-                                {
-                                    voice.note_off();
-                                }
-                            }
-                        }
-                        l.sustained_notes = [false; 128];
-                        // Pedal-only holds are gone; stale mono/latch entries
-                        // would resurrect on the next key press (mono
-                        // retrigger).
-                        l.note_stack.clear();
-                        l.latch_held.clear();
+                        l.release_pedal_held(self.sustain_release);
                     }
                 }
             }
@@ -3453,6 +3405,7 @@ impl SynthEngine {
             // LFO 1
             let lfo1_wf = LfoWaveform::from_param(part.params.lfo_waveform);
             let lfo1_active = lfo1_wf == LfoWaveform::StepSeq
+                || part.lfo1_routed
                 || part.params.lfo_pitch_depth > 0.001
                 || part.params.lfo_filter_depth > 0.001
                 || part.params.lfo_amp_depth > 0.001
@@ -3587,12 +3540,6 @@ impl SynthEngine {
                 * (1.0 - part.params.lfo2_amp_depth * 0.5 * (1.0 - lfo2_val))
                 * seq_amp;
             let amp_mod = lfo_amp_base * (1.0 + mod_offsets.amplitude).max(0.0);
-
-            // Cache mod sources and base values for per-voice poly AT re-evaluation
-            part.cached_mod_sources = mod_sources;
-            part.cached_lfo_pitch_offset = lfo_pitch_offset_base;
-            part.cached_filter_offset = filter_offset;
-            part.cached_lfo_amp_base = lfo_amp_base;
 
             layer_mods[li] = ModulationState {
                 pitch_mult, filter_offset, filter_offset_semis: mod_offsets.filter_cutoff, amp_mod,

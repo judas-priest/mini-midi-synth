@@ -115,11 +115,6 @@ impl FilterType {
     pub fn is_polivoks(self) -> bool {
         matches!(self, Self::PolivoksLP | Self::PolivoksBP)
     }
-
-    #[allow(dead_code)]
-    pub fn is_k35(self) -> bool {
-        matches!(self, Self::K35LP | Self::K35HP)
-    }
 }
 
 /// Transistor thermal voltage scaling.

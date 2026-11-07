@@ -1496,4 +1496,85 @@ fn tc_linear_interp_bit_identical_to_canon() {
         assert_eq!(canon.to_bits(), local.to_bits(),
             "linear interp diverges at delay={delay_raw}");
     }
+    // Positive-read ветка (mid-buffer write_pos): канон conditional-subtract
+    // vs любые fmod-варианты (combulator/floaty) — расхождение ловится тут (QW6)
+    for wp in [100usize, 300, 511] {
+        for delay_raw in [0.0f32, 0.5, 1.0, 7.25, 50.0] {
+            let d = delay_raw.clamp(1.0, (n - 2) as f32);
+            let read_f = wp as f32 - d;
+            let read_f = if read_f < 0.0 { read_f + n as f32 } else { read_f };
+            let i0 = read_f as usize % n;
+            let i1 = (i0 + 1) % n;
+            let frac = read_f.fract();
+            let local = buf[i0] * (1.0 - frac) + buf[i1] * frac;
+            let canon = dsp_utils::buf_read_linear(&buf, wp, delay_raw);
+            assert_eq!(canon.to_bits(), local.to_bits(),
+                "linear interp diverges at write_pos={wp} delay={delay_raw}");
+        }
+    }
+}
+
+// ── QW1: CC scope SSOT (2026-11-07 refactor-audit) ──────────────────
+
+#[test]
+fn tc_registry_global_keys_have_global_scope() {
+    for m in crate::cc_map::PARAM_REGISTRY {
+        if crate::cc_map::is_global_param(m.key) {
+            assert_eq!(m.scope, crate::cc_map::ParamScope::Global,
+                "registry scope contradicts GLOBAL_PARAM_KEYS for '{}'", m.key);
+        }
+        if m.scope == crate::cc_map::ParamScope::Global {
+            assert!(crate::cc_map::is_global_param(m.key),
+                "registry Global '{}' missing from GLOBAL_PARAM_KEYS", m.key);
+        }
+    }
+}
+
+#[test]
+fn tc_cc_scope_survives_config_roundtrip() {
+    let config = crate::config::Config {
+        cc_map: Some(crate::cc_map::CcMapRaw::from_cc_map(&crate::cc_map::CcMap::default_map())),
+        ..Default::default()
+    };
+    let map = crate::cc_map::CcMap::from_config(&config);
+    for cc in [54u8, 66] {
+        let b = map.bindings[cc as usize].expect("binding present");
+        assert_eq!(b.scope, crate::cc_map::ParamScope::Global,
+            "CC{cc} {} must stay Global after roundtrip", b.param_key);
+    }
+    // SSOT-forcing: конфиг со СТАРОЙ записью scope=Patch — реестр правит
+    let mut raw = crate::cc_map::CcMapRaw::from_cc_map(&crate::cc_map::CcMap::default_map());
+    raw.bindings.get_mut(&66).unwrap().scope = crate::cc_map::ParamScope::Patch;
+    let cfg2 = crate::config::Config { cc_map: Some(raw), ..Default::default() };
+    let map2 = crate::cc_map::CcMap::from_config(&cfg2);
+    assert_eq!(map2.bindings[66].as_ref().unwrap().scope,
+        crate::cc_map::ParamScope::Global,
+        "registry is SSOT: stale saved scope must be overridden");
+}
+
+// ── QW11: LFO1 routed через mod-matrix обязан тикать ─────────────────
+
+#[test]
+fn tc_lfo1_routed_cache() {
+    let mut e = SynthEngine::new(48_000.0);
+    // Lfo1-слот с depth != 0, все direct depths = 0
+    let part = &mut e.parts[0];
+    part.params.lfo_pitch_depth = 0.0;
+    part.params.lfo_filter_depth = 0.0;
+    part.params.lfo_amp_depth = 0.0;
+    part.mod_matrix.slots[0] = crate::synth::mod_matrix::ModSlot {
+        source: crate::synth::mod_matrix::ModSource::Lfo1,
+        dest: crate::synth::mod_matrix::ModDest::Pitch,
+        depth: 0.5,
+    };
+    part.update_routing_cache();
+    assert!(part.lfo1_routed, "Lfo1 slot with depth must set lfo1_routed");
+    // depth = 0 → false
+    part.mod_matrix.slots[0].depth = 0.0;
+    part.update_routing_cache();
+    assert!(!part.lfo1_routed);
+    // отрицательная глубина — тоже маршрутизация (abs)
+    part.mod_matrix.slots[0].depth = -0.5;
+    part.update_routing_cache();
+    assert!(part.lfo1_routed);
 }

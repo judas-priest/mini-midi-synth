@@ -371,15 +371,6 @@ impl AudioBackend {
     }
 }
 
-/// Name of the current system default output device. GUI-thread only
-/// (enumerates devices, may allocate). `None` = no default device right now,
-/// or the backend failed to report the name.
-pub fn default_output_device_name(host_id: cpal::HostId) -> Option<String> {
-    let host = cpal::host_from_id(host_id).ok()?;
-    let device = host.default_output_device()?;
-    device.name().ok()
-}
-
 /// Backoff between reconnect attempts (TECHDEBT #18: 2 s).
 pub const RECONNECT_BACKOFF: std::time::Duration = std::time::Duration::from_secs(2);
 

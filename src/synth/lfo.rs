@@ -59,13 +59,6 @@ impl LfoWaveform {
     }
 }
 
-/// Tempo-sync rate divisions. Index maps to musical subdivision.
-#[allow(dead_code)]
-pub const TEMPO_SYNC_NAMES: &[&str] = &[
-    "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/8", "1/16", "1/32",
-    "1/2T", "1/4T", "1/8T", "1/16T", "1/2D", "1/4D", "1/8D", "1/16D",
-];
-
 /// Convert tempo sync index to cycles per beat (quarter note).
 fn tempo_sync_cycles_per_beat(index: u8) -> f32 {
     // cycles_per_beat = 1 / (note_duration_in_beats)
@@ -164,8 +157,6 @@ pub struct Lfo {
     // Envelope mode state
     env_stage: u8,       // 0=idle, 1=attack, 2=decay, 3=sustain, 4=release
     env_value: f32,
-    #[allow(dead_code)]
-    env_triggered: bool,
     // Step sequencer data
     pub step_values: [f32; STEP_SEQ_LEN],
     pub step_count: u8,
@@ -196,7 +187,6 @@ impl Lfo {
             prev_phase_int: 0,
             env_stage: 0,
             env_value: 0.0,
-            env_triggered: false,
             step_values: [0.0; STEP_SEQ_LEN],
             step_count: 16,
             loop_start: 0,
@@ -251,21 +241,6 @@ impl Lfo {
                 self.step_phase = 0.0;
             }
             _ => {} // Free Run: no reset
-        }
-    }
-
-    /// Trigger envelope mode (one-shot from LFO).
-    #[allow(dead_code)]
-    pub fn trigger_envelope(&mut self) {
-        self.env_stage = 1; // attack
-        self.env_triggered = true;
-    }
-
-    /// Release envelope mode.
-    #[allow(dead_code)]
-    pub fn release_envelope(&mut self) {
-        if self.env_stage > 0 && self.env_stage < 4 {
-            self.env_stage = 4; // release
         }
     }
 

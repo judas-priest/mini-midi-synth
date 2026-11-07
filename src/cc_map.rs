@@ -22,7 +22,7 @@ pub struct ParamMeta {
 
 /// All mappable parameters.
 pub const PARAM_REGISTRY: &[ParamMeta] = &[
-    // Global params (persist across patch changes — only volume and tone)
+    // Global params (persist across patch changes)
     ParamMeta { key: "master_volume", label: "Volume", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Global },
     ParamMeta { key: "master_tone", label: "Tone", min: 200.0, max: 20000.0, logarithmic: true, scope: ParamScope::Global },
     // Patch params (reset on patch change)
@@ -47,12 +47,12 @@ pub const PARAM_REGISTRY: &[ParamMeta] = &[
     ParamMeta { key: "portamento_time", label: "Portamento", min: 0.0, max: 2.0, logarithmic: false, scope: ParamScope::Patch },
     ParamMeta { key: "unison_detune", label: "Unison Detune", min: 0.0, max: 50.0, logarithmic: false, scope: ParamScope::Patch },
     ParamMeta { key: "chorus_mix", label: "Chorus", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
-    ParamMeta { key: "delay_mix", label: "Delay Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "delay_mix", label: "Delay Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Global }, // Global
     ParamMeta { key: "delay_time_l", label: "Delay Time L", min: 0.01, max: 2.0, logarithmic: false, scope: ParamScope::Patch },
     ParamMeta { key: "delay_time_r", label: "Delay Time R", min: 0.01, max: 2.0, logarithmic: false, scope: ParamScope::Patch },
     ParamMeta { key: "delay_feedback", label: "Delay Feedback", min: 0.0, max: 0.95, logarithmic: false, scope: ParamScope::Patch },
     ParamMeta { key: "delay_filter", label: "Delay Filter", min: 0.0, max: 0.95, logarithmic: false, scope: ParamScope::Patch },
-    ParamMeta { key: "reverb_mix", label: "Reverb Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
+    ParamMeta { key: "reverb_mix", label: "Reverb Mix", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Global }, // Global
     ParamMeta { key: "reverb_room_size", label: "Reverb Room", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
     ParamMeta { key: "reverb_damping", label: "Reverb Damp", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
     ParamMeta { key: "reverb_width", label: "Reverb Width", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Patch },
