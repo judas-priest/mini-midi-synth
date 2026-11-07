@@ -376,7 +376,10 @@ impl Lfo {
                 super::dsp_utils::xorshift32(&mut self.noise_state);
                 let raw = (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
                 // deform 0=very smooth (coeff~0.999), 1=less smooth (coeff~0.9)
-                let coeff = 0.999 - deform * 0.099;
+                // deform < -0.091 давал coeff > 1 = неустойчивый полюс
+                // (экспоненциальный разлёт → inf → NaN навсегда). Клэмп
+                // держит полюс внутри единичного круга.
+                let coeff = (0.999 - deform * 0.099).min(0.999);
                 self.sh_smooth = self.sh_smooth * coeff + raw * (1.0 - coeff);
                 let val = self.sh_smooth;
                 return if self.unipolar { (val + 1.0) * 0.5 } else { val };
@@ -455,6 +458,16 @@ mod tests {
                 (sine_lut(-p) - (-p * std::f32::consts::TAU).sin()).abs() < 1e-2,
                 "phase -{p}"
             );
+        }
+    }
+
+    #[test]
+    fn smooth_noise_stays_finite_for_negative_deform() {
+        let mut lfo = Lfo::new(48000.0);
+        lfo.unipolar = false;
+        for _ in 0..5000 {
+            let v = lfo.tick_with_deform(5.0, LfoWaveform::SmoothNoise, -1.0);
+            assert!(v.is_finite(), "diverged: {v}");
         }
     }
 }
