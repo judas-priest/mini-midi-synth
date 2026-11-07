@@ -1,13 +1,7 @@
 //! Overdrive/Distortion with pre-filter, waveshaping, tone control.
 //! Includes simple 2x oversampling to reduce aliasing.
 
-use super::dsp_utils::DcBlocker;
-
-/// Cheap soft-clip: x / (1 + |x|)
-#[inline(always)]
-fn soft_clip(x: f32) -> f32 {
-    x / (1.0 + x.abs())
-}
+use super::dsp_utils::{soft_clip, DcBlocker};
 
 /// Asymmetric tube-like distortion
 #[inline(always)]

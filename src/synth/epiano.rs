@@ -242,7 +242,7 @@ impl ElectricPianoModel {
         // Model: soft clip via tanh approximation.
         let driven = sum * self.pickup_drive;
         // Smooth soft-clip: x / (1 + |x|) — no derivative discontinuities
-        let pickup_out = driven / (1.0 + driven.abs());
+        let pickup_out = super::dsp_utils::soft_clip(driven);
 
         // Normalize pickup output back to reasonable level
         let out = pickup_out / self.pickup_drive.sqrt() + noise_out;

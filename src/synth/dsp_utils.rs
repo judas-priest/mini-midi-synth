@@ -180,3 +180,27 @@ pub fn xorshift32(state: &mut u32) -> u32 {
     *state ^= *state << 5;
     *state
 }
+
+/// Canonical soft-clip x/(1+|x|) (drum/overdrive canon; bit-identity pinned
+/// by preset goldens).
+#[inline(always)]
+pub fn soft_clip(x: f32) -> f32 {
+    x / (1.0 + x.abs())
+}
+
+/// Fast exponential approximation for negative arguments.
+/// Uses the identity exp(x) ≈ (1 + x/256)^256 via repeated squaring.
+#[inline(always)]
+pub fn fast_exp(x: f32) -> f32 {
+    let x = x.max(-20.0);
+    let mut y = 1.0 + x / 256.0;
+    y *= y;
+    y *= y;
+    y *= y;
+    y *= y; // 2^4 = 16
+    y *= y;
+    y *= y;
+    y *= y;
+    y *= y; // 2^8 = 256
+    y.max(0.0)
+}

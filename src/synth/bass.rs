@@ -475,7 +475,7 @@ impl BassModel {
         // === Slap click (percussive transient, decays outside loop) ===
         let click = if self.slap_click_amp > 0.001 {
             let noise = self.next_noise();
-            let env = self.slap_click_amp * fast_exp(-self.time * 200.0);
+            let env = self.slap_click_amp * super::dsp_utils::fast_exp(-self.time * 200.0);
             if env < 0.001 { self.slap_click_amp = 0.0; }
             noise * env
         } else {
@@ -508,14 +508,4 @@ impl BassModel {
         let out = pickup_filtered + body_out;
         out.clamp(-1.0, 1.0)
     }
-}
-
-/// Fast exponential approximation for negative arguments.
-#[inline]
-fn fast_exp(x: f32) -> f32 {
-    let x = x.max(-20.0);
-    let mut y = 1.0 + x / 256.0;
-    y *= y; y *= y; y *= y; y *= y;
-    y *= y; y *= y; y *= y; y *= y;
-    y.max(0.0)
 }

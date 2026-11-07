@@ -60,12 +60,6 @@ const METAL_FREQS: [f32; 6] = [204.68, 297.64, 369.47, 411.30, 521.77, 585.32];
 // Utility
 // ---------------------------------------------------------------------------
 
-/// Cheap soft-clip: avoids tanh cost.
-#[inline(always)]
-fn soft_clip(x: f32) -> f32 {
-    x / (1.0 + x.abs())
-}
-
 /// Pre-compute exponential decay coefficient from time in seconds.
 /// `level *= coeff` each sample → reaches ~-60dB after `time_s`.
 #[inline(always)]
@@ -143,7 +137,7 @@ impl KickVoice {
             0.0
         };
 
-        let out = soft_clip(tone * self.amp + click);
+        let out = super::dsp_utils::soft_clip(tone * self.amp + click);
         self.amp *= self.amp_coeff;
         if self.amp < 0.0001 { self.active = false; }
         out
@@ -303,7 +297,7 @@ impl SnareVoice {
             self.active = false;
         }
 
-        soft_clip(body + noise + wire + click)
+        super::dsp_utils::soft_clip(body + noise + wire + click)
     }
 
     fn kill(&mut self, fade_samples: f32) {
@@ -480,7 +474,7 @@ impl ClapVoice {
 
         let out = filtered * env * self.amp;
         if self.burst_index >= 4 && self.amp < 0.0001 { self.active = false; }
-        soft_clip(out)
+        super::dsp_utils::soft_clip(out)
     }
 
     fn kill(&mut self, fade_samples: f32) {
@@ -606,7 +600,7 @@ impl ClickVoice {
 
         self.amp *= self.amp_coeff;
         if self.amp < 0.0001 && self.tone_amp < 0.0001 { self.active = false; }
-        soft_clip(noise + tri)
+        super::dsp_utils::soft_clip(noise + tri)
     }
 
     fn kill(&mut self, fade_samples: f32) {

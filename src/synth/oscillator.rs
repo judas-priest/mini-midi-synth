@@ -1205,20 +1205,20 @@ impl Oscillator {
             // Plus Op4: feedback modulator for metallic character
 
             // Op4: self-feedback operator (adds metallic inharmonicity)
-            let fb_level = 0.3 * fast_exp(-t * 2.0);
+            let fb_level = 0.3 * super::dsp_utils::fast_exp(-t * 2.0);
             let op4_fb = (phases[3] * TAU).sin();
             let op4 = ((phases[3] + fb_level * op4_fb) * TAU).sin();
 
             // Op3: high-ratio modulator — attack transient (decays fast)
-            let op3_idx = fm_index * 0.7 * fast_exp(-t * 15.0);
+            let op3_idx = fm_index * 0.7 * super::dsp_utils::fast_exp(-t * 15.0);
             let op3 = ((phases[2] + op3_idx * 0.1 * op4) * TAU).sin();
 
             // Op2: mid-ratio modulator — body harmonics (slower decay)
-            let op2_idx = fm_index * 0.4 * fast_exp(-t * 1.5) + 0.08;
+            let op2_idx = fm_index * 0.4 * super::dsp_utils::fast_exp(-t * 1.5) + 0.08;
             let op2 = ((phases[1] + op2_idx * op3) * TAU).sin();
 
             // Op1: carrier at fundamental — modulated by Op2 cascade
-            let op1_idx = fm_index * 0.5 * fast_exp(-t * 2.0) + 0.15;
+            let op1_idx = fm_index * 0.5 * super::dsp_utils::fast_exp(-t * 2.0) + 0.15;
             let op1 = ((phases[0] + op1_idx * op2) * TAU).sin();
 
             // Advance phases: carrier 1×, modulator at fm_ratio, high mod at 14×, feedback at 1×
@@ -1405,7 +1405,7 @@ impl Oscillator {
                 }
 
                 let r = decay_rates[n];
-                let env = 0.65 * fast_exp(-t * r * 3.0) + 0.35 * fast_exp(-t * r * 0.4);
+                let env = 0.65 * super::dsp_utils::fast_exp(-t * r * 3.0) + 0.35 * super::dsp_utils::fast_exp(-t * r * 0.4);
 
                 out += (phases[n] * TAU).sin() * amp * env;
 
@@ -1414,7 +1414,7 @@ impl Oscillator {
             }
 
             // Hammer attack noise burst (~3ms)
-            let noise_env = *noise_amp * fast_exp(-t * 300.0);
+            let noise_env = *noise_amp * super::dsp_utils::fast_exp(-t * 300.0);
             if noise_env > 0.001 {
                 super::dsp_utils::xorshift32(&mut noise_state);
                 let noise = (noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
@@ -1482,7 +1482,7 @@ impl Oscillator {
 
             // --- Tone component: sine with exponential pitch sweep ---
             // pitch_amount in semitones, decays from base_freq * 2^(amount/12) down to base_freq
-            let pitch_env = fast_exp(-t * *pitch_decay);
+            let pitch_env = super::dsp_utils::fast_exp(-t * *pitch_decay);
             let freq = *base_freq * (pitch_env * *pitch_amount / 12.0).exp2();
 
             let tone = (*phase * TAU).sin();
@@ -1490,7 +1490,7 @@ impl Oscillator {
             *phase -= (*phase).floor();
 
             // --- Noise component: white noise → one-pole LP → envelope ---
-            let noise_env = fast_exp(-t * *noise_decay);
+            let noise_env = super::dsp_utils::fast_exp(-t * *noise_decay);
             let noise_out = if *noise_level > 0.001 && noise_env > 0.001 {
                 // Xorshift32 noise
                 super::dsp_utils::xorshift32(noise_state);
@@ -2052,7 +2052,7 @@ impl Oscillator {
             }
 
             let bw = base_bandwidth * (1.0 + i as f32 * (1.0 - brightness) * 0.5);
-            let r = fast_exp(-PI * bw / sample_rate);
+            let r = super::dsp_utils::fast_exp(-PI * bw / sample_rate);
             let w = TAU * mode_freq / sample_rate;
             cosw[i] = 2.0 * r * w.cos();
             r_sq[i] = r * r;
@@ -2442,23 +2442,6 @@ fn sine_fold(x: f32) -> f32 {
 #[inline]
 fn sine_fold_ad(x: f32) -> f32 {
     -2.0 / (PI * PI) * (x * PI * 0.5).cos()
-}
-
-/// Fast exponential approximation for negative arguments.
-/// Uses the identity exp(x) ≈ (1 + x/256)^256 via repeated squaring.
-#[inline]
-fn fast_exp(x: f32) -> f32 {
-    let x = x.max(-20.0);
-    let mut y = 1.0 + x / 256.0;
-    y *= y;
-    y *= y;
-    y *= y;
-    y *= y; // 2^4 = 16
-    y *= y;
-    y *= y;
-    y *= y;
-    y *= y; // 2^8 = 256
-    y.max(0.0)
 }
 
 impl Oscillator {
@@ -2948,15 +2931,3 @@ impl Oscillator {
     }
 }
 
-// ─── Free functions ────────────────────────────────────────────────
-
-/// Soft clipping / saturation: tanh approximation for growl/fret buzz.
-#[inline]
-#[allow(dead_code)]
-fn soft_clip(x: f32) -> f32 {
-    if x.abs() < 0.5 {
-        x
-    } else {
-        x.signum() * (1.0 - fast_exp(-x.abs() * 2.0)) * 0.5 + x * 0.5
-    }
-}
