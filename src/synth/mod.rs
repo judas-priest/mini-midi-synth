@@ -2291,7 +2291,7 @@ impl SynthEngine {
             pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
         }; MAX_PARTS];
         for (li, part) in self.parts.iter_mut().enumerate() {
-            if !part.enabled { continue; } // заморозка выключенных частей
+            if !part.enabled { continue; } // выключенные части: слот не обновляется (значение по умолчанию — не читается, part.tick скипается)
             layer_mods_snapshot[li] = part.update_mods(&inputs, li);
         }
 
