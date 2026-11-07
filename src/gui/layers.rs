@@ -98,17 +98,35 @@ impl App {
             // ── View tabs (Drums / MIDI Seq / FX Chain / Pads) ───────────
             ui.separator();
             if ui.selectable_label(self.show_drums && !self.show_midi_seq, "Drums").on_hover_text("Drum sequencer").clicked() {
-                self.show_drums = true; self.show_looper = false;
-                self.show_midi_seq = false; self.show_fx_chain = false;
-                self.seq_target_atom.store(0, Ordering::Relaxed);
+                if self.show_drums && !self.show_midi_seq {
+                    // повторный клик по активной вкладке = нейтральный вид
+                    self.show_drums = false; self.show_looper = false;
+                    self.show_midi_seq = false; self.show_fx_chain = false;
+                } else {
+                    self.show_drums = true; self.show_looper = false;
+                    self.show_midi_seq = false; self.show_fx_chain = false;
+                    self.seq_target_atom.store(0, Ordering::Relaxed);
+                }
             }
             if ui.selectable_label(self.show_midi_seq, "MIDI Seq").on_hover_text("MIDI file sequencer").clicked() {
-                self.show_midi_seq = true; self.show_drums = false;
-                self.show_looper = false; self.show_fx_chain = false;
+                if self.show_midi_seq {
+                    // повторный клик по активной вкладке = нейтральный вид
+                    self.show_midi_seq = false; self.show_drums = false;
+                    self.show_looper = false; self.show_fx_chain = false;
+                } else {
+                    self.show_midi_seq = true; self.show_drums = false;
+                    self.show_looper = false; self.show_fx_chain = false;
+                }
             }
             if ui.selectable_label(self.show_fx_chain, "FX Chain").on_hover_text("16-slot serial FX chain").clicked() {
-                self.show_fx_chain = true; self.show_drums = false;
-                self.show_looper = false; self.show_midi_seq = false;
+                if self.show_fx_chain {
+                    // повторный клик по активной вкладке = нейтральный вид
+                    self.show_fx_chain = false; self.show_drums = false;
+                    self.show_looper = false; self.show_midi_seq = false;
+                } else {
+                    self.show_fx_chain = true; self.show_drums = false;
+                    self.show_looper = false; self.show_midi_seq = false;
+                }
             }
             // NAV long-press opens this too, but NAV SysEx only arrives over
             // Bluetooth — USB users need a GUI path.
