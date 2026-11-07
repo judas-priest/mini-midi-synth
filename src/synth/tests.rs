@@ -1382,7 +1382,9 @@ fn tc_ignore_events_set_part_fields() {
 /// 2) каждый CC-биндинг целяется в arm set_param или глобальный ключ
 ///    (класс «мёртвая ручка»);
 /// 3) GlobalParams::set: полный набор arm'ов меняет значения.
-const MOD_SRC: &str = include_str!("mod.rs");
+// S4-synth 3b: Part::set_param и GlobalParams::set переехали из mod.rs в
+// part.rs (тела verbatim) — парсер пинит их по новому файлу.
+const MOD_SRC: &str = include_str!("part.rs");
 
 /// Извлечь `"key" =>` arm'ы из match-блока исходника (без regex; выравни-
 /// вание пробелами после кавычки допускается).
