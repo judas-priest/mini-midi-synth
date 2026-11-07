@@ -586,9 +586,7 @@ impl Voice {
 
     #[inline]
     fn next_noise(&mut self) -> f32 {
-        self.noise_state ^= self.noise_state << 13;
-        self.noise_state ^= self.noise_state >> 17;
-        self.noise_state ^= self.noise_state << 5;
+        super::dsp_utils::xorshift32(&mut self.noise_state);
         (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0
     }
 

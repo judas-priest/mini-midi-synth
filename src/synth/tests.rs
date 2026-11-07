@@ -1861,3 +1861,12 @@ fn tc_check_pickup_uses_real_value_not_zero() {
     let crossed2 = e.check_pickup(b'0', 127, binding);
     assert!(crossed2, "0.8 of 0..1 => target_cc=102; 127 crosses it");
 }
+
+/// TC3: xorshift32 юнит-пин канона — известный seed → детерминированная
+/// последовательность. Значения вычислены прогоном канона ( dsp_utils::xorshift32 ).
+#[test]
+fn tc_xorshift32_canon_sequence() {
+    let mut x: u32 = 1;
+    let seq: Vec<u32> = (0..5).map(|_| dsp_utils::xorshift32(&mut x)).collect();
+    assert_eq!(seq, [270369, 67634689, 2647435461, 307599695, 2398689233]);
+}

@@ -711,9 +711,7 @@ impl Oscillator {
         let mut buffer = Self::take_buf(&mut self.pool_a, n);
         let mut state = self.noise_state;
         for s in buffer.iter_mut() {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
+            super::dsp_utils::xorshift32(&mut state);
             *s = (state as f32 / u32::MAX as f32) * 2.0 - 1.0;
         }
         self.noise_state = state;
@@ -828,9 +826,7 @@ impl Oscillator {
             let window = 0.5 * (1.0 - (TAU * t).cos());
 
             // Add some noise for attack transient (hammer felt noise)
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
+            super::dsp_utils::xorshift32(&mut state);
             let noise = (state as f32 / u32::MAX as f32) * 2.0 - 1.0;
             let noise_amount = 0.15 + 0.25 * velocity; // more noise at higher velocity
 
@@ -929,9 +925,7 @@ impl Oscillator {
             let amp_scale = 1.0 / partial;
             for (j, buf_sample) in buffers[i].iter_mut().enumerate().take(delay) {
                 if j < excite_len {
-                    state ^= state << 13;
-                    state ^= state >> 17;
-                    state ^= state << 5;
+                    super::dsp_utils::xorshift32(&mut state);
                     let noise = (state as f32 / u32::MAX as f32) * 2.0 - 1.0;
                     let w = (PI * j as f32 / excite_len as f32).sin();
                     *buf_sample = noise * w * amp_scale;
@@ -1035,9 +1029,7 @@ impl Oscillator {
     /// Generate next noise sample using xorshift32.
     #[inline]
     pub fn next_noise(&mut self) -> f32 {
-        self.noise_state ^= self.noise_state << 13;
-        self.noise_state ^= self.noise_state >> 17;
-        self.noise_state ^= self.noise_state << 5;
+        super::dsp_utils::xorshift32(&mut self.noise_state);
         (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0
     }
 
@@ -1424,9 +1416,7 @@ impl Oscillator {
             // Hammer attack noise burst (~3ms)
             let noise_env = *noise_amp * fast_exp(-t * 300.0);
             if noise_env > 0.001 {
-                noise_state ^= noise_state << 13;
-                noise_state ^= noise_state >> 17;
-                noise_state ^= noise_state << 5;
+                super::dsp_utils::xorshift32(&mut noise_state);
                 let noise = (noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
                 out += noise * noise_env;
             }
@@ -1503,9 +1493,7 @@ impl Oscillator {
             let noise_env = fast_exp(-t * *noise_decay);
             let noise_out = if *noise_level > 0.001 && noise_env > 0.001 {
                 // Xorshift32 noise
-                *noise_state ^= *noise_state << 13;
-                *noise_state ^= *noise_state >> 17;
-                *noise_state ^= *noise_state << 5;
+                super::dsp_utils::xorshift32(noise_state);
                 let white = (*noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
 
                 // One-pole LP: color 0 = dark (coeff ~0.05), color 1 = bright (coeff ~0.95)
@@ -1563,11 +1551,11 @@ impl Oscillator {
         let seed = 0.005 * velocity; // сим-верифицировано: ±0.005 достаточно
         let mut rng = 0xDEADBEEFu32;
         for s in nut_delay.iter_mut() {
-            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            super::dsp_utils::xorshift32(&mut rng);
             *s = seed * (rng as f32 / u32::MAX as f32 - 0.5) * 2.0;
         }
         for s in bridge_delay.iter_mut() {
-            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            super::dsp_utils::xorshift32(&mut rng);
             *s = seed * (rng as f32 / u32::MAX as f32 - 0.5) * 2.0;
         }
         // Basin-байас: один период пилы на ПОЛНЫЙ виток петли (bridge-сегмент
@@ -1840,7 +1828,7 @@ impl Oscillator {
         let mut bore = Self::take_buf(&mut self.pool_a, n);
         let mut rng = 0xDEADBEEFu32;
         for s in bore.iter_mut() {
-            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            super::dsp_utils::xorshift32(&mut rng);
             *s = (rng as f32 / u32::MAX as f32 - 0.5) * 0.002 * velocity;
         }
 
@@ -2097,9 +2085,7 @@ impl Oscillator {
             let burst_dur = 0.002;
             let excitation = if *excitation_time < burst_dur {
                 let env = 1.0 - *excitation_time / burst_dur;
-                *noise_state ^= *noise_state << 13;
-                *noise_state ^= *noise_state >> 17;
-                *noise_state ^= *noise_state << 5;
+                super::dsp_utils::xorshift32(noise_state);
                 let noise = (*noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
                 noise * env
             } else {
@@ -2240,9 +2226,7 @@ impl Oscillator {
         let mut phases = [0.0f32; 7];
         let mut state = self.noise_state;
         for p in &mut phases {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
+            super::dsp_utils::xorshift32(&mut state);
             *p = state as f32 / u32::MAX as f32;
         }
         self.noise_state = state;
@@ -2602,7 +2586,7 @@ impl Oscillator {
         // Seed with noise burst to kickstart oscillation
         let mut rng = 0xDEADBEEFu32;
         for s in buf.iter_mut() {
-            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            super::dsp_utils::xorshift32(&mut rng);
             *s = (rng as f32 / u32::MAX as f32 - 0.5) * 0.01 * velocity;
         }
 

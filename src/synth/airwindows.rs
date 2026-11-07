@@ -5,14 +5,6 @@ const HALF_PI_64: f64 = std::f64::consts::FRAC_PI_2;
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-#[inline(always)]
-fn xorshift(state: &mut u32) -> f32 {
-    *state ^= *state << 13;
-    *state ^= *state >> 17;
-    *state ^= *state << 5;
-    (*state as f32) / (u32::MAX as f32)
-}
-
 // ─── Mode 0: Tape2 ──────────────────────────────────────────────────────────
 
 pub struct AirwindowsTape2 {
@@ -722,7 +714,7 @@ impl AirwindowsChromeOxide {
         self.flip = !self.flip;
 
         // simple treble noise (no random, use deterministic)
-        xorshift(&mut self.fpd);
+        super::dsp_utils::xorshift32(&mut self.fpd);
         // skip interpolation noise for simplicity
 
         let mut br = sl.abs() * density_a;
@@ -1201,7 +1193,7 @@ impl AirwindowsGalactic {
         self.vib_m += self.old_fpd * drift;
         if self.vib_m > std::f64::consts::TAU {
             self.vib_m = 0.0;
-            self.old_fpd = 0.4294967295 + xorshift(&mut self.fpd_l) as f64 * 1e-10;
+            self.old_fpd = 0.4294967295 + (super::dsp_utils::xorshift32(&mut self.fpd_l) as f32 / (u32::MAX as f32)) as f64 * 1e-10;
         }
 
         self.a_ml[self.count_m] = in_l * attenuate as f32;

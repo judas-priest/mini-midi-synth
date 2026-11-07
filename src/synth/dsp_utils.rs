@@ -170,3 +170,13 @@ pub fn rbj_peaking(freq: f32, gain_db: f32, q: f32, sr: f32) -> (f32, f32, f32, 
         (1.0 - alpha / a) / a0,
     )
 }
+
+/// Canonical xorshift32 (13/17/5). Возвращает сырой state; конверсию float
+/// делает сайт (bipolar/unipolar — per-site, НЕ канонизировать).
+#[inline(always)]
+pub fn xorshift32(state: &mut u32) -> u32 {
+    *state ^= *state << 13;
+    *state ^= *state >> 17;
+    *state ^= *state << 5;
+    *state
+}

@@ -360,9 +360,7 @@ impl Arpeggiator {
 
         if self.mode == 3 {
             // Random: xorshift32
-            self.rng_state ^= self.rng_state << 13;
-            self.rng_state ^= self.rng_state >> 17;
-            self.rng_state ^= self.rng_state << 5;
+            super::dsp_utils::xorshift32(&mut self.rng_state);
             self.position = (self.rng_state as usize) % self.pattern_len;
         } else {
             self.position += 1;

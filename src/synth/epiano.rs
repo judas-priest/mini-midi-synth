@@ -203,9 +203,7 @@ impl ElectricPianoModel {
             let t = self.attack_time / self.attack_dur;
             let env = (PI * t).sin() * (1.0 - t); // half-sine * linear fade
 
-            self.noise_state ^= self.noise_state << 13;
-            self.noise_state ^= self.noise_state >> 17;
-            self.noise_state ^= self.noise_state << 5;
+            super::dsp_utils::xorshift32(&mut self.noise_state);
             let noise = (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
 
             // LP-filter to shape noise color (more muffled = more piano-like thump)
