@@ -97,7 +97,9 @@ pub(crate) struct CommonInit {
     pub(crate) pad_state: midi::PadState,
     pub(crate) midi_tx_shared: midi::SharedMidiTx,
     /// Bank-2 console pad notes, mirrored by the engine (Task 4).
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     pub(crate) console_rx: std::sync::mpsc::Receiver<(u8, bool)>,
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     pub(crate) flash_rx: rtrb::Consumer<midi::NoteFlash>,
     pub(crate) ctrl_tx: metrics::CountingProducer<synth::ControlEvent>,
     pub(crate) feedback_rx: rtrb::Consumer<synth::ParamFeedback>,

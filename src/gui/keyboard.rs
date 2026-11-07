@@ -4,14 +4,8 @@ use std::sync::atomic::Ordering;
 use eframe::egui;
 
 use super::App;
-use super::NOTE_NAMES;
+use super::note_name;
 use super::theme;
-
-fn note_name(note: u8) -> String {
-    let name = NOTE_NAMES[(note % 12) as usize];
-    let oct = (note as i8 / 12) - 2;
-    format!("{name}{oct}")
-}
 
 fn is_black_key(note: u8) -> bool {
     matches!(note % 12, 1 | 3 | 6 | 8 | 10)

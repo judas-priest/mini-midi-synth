@@ -1639,22 +1639,6 @@ impl App {
         }); // end Effects frame
         ui.add_space(theme::SP_SM);
 
-        // Pitch Bend section
-        egui::Frame::default()
-            .fill(theme::BG_SECTION)
-            .corner_radius(4.0)
-            .inner_margin(egui::Margin::same(6))
-            .show(ui, |ui| {
-        // Compact width for pitch bend utility
-        ui.style_mut().spacing.slider_width = theme::SLIDER_COMPACT;
-
-        // Asymmetric pitch bend — REMOVED (юзер 2026-11-05): масштаб бенда
-        // унифицирован на глобальном PB-фейдере (топ-бар «PB: N st»);
-        // per-patch Range Up/Down больше не имеют эффекта, поля
-        // pitch_bend_up/down в патч-параметрах оставлены для совместимости
-        // json (не читаются при бенде).
-        }); // end Pitch Bend frame
-
         if changed {
             self.parts[part].params_dirty = true;
             self.send_edited_params(part);

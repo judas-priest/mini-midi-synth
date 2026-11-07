@@ -586,19 +586,15 @@ pub fn load_all_patches() -> Vec<Patch> {
     presets
 }
 
-/// Save a patch to an explicit directory (user dir by default).
-pub fn save_patch_in(preset: &Patch, dir: Option<PathBuf>) -> Result<PathBuf> {
-    let dir = dir.context("Could not determine config directory")?;
-    fs::create_dir_all(&dir)?;
-    let path = resolve_save_path(&dir, &preset.name);
-    let json = serde_json::to_string_pretty(preset)?;
-    crate::config::write_atomic(&path, &json)?;
-    Ok(path)
-}
-
 /// Save a patch to user directory.
 pub fn save_patch(preset: &Patch) -> Result<PathBuf> {
-    save_patch_in(preset, user_preset_dir())
+    save_json(preset, user_preset_dir(), &preset.name)
+}
+
+/// Save a patch to an explicit directory (user dir by default).
+/// Thin delegator — used by the preset-collision contract tests.
+pub fn save_patch_in(preset: &Patch, dir: Option<PathBuf>) -> Result<PathBuf> {
+    save_json(preset, dir, &preset.name)
 }
 
 // ---------------------------------------------------------------------------
