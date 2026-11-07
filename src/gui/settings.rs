@@ -505,7 +505,7 @@ impl App {
 
     pub(super) fn save_cc_map(&mut self) {
         self.config.cc_map = Some(crate::cc_map::CcMapRaw::from_cc_map(&self.cc_map));
-        let _ = self.config.save();
+        self.mark_config_dirty();
         let _ = self.ctrl_tx.push(ControlEvent::SetCcMap { map: Box::new(self.cc_map) });
     }
 
@@ -896,17 +896,17 @@ impl App {
                             self.sf2_drums_enabled = drums;
                             let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: drums });
                             self.config.sf2.drums_sf2 = drums;
-                            let _ = self.config.save();
+                            self.mark_config_dirty();
                         }
                     });
                 }
 
                 if ui.checkbox(&mut self.config.ui.led_companion, "LED companion (bank-2 pads)").changed() {
-                    let _ = self.config.save();
+                    self.mark_config_dirty();
                 }
 
                 if ui.checkbox(&mut self.config.ui.show_telemetry, "Show telemetry (drops/errs, JACK, dsp load)").changed() {
-                    let _ = self.config.save();
+                    self.mark_config_dirty();
                 }
 
                 if self.sf2_keys_soundfont.is_some() || self.sf2_drums_soundfont.is_some() {
@@ -926,7 +926,7 @@ impl App {
                             self.sf2_block_size = bs;
                             let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: bs });
                             self.config.sf2.block_size = bs;
-                            let _ = self.config.save();
+                            self.mark_config_dirty();
                         }
                     });
                     ui.horizontal(|ui| {

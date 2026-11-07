@@ -489,6 +489,8 @@ pub struct App {
     pub pad_perf_map: [Option<String>; 16],
     pub pad_prev_state: [u8; 16],
     pub last_config_save: std::time::Instant,
+    /// (F3) конфиг изменился в памяти и ждёт записи на диск (flush_config).
+    pub config_dirty: bool,
     /// Smoothed DSP load percentage shown in the header.
     pub dsp_load: f32,
     /// Decaying peak-hold of DSP load, shown next to `dsp_load`.
@@ -736,6 +738,7 @@ impl App {
             },
             pad_prev_state: [0u8; 16],
             last_config_save: std::time::Instant::now(),
+            config_dirty: false,
             dsp_load: 0.0,
             dsp_peak: 0.0,
             global_dirty: false,
@@ -801,6 +804,7 @@ impl App {
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.save_global_to_config();
+        self.flush_config(true);
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -1371,7 +1375,7 @@ impl eframe::App for App {
                     if let Some(sel) = self.tracks_sel {
                         if sel < self.config.ui.perf_folders.len() {
                             self.config.ui.active_folder = Some(sel);
-                            let _ = self.config.save();
+                            self.mark_config_dirty();
                             self.refresh_console_list();
                             self.perf_window = 0;
                         }
@@ -1506,6 +1510,10 @@ impl eframe::App for App {
                 });
             }
         });
+
+        // (F3) персист-граница: единая точка записи конфига на диск, в самом
+        // конце кадра — все dirty-маркеры за кадр = одна запись не чаще 2 с.
+        self.flush_config(false);
     }
 }
 
@@ -1874,6 +1882,25 @@ impl App {
         }
     }
 
+    /// (F3) единая точка записи конфига на диск: dirty-маркер + дебаунс 2 с.
+    /// force=true — форс-запись (выход приложения).
+    fn flush_config(&mut self, force: bool) {
+        if !self.config_dirty {
+            return;
+        }
+        let due = self.last_config_save.elapsed().as_secs_f32() >= 2.0;
+        if force || due {
+            let _ = self.config.save();
+            self.last_config_save = std::time::Instant::now();
+            self.config_dirty = false;
+        }
+    }
+
+    /// (F3) конфиг изменился в памяти — дисковая запись отложена до flush_config.
+    fn mark_config_dirty(&mut self) {
+        self.config_dirty = true;
+    }
+
     fn save_global_to_config(&mut self) {
         self.config.ui.master_volume = self.global_params.get("master_volume").copied().unwrap_or(0.8);
         self.config.ui.master_tone = self.global_params.get("master_tone").copied().unwrap_or(20000.0);
@@ -1890,8 +1917,7 @@ impl App {
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
         self.config.ui.split_point = Some(self.split_point);
         self.config.ui.keybinds = self.keybinds.to_config();
-        let _ = self.config.save();
-        self.last_config_save = std::time::Instant::now();
+        self.mark_config_dirty();
     }
 
     /// Load edited_params from the current patch for a given part.
@@ -2315,7 +2341,7 @@ impl App {
     fn save_drum_remap(&mut self) {
         let key = self.drum_remap_key();
         self.config.sf2.drums_remaps.insert(key, self.drum_remap.to_vec());
-        let _ = self.config.save();
+        self.mark_config_dirty();
     }
 
     fn push_drum_pad_vel(&mut self) {
@@ -2326,7 +2352,7 @@ impl App {
     fn save_drum_pad_vel(&mut self) {
         let key = self.drum_remap_key();
         self.config.sf2.drums_vels.insert(key, self.drum_pad_vel.to_vec());
-        let _ = self.config.save();
+        self.mark_config_dirty();
     }
 
     /// Re-sends the drum kit, tempo and pattern selection to a fresh engine.
@@ -2368,7 +2394,7 @@ impl App {
             .patches
             .get(self.parts[0].patch_idx)
             .map(|p| p.name.clone());
-        let _ = self.config.save();
+        self.mark_config_dirty();
     }
 
     /// Execute an action from the bank-2 pad console state machine.
@@ -2398,7 +2424,7 @@ impl App {
                 let idx = self.tracks_window + i;
                 if idx < self.config.ui.perf_folders.len() {
                     self.config.ui.active_folder = Some(idx);
-                    let _ = self.config.save();
+                    self.mark_config_dirty();
                     self.refresh_console_list();
                     self.perf_window = 0; // TC8: перф-страница с начала
                 }
@@ -2576,7 +2602,7 @@ impl App {
 
     fn save_collapsed_categories(&mut self) {
         self.config.ui.collapsed_categories = self.collapsed_categories.iter().cloned().collect();
-        let _ = self.config.save();
+        self.mark_config_dirty();
     }
 
     fn refresh_midi_ports(&mut self) {

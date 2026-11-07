@@ -409,7 +409,7 @@ impl App {
             // прежний else затирал layer_b_program с любого парта (QW2).
             if part == 0 { self.config.sf2.layer_a_program = prog; }
             else if part == 1 { self.config.sf2.layer_b_program = prog; }
-            let _ = self.config.save();
+            self.mark_config_dirty();
             // Применили и играем дальше — окно не закрываем (фидбек 2026-11-01)
         }
         if let Some(idx) = picked_patch {
