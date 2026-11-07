@@ -94,7 +94,7 @@ impl App {
         }
     }
 
-    fn reset_kit_names(&mut self) {
+    pub(crate) fn reset_kit_names(&mut self) {
         for (i, n) in self.drum_kit_names.iter_mut().enumerate() {
             let note = 30 + i as u8;
             *n = if (36..=51).contains(&note) {

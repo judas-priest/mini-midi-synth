@@ -589,7 +589,7 @@ impl App {
         layer_b: PartState,
         parts_extra: Vec<PartState>,
     ) -> Self {
-        Self {
+        let mut app = Self {
             patches: c.patches,
             note_state: c.note_state,
             pad_state: c.pad_state,
@@ -645,16 +645,7 @@ impl App {
             drum_slot_mutes_view: [false; NUM_DRUM_SLOTS],
             drum_remap: core::array::from_fn(|i| 36 + i as u8),
             drum_pad_vel: [0u8; 16],
-            drum_kit_names: {
-                let mut n: [String; 26] = Default::default();
-                for (i, entry) in n.iter_mut().enumerate() {
-                    let note = 30 + i as u8;
-                    *entry = if (36..=51).contains(&note) {
-                        crate::synth::drum::DRUM_NAMES[(note - 36) as usize].to_string()
-                    } else { String::new() };
-                }
-                n
-            },
+            drum_kit_names: Default::default(), // filled by reset_kit_names() below
             show_drum_remap: false,
             remap_pad: None,
             drum_volume: c.config.ui.drum_volume,
@@ -715,7 +706,7 @@ impl App {
             looper_part_mutes: [false; 16],
             seq_target_atom: c.handles.seq_target_atom,
             active_part_atom: c.handles.active_part_atom,
-            keybinds: keybinds::Keybinds::from_config(&c.config.ui.keybinds),
+            keybinds: keybinds::Keybinds::from_config(c.config.ui.keybinds.as_ref()),
             show_keybinds_window: false,
             keybind_capturing: None,
             keybinds_reset_confirm: None,
@@ -797,7 +788,9 @@ impl App {
             midi_tx_shared: c.midi_tx_shared.clone(),
             engine_trash_rx: c.engine_trash_rx,
             cb_trash_rx: c.cb_trash_rx,
-        }
+        };
+        app.reset_kit_names();
+        app
     }
 }
 
@@ -929,7 +922,8 @@ impl eframe::App for App {
                 if key != egui::Key::Escape {
                     if let Some(action) = self.keybind_capturing.take() {
                         let stolen = self.keybinds.set_key_for_action(&action, key);
-                        self.config.ui.keybinds = self.keybinds.to_config();
+                        self.config.ui.keybinds = Some(self.keybinds.to_config());
+                        self.mark_config_dirty();
                         if let Some(victim) = stolen {
                             self.show_toast(
                                 format!("{}: key was reassigned from {}",
@@ -1831,7 +1825,7 @@ impl App {
                 // migrate legacy slot-encoded values (0..16) to kit notes (+36)
                 let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
                 let mut t = [0u8; 16];
-                for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or((36 + i) as u8).min(55); }
+                for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or((36 + i) as u8).clamp(30, 55); }
                 self.drum_remap = t;
             }
             if let Some(v) = self.config.sf2.drums_vels.get("internal") {
@@ -1890,7 +1884,9 @@ impl App {
         }
         let due = self.last_config_save.elapsed().as_secs_f32() >= 2.0;
         if force || due {
-            let _ = self.config.save();
+            if let Err(e) = self.config.save() {
+                log::warn!("[config] flush failed ({e}) — will retry after next change");
+            }
             self.last_config_save = std::time::Instant::now();
             self.config_dirty = false;
         }
@@ -1916,7 +1912,7 @@ impl App {
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
         self.config.ui.split_point = Some(self.split_point);
-        self.config.ui.keybinds = self.keybinds.to_config();
+        self.config.ui.keybinds = Some(self.keybinds.to_config());
         self.mark_config_dirty();
     }
 
@@ -2000,7 +1996,7 @@ impl App {
                         self.parts[part].patch_idx = idx - 1;
                         self.load_edited_params(part);
                         self.send_edited_params(part);
-                        self.save_config();
+                        self.snapshot_preset_and_mark_dirty();
                     }
                 }
                 KeyAction::NextPreset => {
@@ -2011,7 +2007,7 @@ impl App {
                         self.parts[part].patch_idx = idx + 1;
                         self.load_edited_params(part);
                         self.send_edited_params(part);
-                        self.save_config();
+                        self.snapshot_preset_and_mark_dirty();
                     }
                 }
                 KeyAction::TogglePadPerf => {
@@ -2078,7 +2074,8 @@ impl App {
                             if armed {
                                 if let Some(key) = self.keybinds.key_for_action(&action) {
                                     self.keybinds.binds_mut().retain(|(k, _)| *k != key);
-                                    self.config.ui.keybinds = self.keybinds.to_config();
+                                    self.config.ui.keybinds = Some(self.keybinds.to_config());
+                                    self.mark_config_dirty();
                                 }
                                 self.unbind_confirm = None;
                             } else {
@@ -2091,7 +2088,8 @@ impl App {
                 ui.add_space(theme::SP_SM);
                 if confirm::confirm_button(ui, "Reset Defaults", &mut self.keybinds_reset_confirm, true, "Restore default keybindings (custom binds are lost)") {
                     self.keybinds = keybinds::Keybinds::defaults();
-                    self.config.ui.keybinds = self.keybinds.to_config();
+                    self.config.ui.keybinds = Some(self.keybinds.to_config());
+                    self.mark_config_dirty();
                     self.keybind_capturing = None;
                 }
             });
@@ -2177,7 +2175,7 @@ impl App {
         // #49: last_preset зеркалит parts[0]; undo патча парта 0 иначе
         // оставляет конфиг на до-undo патче — рестарт вернёт откаченное
         if part == 0 {
-            self.save_config();
+            self.snapshot_preset_and_mark_dirty();
         }
         self.set_active_part(part);
     }
@@ -2389,7 +2387,8 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::SetPartRange { part, min_note, max_note });
     }
 
-    fn save_config(&mut self) {
+    /// Snapshot last_preset + mark dirty (disk write via flush_config).
+    fn snapshot_preset_and_mark_dirty(&mut self) {
         self.config.ui.last_preset = self
             .patches
             .get(self.parts[0].patch_idx)
@@ -2433,7 +2432,6 @@ impl App {
                 // консоль шлёт УЖЕ window-local 0-based (slot-1 из tap())
                 let idx = self.pat_window + i;
                 if idx < 8 {
-                    self.drum_current_pattern = idx as u8;
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: idx as u8 });
                     self.follow_window(idx, false);
                 }
@@ -2482,7 +2480,6 @@ impl App {
             }
             led_console::Action::StepPattern(dir) => {
                 let next = (self.drum_current_pattern as i32 + dir).rem_euclid(8);
-                self.drum_current_pattern = next as u8;
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: next as u8 });
                 // follow снапится на границу страницы — degenerate window 7
                 // больше не возникает (#50-фикс)

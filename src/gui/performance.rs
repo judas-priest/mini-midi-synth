@@ -44,7 +44,7 @@ impl App {
         self.perf_name = perf.name.clone();
         // Запомнить перф — восстановится при старте (юзер-репорт 2026-10-31)
         self.config.ui.last_performance = Some(perf.name.clone());
-        self.save_config();
+        self.snapshot_preset_and_mark_dirty();
         // Анти-stuck: lift the pedal BEFORE applying the new parts, or notes
         // held by the pedal of the previous perf would ring forever under the
         // new one (NOT AllNotesOff — seamless tails keep ringing).

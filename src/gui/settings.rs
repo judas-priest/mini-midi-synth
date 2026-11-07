@@ -8,6 +8,7 @@ use eframe::egui;
 use crate::preset::{self, Patch};
 use crate::synth::{ControlEvent, ParamFeedback, PatchParams};
 use super::{App, ToastKind, BUFFER_SIZES, buffer_label, scan_sf2_files, sf2_dir, theme};
+use super::keyboard::{PAD_BOT_NOTES, PAD_TOP_NOTES};
 
 /// Default parameter values for double-click reset.
 static DEFAULT_PARAMS: LazyLock<BTreeMap<String, f32>> = LazyLock::new(|| PatchParams::default().to_map());
@@ -18,8 +19,6 @@ impl App {
         // Same layout as keyboard pads: 2 rows x 8 columns
         // Top (cyan):  E1(40) F1(41) F#1(42) G1(43)  C2(48) C#2(49) D2(50) D#2(51)
         // Bot (pink):  C1(36) C#1(37) D1(38) D#1(39) G#1(44) A1(45) A#1(46) B1(47)
-        const PAD_TOP: [u8; 8] = [40, 41, 42, 43, 48, 49, 50, 51];
-        const PAD_BOT: [u8; 8] = [36, 37, 38, 39, 44, 45, 46, 47];
         const TOP_COLOR: egui::Color32 = theme::PAD_PERF_TOP;
         const BOT_COLOR: egui::Color32 = theme::PAD_PERF_BOT;
         const EMPTY_COLOR: egui::Color32 = theme::BG_PAD_EMPTY;
@@ -41,7 +40,7 @@ impl App {
                 let pad_h = 52.0_f32;
                 let gap = 3.0_f32;
 
-                for (row_notes, row_color) in [(&PAD_TOP[..], TOP_COLOR), (&PAD_BOT[..], BOT_COLOR)] {
+                for (row_notes, row_color) in [(&PAD_TOP_NOTES[..], TOP_COLOR), (&PAD_BOT_NOTES[..], BOT_COLOR)] {
                     ui.horizontal(|ui| {
                         for &note in row_notes {
                             let idx = (note - 36) as usize;
@@ -399,7 +398,6 @@ impl App {
         let mut param_changes: Vec<(&str, f32)> = Vec::new();
         let mut learned_cc: Option<(u8, &'static str)> = None;
         let mut program: Option<u8> = None;
-        let nav_delta: Option<i32> = None;
 
         if let Some(rx) = &mut self.feedback_rx {
             while let Ok(fb) = rx.pop() {
@@ -499,8 +497,6 @@ impl App {
                 self.load_edited_params(0);
             }
         }
-
-        let _ = nav_delta; // no longer used (setlist removed)
     }
 
     pub(super) fn save_cc_map(&mut self) {
@@ -603,7 +599,7 @@ impl App {
                 self.parts[part].patch_idx = self.patches.len() - 1;
             }
             self.parts[part].params_dirty = false;
-            self.save_config();
+            self.snapshot_preset_and_mark_dirty();
         }
     }
 
@@ -699,13 +695,13 @@ impl App {
                         self.config.audio.backend = host_name.to_string();
                         self.config.audio.sample_rate = self.selected_sample_rate;
                         self.config.audio.buffer_size = self.selected_buffer_size;
-                        self.save_config();
+                        self.snapshot_preset_and_mark_dirty();
                     }
                     #[cfg(target_os = "android")]
                     {
                         self.config.audio.sample_rate = self.selected_sample_rate;
                         self.config.audio.buffer_size = self.selected_buffer_size;
-                        self.save_config();
+                        self.snapshot_preset_and_mark_dirty();
                     }
                 }
                 ui.separator();
@@ -744,7 +740,7 @@ impl App {
                             .step_by(0.5).suffix(" dB")).changed() {
                             self.config.audio.dsp_trim_db = dsp_db;
                             let _ = self.ctrl_tx.push(ControlEvent::SetDspTrim { db: dsp_db });
-                            self.save_config();
+                            self.snapshot_preset_and_mark_dirty();
                         }
                         ui.end_row();
 
@@ -754,7 +750,7 @@ impl App {
                             .step_by(0.5).suffix(" dB")).changed() {
                             self.config.audio.sf2_trim_db = sf2_db;
                             let _ = self.ctrl_tx.push(ControlEvent::SetSf2Trim { db: sf2_db });
-                            self.save_config();
+                            self.snapshot_preset_and_mark_dirty();
                         }
                         ui.end_row();
                     });
@@ -961,7 +957,7 @@ impl App {
                         self.midi_connected_port = Some(port_name.clone());
                         self.config.midi.port_name = Some(port_name.clone());
                         self.show_toast(format!("MIDI: {port_name}"), ToastKind::Success);
-                        self.save_config();
+                        self.snapshot_preset_and_mark_dirty();
                     }
                     Err(e) => { self.show_toast(format!("MIDI error: {e}"), ToastKind::Error); }
                 }
@@ -970,7 +966,7 @@ impl App {
             self.midi_connected_port = None;
             self.config.midi.port_name = None;
             self.show_toast("MIDI disconnected", ToastKind::Info);
-            self.save_config();
+            self.snapshot_preset_and_mark_dirty();
         }
     }
 }

@@ -1640,3 +1640,53 @@ lfo1|lfo_deform	91520c550aa67b1d
 lfo1|lfo_filter_depth	1cdcc49da15bb739
 lfo1|lfo_pitch_depth	22822a6f8afc1cf5
 lfo1|lfo_rate	9e8a5c4f97c5ae5d
+Overdrive|fx0_p0	265e677067ab4765
+Overdrive|fx0_p1	b7dd5d13be2d5445
+Tape|fx0_p0	089b2161f083cb59
+Tape|fx0_p1	f3dcdf9743b9b139
+Tape|fx0_p2	a45752080abe6769
+Tape|fx0_p3	992cf52a072b0cf9
+Neuron Dist|fx0_p0	3fb81308a16860dd
+Neuron Dist|fx0_p1	29fb01e891650515
+Neuron Dist|fx0_p2	a40bbf0e07297fe5
+Bonsai Sat|fx0_p0	8fb51b39ec9a64a1
+Bonsai Sat|fx0_p1	b7bbf5aa38d79e8d
+Bonsai Sat|fx0_p2	6a8b9161467cba91
+WaveShaper|fx0_p2	86ee8d4634e80f75
+Airwindows|fx0_p1	2d4fc2eb69d06365
+BBD Ensemble|fx0_p0	11a8dbf14748f095
+BBD Ensemble|fx0_p1	9d695639f8a2f8cf
+Reverb (Plate)|fx0_p0	c49004a547f0d46d
+Reverb (Plate)|fx0_p1	2f5cba06fee5d63a
+Reverb (Plate)|fx0_p2	2df27683dea1005d
+Reverb2 (FDN)|fx0_p0	03a10d1be9298382
+Reverb2 (FDN)|fx0_p1	d0c6ee95565a9814
+Reverb2 (FDN)|fx0_p2	6bdf713126a46536
+Spring Reverb|fx0_p0	b4e64046bb22b8ad
+Spring Reverb|fx0_p1	27b41e08e50dce39
+Spring Reverb|fx0_p2	885cd4bf9307d35e
+Spring Reverb|fx0_p3	258baab7cc73772e
+Conv Reverb|fx0_p0	e312fe17bb7e3219
+Conv Reverb|fx0_p1	93a840565719cae9
+Conv Reverb|fx0_p2	2f4c7c4120c49c35
+Ring Mod|fx0_p0	2586ad9991640e9d
+Ring Mod|fx0_p2	d7b4139ac475abf9
+Freq Shift|fx0_p0	21f252c30ecea0bd
+Freq Shift|fx0_p1	c439202859769145
+Freq Shift|fx0_p2	e8b4c9923bfc78bd
+Resonator|fx0_p1	71f73d2f57cf3a31
+Combulator|fx0_p1	bf4af0dd88f3382e
+Combulator|fx0_p2	6fd4b931814d3c12
+Combulator|fx0_p3	c5eda65289a5fbb1
+Treemonster|fx0_p1	f03dd7689586198d
+Treemonster|fx0_p2	2f85bebd789e6d7d
+Vocoder|fx0_p0	81d6d360e8de7b3d
+Vocoder|fx0_p1	74788ceeb2acb51d
+Graphic EQ|fx0_p0	904f6d07b5d23909
+Graphic EQ|fx0_p1	63938c2f8e6ff2f9
+Graphic EQ|fx0_p2	6bc929f3cc838565
+Graphic EQ|fx0_p3	c13f389e9d142f3d
+Conditioner|fx0_p0	b4438b65a271f175
+Conditioner|fx0_p2	69509b3d87e7ea71
+Exciter|fx0_p0	bed1abefa7471f2d
+Exciter|fx0_p2	368d25d50ecf64d1

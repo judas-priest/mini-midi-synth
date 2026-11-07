@@ -13,18 +13,19 @@ pub struct Keybinds {
 }
 
 impl Keybinds {
-    pub fn from_config(map: &HashMap<String, String>) -> Self {
-        let mut binds = Vec::new();
-        for (key_str, action_str) in map {
-            if let (Some(key), Some(action)) = (key_from_str(key_str), KeyAction::from_str(action_str)) {
-                binds.push((key, action));
-            }
+    /// `None` (config key absent) → defaults. `Some(map)` — even an empty
+    /// map — is the user's explicit set: "unbound everything" is a valid
+    /// state and must survive restarts (QW10f).
+    pub fn from_config(binds: Option<&HashMap<String, String>>) -> Self {
+        let mut k = Self::defaults();
+        if let Some(map) = binds {
+            k.binds = map.iter()
+                .filter_map(|(key_str, action_str)| {
+                    Some((key_from_str(key_str)?, KeyAction::from_str(action_str)?))
+                })
+                .collect();
         }
-        // Fill in defaults for actions not yet bound
-        if binds.is_empty() {
-            binds = Self::defaults().binds;
-        }
-        Self { binds }
+        k
     }
 
     pub fn defaults() -> Self {

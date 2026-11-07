@@ -56,3 +56,32 @@ fn tc2_no_folder_resolves_to_full_list() {
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].0, "(Init)");
 }
+
+// QW10f: keybinds Option<HashMap> — "user unbound everything" (empty map)
+// must be distinguishable from "no key in config" (defaults).
+
+/// Config with `"keybinds": {}` → Some(empty map), NOT defaults.
+#[test]
+fn qw10f_keybinds_empty_map_is_some_empty() {
+    let json = r#"{"window_width":720.0,"window_height":400.0,"last_preset":null,"keybinds":{}}"#;
+    let ui: config::UiSettings = serde_json::from_str(json).unwrap();
+    let binds = ui.keybinds.expect("empty keybinds map must deserialize as Some, not None");
+    assert!(binds.is_empty(), "expected the explicit empty set, got {} binds", binds.len());
+}
+
+/// Config without the `keybinds` key → None (defaults apply downstream).
+#[test]
+fn qw10f_keybinds_absent_key_is_none() {
+    let ui: config::UiSettings = serde_json::from_str(LEGACY_UI).unwrap();
+    assert_eq!(ui.keybinds, None);
+}
+
+/// Roundtrip pin: a non-empty set survives save/load as Some(map).
+#[test]
+fn qw10f_keybinds_nonempty_roundtrip() {
+    let json = r#"{"window_width":720.0,"window_height":400.0,"last_preset":null,"keybinds":{"F1":"SwitchPart(0)"}}"#;
+    let ui: config::UiSettings = serde_json::from_str(json).unwrap();
+    let out = serde_json::to_string(&ui).unwrap();
+    let back: config::UiSettings = serde_json::from_str(&out).unwrap();
+    assert_eq!(back.keybinds.as_ref().map(|m| m.get("F1").map(String::as_str)), Some(Some("SwitchPart(0)")));
+}

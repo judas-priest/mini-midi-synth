@@ -129,7 +129,7 @@ pub(crate) fn run_headless() -> Result<()> {
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     #[cfg(target_os = "linux")]
     let kb_rx = input::spawn_keyboard_thread(
-        &c.config.ui.keybinds,
+        c.config.ui.keybinds.as_ref().unwrap_or(&std::collections::HashMap::new()),
         shutdown_flag.clone(),
     );
     #[cfg(not(target_os = "linux"))]

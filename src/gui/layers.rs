@@ -18,9 +18,9 @@ use crate::preset::{self, Performance, PartConfig};
 use crate::synth::ControlEvent;
 use super::{App, ToastKind};
 use super::note_name;
+use super::PARTS_PER_ZONE;
 use super::theme;
 
-const PARTS_PER_ZONE: usize = 8;
 const ZONE_A: std::ops::Range<usize> = 0..PARTS_PER_ZONE;
 const ZONE_B: std::ops::Range<usize> = PARTS_PER_ZONE..PARTS_PER_ZONE * 2;
 
@@ -184,8 +184,8 @@ impl App {
                     for (i, r) in &row_rects {
                         if r.contains(p) {
                             let dst = *i;
-                            let src_zone = src / crate::gui::PARTS_PER_ZONE;
-                            let dst_zone = dst / crate::gui::PARTS_PER_ZONE;
+                            let src_zone = src / PARTS_PER_ZONE;
+                            let dst_zone = dst / PARTS_PER_ZONE;
                             if src_zone == dst_zone && src != dst {
                                 new_dst = Some(dst);
                             }
@@ -465,7 +465,6 @@ impl App {
             // params.rs), undo-снапшот на смену; портаменто остаётся в дереве
             // (глубина звука, не live-свитч).
             let mut pmode = self.parts[i].edited_params.get("play_mode").copied().unwrap_or(0.0) as usize;
-            let pm_before = pmode;
             let pm_resp = egui::ComboBox::from_id_salt(format!("pm_row_{i}"))
                 .width(56.0)
                 .selected_text((*crate::gui::PLAY_MODE_NAMES.get(pmode).unwrap_or(&"Poly")).to_string())
@@ -480,7 +479,6 @@ impl App {
                 });
             pm_resp.response.on_hover_text(
                 "Play mode: Poly / Mono / Mono-ST / Latch / ... (portamento — в дереве параметров)");
-            let _ = pm_before;
             let mut s = self.parts[i].sustain_enabled;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut s, "Sus")).on_hover_text(
                 "Sustain pedal affects this part").changed()

@@ -366,6 +366,7 @@ impl App {
         if let Some(inner) = &win {
             let min = inner.response.rect.min;
             self.config.ui.inst_browser_pos = Some([min.x, min.y]);
+            self.mark_config_dirty();
         }
         // Зажим индекса: список мог пересобраться (фильтр/смена парта)
         let flat_len = flat.len();
@@ -418,7 +419,7 @@ impl App {
             self.parts[part].patch_idx = idx;
             self.load_edited_params(part);
             self.send_edited_params(part);
-            self.save_config();
+            self.snapshot_preset_and_mark_dirty();
             // Применили и играем дальше — окно не закрываем
         }
         if !win_open || win.is_none() {
