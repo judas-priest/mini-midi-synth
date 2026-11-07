@@ -189,6 +189,28 @@ pub struct LoadPatchEvent {
     pub wavetable: Option<(Arc<Vec<f32>>, usize, usize)>,
 }
 
+/// Полное состояние парта одной транзакцией (ST2): 1 слот кольца вместо
+/// 20-22 событий. `patch` = LoadPatchEvent последним (порядок GUI-пуша).
+pub struct PartFullState {
+    pub enabled: bool,
+    pub mute: bool,
+    pub volume: f32,
+    pub min_note: u8,
+    pub max_note: u8,
+    pub vel_min: u8,
+    pub vel_max: u8,
+    pub pan: f32,
+    pub transpose: i8,
+    pub note_mode: u8,
+    pub sustain_enabled: bool,
+    pub ignore_pb: bool,
+    pub ignore_mw: bool,
+    pub sf2_mode: bool,
+    pub sf2_program: u8,
+    pub macro_vals: [f32; 8],
+    pub patch: Option<Box<LoadPatchEvent>>,
+}
+
 /// Per-part note mode (TECHDEBT #24-семейство): Poly — все ноты; Bass —
 /// нижняя зажатая (бывший root_only); Root — честный корень зажатого аккорда
 /// (chord::detect_root), фолбэк на Bass для некордовых наборов.
@@ -210,6 +232,9 @@ pub(crate) fn effective_mw(ignore: bool, mw: f32) -> f32 { if ignore { 0.0 } els
 
 pub enum ControlEvent {
     LoadPatch(Box<LoadPatchEvent>),
+    /// Полное состояние парта одной транзакцией (ST2). Обрабатывается
+    /// композицией существующих хэндлеров (см. handle_control).
+    SetPartFull { part: usize, state: Box<PartFullState> },
     SetPartEnabled { part: usize, enabled: bool },
     SetPartMute { part: usize, mute: bool },
     /// Note mode per part: NOTE_MODE_POLY (all notes) / NOTE_MODE_BASS
@@ -2618,6 +2643,85 @@ impl SynthEngine {
                 }
                 self.reset_preset_pickups();
                 return Some(ControlEvent::LoadPatch(ev));
+            }
+            ControlEvent::SetPartFull { part, mut state } => {
+                // ST2: транзакция = 1 слот кольца. Композиция СУЩЕСТВУЮЩИХ
+                // хэндлеров в каноническом порядке push_full_part_state —
+                // семантический паритет по конструкции (change-detection
+                // sf2_mode живёт в SetPartSf2Mode arm'е; SetPartMute НЕ имеет
+                // change-detection — паритет: drain'ит в обеих формах).
+                // RT: state-box НЕ дропать здесь — trash.
+                let macro_vals = state.macro_vals;
+                let sf2_mode = state.sf2_mode;
+                let sf2_program = state.sf2_program;
+                let sub: [ControlEvent; 12] = [
+                    ControlEvent::SetPartEnabled { part, enabled: state.enabled },
+                    ControlEvent::SetPartMute { part, mute: state.mute },
+                    ControlEvent::SetPartVolume { part, volume: state.volume },
+                    ControlEvent::SetPartRange { part, min_note: state.min_note, max_note: state.max_note },
+                    ControlEvent::SetPartVelRange { part, vel_min: state.vel_min, vel_max: state.vel_max },
+                    ControlEvent::SetPartPan { part, pan: state.pan },
+                    ControlEvent::SetPartTranspose { part, semitones: state.transpose },
+                    ControlEvent::SetPartNoteMode { part, mode: state.note_mode },
+                    ControlEvent::SetPartSustain { part, on: state.sustain_enabled },
+                    ControlEvent::SetPartIgnorePb { part, on: state.ignore_pb },
+                    ControlEvent::SetPartIgnoreMw { part, on: state.ignore_mw },
+                    ControlEvent::SetPartSf2Mode { part, enabled: sf2_mode },
+                ];
+                let mut spent: Option<ControlEvent> = None;
+                for ev in sub {
+                    if let Some(heap) = self.handle_control(ev) {
+                        // среди 12 plain-data arm'ов heap не бывает — guard
+                        spent = Some(heap);
+                        break;
+                    }
+                }
+                if spent.is_none() {
+                    for (index, &value) in macro_vals.iter().enumerate() {
+                        if let Some(heap) = self.handle_control(
+                            ControlEvent::SetMacro { part, index, value },
+                        ) {
+                            spent = Some(heap);
+                            break;
+                        }
+                    }
+                }
+                if spent.is_none() && sf2_mode {
+                    if let Some(heap) = self.handle_control(
+                        ControlEvent::SetPartSf2Program {
+                            part, program: sf2_program, bank: 0,
+                        },
+                    ) {
+                        spent = Some(heap);
+                    }
+                }
+                // patch ПОСЛЕДНИМ (GUI-порядок: full state, затем LoadPatch).
+                // Box по указателю: DerefMut part; НЕ распаковывать
+                // (`*boxed` = free на аудио-потоке — канон LoadPatch).
+                let mut patch_spent: Option<ControlEvent> = None;
+                if spent.is_none() {
+                    if let Some(boxed) = state.patch.as_mut() {
+                        boxed.part = part; // DerefMut, no alloc
+                        patch_spent = self.handle_control(
+                            ControlEvent::LoadPatch(state.patch.take().unwrap()),
+                        );
+                    }
+                }
+                // Trash: defensive guard `spent` (heap среди plain arm'ов не
+                // бывает) + сам state-box (иначе free случился бы на
+                // аудио-потоке). Spent LoadPatch ПРОБУЛИВАЕТСЯ вызывающему
+                // через return — канон LoadPatch-контракта (`#[must_use]`,
+                // audio callback отдаёт его в trash); глотать его здесь
+                // нельзя (утечка Box).
+                if let Some(t) = self.trash.as_mut() {
+                    if let Some(heap) = spent {
+                        t.dispose(crate::trash::Trash::Control(heap));
+                    }
+                    t.dispose(crate::trash::Trash::PartFull(state));
+                }
+                // Другие arm'ы матча — `()` (heap уходит через `return`),
+                // поэтому и здесь явный return.
+                return patch_spent;
             }
             ControlEvent::SetPartEnabled { part, enabled } => {
                 if let Some(l) = self.parts.get_mut(part) {

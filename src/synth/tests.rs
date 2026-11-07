@@ -1578,3 +1578,212 @@ fn tc_lfo1_routed_cache() {
     part.update_routing_cache();
     assert!(part.lfo1_routed);
 }
+
+// ── ST2: SetPartFull parity с последовательностью событий ───────────
+
+fn load_patch_event_for(patch: &crate::preset::Patch, part: usize) -> LoadPatchEvent {
+    let ev = crate::synth::ControlEvent::load_patch_from(
+        part, patch,
+    );
+    // load_patch_from возвращает ControlEvent — распаковать до LoadPatchEvent
+    match ev {
+        ControlEvent::LoadPatch(boxed) => *boxed,
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn tc_set_part_full_parity_with_event_sequence() {
+    let patches = crate::preset::load_factory_patches();
+    let seq_events = |e: &mut SynthEngine| {
+        // канонический порядок push_full_part_state (gui/mod.rs:2444-2480)
+        for ev in [
+            ControlEvent::SetPartEnabled { part: 0, enabled: true },
+            ControlEvent::SetPartMute { part: 0, mute: false },
+            ControlEvent::SetPartVolume { part: 0, volume: 0.7 },
+            ControlEvent::SetPartRange { part: 0, min_note: 36, max_note: 84 },
+            ControlEvent::SetPartVelRange { part: 0, vel_min: 1, vel_max: 120 },
+            ControlEvent::SetPartPan { part: 0, pan: 0.5 },
+            ControlEvent::SetPartTranspose { part: 0, semitones: -3 },
+            ControlEvent::SetPartNoteMode { part: 0, mode: crate::synth::NOTE_MODE_POLY },
+            ControlEvent::SetPartSustain { part: 0, on: true },
+            ControlEvent::SetPartIgnorePb { part: 0, on: true },
+            ControlEvent::SetPartIgnoreMw { part: 0, on: false },
+            ControlEvent::SetPartSf2Mode { part: 0, enabled: false },
+        ] {
+            drop(e.handle_control(ev));
+        }
+        for i in 0..8 {
+            drop(e.handle_control(ControlEvent::SetMacro { part: 0, index: i, value: 0.1 * i as f32 }));
+        }
+        drop(e.handle_control(ControlEvent::load_patch_from(0, &patches[0])));
+    };
+    let tx_events = |e: &mut SynthEngine| {
+        let state = crate::synth::PartFullState {
+            enabled: true, mute: false, volume: 0.7,
+            min_note: 36, max_note: 84, vel_min: 1, vel_max: 120,
+            pan: 0.5, transpose: -3,
+            note_mode: crate::synth::NOTE_MODE_POLY,
+            sustain_enabled: true, ignore_pb: true, ignore_mw: false,
+            sf2_mode: false, sf2_program: 0,
+            macro_vals: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            patch: Some(Box::new(load_patch_event_for(&patches[0], 0))),
+        };
+        drop(e.handle_control(ControlEvent::SetPartFull { part: 0, state: Box::new(state) }));
+    };
+    let mut a = SynthEngine::new(48_000.0);
+    a.set_patches(patches.clone());
+    seq_events(&mut a);
+    let mut b = SynthEngine::new(48_000.0);
+    b.set_patches(patches.clone());
+    tx_events(&mut b);
+    let l = &a.parts[0];
+    let r = &b.parts[0];
+    assert_eq!(l.enabled, r.enabled);
+    assert_eq!(l.volume, r.volume);
+    assert_eq!(l.min_note, r.min_note);
+    assert_eq!(l.max_note, r.max_note);
+    assert_eq!(l.vel_min, r.vel_min);
+    assert_eq!(l.vel_max, r.vel_max);
+    assert_eq!(l.pan, r.pan);
+    assert_eq!(l.transpose, r.transpose);
+    assert_eq!(l.note_mode, r.note_mode);
+    assert_eq!(l.sustain_enabled, r.sustain_enabled);
+    assert_eq!(l.ignore_pb, r.ignore_pb);
+    assert_eq!(l.ignore_mw, r.ignore_mw);
+    assert_eq!(l.sf2_mode, r.sf2_mode);
+    assert_eq!(l.macro_vals, r.macro_vals);
+    assert_eq!(l.params.filter_cutoff, r.params.filter_cutoff, "patch applied");
+    assert_eq!(l.params.osc_type, r.params.osc_type);
+}
+
+#[test]
+fn tc_set_part_full_parity_muted_part_drains_both_ways() {
+    // ВАЖНО (ревью 2026-11-08): SetPartMute НЕ имеет change-detection —
+    // mute=true на уже замьюченном парте ДРЕЙНИТ голоса И в последовательной,
+    // И в транзакционной ветке. Паритет проверяем: обе ветки дают один
+    // результат (голоса сняты), никаких no-drain пинов.
+    let patches = crate::preset::load_factory_patches();
+    let mk = |tx: bool| -> SynthEngine {
+        let mut e = SynthEngine::new(48_000.0);
+        e.set_patches(patches.clone());
+        drop(e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true }));
+        drop(e.handle_control(ControlEvent::SetPartMute { part: 0, mute: true }));
+        e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+        let state = crate::synth::PartFullState {
+            enabled: true, mute: true, volume: 0.7,
+            min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
+            pan: 0.0, transpose: 0,
+            note_mode: crate::synth::NOTE_MODE_POLY,
+            sustain_enabled: false, ignore_pb: false, ignore_mw: false,
+            sf2_mode: false, sf2_program: 0,
+            macro_vals: [0.0; 8],
+            patch: None,
+        };
+        if tx {
+            drop(e.handle_control(ControlEvent::SetPartFull { part: 0, state: Box::new(state) }));
+        } else {
+            // последовательность как в GUI push_full_part_state (mute=true)
+            drop(e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true }));
+            drop(e.handle_control(ControlEvent::SetPartMute { part: 0, mute: true }));
+            drop(e.handle_control(ControlEvent::SetPartVolume { part: 0, volume: 0.7 }));
+        }
+        e
+    };
+    let a = mk(false);
+    let b = mk(true);
+    let drained_a = !a.parts[0].voices.iter().any(|v| v.active);
+    let drained_b = !b.parts[0].voices.iter().any(|v| v.active);
+    assert_eq!(drained_a, drained_b, "mute drain parity");
+    assert!(drained_b, "SetPartMute(true) drains regardless of prior state");
+}
+
+#[test]
+fn tc_set_part_full_sf2_parity() {
+    // TC2 (ревью: был в списке, не было теста): sf2_mode=true + program
+    let patches = crate::preset::load_factory_patches();
+    let build = |tx: bool| -> SynthEngine {
+        let mut e = SynthEngine::new(48_000.0);
+        e.set_patches(patches.clone());
+        if tx {
+            let state = crate::synth::PartFullState {
+                enabled: true, mute: false, volume: 0.8,
+                min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
+                pan: 0.0, transpose: 0,
+                note_mode: crate::synth::NOTE_MODE_POLY,
+                sustain_enabled: false, ignore_pb: false, ignore_mw: false,
+                sf2_mode: true, sf2_program: 5,
+                macro_vals: [0.0; 8],
+                patch: None,
+            };
+            drop(e.handle_control(ControlEvent::SetPartFull { part: 0, state: Box::new(state) }));
+        } else {
+            drop(e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true }));
+            drop(e.handle_control(ControlEvent::SetPartSf2Mode { part: 0, enabled: true }));
+            drop(e.handle_control(ControlEvent::SetPartSf2Program { part: 0, program: 5, bank: 0 }));
+        }
+        e
+    };
+    let a = build(false);
+    let b = build(true);
+    assert_eq!(a.parts[0].sf2_mode, b.parts[0].sf2_mode);
+    assert!(b.parts[0].sf2_mode, "transaction enables sf2");
+}
+
+#[test]
+fn tc_set_part_full_macros_without_patch() {
+    // Ревью: с patch:Some LoadPatch перезаписывает macro_vals из пресета —
+    // SetMacro-ветка не наблюдаема (таутология). Здесь patch:None — сценарий
+    // реконнекта/спавна: SetMacro единственный писатель.
+    let patches = crate::preset::load_factory_patches();
+    let seq = |e: &mut SynthEngine| {
+        drop(e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true }));
+        for i in 0..8 {
+            drop(e.handle_control(ControlEvent::SetMacro { part: 0, index: i, value: 0.1 * i as f32 }));
+        }
+    };
+    let tx = |e: &mut SynthEngine| {
+        let state = crate::synth::PartFullState {
+            enabled: true, mute: false, volume: 0.8,
+            min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
+            pan: 0.0, transpose: 0,
+            note_mode: crate::synth::NOTE_MODE_POLY,
+            sustain_enabled: false, ignore_pb: false, ignore_mw: false,
+            sf2_mode: false, sf2_program: 0,
+            macro_vals: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            patch: None,
+        };
+        drop(e.handle_control(ControlEvent::SetPartFull { part: 0, state: Box::new(state) }));
+    };
+    let mut a = SynthEngine::new(48_000.0);
+    a.set_patches(patches.clone());
+    seq(&mut a);
+    let mut b = SynthEngine::new(48_000.0);
+    b.set_patches(patches.clone());
+    tx(&mut b);
+    assert_eq!(a.parts[0].macro_vals, b.parts[0].macro_vals);
+    assert_eq!(b.parts[0].macro_vals[3], 0.3, "SetMacro branch is observable");
+}
+#[test]
+fn tc_set_part_full_heap_return() {
+    // patch:Some на парте с активным wavetable → Some(LoadPatch) назад
+    // (trash-контракт; Box НЕ дропается на аудио-потоке)
+    let patches = crate::preset::load_factory_patches();
+    let mut e = SynthEngine::new(48_000.0);
+    e.set_patches(patches.clone());
+    drop(e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true }));
+    drop(e.handle_control(ControlEvent::load_patch_from(0, &patches[0])));
+    let state = crate::synth::PartFullState {
+        enabled: true, mute: false, volume: 0.8,
+        min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
+        pan: 0.0, transpose: 0,
+        note_mode: crate::synth::NOTE_MODE_POLY,
+        sustain_enabled: false, ignore_pb: false, ignore_mw: false,
+        sf2_mode: false, sf2_program: 0,
+        macro_vals: [0.0; 8],
+        patch: Some(Box::new(load_patch_event_for(&patches[1], 0))),
+    };
+    let spent = e.handle_control(ControlEvent::SetPartFull { part: 0, state: Box::new(state) });
+    assert!(spent.is_some(), "patch-carrying transaction must return heap event");
+    assert!(matches!(spent, Some(ControlEvent::LoadPatch(_))));
+}

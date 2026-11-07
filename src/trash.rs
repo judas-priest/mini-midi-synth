@@ -23,6 +23,9 @@ use crate::synth::ControlEvent;
 pub enum Trash {
     /// A control event the engine has finished with. Still owns its Box.
     Control(ControlEvent),
+    /// An emptied full-part transaction box (ST2). Read on the audio thread,
+    /// freed on the GUI thread.
+    PartFull(Box<crate::synth::PartFullState>),
     /// A soundfont and rustysynth instance the sampler just replaced. The
     /// soundfont alone can be tens of megabytes.
     Sf2(crate::synth::sampler::Displaced),
