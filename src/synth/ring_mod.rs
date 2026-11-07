@@ -3,6 +3,8 @@
 
 use std::f32::consts::TAU;
 
+use super::dsp_utils::advance_phase;
+
 pub struct RingMod {
     sample_rate: f32,
     carrier_phase: f32,
@@ -63,9 +65,7 @@ impl RingMod {
         if mix < 0.001 { return (in_l, in_r); }
 
         // Advance carrier
-        let dt = carrier_freq / self.sample_rate;
-        self.carrier_phase += dt;
-        if self.carrier_phase >= 1.0 { self.carrier_phase -= 1.0; }
+        advance_phase(&mut self.carrier_phase, carrier_freq, self.sample_rate);
         let carrier = Self::carrier_sample(self.carrier_phase, carrier_shape as u8);
 
         // 4-diode bridge per channel

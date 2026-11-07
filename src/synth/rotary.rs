@@ -4,7 +4,7 @@
 //! ~40–350 RPM) with modulated delay lines for Doppler shift and AM for tremolo.
 //! A one-pole crossover splits the signal between horn and rotor paths.
 
-use super::dsp_utils::buf_read_linear;
+use super::dsp_utils::{buf_read_linear, advance_phase};
 
 const BUF_SIZE: usize = 2048; // covers up to ~46ms delay at 44100 Hz
 
@@ -70,10 +70,8 @@ impl RotarySpeaker {
 
         // Advance LFO phases
         let sr = self.sample_rate;
-        self.horn_phase += self.horn_rate / sr;
-        if self.horn_phase >= 1.0 { self.horn_phase -= 1.0; }
-        self.rotor_phase += self.rotor_rate / sr;
-        if self.rotor_phase >= 1.0 { self.rotor_phase -= 1.0; }
+        advance_phase(&mut self.horn_phase, self.horn_rate, sr);
+        advance_phase(&mut self.rotor_phase, self.rotor_rate, sr);
 
         let horn_lfo = (self.horn_phase * std::f32::consts::TAU).sin();
         let rotor_lfo = (self.rotor_phase * std::f32::consts::TAU).sin();

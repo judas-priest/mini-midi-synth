@@ -1665,8 +1665,7 @@ impl Oscillator {
 
             // Вибрато: модуляция длины nut-линии (STK: neckDelay.setDelay)
             *nut_vib = 0.02 * (*vib_phase * std::f32::consts::TAU).sin();
-            *vib_phase += 6.13 / sample_rate;
-            if *vib_phase >= 1.0 { *vib_phase -= 1.0; }
+            super::dsp_utils::advance_phase(vib_phase, 6.13, sample_rate);
 
             // 1) Отражения: ОБЕ инверсии (STK Bowed.cpp) — иначе
             // субгармонический ряд (чужие высоты, #56а)
@@ -2820,9 +2819,7 @@ impl Oscillator {
 
     fn tick_window(&mut self, freq: f32) -> f32 {
         if let OscState::Window { phase, window_type, morph, formant } = &mut self.state {
-            let dt = freq / self.sample_rate;
-            *phase += dt;
-            if *phase >= 1.0 { *phase -= 1.0; }
+            super::dsp_utils::advance_phase(phase, freq, self.sample_rate);
 
             // Formant control: scale the inner waveform independently
             let formant_mult = 2.0_f32.powf(*formant / 12.0);

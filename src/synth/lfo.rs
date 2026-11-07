@@ -329,10 +329,7 @@ impl Lfo {
 
         let hz = self.effective_rate(rate);
         let dt = hz / self.sample_rate;
-        self.phase += dt;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
+        super::dsp_utils::advance_phase(&mut self.phase, hz, self.sample_rate);
 
         let raw = match waveform {
             LfoWaveform::Sine => sine_lut(self.phase),

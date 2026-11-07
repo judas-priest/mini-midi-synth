@@ -7,6 +7,8 @@
 
 use std::f32::consts::PI;
 
+use super::dsp_utils::advance_phase;
+
 const BUF_SIZE: usize = 384000; // ~8s at 48kHz, supports high sample rates
 
 pub struct FloatyDelay {
@@ -86,7 +88,6 @@ impl FloatyDelay {
         let fb = (feedback * 0.9).clamp(0.0, 0.9);        // 0..0.9 max to avoid runaway
         let lfo_depth = wobble * 0.20 * base_delay;        // 0..20% of delay time in samples
         let lfo_rate_hz = 0.1 + rate * 2.9;               // 0.1..3.0 Hz
-        let lfo_inc = lfo_rate_hz / sr;
 
         // Damping LP coefficient: cutoff 200Hz..8kHz
         let damp_cutoff = 200.0 + damp * 7800.0;
@@ -131,8 +132,8 @@ impl FloatyDelay {
         self.write_pos = (self.write_pos + 1) % BUF_SIZE;
 
         // Advance LFO phases
-        self.lfo_phase_l = (self.lfo_phase_l + lfo_inc) % 1.0;
-        self.lfo_phase_r = (self.lfo_phase_r + lfo_inc) % 1.0;
+        advance_phase(&mut self.lfo_phase_l, lfo_rate_hz, sr);
+        advance_phase(&mut self.lfo_phase_r, lfo_rate_hz, sr);
 
         // Wet/dry mix
         let out_l = in_l * (1.0 - mix) + damp_out_l * mix;

@@ -2,6 +2,8 @@
 
 use std::f32::consts::PI;
 
+use super::dsp_utils::advance_phase;
+
 pub struct Tremolo {
     phase: f32,
     sample_rate: f32,
@@ -31,8 +33,7 @@ impl Tremolo {
         let phase_r = self.phase + 0.25 * self.stereo; // offset for stereo
         let lfo_r = ((phase_r * 2.0 * PI).sin() + 1.0) * 0.5;
 
-        self.phase += self.rate / self.sample_rate;
-        if self.phase >= 1.0 { self.phase -= 1.0; }
+        advance_phase(&mut self.phase, self.rate, self.sample_rate);
 
         let gain_l = 1.0 - self.depth * (1.0 - lfo_l);
         let gain_r = 1.0 - self.depth * (1.0 - lfo_r);
