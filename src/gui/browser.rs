@@ -65,11 +65,11 @@ impl App {
         };
         let mut builder = modal::ModalWindow::new(
             ctx, "inst_browser", format!("Instrument Browser — {layer_label}"),
-            &mut win_open, 400.0,
+            &mut win_open, 520.0,
         )
         .default_height(540.0)
         // #38-регресс: пин ширины — храповик egui растит окно до контента
-        .fixed_width(400.0);
+        .fixed_width(520.0);
         // #34: restore the position saved in a previous session (within a
         // session egui remembers drags itself, keyed by the constant Id).
         if let Some([x, y]) = self.config.ui.inst_browser_pos {
@@ -357,6 +357,19 @@ impl App {
             // (#44-фидбек) Клик по инструменту = ПРИМЕНИТЬ и играть дальше —
             // окно остаётся открытым; закрытие — Done из shell, двойной клик
             // по инструменту (Windows select-and-OK), Esc, ✕.
+            ui.separator();
+            if !self.parts[part].sf2_mode {
+                ui.strong("Параметры пресета");
+                egui::ScrollArea::vertical()
+                    .id_salt("browser_params_scroll")
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        self.draw_params_editable_for(ui, part);
+                    });
+            } else {
+                ui.label(egui::RichText::new(
+                    "SF2: у семплов нет DSP-параметров").weak());
+            }
         });
 
         // ── Post-closure handling (after .show, reads locals + modal) ────
