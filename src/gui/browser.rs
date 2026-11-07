@@ -65,11 +65,11 @@ impl App {
         };
         let mut builder = modal::ModalWindow::new(
             ctx, "inst_browser", format!("Instrument Browser — {layer_label}"),
-            &mut win_open, 940.0,
+            &mut win_open, 700.0,
         )
         .default_height(540.0)
         // #38-регресс: пин ширины — храповик egui растит окно до контента
-        .fixed_width(940.0);
+        .fixed_width(700.0);
         // #34: restore the position saved in a previous session (within a
         // session egui remembers drags itself, keyed by the constant Id).
         if let Some([x, y]) = self.config.ui.inst_browser_pos {
@@ -126,7 +126,7 @@ impl App {
             // Параметры пресета — ПРАВАЯ колонка (юзер 2026-11-08: окно
             // узкое, логичнее занять ширину; высота ограничена окном).
             egui::SidePanel::right("inst_browser_params")
-                .exact_width(400.0)
+                .exact_width(390.0)
                 .resizable(false)
                 .show_inside(ui, |ui| {
                     ui.add_space(theme::SP_XS);
