@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+status: executed 2026-11-08 (субагентно; 3 задачи + ревью; PR стадии 1)
+
 anchor-checked: 2026-11-08 (база = master 7a5d021; анкоры собраны субагентом с HEAD,
 все сниппеты verbatim; канон-исследование Tavily 2026-11-08: single boxed payload
 per gesture — SPSC-канон, allocation на GUI-потоке, zero-alloc на аудио; Arc
@@ -111,7 +113,7 @@ rt_safety + cargo deny.
 - Modify: `src/gui/settings.rs:269-295` — реконнект: `let h = engine.handles();`
   + присвоения `self.X = h.X;`.
 
-- [ ] **Step 1: struct** — в src/lib.rs после CommonInit (или перед ним):
+- [x] **Step 1: struct** — в src/lib.rs после CommonInit (или перед ним):
 
 ```rust
 /// Единый бандл общих хэндлов движка (ST1: 18 хэндлов × 6 мест → 3).
@@ -152,7 +154,7 @@ midi_seq_pos_atom; БЕЗ гейта = seq_target_atom, active_part_atom,
 master_rec_cycle_atom. Названия полей EngineHandles = имена полей CommonInit
 1:1. Гейт после: `cargo check --lib --no-default-features` обязателен.
 
-- [ ] **Step 2: метод** — в impl SynthEngine (src/synth/mod.rs, рядом с
+- [x] **Step 2: метод** — в impl SynthEngine (src/synth/mod.rs, рядом с
   accessors-секцией: seq_target_atom и т.п.):
 
 ```rust
@@ -184,7 +186,7 @@ master_rec_cycle_atom. Названия полей EngineHandles = имена п
     }
 ```
 
-- [ ] **Step 3: потребители** — init_common (lib.rs:225-254): 17 локальных
+- [x] **Step 3: потребители** — init_common (lib.rs:225-254): 17 локальных
   let заменить на `let h = engine.handles();` — литерал CommonInit (:329-391)
   использует `h.drum_step_atom` и т.д. ИЛИ оставить 17 полей CommonInit и
   заполнить их из h (меньше диффа): `let common = CommonInit { drum_step_atom:
@@ -203,12 +205,12 @@ master_rec_cycle_atom. Названия полей EngineHandles = имена п
   литерала; поправить ДРУГИЕ использования полей CommonInit (grep `c\.` и
   `common.` по lib.rs — audio-конфиг поля остаются).
 
-- [ ] **Step 4: гейт**
+- [x] **Step 4: гейт**
 
 Run: `cargo check --lib --no-default-features 2>&1 | tail -1 && cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok"`
 Expected: всё зелёное.
 
-- [ ] **Step 5: коммит**
+- [x] **Step 5: коммит**
 
 ```bash
 git add src/lib.rs src/synth/mod.rs src/gui/settings.rs && git commit -m "refactor: EngineHandles bundle — 17 handle pulls via SynthEngine::handles() (ST1)"
@@ -222,7 +224,7 @@ git add src/lib.rs src/synth/mod.rs src/gui/settings.rs && git commit -m "refact
   с LoadPatch arm)
 - Test: `src/synth/tests.rs`
 
-- [ ] **Step 1: типы** — events-секция:
+- [x] **Step 1: типы** — events-секция:
 
 ```rust
 /// Полное состояние парта одной транзакцией (ST2): 1 слот кольца вместо
@@ -253,7 +255,7 @@ variant в ControlEvent:
     SetPartFull { part: usize, state: Box<PartFullState> },
 ```
 
-- [ ] **Step 2: падающий тест** — src/synth/tests.rs:
+- [x] **Step 2: падающий тест** — src/synth/tests.rs:
 
 ```rust
 
@@ -600,7 +602,7 @@ git add src/synth/mod.rs src/synth/tests.rs && git commit -m "feat: SetPartFull 
 **Files:**
 - Modify: `src/gui/mod.rs` — push_full_part_state (:2444-2480), do_swap_parts_push (:2524-2532), reset_and_push_part (:2486-2506), apply_performance (~:3300-3403)
 
-- [ ] **Step 1: push_full_part_state → транзакция** (тело заменить):
+- [x] **Step 1: push_full_part_state → транзакция** (тело заменить):
 
 ```rust
     fn push_full_part_state(&mut self, part: usize) {
@@ -623,7 +625,7 @@ git add src/synth/mod.rs src/synth/tests.rs && git commit -m "feat: SetPartFull 
     }
 ```
 
-- [ ] **Step 2: do_swap_parts_push** — патч входит в транзакцию (свап = 2
+- [x] **Step 2: do_swap_parts_push** — патч входит в транзакцию (свап = 2
   слота). Заменить:
 
 ```rust
@@ -661,14 +663,14 @@ git add src/synth/mod.rs src/synth/tests.rs && git commit -m "feat: SetPartFull 
 (Порядок «state потом patch» внутри одной транзакции = прежний порядок «full
 state, потом LoadPatch» — GUI-порядок сохранён.)
 
-- [ ] **Step 3: reset_and_push_part** — tail: `load_edited_params(part);` +
+- [x] **Step 3: reset_and_push_part** — tail: `load_edited_params(part);` +
   `send_edited_params(part);` + `push_full_part_state(part);` заменить на
   сборку транзакции с patch (паттерн Step 2, part один) — ИЛИ (проще, тоже
   корректно) оставить send_edited_params и push_full_part_state (теперь 2
   события вместо 21-22). РЕШЕНИЕ: простое (2 события) — семантика та же,
   дифф меньше. Патч-в-транзакцию — только свапу (2 слота).
 
-- [ ] **Step 4: apply_performance** — per-part блок (~14-15 событий) заменить
+- [x] **Step 4: apply_performance** — per-part блок (~14-15 событий) заменить
   сборкой PartFullState c patch (load_patch_from_edited с edited_params
   перфа) — 8 транзакций + SetSustain{false} + tail SetPartEnabled. ВАЖНО:
   apply_performance берёт данные из СВОИХ локальных структур (parts из файла
@@ -683,14 +685,14 @@ state, потом LoadPatch» — GUI-порядок сохранён.)
   key_low/key_high перфа; apply_split_ranges (layers.rs:670-691) остаётся
   хвостом и перепушивает диапазоны после.
 
-- [ ] **Step 5: гейт**
+- [x] **Step 5: гейт**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok" && cargo test --features rt-assert --test rt_safety 2>&1 | tail -1 && cargo test --test sf2_channel_gain 2>&1 | tail -2`
 Expected: всё зелёное (sf2_channel_gain пинил СТАРЫЙ порядок apply — если
 тест шлёт события напрямую, он не ломается; если тест ссылался на GUI-функцию
 — проверить и поправить пин на транзакцию, осознанно).
 
-- [ ] **Step 6: коммит**
+- [x] **Step 6: коммит**
 
 ```bash
 git add src/gui/mod.rs && git commit -m "feat: GUI gestures via SetPartFull — part swap = 2 ring slots, spawn/reconnect = 1 (ST2b)"
@@ -698,14 +700,14 @@ git add src/gui/mod.rs && git commit -m "feat: GUI gestures via SetPartFull — 
 
 ### Task 4: Верификация стадии + релизный цикл
 
-- [ ] **Step 1: полный гейт** — clippy + cargo test + rt_safety + cargo deny.
-- [ ] **Step 2:** PR → squash merge → rebuild release → ЗАПУСТИТЬ приложение
+- [x] **Step 1: полный гейт** — clippy + cargo test + rt_safety + cargo deny.
+- [x] **Step 2:** PR → squash merge → rebuild release → ЗАПУСТИТЬ приложение
   (ночь: запуск разрешён, проверка запускаемости) → логи `adb`/stderr не смотрим
   дольше 5 с, процесс жив = ок.
-- [ ] **Step 3:** TECHDEBT подсекция + roadmap: чекбокс стадии, «УТРОМ: что
+- [x] **Step 3:** TECHDEBT подсекция + roadmap: чекбокс стадии, «УТРОМ: что
   проверить» — пункты: свап партов работает (драг ⠿), спавн парта, реконнект
   аудио (Settings → Reconnect) сохраняет состояние партов, apply перфа.
-- [ ] **Step 4:** Tavily ПОСЛЕ итерации: сверить «boxed payload + trash» с
+- [x] **Step 4:** Tavily ПОСЛЕ итерации: сверить «boxed payload + trash» с
   канонами (reclamation off audio thread) — расхождение → пометка.
 
 ## Out of scope
