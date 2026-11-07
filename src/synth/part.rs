@@ -903,6 +903,11 @@ impl Part {
 
         let bl = inputs.block_len as f32;
 
+        // Блочная длина для sync-ветки LFO (компенсация внутри Lfo, audit mod-matrix #3b)
+        for l in self.lfos.iter_mut().chain(self.scene_lfos.iter_mut()) {
+            l.set_block_len(bl);
+        }
+
         // Set BPM, tempo sync, unipolar on all LFOs
         let lfo_tempo_syncs = [self.params.lfo1_tempo_sync, self.params.lfo2_tempo_sync,
                                self.params.lfo3_tempo_sync, self.params.lfo4_tempo_sync];
@@ -923,9 +928,8 @@ impl Part {
             || self.params.lfo_amp_depth > 0.001
             || inputs.aftertouch_smooth > 0.001;
         let lfo1_val = if lfo1_active {
-            // tempo_sync ждёт ИНДЕКС деления 0..15 (lfo.rs), а не герцы; GUI-пикера
-            // нет — фича спит (0 пользователей в пресетах/конфиге); полный дизайн —
-            // отдельная задача.
+            // tempo_sync ждёт ИНДЕКС деления 0..15 (не герцы): clamp 15 внутри
+            // Lfo::effective_rate, блочная компенсация тоже внутри Lfo (set_block_len).
             let rate = if self.lfos[0].tempo_sync { self.params.lfo_rate } else { self.params.lfo_rate * bl };
             self.lfos[0].tick_with_deform(rate, lfo1_wf, self.params.lfo_deform)
         } else { 0.0 };

@@ -170,6 +170,7 @@ pub struct Lfo {
     // Tempo sync
     pub tempo_sync: bool,
     pub bpm: f32,
+    block_len: f32,
     // Unipolar
     pub unipolar: bool,
     // Cached last step event
@@ -198,6 +199,7 @@ impl Lfo {
             step_prev_value: 0.0,
             tempo_sync: false,
             bpm: 120.0,
+            block_len: 128.0,
             unipolar: false,
             last_step_event: StepSeqEvent::default(),
         }
@@ -210,6 +212,10 @@ impl Lfo {
     pub fn set_bpm(&mut self, bpm: f32) {
         self.bpm = bpm.max(20.0);
     }
+
+    /// Длина блока в сэмплах — tick вызывается раз на блок, sync-ветка
+    /// компенсирует блочность сама (audit mod-matrix #3b).
+    pub fn set_block_len(&mut self, bl: f32) { self.block_len = bl.max(1.0); }
 
     /// Reset LFO phase to 0 (retrigger on note-on). Does not affect noise state.
     pub fn reset_phase(&mut self) {
@@ -248,8 +254,10 @@ impl Lfo {
     /// Compute effective rate in Hz, handling tempo sync.
     fn effective_rate(&self, rate: f32) -> f32 {
         if self.tempo_sync {
-            let cpb = tempo_sync_cycles_per_beat(rate as u8);
-            self.bpm / 60.0 * cpb
+            // rate = ИНДЕКС деления 0..15 (не Hz); ×block_len: tick раз на
+            // блок, advance_phase добавляет hz/sample_rate за вызов
+            let idx = (rate as u8).min(15);
+            self.bpm / 60.0 * tempo_sync_cycles_per_beat(idx) * self.block_len
         } else {
             rate
         }
@@ -458,6 +466,22 @@ mod tests {
                 (sine_lut(-p) - (-p * std::f32::consts::TAU).sin()).abs() < 1e-2,
                 "phase -{p}"
             );
+        }
+    }
+
+    #[test]
+    fn tempo_sync_advances_like_freerun_at_division_hz() {
+        // rate = индекс деления 4 (1 beat) при bpm 120 → 2.0 Гц
+        let bl = 128.0_f32;
+        let mut synced = Lfo::new(48000.0);
+        synced.tempo_sync = true;
+        synced.set_bpm(120.0);
+        synced.set_block_len(bl);
+        let mut free = Lfo::new(48000.0);
+        for _ in 0..64 {
+            let s = synced.tick_with_deform(4.0, LfoWaveform::Sine, 0.0); // индекс 4
+            let f = free.tick_with_deform(2.0 * bl, LfoWaveform::Sine, 0.0); // 2 Гц
+            assert!((s - f).abs() < 1e-4, "sync {s} vs free {f}");
         }
     }
 
