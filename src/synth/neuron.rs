@@ -41,12 +41,6 @@ impl Neuron {
         self.dc.reset();
     }
 
-    /// Fast sigmoid approximation
-    #[inline(always)]
-    fn sigmoid(x: f32) -> f32 {
-        x / (1.0 + x.abs())
-    }
-
     /// Fast tanh approximation
     #[inline(always)]
     fn fast_tanh(x: f32) -> f32 {
@@ -57,7 +51,7 @@ impl Neuron {
     /// GRU cell: f = sigmoid(Wf*x + Uf*y + bf), out = f*y + (1-f)*tanh(Wh*x + Uh*f*y)
     #[inline(always)]
     fn gru_step(x: f32, y_prev: f32, wf: f32, uf: f32, bf: f32, wh: f32, uh: f32) -> f32 {
-        let f = Self::sigmoid(wf * x + uf * y_prev + bf);
+        let f = super::dsp_utils::soft_clip(wf * x + uf * y_prev + bf);
         f * y_prev + (1.0 - f) * Self::fast_tanh(wh * x + uh * f * y_prev)
     }
 

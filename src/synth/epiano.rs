@@ -203,9 +203,7 @@ impl ElectricPianoModel {
             let t = self.attack_time / self.attack_dur;
             let env = (PI * t).sin() * (1.0 - t); // half-sine * linear fade
 
-            self.noise_state ^= self.noise_state << 13;
-            self.noise_state ^= self.noise_state >> 17;
-            self.noise_state ^= self.noise_state << 5;
+            super::dsp_utils::xorshift32(&mut self.noise_state);
             let noise = (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
 
             // LP-filter to shape noise color (more muffled = more piano-like thump)
@@ -244,7 +242,7 @@ impl ElectricPianoModel {
         // Model: soft clip via tanh approximation.
         let driven = sum * self.pickup_drive;
         // Smooth soft-clip: x / (1 + |x|) — no derivative discontinuities
-        let pickup_out = driven / (1.0 + driven.abs());
+        let pickup_out = super::dsp_utils::soft_clip(driven);
 
         // Normalize pickup output back to reasonable level
         let out = pickup_out / self.pickup_drive.sqrt() + noise_out;

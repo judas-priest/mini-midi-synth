@@ -60,21 +60,6 @@ const METAL_FREQS: [f32; 6] = [204.68, 297.64, 369.47, 411.30, 521.77, 585.32];
 // Utility
 // ---------------------------------------------------------------------------
 
-/// Cheap soft-clip: avoids tanh cost.
-#[inline(always)]
-fn soft_clip(x: f32) -> f32 {
-    x / (1.0 + x.abs())
-}
-
-/// Xorshift32 PRNG — returns white noise in -1..1.
-#[inline(always)]
-fn xorshift32(state: &mut u32) -> f32 {
-    *state ^= *state << 13;
-    *state ^= *state >> 17;
-    *state ^= *state << 5;
-    (*state as f32 / u32::MAX as f32) * 2.0 - 1.0
-}
-
 /// Pre-compute exponential decay coefficient from time in seconds.
 /// `level *= coeff` each sample → reaches ~-60dB after `time_s`.
 #[inline(always)]
@@ -152,7 +137,7 @@ impl KickVoice {
             0.0
         };
 
-        let out = soft_clip(tone * self.amp + click);
+        let out = super::dsp_utils::soft_clip(tone * self.amp + click);
         self.amp *= self.amp_coeff;
         if self.amp < 0.0001 { self.active = false; }
         out
@@ -285,20 +270,20 @@ impl SnareVoice {
         body *= self.body_amp;
 
         // Snare wire noise through 2-pole SVF bandpass
-        let white = xorshift32(&mut self.noise_state);
+        let white = (super::dsp_utils::xorshift32(&mut self.noise_state) as f32 / u32::MAX as f32) * 2.0 - 1.0;
         let hp = white - self.svf_lp - self.svf_q_inv * self.svf_bp;
         self.svf_bp += self.svf_w * hp;
         self.svf_lp += self.svf_w * self.svf_bp;
         let noise = self.svf_bp * self.noise_amp;
 
         // Wire rattle: 2-pole highpass at ~4kHz for sizzle
-        let white2 = xorshift32(&mut self.noise_state);
+        let white2 = (super::dsp_utils::xorshift32(&mut self.noise_state) as f32 / u32::MAX as f32) * 2.0 - 1.0;
         self.wire_hp += 0.25 * (white2 - self.wire_hp);
         self.wire_hp2 += 0.25 * (self.wire_hp - self.wire_hp2);
         let wire = (white2 - self.wire_hp2) * self.wire_amp;
 
         // Transient click
-        let click = xorshift32(&mut self.noise_state) * self.click_amp;
+        let click = ((super::dsp_utils::xorshift32(&mut self.noise_state) as f32 / u32::MAX as f32) * 2.0 - 1.0) * self.click_amp;
 
         // Decay all envelopes
         self.body_amp *= self.body_coeff;
@@ -312,7 +297,7 @@ impl SnareVoice {
             self.active = false;
         }
 
-        soft_clip(body + noise + wire + click)
+        super::dsp_utils::soft_clip(body + noise + wire + click)
     }
 
     fn kill(&mut self, fade_samples: f32) {
@@ -462,7 +447,7 @@ impl ClapVoice {
     fn tick(&mut self) -> f32 {
         if !self.active { return 0.0; }
 
-        let white = xorshift32(&mut self.noise_state);
+        let white = (super::dsp_utils::xorshift32(&mut self.noise_state) as f32 / u32::MAX as f32) * 2.0 - 1.0;
 
         // Bandpass filter (~1.1kHz center)
         self.bp_state[0] += self.filter_freq * (white - self.bp_state[0]);
@@ -489,7 +474,7 @@ impl ClapVoice {
 
         let out = filtered * env * self.amp;
         if self.burst_index >= 4 && self.amp < 0.0001 { self.active = false; }
-        soft_clip(out)
+        super::dsp_utils::soft_clip(out)
     }
 
     fn kill(&mut self, fade_samples: f32) {
@@ -602,7 +587,7 @@ impl ClickVoice {
         if !self.active { return 0.0; }
 
         // Noise component
-        let white = xorshift32(&mut self.noise_state);
+        let white = (super::dsp_utils::xorshift32(&mut self.noise_state) as f32 / u32::MAX as f32) * 2.0 - 1.0;
         self.bp_state[0] += self.filter_freq * (white - self.bp_state[0]);
         self.bp_state[1] += self.filter_freq * (self.bp_state[0] - self.bp_state[1]);
         let noise = (self.bp_state[0] - self.bp_state[1]) * self.amp;
@@ -615,7 +600,7 @@ impl ClickVoice {
 
         self.amp *= self.amp_coeff;
         if self.amp < 0.0001 && self.tone_amp < 0.0001 { self.active = false; }
-        soft_clip(noise + tri)
+        super::dsp_utils::soft_clip(noise + tri)
     }
 
     fn kill(&mut self, fade_samples: f32) {

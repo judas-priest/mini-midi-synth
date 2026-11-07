@@ -225,17 +225,13 @@ impl Lfo {
         match mode {
             1 => { self.reset_phase(); }
             2 => {
-                self.noise_state ^= self.noise_state << 13;
-                self.noise_state ^= self.noise_state >> 17;
-                self.noise_state ^= self.noise_state << 5;
+                super::dsp_utils::xorshift32(&mut self.noise_state);
                 self.phase = (self.noise_state as f32 / u32::MAX as f32).abs();
                 self.step_current = 0;
                 self.step_phase = 0.0;
             }
             3 => {
-                self.noise_state ^= self.noise_state << 13;
-                self.noise_state ^= self.noise_state >> 17;
-                self.noise_state ^= self.noise_state << 5;
+                super::dsp_utils::xorshift32(&mut self.noise_state);
                 self.phase = (self.noise_state as f32 / u32::MAX as f32).abs();
                 self.step_current = 0;
                 self.step_phase = 0.0;
@@ -333,10 +329,7 @@ impl Lfo {
 
         let hz = self.effective_rate(rate);
         let dt = hz / self.sample_rate;
-        self.phase += dt;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
+        super::dsp_utils::advance_phase(&mut self.phase, hz, self.sample_rate);
 
         let raw = match waveform {
             LfoWaveform::Sine => sine_lut(self.phase),
@@ -355,9 +348,7 @@ impl Lfo {
                 if phase_int != self.prev_phase_int || self.phase < dt * 1.5 {
                     self.prev_phase_int = phase_int;
                     // xorshift32
-                    self.noise_state ^= self.noise_state << 13;
-                    self.noise_state ^= self.noise_state >> 17;
-                    self.noise_state ^= self.noise_state << 5;
+                    super::dsp_utils::xorshift32(&mut self.noise_state);
                     self.sh_value =
                         (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
 
@@ -378,15 +369,11 @@ impl Lfo {
             }
             LfoWaveform::Noise => {
                 // xorshift32 — new random value every sample
-                self.noise_state ^= self.noise_state << 13;
-                self.noise_state ^= self.noise_state >> 17;
-                self.noise_state ^= self.noise_state << 5;
+                super::dsp_utils::xorshift32(&mut self.noise_state);
                 (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0
             }
             LfoWaveform::SmoothNoise => {
-                self.noise_state ^= self.noise_state << 13;
-                self.noise_state ^= self.noise_state >> 17;
-                self.noise_state ^= self.noise_state << 5;
+                super::dsp_utils::xorshift32(&mut self.noise_state);
                 let raw = (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
                 // deform 0=very smooth (coeff~0.999), 1=less smooth (coeff~0.9)
                 let coeff = 0.999 - deform * 0.099;

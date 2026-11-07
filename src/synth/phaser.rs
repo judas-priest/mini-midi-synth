@@ -2,6 +2,8 @@
 
 use std::f32::consts::PI;
 
+use super::dsp_utils::advance_phase;
+
 const NUM_STAGES: usize = 12;
 
 pub struct Phaser {
@@ -56,8 +58,7 @@ impl Phaser {
 
         // LFO
         let lfo = (self.lfo_phase * 2.0 * PI).sin();
-        self.lfo_phase += self.rate / self.sample_rate;
-        if self.lfo_phase >= 1.0 { self.lfo_phase -= 1.0; }
+        advance_phase(&mut self.lfo_phase, self.rate, self.sample_rate);
 
         // Map LFO to frequency range (100Hz - 8kHz, logarithmic)
         let min_freq = 100.0_f32;

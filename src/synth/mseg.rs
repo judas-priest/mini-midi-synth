@@ -180,9 +180,7 @@ impl MsegState {
             }
             CurveType::Brownian => {
                 // Random walk with bias toward v1
-                *noise ^= *noise << 13;
-                *noise ^= *noise >> 17;
-                *noise ^= *noise << 5;
+                super::dsp_utils::xorshift32(noise);
                 let r = (*noise as f32 / u32::MAX as f32) * 2.0 - 1.0;
                 let target = v0 + (v1 - v0) * t;
                 target + r * (1.0 - t) * 0.3
