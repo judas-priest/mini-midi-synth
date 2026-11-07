@@ -144,8 +144,8 @@ pub struct EngineHandles {
 ```
 
 ИСПОЛНИТЕЛЮ: типы 17 полей списать ТОЧНО с полей CommonInit (lib.rs:81-146).
-Ревью-уточнение: drum-атомики = `Arc<AtomicU8>` (НЕ U32/Bool как в черновике
-выше); cfg-гейтов 14 (НЕ 4): gui-gated = drum_step, drum_play, drum_rec,
+Ревью-уточнение: step/play/rec/pattern = `Arc<AtomicU8>`; undo/redo =
+`Arc<AtomicBool>` (сверять с CommonInit при каждом поле); cfg-гейтов 14 (НЕ 4): gui-gated = drum_step, drum_play, drum_rec,
 drum_pattern, drum_undo, drum_redo, looper_atoms, looper_display, sustain_atom,
 master_rec_state_atom, pitch_seq_step_atoms, scope_buf, midi_seq_play_atom,
 midi_seq_pos_atom; БЕЗ гейта = seq_target_atom, active_part_atom,
@@ -335,6 +335,7 @@ fn tc_set_part_full_parity_with_event_sequence() {
     assert_eq!(l.params.osc_type, r.params.osc_type);
 }
 
+#[test]
 fn tc_set_part_full_parity_muted_part_drains_both_ways() {
     // ВАЖНО (ревью 2026-11-08): SetPartMute НЕ имеет change-detection —
     // mute=true на уже замьюченном парте ДРЕЙНИТ голоса И в последовательной,
