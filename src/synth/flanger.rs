@@ -1,7 +1,7 @@
 //! Flanger: short modulated delay line with feedback.
 
 use std::f32::consts::PI;
-use super::dsp_utils::advance_phase;
+use super::dsp_utils::{advance_phase, dc_block};
 
 const FLANGER_SIZE: usize = 2048; // ~42ms at 48kHz
 const FLANGER_MASK: usize = FLANGER_SIZE - 1;
@@ -82,10 +82,8 @@ impl Flanger {
         // DC blocker on feedback to prevent DC accumulation (one-pole HPF, R≈0.9995)
         let fb_l = dl * self.feedback;
         let fb_r = dr * self.feedback;
-        let dc_l = fb_l - self.dc_x1_l + 0.9995 * self.dc_y1_l;
-        let dc_r = fb_r - self.dc_x1_r + 0.9995 * self.dc_y1_r;
-        self.dc_x1_l = fb_l; self.dc_y1_l = dc_l;
-        self.dc_x1_r = fb_r; self.dc_y1_r = dc_r;
+        let dc_l = dc_block(fb_l, &mut self.dc_x1_l, &mut self.dc_y1_l, 0.9995);
+        let dc_r = dc_block(fb_r, &mut self.dc_x1_r, &mut self.dc_y1_r, 0.9995);
         self.buf_l[self.write_pos] = in_l + dc_l;
         self.buf_r[self.write_pos] = in_r + dc_r;
         self.write_pos = (self.write_pos + 1) & FLANGER_MASK;

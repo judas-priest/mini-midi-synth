@@ -698,10 +698,7 @@ impl Voice {
         if self.osc_ws_mix > 0.001 {
             let mono = (sum_l + sum_r) * 0.5;
             let shaped = shape_sample(mono, self.osc_ws_mode, self.osc_ws_drive);
-            let r = DC_BLOCKER_R;
-            let dc_out = shaped - self.osc_ws_dc_x1 + r * self.osc_ws_dc_y1;
-            self.osc_ws_dc_x1 = shaped;
-            self.osc_ws_dc_y1 = dc_out;
+            let dc_out = super::dsp_utils::dc_block(shaped, &mut self.osc_ws_dc_x1, &mut self.osc_ws_dc_y1, DC_BLOCKER_R);
             let ws_mono = mono + self.osc_ws_mix * (dc_out - mono);
             let ratio = if mono.abs() > 0.0001 { ws_mono / mono } else { 1.0 };
             sum_l *= ratio;
@@ -765,10 +762,7 @@ impl Voice {
         if self.osc_ws_mix > 0.001 {
             let shaped = shape_sample(mix, self.osc_ws_mode, self.osc_ws_drive);
             // DC blocker (~6 Hz pole at typical sample rates)
-            let r = DC_BLOCKER_R;
-            let dc_out = shaped - self.osc_ws_dc_x1 + r * self.osc_ws_dc_y1;
-            self.osc_ws_dc_x1 = shaped;
-            self.osc_ws_dc_y1 = dc_out;
+            let dc_out = super::dsp_utils::dc_block(shaped, &mut self.osc_ws_dc_x1, &mut self.osc_ws_dc_y1, DC_BLOCKER_R);
             mix += self.osc_ws_mix * (dc_out - mix);
         }
 

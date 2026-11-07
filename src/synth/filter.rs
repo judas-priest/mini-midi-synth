@@ -5,7 +5,7 @@
 //! Cutoff Warp and Resonance Warp variants.
 
 use std::f32::consts::PI;
-use super::dsp_utils::{fast_tan, fast_tanh};
+use super::dsp_utils::{dc_block, fast_tan, fast_tanh};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FilterType {
@@ -594,9 +594,7 @@ impl Filter {
         // DC blocker on feedback path (one-pole HPF ~10 Hz at any SR)
         // y[n] = R * y[n-1] + x[n] - x[n-1], R ≈ 0.9995
         let dc_in = self.comb_feedback * delayed;
-        let dc_out = dc_in - self.comb_dc_x1 + 0.9995 * self.comb_dc_y1;
-        self.comb_dc_x1 = dc_in;
-        self.comb_dc_y1 = dc_out;
+        let dc_out = dc_block(dc_in, &mut self.comb_dc_x1, &mut self.comb_dc_y1, 0.9995);
         let output = input + dc_out;
         self.comb_buf[self.comb_write] = output;
         self.comb_write = (self.comb_write + 1) & mask;

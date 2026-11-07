@@ -204,3 +204,13 @@ pub fn fast_exp(x: f32) -> f32 {
     y *= y; // 2^8 = 256
     y.max(0.0)
 }
+
+/// Canonical one-pole DC blocker: y = x - x1 + r*y1 (state passed by caller).
+/// Per-site coefficients are NOT canonicalized — pass the site's own r.
+#[inline(always)]
+pub fn dc_block(x: f32, x1: &mut f32, y1: &mut f32, r: f32) -> f32 {
+    let y = x - *x1 + r * *y1;
+    *x1 = x;
+    *y1 = y;
+    y
+}

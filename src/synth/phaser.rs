@@ -2,7 +2,7 @@
 
 use std::f32::consts::PI;
 
-use super::dsp_utils::advance_phase;
+use super::dsp_utils::{advance_phase, dc_block};
 
 const NUM_STAGES: usize = 12;
 
@@ -77,10 +77,8 @@ impl Phaser {
             xr = Self::allpass_tick(xr, &mut self.ap_state_r[i], coeff);
         }
         // DC blocker on feedback to prevent DC accumulation (one-pole HPF, R≈0.9995)
-        let dc_l = xl - self.dc_x1_l + 0.9995 * self.dc_y1_l;
-        let dc_r = xr - self.dc_x1_r + 0.9995 * self.dc_y1_r;
-        self.dc_x1_l = xl; self.dc_y1_l = dc_l;
-        self.dc_x1_r = xr; self.dc_y1_r = dc_r;
+        let dc_l = dc_block(xl, &mut self.dc_x1_l, &mut self.dc_y1_l, 0.9995);
+        let dc_r = dc_block(xr, &mut self.dc_x1_r, &mut self.dc_y1_r, 0.9995);
         self.feedback_l = dc_l;
         self.feedback_r = dc_r;
 
