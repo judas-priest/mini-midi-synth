@@ -77,11 +77,10 @@ use compressor::Compressor;
 use delay::StereoDelay;
 use resonator::Resonator;
 use rotary::RotarySpeaker;
-use drum::{DrumEngine, DrumPattern, DrumSlotParams, NUM_DRUM_SLOTS};
+use drum::DrumEngine;
 use eq::ParametricEq;
 use flanger::Flanger;
 use freq_shift::FreqShift;
-use lfo::{Lfo, LfoStepSeqData, LfoWaveform};
 use arpeggiator::Arpeggiator;
 use looper::MidiLooper;
 use neuron::Neuron;
@@ -93,10 +92,6 @@ use ring_mod::RingMod;
 use spring_reverb::SpringReverb;
 use tape::Tape;
 use tremolo::Tremolo;
-use mod_matrix::ModMatrix;
-use mseg::{Mseg, MsegState};
-use voice::{Voice, VoiceParams};
-use std::sync::Arc;
 
 /// Lock-free oscilloscope buffer shared between audio and GUI threads.
 /// Audio writes samples; GUI reads them for display. Uses atomic f32 encoding.
@@ -158,1173 +153,27 @@ impl ScopeBuffer {
     }
 }
 
-/// MIDI events sent from the MIDI thread to the audio thread.
-#[allow(dead_code)]
-pub enum MidiEvent {
-    NoteOn { channel: u8, note: u8, velocity: u8 },
-    NoteOff { channel: u8, note: u8 },
-    PitchBend { channel: u8, value: f32 },
-    ModWheel { channel: u8, value: f32 },
-    ProgramChange { channel: u8, program: u8 },
-    Aftertouch { channel: u8, value: f32 },
-    PolyAftertouch { channel: u8, note: u8, pressure: f32 },
-    ControlChange { channel: u8, cc: u8, value: u8 },
-    /// SMK-37 Pro left/right button (SysEx F0 35 59 10 00 xx F7)
-    Navigate { pressed: bool }, // true = press, false = release
-}
+mod events;
+pub use events::{ControlEvent, DrumParam, LoadPatchEvent, MidiEvent, NOTE_MODE_BASS, NOTE_MODE_POLY,
+    NOTE_MODE_ROOT, ParamFeedback, PartFullState};
+pub(crate) use events::RootDecision;
+// effective_pb/effective_mw: the engine path lives in part.rs; this re-export
+// is for tests.rs (`super::effective_pb`).
+#[allow(unused_imports)]
+pub(crate) use events::{effective_mw, effective_pb};
 
-/// Control events sent from GUI to the audio thread.
-#[allow(dead_code)]
-/// Heavyweight payload for `ControlEvent::LoadPatch`, boxed to keep the
-/// `ControlEvent` enum slot small (~2 KB → ~32 B). Built on the GUI thread,
-/// shipped through the SPSC queue, consumed once by the audio thread.
-pub struct LoadPatchEvent {
-    pub part: usize,
-    pub params: PatchParams,
-    pub mod_matrix: ModMatrix,
-    pub mseg1: Option<Mseg>,
-    pub mseg2: Option<Mseg>,
-    pub pitch_seq: Option<step_seq::PitchSequencer>,
-    pub lfo_step_seq: Option<[LfoStepSeqData; 4]>,
-    pub wavetable: Option<(Arc<Vec<f32>>, usize, usize)>,
-}
-
-/// Полное состояние парта одной транзакцией (ST2): 1 слот кольца вместо
-/// 20-22 событий. `patch` = LoadPatchEvent последним (порядок GUI-пуша).
-pub struct PartFullState {
-    pub enabled: bool,
-    pub mute: bool,
-    pub volume: f32,
-    pub min_note: u8,
-    pub max_note: u8,
-    pub vel_min: u8,
-    pub vel_max: u8,
-    pub pan: f32,
-    pub transpose: i8,
-    pub note_mode: u8,
-    pub sustain_enabled: bool,
-    pub ignore_pb: bool,
-    pub ignore_mw: bool,
-    pub sf2_mode: bool,
-    pub sf2_program: u8,
-    pub macro_vals: [f32; 8],
-    pub patch: Option<Box<LoadPatchEvent>>,
-}
-
-/// Per-part note mode (TECHDEBT #24-семейство): Poly — все ноты; Bass —
-/// нижняя зажатая (бывший root_only); Root — честный корень зажатого аккорда
-/// (chord::detect_root), фолбэк на Bass для некордовых наборов.
-pub const NOTE_MODE_POLY: u8 = 0;
-pub const NOTE_MODE_BASS: u8 = 1;
-pub const NOTE_MODE_ROOT: u8 = 2;
-
-/// Root-only gate decision for one note-on (TECHDEBT #6).
-pub(crate) enum RootDecision {
-    /// Suppressed: an equal-or-lower key is already the sounding root.
-    Suppress,
-    /// Sound `note`; `release` (raw) is the old root to release first.
-    Sound { release: Option<u8>, note: u8 },
-}
-
-/// Per-part ignore: PB/MW-вклад конкретного парта (TECHDEBT #55).
-pub(crate) fn effective_pb(ignore: bool, pb: f32) -> f32 { if ignore { 0.0 } else { pb } }
-pub(crate) fn effective_mw(ignore: bool, mw: f32) -> f32 { if ignore { 0.0 } else { mw } }
-
-pub enum ControlEvent {
-    LoadPatch(Box<LoadPatchEvent>),
-    /// Полное состояние парта одной транзакцией (ST2). Обрабатывается
-    /// композицией существующих хэндлеров (см. handle_control).
-    SetPartFull { part: usize, state: Box<PartFullState> },
-    SetPartEnabled { part: usize, enabled: bool },
-    SetPartMute { part: usize, mute: bool },
-    /// Note mode per part: NOTE_MODE_POLY (all notes) / NOTE_MODE_BASS
-    /// (lowest held — the old root-only) / NOTE_MODE_ROOT (chord root).
-    /// Clears the root re-key tracking on EVERY change.
-    SetPartNoteMode { part: usize, mode: u8 },
-    /// Sustain pedal (CC64) affects this part (Sus checkbox). While the pedal
-    /// is down, turning it OFF also releases this part's pedal-held notes.
-    SetPartSustain { part: usize, on: bool },
-    /// Part ignores incoming Pitch Bend (TECHDEBT #55).
-    SetPartIgnorePb { part: usize, on: bool },
-    /// Part ignores incoming Mod Wheel (TECHDEBT #55).
-    SetPartIgnoreMw { part: usize, on: bool },
-    SetPartVolume { part: usize, volume: f32 },
-    SetPartRange { part: usize, min_note: u8, max_note: u8 },
-    SetPartVelRange { part: usize, vel_min: u8, vel_max: u8 },
-    SetPartPan { part: usize, pan: f32 },
-    SetPartTranspose { part: usize, semitones: i8 },
-    /// Mono mode per part (last-note priority). true: poly/piano → mono
-    /// (1), Mono-ST (2) → mono (1); false: mono/mono-ST → poly (0). Latch
-    /// (3) / Poly-High / Poly-Low are left untouched. Clears the stale
-    /// mono note stack on every transition.
-    SetPartMono { part: usize, mono: bool },
-    /// Legato per part: mono (1) ↔ mono-ST (2). No-op in other modes.
-    SetPartLegato { part: usize, legato: bool },
-    /// Portamento glide time in milliseconds (0 = instant). Clamped to
-    /// 0..2000 ms (patch param `portamento_time` stays in seconds). A
-    /// non-zero value also raises portamento_mode 0→1 ("Always").
-    SetPartGlide { part: usize, ms: f32 },
-    SetMacro { part: usize, index: usize, value: f32 },
-    SetCcMap { map: Box<CcMap> },
-    SetGlobalParam { key: &'static str, value: f32 },
-    // Drum engine controls
-    DrumSetStep { slot: u8, step: u8, velocity: u8 },
-    DrumSetParam { slot: u8, param: DrumParam },
-    /// Mute слота ударных: гасит и секвенсорные, и живые удары (запись в
-    /// сетку продолжается — mute это решение микса).
-    DrumSetMute { slot: u8, mute: bool },
-    DrumSetVolume { volume: f32 },
-    DrumSeqPlay { playing: bool },
-    DrumSeqBpm { bpm: f32 },
-    DrumSeqSwing { swing: f32 },
-    DrumSeqPattern { pattern: u8 },
-    /// Quantized pattern switch (#32 Phase 5): queued by the GUI, applied at
-    /// the next pattern boundary. NOTE: DrumSeqPattern above stays IMMEDIATE
-    /// on purpose — it is the hardware console transport path; the GUI
-    /// selector is quantized (deliberate asymmetry).
-    DrumSeqQueuePattern { pattern: u8 },
-    /// Chain mode on/off: at each boundary the first marked pattern after the
-    /// current one plays (one pattern per bar).
-    DrumSeqChain { on: bool },
-    /// Toggle one pattern's membership in the chain.
-    DrumSeqChainToggle { pattern: u8 },
-    DrumSeqLength { length: u8 },
-    /// Time signature for the current pattern: sets `beats_per_bar` and
-    /// `length = beats_per_bar * 4` (16th steps). Clamped to 2..=4 —
-    /// MAX_STEPS = 16 caps the bar at 4/4 (see docs/TECHDEBT.md §21).
-    DrumSeqTimeSig { beats_per_bar: u8 },
-    DrumSeqRecord { recording: bool },
-    DrumSeqClear,
-    DrumSeqUndo,
-    DrumSeqRedo,
-    DrumLoadKit { patterns: Box<[DrumPattern; 8]>, params: Box<[DrumSlotParams; NUM_DRUM_SLOTS]>, bpm: f32, swing: f32, volume: f32 },
-    // Looper controls
-    LooperRecord,
-    LooperStopRecord,
-    LooperTogglePlay,
-    LooperUndo,
-    LooperClear,
-    LooperSetBars { bars: u8 },
-    LooperSetQuantize { quantize: u8 },
-    /// Restore recorded looper content after an audio reconnect. The payload
-    /// owns heap memory and is handed back from handle_control for disposal.
-    LooperRestore {
-        events: Box<[crate::synth::looper::LooperEventSnapshot]>,
-        loop_length_ticks: u32,
-    },
-    LooperSetLayerMute { layer: u8, mute: bool },
-    LooperSetSolo { layer: Option<u8> },
-    /// Per-part replay mute (TECHDEBT #30/#34): a muted part's recorded
-    /// events are skipped on looper playback; its sounding notes are flushed.
-    LooperSetPartMute { part: u8, mute: bool },
-    /// Looper record source: true = Mix (every sounding enabled part is
-    /// recorded, each event tagged with its own part id), false = Part
-    /// (only the active part). Live transport state — not persisted.
-    LooperSetSource { mix: bool },
-    /// Master transport (#32): toggle play drums + looper together
-    MasterPlay,
-    /// Master transport: stop drums + looper (drain note-offs)
-    MasterStop,
-    /// Master transport: arm/disarm recording on drums + looper
-    MasterRecord,
-    /// Master overdub (layer) toggle: quantized loop Playing -> Overdubbing
-    /// at the next boundary; again -> close at the next boundary
-    MasterOverdub,
-    /// Квантованный захват: добавить цикл к петле (+1)
-    CaptureCycleAdd,
-    /// Квантованный захват: убрать последний цикл (−1, откат курсора записи)
-    CaptureCycleRemove,
-    SetSustain { on: bool },
-    /// Static pedal-up release duration in seconds (None = patch release)
-    SetSustainRelease { seconds: Option<f32> },
-    AllNotesOff,
-    /// GUI sustain toggle (F1): same path as CC64
-    /// Drums: force every hit to velocity 127
-    DrumSetFixedVelocity { fixed: bool },
-    /// Drums: metronome click on every beat while the sequencer plays
-    DrumSetMetronome { on: bool },
-    /// Drums: pad-note -> internal slot table (index = in_note-36, value = slot)
-    DrumSetRemap { table: Box<[u8; 16]> },
-    /// Drums: per-note choke group ids for the SF2 path, indexed (note-30) (0 = none)
-    DrumSetChokeGroups { table: Box<[u8; 26]> },
-    /// Drums: per-pad velocity override (index = in_note-36, 0 = off)
-    DrumSetPadVel { table: Box<[u8; 16]> },
-    // SF2 sampler controls
-    LoadKeysSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
-    LoadDrumsSoundFont { soundfont: std::sync::Arc<rustysynth::SoundFont> },
-    UnloadKeysSoundFont,
-    UnloadDrumsSoundFont,
-    SetPartSf2Mode { part: usize, enabled: bool },
-    SetPartSf2Program { part: usize, program: u8, bank: u8 },
-    SetDrumsSf2Mode { enabled: bool },
-    SetSf2BlockSize { size: usize },
-    SetSf2SampleOffset { ms: f32 },
-    /// Global SF2 release multiplier (GM2 CC72 semantics, 1.0 = file defaults)
-    SetSf2ReleaseScale { scale: f32 },
-    /// Per-engine loudness trim in dB (Settings → Audio). DSP trim scales the
-    /// DSP part bus + internal drum engine (NOT the SF2 sampler / looper, the
-    /// looper replays through parts); SF2 trim sits on top of SF2_CAL_GAIN.
-    SetDspTrim { db: f32 },
-    SetSf2Trim { db: f32 },
-    // Pitch step sequencer
-    SeqSetEnabled { part: usize, enabled: bool },
-    SeqSetStep { part: usize, step: u8, pitch: i8, gate: bool, velocity: u8 },
-    SeqSetLength { part: usize, length: u8 },
-    SeqSetRate { part: usize, rate: u8 },
-    SeqSetScale { part: usize, scale: u8 },
-    SeqSetSwing { part: usize, swing: f32 },
-    // MIDI file sequencer
-    MidiSeqLoad { data: Box<midi_player::MidiSeqData> },
-    MidiSeqPlay { playing: bool },
-    MidiSeqSetBpm { bpm: Option<f32> },
-    MidiSeqSetLooping { looping: bool },
-    MidiSeqSetTrackInstrument { track_idx: usize, instrument: midi_player::TrackInstrument },
-    MidiSeqSetTrackMute { track_idx: usize, muted: bool },
-    // Arpeggiator
-    SetArpParams { enabled: bool, mode: u8, rate: u8, octaves: u8, gate: f32 },
-    /// Arp latch (TECHDEBT 14.4): true — arp keeps playing after keys are
-    /// released; false — a frozen latched set is stopped immediately.
-    SetArpLatch { latch: bool },
-}
-
-impl ControlEvent {
-    /// Build a LoadPatch event from a Patch + part index.
-    /// Extracts PatchParams, ModMatrix, MSEG, PitchSequencer, wavetable in one place.
-    pub fn load_patch_from(part: usize, patch: &crate::preset::Patch) -> Self {
-        let params = PatchParams::from_map(&patch.params);
-        let mut mod_matrix = ModMatrix::default();
-        mod_matrix.load_from_params(&patch.params);
-        let mseg1 = if patch.params.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
-            Some(Mseg::load_from_params(&patch.params))
-        } else {
-            None
-        };
-        let mut pitch_seq = step_seq::PitchSequencer::new();
-        pitch_seq.load_from_params(&patch.params);
-        let lfo_step_seq = Some([
-            LfoStepSeqData::from_params(0, &patch.params),
-            LfoStepSeqData::from_params(1, &patch.params),
-            LfoStepSeqData::from_params(2, &patch.params),
-            LfoStepSeqData::from_params(3, &patch.params),
-        ]);
-        let wavetable = patch.wavetable_data.as_ref().map(|d| {
-            (d.clone(), patch.wavetable_frames, patch.wavetable_frame_size)
-        });
-        Self::LoadPatch(Box::new(LoadPatchEvent {
-            part, params, mod_matrix, mseg1, mseg2: None,
-            pitch_seq: Some(pitch_seq), lfo_step_seq, wavetable,
-        }))
-    }
-
-    /// Build a LoadPatch from edited params (BTreeMap) + optional wavetable from original Patch.
-    pub fn load_patch_from_edited(
-        part: usize,
-        edited: &std::collections::BTreeMap<String, f32>,
-        original_patch: Option<&crate::preset::Patch>,
-    ) -> Self {
-        let params = PatchParams::from_map(edited);
-        let mut mod_matrix = ModMatrix::default();
-        mod_matrix.load_from_params(edited);
-        let mseg1 = if edited.get("mseg_enabled").copied().unwrap_or(0.0) > 0.5 {
-            Some(Mseg::load_from_params(edited))
-        } else {
-            None
-        };
-        let mut pitch_seq = step_seq::PitchSequencer::new();
-        pitch_seq.load_from_params(edited);
-        let lfo_step_seq = Some([
-            LfoStepSeqData::from_params(0, edited),
-            LfoStepSeqData::from_params(1, edited),
-            LfoStepSeqData::from_params(2, edited),
-            LfoStepSeqData::from_params(3, edited),
-        ]);
-        let wavetable = original_patch.and_then(|p| {
-            p.wavetable_data.as_ref().map(|d| (d.clone(), p.wavetable_frames, p.wavetable_frame_size))
-        });
-        Self::LoadPatch(Box::new(LoadPatchEvent {
-            part, params, mod_matrix, mseg1, mseg2: None,
-            pitch_seq: Some(pitch_seq), lfo_step_seq, wavetable,
-        }))
-    }
-}
-
-#[derive(Clone, Copy)]
-#[allow(dead_code)]
-pub enum DrumParam {
-    Level(f32),
-    Pan(f32),
-    Tune(f32),
-    Decay(f32),
-}
-
-/// Feedback from audio thread to GUI.
-pub enum ParamFeedback {
-    ParamChanged { key: &'static str, value: f32 },
-    CcReceived { cc: u8 },
-    ProgramChanged { program: u8 },
-    DrumStepRecorded { pattern: u8, slot: u8, step: u8, velocity: u8 },
-    /// Engine-side undo/redo restored patterns — GUI mirror must resync
-    /// (Box travels to the GUI thread for freeing; zero alloc on audio).
-    DrumPatternsSync { patterns: Box<[crate::synth::drum::DrumPattern; 8]> },
-    /// Engine-side clear of the current pattern — GUI zeroes its mirror slot.
-    DrumCleared { pattern: u8 },
-    /// Pickup indicator: knob position (0-127) vs param for a CC that hasn't picked up yet.
-    PickupPending { key: &'static str, cc_position: f32 },
-    /// CC has picked up — clear the indicator.
-    PickupDone { key: &'static str },
-    /// SysEx navigate button press/release.
-    NavigatePress,
-    NavigateRelease,
-}
-
-/// Modulation state computed per-part, passed to voices.
-#[derive(Clone, Copy)]
-pub struct ModulationState {
-    pub pitch_mult: f32,
-    pub filter_offset: f32,       // Hz (from LFOs, aftertouch)
-    pub filter_offset_semis: f32, // semitones (from mod matrix — applied as 2^(s/12) multiplier)
-    pub amp_mod: f32,
-}
-
-pub const MAX_PARTS: usize = 16;
-const VOICES_PER_LAYER: usize = 8;
 pub const BLOCK_SIZE: usize = 32;
 
-/// Global parameters — only truly global controls that persist across everything.
-struct GlobalParams {
-    master_volume: f32,
-    master_tone: f32, // simple LP cutoff (20-20000 Hz), post-effects
-    // Fader-controlled global (persist across patch changes)
-    reverb_mix: Option<f32>,       // None = use preset value
-    delay_mix: Option<f32>,        // None = use preset value
-    pitch_bend_range: f32,         // semitones, default 2 (used when up/down not set)
-    pitch_bend_up: f32,            // semitones up (0 = use pitch_bend_range)
-    pitch_bend_down: f32,          // semitones down (0 = use pitch_bend_range)
-    // One-pole LP state for master tone
-    tone_lp_l: f32,
-    tone_lp_r: f32,
-}
-
-impl Default for GlobalParams {
-    fn default() -> Self {
-        Self {
-            master_volume: 0.8,
-            master_tone: 20000.0,
-            reverb_mix: None,
-            delay_mix: None,
-            pitch_bend_range: 2.0,
-            pitch_bend_up: 0.0,
-            pitch_bend_down: 0.0,
-            tone_lp_l: 0.0,
-            tone_lp_r: 0.0,
-        }
-    }
-}
-
-impl GlobalParams {
-    fn set(&mut self, key: &str, value: f32) {
-        match key {
-            "master_volume" => self.master_volume = value,
-            "master_tone" => self.master_tone = value,
-            "reverb_mix" => self.reverb_mix = Some(value),
-            "delay_mix" => self.delay_mix = Some(value),
-            "pitch_bend_range" => self.pitch_bend_range = value.clamp(1.0, 24.0),
-            "pitch_bend_up"    => self.pitch_bend_up    = value.clamp(0.0, 48.0),
-            "pitch_bend_down"  => self.pitch_bend_down  = value.clamp(0.0, 48.0),
-            _ => {
-                debug_assert!(false, "GlobalParams::set: unknown key '{key}'");
-            }
-        }
-    }
-
-    /// Apply master tone (one-pole LP) to output. Cheap, no resonance.
-    #[inline]
-    fn apply_tone(&mut self, l: f32, r: f32, sample_rate: f32) -> (f32, f32) {
-        let freq = self.master_tone.clamp(20.0, 20000.0);
-        if freq >= 19000.0 { return (l, r); } // bypass when wide open
-        let coeff = (std::f32::consts::PI * freq / sample_rate).sin().min(0.999);
-        self.tone_lp_l += coeff * (l - self.tone_lp_l);
-        self.tone_lp_r += coeff * (r - self.tone_lp_r);
-        (self.tone_lp_l, self.tone_lp_r)
-    }
-}
-
-/// Pickup state for a single CC — prevents jumps on patch change.
-#[derive(Clone, Copy)]
-struct PickupState {
-    last_cc_value: Option<u8>,
-    picked_up: bool,
-}
-
-impl Default for PickupState {
-    fn default() -> Self {
-        Self { last_cc_value: None, picked_up: true }
-    }
-}
-
-struct Part {
-    voices: Vec<Voice>,
-    age_counter: u64,
-    volume: f32,
-    enabled: bool,   // part is in scene (has patch, receives MIDI)
-    mute: bool,      // temporary silence without removing from scene
-    /// Mix gate for mute: 1.0 open; ramps to 0 over ~5 ms when muted, back to
-    /// 1.0 on unmute (click-free). Per-sample, audio thread only.
-    mute_gain: f32,
-    min_note: u8,
-    max_note: u8,
-    vel_min: u8,     // velocity range (1-127)
-    vel_max: u8,
-    pan: f32,        // -1.0 (L) .. 0.0 (C) .. +1.0 (R)
-    transpose: i8,   // semitone offset per part (-24..+24)
-    params: PatchParams,
-    lfos: [Lfo; 4],
-    /// Scene LFOs — free-running, never reset on note-on (unlike voice LFOs).
-    /// tick every block regardless of note activity.
-    scene_lfos: [Lfo; 2],
-    scene_lfo_routed: [bool; 2],  // true when used in mod matrix
-    /// External wavetable loaded from .wt file (set via LoadPatch)
-    wavetable_data: Option<Arc<Vec<f32>>>,
-    wavetable_frames: usize,
-    wavetable_frame_size: usize,
-    /// Current macro knob values (0..1). Updated by SetMacro event.
-    macro_vals: [f32; 8],
-    mod_matrix: ModMatrix,
-    mseg1: Mseg,
-    mseg1_state: MsegState,
-    mseg2: Mseg,
-    mseg2_state: MsegState,
-    last_note_freq: Option<f32>,
-    last_velocity: f32,
-    last_note: u8,
-    sf2_mode: bool,
-    pitch_seq: step_seq::PitchSequencer,
-    // Mono / Latch voice mode state
-    note_stack: Vec<u8>,   // held notes for mono mode (newest last)
-    latch_held: Vec<u8>,   // latched notes (toggle mode)
-    // Random/Alternate mod source state
-    rng_state: u64,         // LCG PRNG state
-    alt_counter: u32,       // alternation counter (even=+, odd=-)
-    rand_bipolar: f32,      // current random bipolar value
-    rand_unipolar: f32,     // current random unipolar value
-    alt_bipolar: f32,       // current alternate bipolar value
-    alt_unipolar: f32,      // current alternate unipolar value
-    release_vel: f32,       // last note-off velocity
-    sustained_notes: [bool; 128], // notes held by sustain pedal
-    keys_down: [bool; 128],   // raw key physically held (pedal-up must spare these)
-    /// Note mode: NOTE_MODE_POLY / NOTE_MODE_BASS (the old root-only) /
-    /// NOTE_MODE_ROOT (chord root via detect_root). Gates note routing
-    /// through root_on/root_off unless Poly.
-    note_mode: u8,
-    /// Sustain pedal (CC64) affects this part. false: bass without sustain
-    /// while a pad part keeps sustaining.
-    pub sustain_enabled: bool,
-    /// SF2 mono: последняя играющая нота (play_mode 1/2). SF2-ветка
-    /// route_note_on минует DSP mono-логику — моно для сэмплера делаем
-    /// здесь: новая нота глушит предыдущую (#55-фидбек «моно не реагирует
-    /// на SF2»).
-    sf2_mono_stack: Vec<(u8, u8)>,
-    /// Part ignores incoming Pitch Bend (TECHDEBT #55) — чужие контроллеры
-    /// шлют мусорный PB, слои не должны дёргаться.
-    pub ignore_pb: bool,
-    /// Part ignores incoming Mod Wheel (TECHDEBT #55).
-    pub ignore_mw: bool,
-    root_held: [bool; 128],   // keys currently physically held, for re-keying
-    root_active: Option<u8>,  // raw note currently sounding as the root
-    breath: f32,            // CC2, 0..1
-    expression: f32,        // CC11, 0..1
-    sustain_pedal: f32,     // CC64: 0.0 or 1.0
-    lowest_held: u8,        // lowest active note (default 60)
-    highest_held: u8,       // highest active note (default 60)
-    poly_at_in_matrix: bool,  // true if any mod slot uses PolyAftertouch
-    // Cached routing flags — updated on patch load, not per-block
-    lfo1_routed: bool,
-    lfo2_routed: bool,
-    lfo3_routed: bool,
-    lfo4_routed: bool,
-}
-
-impl Part {
-    fn new(sample_rate: f32) -> Self {
-        let voices = (0..VOICES_PER_LAYER).map(|_| Voice::new(sample_rate)).collect();
-        Self {
-            voices, age_counter: 0, volume: 0.8, enabled: false, mute: false, mute_gain: 1.0,
-            min_note: 0, max_note: 127, vel_min: 1, vel_max: 127,
-            pan: 0.0, transpose: 0,
-            params: PatchParams::default(),
-            lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate), Lfo::new(sample_rate)],
-            scene_lfos: [Lfo::new(sample_rate), Lfo::new(sample_rate)],
-            scene_lfo_routed: [false; 2],
-            wavetable_data: None,
-            wavetable_frames: 0,
-            wavetable_frame_size: 0,
-            macro_vals: [0.0; 8],
-            mod_matrix: ModMatrix::default(),
-            mseg1: Mseg::default(), mseg1_state: MsegState::new(sample_rate),
-            mseg2: Mseg::default(), mseg2_state: MsegState::new(sample_rate),
-            last_note_freq: None, last_velocity: 1.0, last_note: 60,
-            sf2_mode: false, pitch_seq: step_seq::PitchSequencer::new(),
-            note_stack: Vec::new(), latch_held: Vec::new(),
-            rng_state: 0x5851f42d4c957f2d, alt_counter: 0,
-            rand_bipolar: 0.0, rand_unipolar: 0.5,
-            alt_bipolar: 1.0, alt_unipolar: 1.0, release_vel: 0.0,
-            sustained_notes: [false; 128],
-            sf2_mono_stack: Vec::new(),
-            keys_down: [false; 128],
-            note_mode: NOTE_MODE_POLY, root_held: [false; 128], root_active: None,
-            sustain_enabled: true,
-            ignore_pb: false, ignore_mw: false,
-            breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
-            lowest_held: 60, highest_held: 60,
-            poly_at_in_matrix: false,
-            lfo1_routed: false,
-            lfo2_routed: false,
-            lfo3_routed: false,
-            lfo4_routed: false,
-        }
-    }
-
-    /// Update cached routing flags from mod matrix slots. Call after loading a patch
-    /// or changing mod matrix routing to avoid per-block scanning.
-    fn update_routing_cache(&mut self) {
-        self.lfo1_routed = self.mod_matrix.slots.iter()
-            .any(|s| s.source == mod_matrix::ModSource::Lfo1 && s.depth.abs() > 0.001);
-        self.lfo2_routed = self.mod_matrix.slots.iter()
-            .any(|s| s.source == mod_matrix::ModSource::Lfo2 && s.depth.abs() > 0.001);
-        self.lfo3_routed = self.mod_matrix.slots.iter()
-            .any(|s| s.source == mod_matrix::ModSource::Lfo3 && s.depth.abs() > 0.001);
-        self.lfo4_routed = self.mod_matrix.slots.iter()
-            .any(|s| s.source == mod_matrix::ModSource::Lfo4 && s.depth.abs() > 0.001);
-        self.poly_at_in_matrix = self.mod_matrix.slots.iter()
-            .any(|s| s.source == mod_matrix::ModSource::PolyAftertouch && s.depth.abs() > 0.001);
-        self.scene_lfo_routed[0] = self.mod_matrix.slots.iter()
-            .any(|s| s.source == mod_matrix::ModSource::SceneLfo1 && s.depth.abs() > 0.001);
-        self.scene_lfo_routed[1] = self.mod_matrix.slots.iter()
-            .any(|s| s.source == mod_matrix::ModSource::SceneLfo2 && s.depth.abs() > 0.001);
-    }
-
-    /// LCG random float 0..1
-    fn next_rand(&mut self) -> f32 {
-        self.rng_state = self.rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        ((self.rng_state >> 33) as f32) / (u32::MAX as f32)
-    }
-
-    /// Start a voice from a RAW (pre-transpose) MIDI note. Transposition is
-    /// applied internally: `voice.note` keeps the sounding pitch, `voice.src_note`
-    /// keeps the raw key so note-offs match across transpose changes.
-    fn note_on(&mut self, raw_note: u8, velocity: u8) {
-        if !self.enabled { return; }
-        let note = (raw_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
-        if note < self.min_note || note > self.max_note { return; }
-        debug_assert!(raw_note < 128);
-        self.keys_down[raw_note as usize] = true;
-        self.last_velocity = velocity as f32 / 127.0;
-        self.last_note = note;
-
-        // Update random/alternate mod sources on each note-on
-        let r = self.next_rand();
-        self.rand_bipolar = r * 2.0 - 1.0;
-        self.rand_unipolar = r;
-        self.alt_counter = self.alt_counter.wrapping_add(1);
-        let is_even = self.alt_counter.is_multiple_of(2);
-        self.alt_bipolar = if is_even { 1.0 } else { -1.0 };
-        self.alt_unipolar = if is_even { 1.0 } else { 0.0 };
-
-        let play_mode = self.params.play_mode as u8;
-
-        // Latch mode: toggle note on/off
-        if play_mode == 3 {
-            if let Some(pos) = self.latch_held.iter().position(|&n| n == raw_note) {
-                self.latch_held.remove(pos);
-                self.keys_down[raw_note as usize] = false;
-                for v in &mut self.voices { if v.active && v.src_note == raw_note { v.note_off(); } }
-            } else {
-                self.latch_held.push(raw_note);
-                // fall through to start voice below
-            }
-            if self.latch_held.contains(&raw_note) {
-                // Start voice for new latch note
-                self.age_counter += 1;
-                let age = self.age_counter;
-                let idx = self.voices.iter().position(|v| !v.active).unwrap_or_else(|| {
-                    self.voices.iter().enumerate().min_by_key(|(_, v)| v.age).map(|(i, _)| i).unwrap_or(0)
-                });
-                let prev_freq = self.last_note_freq;
-                let voice_params = self.build_voice_params();
-                self.voices[idx].note_on(note, raw_note, velocity, age, &voice_params, prev_freq);
-                self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
-                self.lfos[0].trigger_mode(self.params.lfo1_trigger_mode as u8);
-                self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
-                self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
-                self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
-                if self.params.mseg_enabled > 0.5 { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
-            }
-            self.update_held_range();
-            return;
-        }
-
-        // Mono modes (1=mono, 2=mono-st single trigger, 3 handled above)
-        if play_mode == 1 || play_mode == 2 {
-            self.note_stack.retain(|&n| n != raw_note);
-            self.note_stack.push(raw_note);
-            self.age_counter += 1;
-            let age = self.age_counter;
-            // Retrigger the single mono voice
-            let idx = self.voices.iter().position(|v| v.active).unwrap_or_else(|| {
-                self.voices.iter().position(|v| !v.active).unwrap_or(0)
-            });
-            // Same gating as the poly path: portamento_mode 0 (Off) never
-            // glides; 2 (Fingered) glides only while another key is held
-            // (the new note is already pushed, so len > 1 means a key was
-            // held); 1 (Always) glides from the last pitch.
-            let porta_mode = self.params.portamento_mode as u8;
-            let prev_freq = match porta_mode {
-                1 => self.last_note_freq,
-                2 => if self.note_stack.len() > 1 { self.last_note_freq } else { None },
-                _ => None,
-            };
-            let voice_params = self.build_voice_params();
-            let retrigger = play_mode == 2 && self.note_stack.len() > 1; // ST: don't retrigger env
-            if retrigger {
-                self.voices[idx].retrigger_note(note, raw_note, &voice_params);
-            } else {
-                self.voices[idx].note_on(note, raw_note, velocity, age, &voice_params, prev_freq);
-            }
-            self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
-            if !retrigger {
-                self.lfos[0].trigger_mode(self.params.lfo1_trigger_mode as u8);
-                self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
-                self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
-                self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
-            }
-            if self.params.mseg_enabled > 0.5 && !retrigger { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
-            self.update_held_range();
-            return;
-        }
-
-        // Piano mode: if same key is already playing, don't retrigger — let it continue
-        if play_mode == 6 && self.voices.iter().any(|v| v.active && v.src_note == raw_note) {
-            return;
-        }
-
-        self.age_counter += 1;
-        let age = self.age_counter;
-        let idx = self.voices.iter().position(|v| !v.active).unwrap_or_else(|| {
-            match play_mode {
-                4 => {
-                    // Poly-High: steal lowest note (highest note wins)
-                    self.voices.iter().enumerate()
-                        .filter(|(_, v)| v.active)
-                        .min_by_key(|(_, v)| v.note)
-                        .map(|(i, _)| i)
-                        .unwrap_or(0)
-                }
-                5 => {
-                    // Poly-Low: steal highest note (lowest note wins)
-                    self.voices.iter().enumerate()
-                        .filter(|(_, v)| v.active)
-                        .max_by_key(|(_, v)| v.note)
-                        .map(|(i, _)| i)
-                        .unwrap_or(0)
-                }
-                _ => {
-                    // Default (Poly / Piano / Latch): JUCE-style steal order —
-                    // voices already in release phase die first (their tails
-                    // are almost done), then the oldest sustained voice.
-                    let releasing = self.voices.iter().enumerate()
-                        .filter(|(_, v)| v.active && v.is_releasing())
-                        .min_by_key(|(_, v)| v.age);
-                    releasing
-                        .or_else(|| self.voices.iter().enumerate()
-                            .min_by_key(|(_, v)| v.age))
-                        .map(|(i, _)| i)
-                        .unwrap_or(0)
-                }
-            }
-        });
-        let porta_mode = self.params.portamento_mode as u8;
-        let prev_freq = match porta_mode {
-            1 => self.last_note_freq,
-            2 => if self.has_active_notes() { self.last_note_freq } else { None },
-            _ => None,
-        };
-        let voice_params = self.build_voice_params();
-        self.voices[idx].note_on(note, raw_note, velocity, age, &voice_params, prev_freq);
-        self.last_note_freq = Some(440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0));
-        // Retrigger LFOs on note-on if flagged
-        self.lfos[0].trigger_mode(self.params.lfo1_trigger_mode as u8);
-        self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
-        self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
-        self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
-        // Trigger MSEGs on note-on (per-part, not per-voice)
-        if self.params.mseg_enabled > 0.5 {
-            self.mseg1_state.trigger();
-            self.mseg2_state.trigger();
-        }
-        self.update_held_range();
-    }
-
-    fn build_voice_params(&self) -> VoiceParams {
-        VoiceParams {
-            osc_type: self.params.osc_type, osc_detune: self.params.osc_detune,
-            fm_ratio: self.params.fm_ratio, fm_index: self.params.fm_index,
-            fm_env_amount: self.params.fm_env_amount,
-            osc_count: self.params.osc_count, osc1_level: self.params.osc1_level,
-            osc2_type: self.params.osc2_type, osc2_detune: self.params.osc2_detune, osc2_level: self.params.osc2_level,
-            osc3_type: self.params.osc3_type, osc3_detune: self.params.osc3_detune, osc3_level: self.params.osc3_level,
-            filter_cutoff: self.params.filter_cutoff, filter_resonance: self.params.filter_resonance,
-            filter_type: self.params.filter_type, filter_env_amount: self.params.filter_env_amount,
-            filter_key_track: self.params.filter_key_track,
-            filter_routing: self.params.filter_routing, filter2_type: self.params.filter2_type,
-            filter2_cutoff: self.params.filter2_cutoff, filter2_resonance: self.params.filter2_resonance,
-            noise_level: self.params.noise_level,
-            amp_attack: self.params.amp_attack, amp_decay: self.params.amp_decay,
-            amp_sustain: self.params.amp_sustain, amp_release: self.params.amp_release,
-            amp_hold: self.params.amp_hold,
-            filter_attack: self.params.filter_attack, filter_decay: self.params.filter_decay,
-            filter_sustain: self.params.filter_sustain, filter_release: self.params.filter_release,
-            filter_hold: self.params.filter_hold,
-            ks_brightness: self.params.ks_brightness, ks_feedback: self.params.ks_feedback,
-            organ_drawbars: self.params.organ_drawbars,
-            formant_voice: self.params.formant_voice, formant_vowel: self.params.formant_vowel,
-            drum_pitch_amount: self.params.drum_pitch_amount, drum_pitch_decay: self.params.drum_pitch_decay,
-            drum_noise_level: self.params.drum_noise_level, drum_noise_decay: self.params.drum_noise_decay,
-            drum_noise_color: self.params.drum_noise_color,
-            bass_style: self.params.bass_style, bass_tone: self.params.bass_tone, bass_body: self.params.bass_body, bass_pickup: self.params.bass_pickup,
-            bow_pressure: self.params.bow_pressure, bow_position: self.params.bow_position, body_type: self.params.body_type,
-            lip_tension: self.params.lip_tension, blowing_pressure: self.params.blowing_pressure, bell_type: self.params.bell_type,
-            pd_shape: self.params.pd_shape, pd_depth: self.params.pd_depth, pd_env_amount: self.params.pd_env_amount,
-            fold_amount: self.params.fold_amount, fold_symmetry: self.params.fold_symmetry, fold_source: self.params.fold_source,
-            modal_material: self.params.modal_material, modal_brightness: self.params.modal_brightness,
-            modal_damping: self.params.modal_damping, modal_strike_pos: self.params.modal_strike_pos,
-            sync_ratio: self.params.sync_ratio, sync_shape: self.params.sync_shape,
-            supersaw_detune: self.params.supersaw_detune, supersaw_mix: self.params.supersaw_mix,
-            pulse_width: self.params.pulse_width,
-            accordion_register: self.params.accordion_register, accordion_bellows: self.params.accordion_bellows,
-            sax_reed_stiffness: self.params.sax_reed_stiffness, sax_embouchure: self.params.sax_embouchure,
-            sax_blow_pressure: self.params.sax_blow_pressure, sax_type: self.params.sax_type,
-            epiano_type: self.params.epiano_type,
-            alias_wave_type: self.params.alias_wave_type, alias_crush: self.params.alias_crush,
-            window_type: self.params.window_type, window_morph: self.params.window_morph,
-            window_formant: self.params.window_formant,
-            wavetable_data: self.wavetable_data.clone(),
-            wavetable_frames: self.wavetable_frames,
-            wavetable_frame_size: self.wavetable_frame_size,
-            twist_engine: self.params.twist_engine as u32,
-            twist_harmonics: self.params.twist_harmonics,
-            twist_timbre: self.params.twist_timbre,
-            twist_morph: self.params.twist_morph,
-            twist_lpg_decay: self.params.twist_lpg_decay,
-            twist_lpg_colour: self.params.twist_lpg_colour,
-            twist_aux_mix: self.params.twist_aux_mix,
-            env_attack_shape: self.params.env_attack_shape, env_decay_shape: self.params.env_decay_shape,
-            env_release_shape: self.params.env_release_shape,
-            filter_env_attack_shape: self.params.filter_env_attack_shape,
-            filter_env_decay_shape: self.params.filter_env_decay_shape,
-            filter_env_release_shape: self.params.filter_env_release_shape,
-            velocity_curve: self.params.velocity_curve, vel_to_filter: self.params.vel_to_filter,
-            portamento_time: self.params.portamento_time, _portamento_mode: self.params.portamento_mode,
-            unison_voices: self.params.unison_voices, unison_detune: self.params.unison_detune,
-            unison_spread: self.params.unison_spread,
-            fm_cross_depth: self.params.fm_cross_depth,
-            filter_env_semitones: self.params.filter_env_semitones,
-            osc_ws_mode: self.params.osc_ws_mode as u32,
-            osc_ws_drive: self.params.osc_ws_drive * 4.0 + 0.5,
-            osc_ws_mix: self.params.osc_ws_mix,
-            inter_ws_mode: self.params.inter_ws_mode as u32,
-            inter_ws_drive: self.params.inter_ws_drive * 4.0 + 0.5,
-            inter_ws_mix: self.params.inter_ws_mix,
-            svf_morph: self.params.svf_morph,
-            filter_drive: self.params.filter_drive,
-            filter_starve: self.params.filter_starve,
-        }
-    }
-
-    /// Release voices matching the RAW (pre-transpose) note — see `note_on`.
-    fn note_off(&mut self, raw_note: u8) {
-        self.keys_down[raw_note as usize] = false;
-        let note = (raw_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
-        let play_mode = self.params.play_mode as u8;
-
-        // Latch mode: notes released by toggling via note_on, not note_off
-        if play_mode == 3 { return; }
-
-        // Mono modes: manage note stack
-        if play_mode == 1 || play_mode == 2 {
-            self.note_stack.retain(|&n| n != raw_note);
-            if let Some(&prev_note) = self.note_stack.last() {
-                // Retrigger with the previous held note
-                let vp = self.build_voice_params();
-                let prev_transposed = (prev_note as i16 + self.transpose as i16).clamp(0, 127) as u8;
-                if let Some(v) = self.voices.iter_mut().find(|v| v.active) {
-                    v.retrigger_note(prev_transposed, prev_note, &vp);
-                    if play_mode == 1 { v.retrigger_envelope(); }
-                }
-            } else {
-                for voice in &mut self.voices {
-                    if voice.active && voice.src_note == raw_note { voice.note_off(); }
-                }
-                if !self.has_active_notes() {
-                    self.mseg1_state.release();
-                    self.mseg2_state.release();
-                }
-            }
-            self.update_held_range();
-            return;
-        }
-
-        self.release_vel = 0.5; // default; would need MIDI note-off velocity from caller
-
-        if self.sustain_pedal > 0.5 && self.sustain_enabled {
-            match self.params.sustain_mode as u32 {
-                0 => {
-                    // Hold all notes — don't release while pedal is down
-                    self.sustained_notes[raw_note as usize] = true;
-                }
-                1 => {
-                    // Release note only if other active non-releasing notes are held
-                    let other_active = self.voices.iter()
-                        .any(|v| v.note != note && v.active && !v.is_releasing());
-                    if other_active {
-                        for voice in &mut self.voices {
-                            if voice.active && voice.src_note == raw_note { voice.note_off(); }
-                        }
-                    } else {
-                        // Held by pedal — must be flagged so pedal-up releases it
-                        self.sustained_notes[raw_note as usize] = true;
-                    }
-                }
-                _ => {
-                    // Default: hold all
-                    self.sustained_notes[raw_note as usize] = true;
-                }
-            }
-        } else {
-            for voice in &mut self.voices {
-                if voice.active && voice.src_note == raw_note { voice.note_off(); }
-            }
-        }
-
-        // Release MSEGs when no active held notes remain
-        if !self.has_active_notes() {
-            self.mseg1_state.release();
-            self.mseg2_state.release();
-        }
-        self.update_held_range();
-    }
-
-    /// Release all voices playing `note` with an explicit amp-release duration
-    /// (matches by voice.note — the caller builds its needs bitmap by note).
-    /// Used for the static pedal-up release (TECHDEBT #7).
-    fn note_off_for(&mut self, note: u8, seconds: f32) {
-        for voice in &mut self.voices {
-            if voice.active && voice.note == note { voice.note_off_for(seconds); }
-        }
-    }
-
-    fn has_active_notes(&self) -> bool {
-        self.voices.iter().any(|v| v.active && !v.is_releasing())
-    }
-
-    /// Note-mode gate, note-on side. Called for EVERY in-range note-on routed
-    /// to this part (both engines) via SynthEngine::route_note_on.
-    fn root_on(&mut self, raw: u8) -> RootDecision {
-        self.root_held[raw as usize] = true;
-        // Latch mode is NOT gated: latch toggles on note-on and the gate would
-        // break the toggle contract (tap-off suppressed under root-only).
-        if self.note_mode == NOTE_MODE_POLY || self.params.play_mode as u8 == 3 {
-            return RootDecision::Sound { release: None, note: raw };
-        }
-        // Стек-буфер вместо Vec: root_on на аудио-потоке — аллокации запрещены.
-        let mut buf = [0u8; 128];
-        let mut n = 0usize;
-        for (k, &held_flag) in self.root_held.iter().enumerate() {
-            if held_flag { buf[n] = k as u8; n += 1; }
-        }
-        let held = &buf[..n];
-        // Якорь корня — min_held (басовый корень), не последняя нажатая:
-        // корень звучит в басовой октаве и не прыгает вверх при добавлении
-        // верхних нот.
-        let min_held = held.iter().copied().min().unwrap_or(raw);
-        let target = match self.note_mode {
-            NOTE_MODE_ROOT => crate::chord::detect_root(held)
-                .map(|pc| {
-                    // i16-математика: `raw - pc` в u8 паникует при raw < pc;
-                    // delta затем saturating_sub — без паники и обёртки.
-                    let delta = (min_held as i16 - pc as i16).rem_euclid(12) as u8;
-                    min_held.saturating_sub(delta)
-                })
-                .unwrap_or(min_held), // фолбэк: некордовый набор = нижняя
-            _ => min_held, // Bass: нижняя зажатая
-        };
-        match self.root_active {
-            Some(cur) if cur == target => RootDecision::Suppress, // дубликат/не-корневая нота
-            Some(cur) => {
-                self.root_active = Some(target);
-                RootDecision::Sound { release: Some(cur), note: target }
-            }
-            None => {
-                self.root_active = Some(target);
-                RootDecision::Sound { release: None, note: target }
-            }
-        }
-    }
-
-    /// Note-mode gate, note-off side. Returns the new root to re-key to
-    /// (Some only when the sounding root actually changed).
-    fn root_off(&mut self, raw: u8) -> Option<u8> {
-        self.root_held[raw as usize] = false;
-        if self.note_mode == NOTE_MODE_POLY { return None; }
-        // Пересчитать таргет по оставшимся held (тот же стек-буфер +
-        // i16/saturating-математика, что в root_on).
-        let mut buf = [0u8; 128];
-        let mut n = 0usize;
-        for (k, &held_flag) in self.root_held.iter().enumerate() {
-            if held_flag { buf[n] = k as u8; n += 1; }
-        }
-        let held = &buf[..n];
-        let min_held = match held.iter().copied().min() {
-            Some(m) => m,
-            None => { self.root_active = None; return None; } // ни одной зажатой
-        };
-        let target = match self.note_mode {
-            NOTE_MODE_ROOT => crate::chord::detect_root(held)
-                .map(|pc| {
-                    let delta = (min_held as i16 - pc as i16).rem_euclid(12) as u8;
-                    min_held.saturating_sub(delta)
-                })
-                .unwrap_or(min_held),
-            _ => min_held,
-        };
-        if self.root_active == Some(target) { return None; } // не изменился — нет re-key
-        self.root_active = Some(target);
-        Some(target)
-    }
-
-    /// Drains a part on state changes / panic: releases (or kills) DSP voices,
-    /// releases this part's SF2 voices, and clears every held-note tracking
-    /// field — pedal-held notes, keys down, mono/latch stacks, and the
-    /// root-only rekey state. Without the root clear a stale root_active
-    /// ghost-suppresses the next note after MIDI-stop / AllNotesOff on
-    /// gated (Bass/Root) patches (see root_on/root_off). `kill`: CC120 semantics
-    /// (immediate) vs release (CC123 / state change). Caller must have lifted
-    /// engine-level sustain via set_sustain(0) first — this fn does not touch
-    /// part.sustain_pedal. Zero-allocation (audio thread).
-    fn drain_notes(&mut self, sampler: &mut SamplerEngine, idx: usize, kill: bool) {
-        sampler.part_all_notes_off(idx);
-        for voice in &mut self.voices {
-            if voice.active {
-                if kill { voice.kill(); } else { voice.note_off(); }
-            }
-        }
-        self.sustained_notes = [false; 128];
-        self.keys_down = [false; 128];
-        self.note_stack.clear();
-        self.latch_held.clear();
-        self.root_held = [false; 128];
-        self.root_active = None;
-    }
-
-    /// Pedal-up: разжать pedal-held (не key-held) голоса парта. Общий код
-    /// set_sustain и SetPartSustain (QW10: verbatim ×2 — дрейф запрещён).
-    /// `secs` = static pedal-up release (#7), None = patch release.
-    fn release_pedal_held(&mut self, secs: Option<f32>) {
-        // Latch voices: released unconditionally (см. latch_held контракт —
-        // latched note определяется latch_held, не keys_down).
-        for &n in &self.latch_held {
-            self.keys_down[n as usize] = false;
-        }
-        if let Some(secs) = secs {
-            // Two passes: needs-битмап держит borrows disjoint.
-            let mut needs = [false; 128];
-            for voice in &self.voices {
-                if voice.active && !voice.is_releasing()
-                    && !self.keys_down[voice.src_note as usize]
-                {
-                    needs[voice.note as usize] = true;
-                }
-            }
-            for (note, &held) in needs.iter().enumerate() {
-                if held { self.note_off_for(note as u8, secs); }
-            }
-        } else {
-            for voice in &mut self.voices {
-                if voice.active && !voice.is_releasing()
-                    && !self.keys_down[voice.src_note as usize]
-                {
-                    voice.note_off();
-                }
-            }
-        }
-        self.sustained_notes = [false; 128];
-        // Stale mono/latch entries would resurrect on the next key press.
-        self.note_stack.clear();
-        self.latch_held.clear();
-    }
-
-    /// Latch-mismatch: уход с play_mode==3 (latch) — снять latched голоса.
-    /// Общий код ProgramChange и LoadPatch (QW10). Вызывать ДО swap params.
-    fn release_latch_mismatch(&mut self, new_play_mode: u8) {
-        if self.params.play_mode as u8 == 3 && new_play_mode != 3 {
-            for voice in &mut self.voices {
-                if voice.active && self.latch_held.contains(&voice.src_note) {
-                    voice.note_off();
-                }
-            }
-            self.latch_held.clear();
-        }
-    }
-
-    fn update_held_range(&mut self) {
-        let mut lo = 255u8;
-        let mut hi = 0u8;
-        for v in &self.voices {
-            if v.active && !v.is_releasing() {
-                if v.note < lo { lo = v.note; }
-                if v.note > hi { hi = v.note; }
-            }
-        }
-        if lo > hi {
-            // No active non-releasing voices — keep last known values
-        } else {
-            self.lowest_held = lo;
-            self.highest_held = hi;
-        }
-    }
-
-    fn set_sample_rate(&mut self, sample_rate: f32) {
-        for voice in &mut self.voices { voice.set_sample_rate(sample_rate); }
-        for lfo in &mut self.lfos { lfo.set_sample_rate(sample_rate); }
-        self.mseg1_state.set_sample_rate(sample_rate);
-        self.mseg2_state.set_sample_rate(sample_rate);
-    }
-
-    fn tick(&mut self, mods: &ModulationState) -> (f32, f32) {
-        if !self.enabled { return (0.0, 0.0); }
-        let (mut out_l, mut out_r) = (0.0, 0.0);
-        for voice in &mut self.voices {
-            // Per-voice poly aftertouch: compute only the AT delta, not full matrix
-            let voice_mods = if self.poly_at_in_matrix && voice.active && voice.poly_aftertouch > 0.001 {
-                let delta = self.mod_matrix.evaluate_poly_at_delta(voice.poly_aftertouch);
-                let pitch_mult = if (mods.pitch_mult - 1.0).abs() < 0.001 && delta.pitch.abs() < 0.001 {
-                    1.0
-                } else {
-                    mods.pitch_mult * if delta.pitch.abs() > 0.001 { (delta.pitch / 12.0).exp2() } else { 1.0 }
-                };
-                let amp_mod = mods.amp_mod * (1.0 + delta.amplitude).max(0.0);
-                ModulationState {
-                    pitch_mult,
-                    filter_offset: mods.filter_offset,
-                    filter_offset_semis: mods.filter_offset_semis + delta.filter_cutoff,
-                    amp_mod,
-                }
-            } else {
-                *mods
-            };
-            let (l, r) = voice.tick(&voice_mods);
-            out_l += l; out_r += r;
-        }
-        let vol = self.volume * self.volume; // perceptual curve (quadratic)
-        (out_l * vol, out_r * vol)
-    }
-
-    /// Текущее значение CC-live patch-параметра (S2a: SSOT-макрос
-    /// cc_patch_params! в patch_params.rs). None = ключ не CC-live.
-    fn cc_value(&self, key: &str) -> Option<f32> {
-        crate::synth::patch_params::cc_value_of(&self.params, key)
-    }
-
-    fn set_param(&mut self, key: &str, value: f32) {
-        // 31 CC-live ключ — SSOT-таблица (S2a); остальные — рукописные arm'ы
-        if crate::synth::patch_params::cc_set_param(&mut self.params, key, value) {
-            return;
-        }
-        match key {
-            "filter_key_track" => self.params.filter_key_track = value,
-            "delay_ping_pong" => self.params.delay_ping_pong = value,
-            "ring_mod_freq" => self.params.ring_mod_freq = value,
-            "ring_mod_shape" => self.params.ring_mod_shape = value,
-            "ring_mod_bias" => self.params.ring_mod_bias = value,
-            "ring_mod_linear" => self.params.ring_mod_linear = value,
-            "ring_mod_mix" => self.params.ring_mod_mix = value,
-            "freq_shift_hz" => self.params.freq_shift_hz = value,
-            "freq_shift_feedback" => self.params.freq_shift_feedback = value,
-            "freq_shift_delay" => self.params.freq_shift_delay = value,
-            "freq_shift_mix" => self.params.freq_shift_mix = value,
-            "tape_drive" => self.params.tape_drive = value,
-            "tape_saturation" => self.params.tape_saturation = value,
-            "tape_bias" => self.params.tape_bias = value,
-            "tape_tone" => self.params.tape_tone = value,
-            "tape_speed" => self.params.tape_speed = value,
-            "tape_mix" => self.params.tape_mix = value,
-            "neuron_drive" => self.params.neuron_drive = value,
-            "neuron_squash" => self.params.neuron_squash = value,
-            "neuron_stab" => self.params.neuron_stab = value,
-            "neuron_asym" => self.params.neuron_asym = value,
-            "neuron_bias" => self.params.neuron_bias = value,
-            "neuron_comb_freq" => self.params.neuron_comb_freq = value,
-            "neuron_comb_sep" => self.params.neuron_comb_sep = value,
-            "neuron_mix" => self.params.neuron_mix = value,
-            "spring_size" => self.params.spring_size = value,
-            "spring_decay" => self.params.spring_decay = value,
-            "spring_reflections" => self.params.spring_reflections = value,
-            "spring_damping" => self.params.spring_damping = value,
-            "spring_spin" => self.params.spring_spin = value,
-            "spring_chaos" => self.params.spring_chaos = value,
-            "spring_mix" => self.params.spring_mix = value,
-            "reverb_type" => self.params.reverb_type = value,
-            "env_attack_shape" => self.params.env_attack_shape = value,
-            "env_decay_shape" => self.params.env_decay_shape = value,
-            "env_release_shape" => self.params.env_release_shape = value,
-            "filter_env_attack_shape" => self.params.filter_env_attack_shape = value,
-            "filter_env_decay_shape" => self.params.filter_env_decay_shape = value,
-            "filter_env_release_shape" => self.params.filter_env_release_shape = value,
-            "lfo1_retrigger" => self.params.lfo1_retrigger = value,
-            "lfo2_retrigger" => self.params.lfo2_retrigger = value,
-            "lfo3_retrigger" => self.params.lfo3_retrigger = value,
-            "lfo4_retrigger" => self.params.lfo4_retrigger = value,
-            "lfo1_trigger_mode" => self.params.lfo1_trigger_mode = value,
-            "lfo2_trigger_mode" => self.params.lfo2_trigger_mode = value,
-            "lfo3_trigger_mode" => self.params.lfo3_trigger_mode = value,
-            "lfo4_trigger_mode" => self.params.lfo4_trigger_mode = value,
-            "lfo_deform" => self.params.lfo_deform = value,
-            "slfo1_rate"       => self.params.slfo1_rate = value,
-            "slfo1_waveform"   => self.params.slfo1_waveform = value,
-            "slfo1_deform"     => self.params.slfo1_deform = value,
-            "slfo1_tempo_sync" => self.params.slfo1_tempo_sync = value,
-            "slfo1_unipolar"   => self.params.slfo1_unipolar = value,
-            "slfo2_rate"       => self.params.slfo2_rate = value,
-            "slfo2_waveform"   => self.params.slfo2_waveform = value,
-            "slfo2_deform"     => self.params.slfo2_deform = value,
-            "slfo2_tempo_sync" => self.params.slfo2_tempo_sync = value,
-            "slfo2_unipolar"   => self.params.slfo2_unipolar = value,
-            "twist_engine"     => self.params.twist_engine = value,
-            "twist_harmonics"  => self.params.twist_harmonics = value,
-            "twist_timbre"     => self.params.twist_timbre = value,
-            "twist_morph"      => self.params.twist_morph = value,
-            "twist_lpg_decay"  => self.params.twist_lpg_decay = value,
-            "twist_lpg_colour" => self.params.twist_lpg_colour = value,
-            "twist_aux_mix"    => self.params.twist_aux_mix = value,
-            "lfo2_rate" => self.params.lfo2_rate = value,
-            "lfo2_pitch_depth" => self.params.lfo2_pitch_depth = value,
-            "lfo2_filter_depth" => self.params.lfo2_filter_depth = value,
-            "lfo2_amp_depth" => self.params.lfo2_amp_depth = value,
-            "lfo2_deform" => self.params.lfo2_deform = value,
-            "lfo3_rate" => self.params.lfo3_rate = value,
-            "lfo3_deform" => self.params.lfo3_deform = value,
-            "lfo4_rate" => self.params.lfo4_rate = value,
-            "lfo4_deform" => self.params.lfo4_deform = value,
-            "fm_cross_depth" => self.params.fm_cross_depth = value,
-            "seq_pitch_depth" => self.params.seq_pitch_depth = value,
-            // In debug builds, fail loud on unknown keys so typos are caught
-            // by tests instead of silently no-op'ing live parameter updates.
-            // In release builds, ignore (cheap, no audio-thread side effects).
-            _ => {
-                debug_assert!(false, "Part::set_param: unknown key '{key}'");
-            }
-        }
-    }
-}
+mod part;
+pub use part::MAX_PARTS;
+// pub(super) items of part.rs — the parent re-imports them privately; children
+// (voice.rs, tests.rs) see them via `use super::…` / the `use super::*` glob.
+use part::{EngineModInputs, GlobalParams, ModulationState, Part, PickupState};
+// tests.rs constructs these through the `use super::*` glob:
+#[allow(unused_imports)]
+use lfo::Lfo;
+#[allow(unused_imports)]
+use mod_matrix::ModMatrix;
 
 pub struct SynthEngine {
     parts: Vec<Part>,
@@ -1444,202 +293,11 @@ pub struct SynthEngine {
     /// 1 = SF2 took it, 2 = drums. Note-offs must follow the note-on's
     /// route, even if the track instrument changed mid-note.
     seq_route: [u8; 16],
-    /// Per-part modulation state, refilled each block in `tick_block`.
-    /// Held as a struct field to avoid per-block `Vec` allocation.
-    layer_mods: [ModulationState; MAX_PARTS],
 }
 
-/// Cached effect parameters — extracted once per block from PatchParams.
-#[derive(Clone, Copy)]
-struct CachedFxParams {
-    // Tape
-    tape_drive: f32, tape_saturation: f32, tape_bias: f32,
-    tape_tone: f32, tape_speed: f32, tape_mix: f32,
-    // Neuron
-    neuron_drive: f32, neuron_squash: f32, neuron_stab: f32,
-    neuron_asym: f32, neuron_bias: f32, neuron_comb_freq: f32,
-    neuron_comb_sep: f32, neuron_mix: f32,
-    // Ring mod
-    ring_mod_freq: f32, ring_mod_shape: f32, ring_mod_bias: f32,
-    ring_mod_linear: f32, ring_mod_mix: f32,
-    // Freq shift
-    freq_shift_hz: f32, freq_shift_feedback: f32,
-    freq_shift_delay: f32, freq_shift_mix: f32,
-    // Chorus
-    chorus_mix: f32,
-    // Delay
-    delay_time_l: f32, delay_time_r: f32, delay_feedback: f32,
-    delay_filter: f32, delay_ping_pong: f32, delay_mix: f32,
-    // Reverb
-    reverb_type: f32, reverb_mix: f32,
-    reverb_room_size: f32, reverb_damping: f32,
-    reverb_width: f32, reverb_pre_delay: f32,
-    // Spring reverb
-    spring_size: f32, spring_decay: f32, spring_reflections: f32,
-    spring_damping: f32, spring_spin: f32, spring_chaos: f32,
-    spring_mix: f32,
-    // Rotary Speaker
-    rotary_speed: f32, rotary_mix: f32,
-    // BBD Ensemble
-    ensemble_depth: f32, ensemble_rate: f32, ensemble_mix: f32,
-    // Resonator
-    resonator_freq: f32, resonator_decay: f32, resonator_mix: f32,
-    // Bonsai
-    bonsai_drive: f32, bonsai_tone: f32, bonsai_asym: f32,
-    bonsai_mode: f32, bonsai_mix: f32,
-    // WaveShaper
-    wave_shaper_drive: f32, wave_shaper_mode: f32, wave_shaper_bias: f32, wave_shaper_mix: f32,
-    // MS Tool
-    ms_mid_gain: f32, ms_side_gain: f32, ms_rotation: f32, ms_mix: f32,
-    // Graphic EQ
-    graphic_eq_gains: [f32; 11], graphic_eq_output: f32,
-    // Conditioner
-    conditioner_bass_cut: f32, conditioner_width: f32, conditioner_threshold: f32, conditioner_mix: f32,
-    // Exciter
-    exciter_drive: f32, exciter_freq: f32, exciter_presence: f32, exciter_mix: f32,
-    // Floaty Delay
-    floaty_time: f32, floaty_feedback: f32, floaty_wobble: f32, floaty_rate: f32, floaty_damp: f32, floaty_mix: f32,
-    // Reverb2
-    reverb2_decay: f32, reverb2_damping: f32, reverb2_size: f32, reverb2_mix: f32,
-    // Combulator
-    combulator_freq: f32, combulator_offset2: f32, combulator_offset3: f32,
-    combulator_feedback: f32, combulator_tone: f32, combulator_mix: f32,
-    // Treemonster
-    treemonster_threshold: f32, treemonster_shift: f32, treemonster_ring_mix: f32, treemonster_mix: f32,
-    // Nimbus
-    nimbus_position: f32, nimbus_size: f32, nimbus_pitch: f32, nimbus_density: f32,
-    nimbus_spread: f32, nimbus_texture: f32, nimbus_mix: f32,
-    // Vocoder
-    vocoder_env_follow: f32, vocoder_gate: f32, vocoder_mix: f32,
-    // Convolution Reverb
-    conv_reverb_room: f32, conv_reverb_damping: f32, conv_reverb_predelay: f32, conv_reverb_mix: f32,
-    // Airwindows
-    airwindows_mode: u32, airwindows_drive: f32, airwindows_mix: f32,
-}
+mod cached_fx;
+use cached_fx::CachedFxParams;
 
-impl CachedFxParams {
-    fn from_preset(p: Option<&PatchParams>, global: &GlobalParams) -> Self {
-        // Нет включённой части → PatchParams::default() (один источник
-        // дефолтов; прежние 111 unwrap_or-литералов дублировали его).
-        let default_params = PatchParams::default();
-        let p = p.unwrap_or(&default_params);
-        Self {
-            tape_drive: p.tape_drive,
-            tape_saturation: p.tape_saturation,
-            tape_bias: p.tape_bias,
-            tape_tone: p.tape_tone,
-            tape_speed: p.tape_speed,
-            tape_mix: p.tape_mix,
-            neuron_drive: p.neuron_drive,
-            neuron_squash: p.neuron_squash,
-            neuron_stab: p.neuron_stab,
-            neuron_asym: p.neuron_asym,
-            neuron_bias: p.neuron_bias,
-            neuron_comb_freq: p.neuron_comb_freq,
-            neuron_comb_sep: p.neuron_comb_sep,
-            neuron_mix: p.neuron_mix,
-            ring_mod_freq: p.ring_mod_freq,
-            ring_mod_shape: p.ring_mod_shape,
-            ring_mod_bias: p.ring_mod_bias,
-            ring_mod_linear: p.ring_mod_linear,
-            ring_mod_mix: p.ring_mod_mix,
-            freq_shift_hz: p.freq_shift_hz,
-            freq_shift_feedback: p.freq_shift_feedback,
-            freq_shift_delay: p.freq_shift_delay,
-            freq_shift_mix: p.freq_shift_mix,
-            chorus_mix: p.chorus_mix,
-            delay_time_l: p.delay_time_l,
-            delay_time_r: p.delay_time_r,
-            delay_feedback: p.delay_feedback,
-            delay_filter: p.delay_filter,
-            delay_ping_pong: p.delay_ping_pong,
-            delay_mix: global.delay_mix
-                .unwrap_or(p.delay_mix),
-            reverb_type: p.reverb_type,
-            reverb_mix: global.reverb_mix
-                .unwrap_or(p.reverb_mix),
-            reverb_room_size: p.reverb_room_size,
-            reverb_damping: p.reverb_damping,
-            reverb_width: p.reverb_width,
-            reverb_pre_delay: p.reverb_pre_delay,
-            spring_size: p.spring_size,
-            spring_decay: p.spring_decay,
-            spring_reflections: p.spring_reflections,
-            spring_damping: p.spring_damping,
-            spring_spin: p.spring_spin,
-            spring_chaos: p.spring_chaos,
-            spring_mix: p.spring_mix,
-            rotary_speed: p.rotary_speed,
-            rotary_mix: p.rotary_mix,
-            ensemble_depth: p.ensemble_depth,
-            ensemble_rate: p.ensemble_rate,
-            ensemble_mix: p.ensemble_mix,
-            resonator_freq: p.resonator_freq,
-            resonator_decay: p.resonator_decay,
-            resonator_mix: p.resonator_mix,
-            bonsai_drive: p.bonsai_drive,
-            bonsai_tone: p.bonsai_tone,
-            bonsai_asym: p.bonsai_asym,
-            bonsai_mode: p.bonsai_mode,
-            bonsai_mix: p.bonsai_mix,
-            wave_shaper_drive: p.wave_shaper_drive,
-            wave_shaper_mode: p.wave_shaper_mode,
-            wave_shaper_bias: p.wave_shaper_bias,
-            wave_shaper_mix: p.wave_shaper_mix,
-            ms_mid_gain: p.ms_mid_gain,
-            ms_side_gain: p.ms_side_gain,
-            ms_rotation: p.ms_rotation,
-            ms_mix: p.ms_mix,
-            graphic_eq_gains: p.graphic_eq_gains,
-            graphic_eq_output: p.graphic_eq_output,
-            conditioner_bass_cut: p.conditioner_bass_cut,
-            conditioner_width: p.conditioner_width,
-            conditioner_threshold: p.conditioner_threshold,
-            conditioner_mix: p.conditioner_mix,
-            exciter_drive: p.exciter_drive,
-            exciter_freq: p.exciter_freq,
-            exciter_presence: p.exciter_presence,
-            exciter_mix: p.exciter_mix,
-            floaty_time: p.floaty_time,
-            floaty_feedback: p.floaty_feedback,
-            floaty_wobble: p.floaty_wobble,
-            floaty_rate: p.floaty_rate,
-            floaty_damp: p.floaty_damp,
-            floaty_mix: p.floaty_mix,
-            reverb2_decay: p.reverb2_decay,
-            reverb2_damping: p.reverb2_damping,
-            reverb2_size: p.reverb2_size,
-            reverb2_mix: p.reverb2_mix,
-            combulator_freq: p.combulator_freq,
-            combulator_offset2: p.combulator_offset2,
-            combulator_offset3: p.combulator_offset3,
-            combulator_feedback: p.combulator_feedback,
-            combulator_tone: p.combulator_tone,
-            combulator_mix: p.combulator_mix,
-            treemonster_threshold: p.treemonster_threshold,
-            treemonster_shift: p.treemonster_shift,
-            treemonster_ring_mix: p.treemonster_ring_mix,
-            treemonster_mix: p.treemonster_mix,
-            nimbus_position: p.nimbus_position,
-            nimbus_size: p.nimbus_size,
-            nimbus_pitch: p.nimbus_pitch,
-            nimbus_density: p.nimbus_density,
-            nimbus_spread: p.nimbus_spread,
-            nimbus_texture: p.nimbus_texture,
-            nimbus_mix: p.nimbus_mix,
-            vocoder_env_follow: p.vocoder_env_follow,
-            vocoder_gate: p.vocoder_gate,
-            vocoder_mix: p.vocoder_mix,
-            conv_reverb_room: p.conv_reverb_room,
-            conv_reverb_damping: p.conv_reverb_damping,
-            conv_reverb_predelay: p.conv_reverb_predelay,
-            conv_reverb_mix: p.conv_reverb_mix,
-            airwindows_mode: p.airwindows_mode as u32,
-            airwindows_drive: p.airwindows_drive,
-            airwindows_mix: p.airwindows_mix,
-        }
-    }
-}
 
 impl SynthEngine {
     /// Тест-аксессор #52а. НЕ для RT-пути.
@@ -1721,9 +379,6 @@ impl SynthEngine {
             midi_player: midi_player::MidiPlayer::new(),
             midi_seq_buf: Vec::new(),
             seq_route: [0u8; 16],
-            layer_mods: [ModulationState {
-                pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
-            }; MAX_PARTS],
         }
     }
 
@@ -2545,6 +1200,105 @@ impl SynthEngine {
     #[must_use = "heap-owning events must be sent to the trash queue"]
     pub fn handle_control(&mut self, event: ControlEvent) -> Option<ControlEvent> {
         match event {
+            ControlEvent::LoadPatch(_)
+            | ControlEvent::SetPartFull { .. }
+            | ControlEvent::SetPartEnabled { .. }
+            | ControlEvent::SetPartMute { .. }
+            | ControlEvent::SetPartIgnorePb { .. }
+            | ControlEvent::SetPartIgnoreMw { .. }
+            | ControlEvent::SetPartNoteMode { .. }
+            | ControlEvent::SetPartSustain { .. }
+            | ControlEvent::SetPartVolume { .. }
+            | ControlEvent::SetPartRange { .. }
+            | ControlEvent::SetPartVelRange { .. }
+            | ControlEvent::SetPartPan { .. }
+            | ControlEvent::SetPartTranspose { .. }
+            | ControlEvent::SetPartMono { .. }
+            | ControlEvent::SetPartLegato { .. }
+            | ControlEvent::SetPartGlide { .. }
+            | ControlEvent::SetMacro { .. }
+            | ControlEvent::SetCcMap { .. }
+            | ControlEvent::SetGlobalParam { .. }
+            => self.hc_patch_part(event),
+            ControlEvent::DrumSetStep { .. }
+            | ControlEvent::DrumSetParam { .. }
+            | ControlEvent::DrumSetMute { .. }
+            | ControlEvent::DrumSetVolume { .. }
+            | ControlEvent::DrumSeqPlay { .. }
+            | ControlEvent::DrumSeqBpm { .. }
+            | ControlEvent::DrumSeqSwing { .. }
+            | ControlEvent::DrumSeqPattern { .. }
+            | ControlEvent::DrumSeqQueuePattern { .. }
+            | ControlEvent::DrumSeqChain { .. }
+            | ControlEvent::DrumSeqChainToggle { .. }
+            | ControlEvent::DrumSeqLength { .. }
+            | ControlEvent::DrumSeqTimeSig { .. }
+            | ControlEvent::DrumSeqRecord { .. }
+            | ControlEvent::DrumSeqClear
+            | ControlEvent::DrumSeqUndo
+            | ControlEvent::DrumSeqRedo
+            | ControlEvent::DrumLoadKit { .. }
+            | ControlEvent::DrumSetFixedVelocity { .. }
+            | ControlEvent::DrumSetMetronome { .. }
+            | ControlEvent::DrumSetRemap { .. }
+            | ControlEvent::DrumSetChokeGroups { .. }
+            | ControlEvent::DrumSetPadVel { .. }
+            => self.hc_drums(event),
+            ControlEvent::LooperRecord
+            | ControlEvent::LooperStopRecord
+            | ControlEvent::LooperTogglePlay
+            | ControlEvent::LooperUndo
+            | ControlEvent::LooperClear
+            | ControlEvent::LooperSetBars { .. }
+            | ControlEvent::LooperSetQuantize { .. }
+            | ControlEvent::LooperRestore { .. }
+            | ControlEvent::LooperSetLayerMute { .. }
+            | ControlEvent::LooperSetSolo { .. }
+            | ControlEvent::LooperSetPartMute { .. }
+            | ControlEvent::LooperSetSource { .. }
+            | ControlEvent::MasterPlay
+            | ControlEvent::MasterStop
+            | ControlEvent::MasterOverdub
+            | ControlEvent::CaptureCycleAdd
+            | ControlEvent::CaptureCycleRemove
+            | ControlEvent::MasterRecord
+            | ControlEvent::SetSustain { .. }
+            | ControlEvent::SetSustainRelease { .. }
+            | ControlEvent::AllNotesOff
+            => self.hc_looper_transport(event),
+            ControlEvent::LoadKeysSoundFont { .. }
+            | ControlEvent::LoadDrumsSoundFont { .. }
+            | ControlEvent::UnloadKeysSoundFont
+            | ControlEvent::UnloadDrumsSoundFont
+            | ControlEvent::SetPartSf2Mode { .. }
+            | ControlEvent::SetPartSf2Program { .. }
+            | ControlEvent::SetDrumsSf2Mode { .. }
+            | ControlEvent::SetSf2BlockSize { .. }
+            | ControlEvent::SetSf2ReleaseScale { .. }
+            | ControlEvent::SetDspTrim { .. }
+            | ControlEvent::SetSf2Trim { .. }
+            | ControlEvent::SetSf2SampleOffset { .. }
+            => self.hc_sf2(event),
+            ControlEvent::SeqSetEnabled { .. }
+            | ControlEvent::SeqSetStep { .. }
+            | ControlEvent::SeqSetLength { .. }
+            | ControlEvent::SeqSetRate { .. }
+            | ControlEvent::SeqSetScale { .. }
+            | ControlEvent::SeqSetSwing { .. }
+            | ControlEvent::MidiSeqLoad { .. }
+            | ControlEvent::MidiSeqPlay { .. }
+            | ControlEvent::MidiSeqSetBpm { .. }
+            | ControlEvent::MidiSeqSetLooping { .. }
+            | ControlEvent::MidiSeqSetTrackInstrument { .. }
+            | ControlEvent::MidiSeqSetTrackMute { .. }
+            | ControlEvent::SetArpParams { .. }
+            | ControlEvent::SetArpLatch { .. }
+            => self.hc_seq(event),
+        }
+    }
+
+    fn hc_patch_part(&mut self, event: ControlEvent) -> Option<ControlEvent> {
+        match event {
             ControlEvent::LoadPatch(mut ev) => {
                 // Take the contents out of the box rather than unboxing it:
                 // `*ev` would drop the allocation right here, on the audio
@@ -2864,6 +1618,15 @@ impl SynthEngine {
                     self.sampler.set_pitch_bend_range(value.clamp(1.0, 24.0) as u8);
                 }
             }
+            _ => {}
+        }
+        // Every variant that owns heap memory returns early above; reaching
+        // here means the event was plain data and costs nothing to drop.
+        None
+    }
+
+    fn hc_drums(&mut self, event: ControlEvent) -> Option<ControlEvent> {
+        match event {
             ControlEvent::DrumSetStep { slot, step, velocity } => {
                 let pat = self.drum_engine.sequencer.current_pattern as usize;
                 self.drum_engine.sequencer.patterns[pat].steps[slot as usize][step as usize].velocity = velocity;
@@ -2963,6 +1726,34 @@ impl SynthEngine {
                 self.sampler.drum_volume = volume;
                 return Some(ControlEvent::DrumLoadKit { patterns, params, bpm, swing, volume });
             }
+            ControlEvent::DrumSetFixedVelocity { fixed } => {
+                self.drum_engine.fixed_velocity = fixed;
+            }
+            ControlEvent::DrumSetMetronome { on } => {
+                self.drum_engine.metronome = on;
+            }
+            ControlEvent::DrumSetRemap { table } => {
+                // The box travels back for freeing on the GUI thread.
+                self.drum_engine.apply_remap_vec(&*table);
+                return Some(ControlEvent::DrumSetRemap { table });
+            }
+            ControlEvent::DrumSetChokeGroups { table } => {
+                self.drum_engine.set_choke_groups(&table);
+                return Some(ControlEvent::DrumSetChokeGroups { table });
+            }
+            ControlEvent::DrumSetPadVel { table } => {
+                self.drum_engine.apply_pad_vel_vec(&*table);
+                return Some(ControlEvent::DrumSetPadVel { table });
+            }
+            _ => {}
+        }
+        // Every variant that owns heap memory returns early above; reaching
+        // here means the event was plain data and costs nothing to drop.
+        None
+    }
+
+    fn hc_looper_transport(&mut self, event: ControlEvent) -> Option<ControlEvent> {
+        match event {
             ControlEvent::LooperRecord => { self.looper.start_record(); }
             ControlEvent::LooperStopRecord => { self.looper.stop_record(); }
             ControlEvent::LooperTogglePlay => { self.looper.toggle_play(); }
@@ -3020,25 +1811,6 @@ impl SynthEngine {
             ControlEvent::MasterRecord => {
                 self.master_toggle_record();
             }
-            ControlEvent::DrumSetFixedVelocity { fixed } => {
-                self.drum_engine.fixed_velocity = fixed;
-            }
-            ControlEvent::DrumSetMetronome { on } => {
-                self.drum_engine.metronome = on;
-            }
-            ControlEvent::DrumSetRemap { table } => {
-                // The box travels back for freeing on the GUI thread.
-                self.drum_engine.apply_remap_vec(&*table);
-                return Some(ControlEvent::DrumSetRemap { table });
-            }
-            ControlEvent::DrumSetChokeGroups { table } => {
-                self.drum_engine.set_choke_groups(&table);
-                return Some(ControlEvent::DrumSetChokeGroups { table });
-            }
-            ControlEvent::DrumSetPadVel { table } => {
-                self.drum_engine.apply_pad_vel_vec(&*table);
-                return Some(ControlEvent::DrumSetPadVel { table });
-            }
             ControlEvent::SetSustain { on } => {
                 self.set_sustain(if on { 127 } else { 0 });
             }
@@ -3059,6 +1831,15 @@ impl SynthEngine {
                 }
                 self.arpeggiator.clear();
             }
+            _ => {}
+        }
+        // Every variant that owns heap memory returns early above; reaching
+        // here means the event was plain data and costs nothing to drop.
+        None
+    }
+
+    fn hc_sf2(&mut self, event: ControlEvent) -> Option<ControlEvent> {
+        match event {
             ControlEvent::LoadKeysSoundFont { soundfont } => {
                 // Clone bumps the Arc refcount; the original travels back to
                 // the GUI thread with the event, and whatever the sampler
@@ -3141,6 +1922,15 @@ impl SynthEngine {
             ControlEvent::SetSf2SampleOffset { ms } => {
                 self.sampler.set_sample_offset_ms(ms);
             }
+            _ => {}
+        }
+        // Every variant that owns heap memory returns early above; reaching
+        // here means the event was plain data and costs nothing to drop.
+        None
+    }
+
+    fn hc_seq(&mut self, event: ControlEvent) -> Option<ControlEvent> {
+        match event {
             ControlEvent::SeqSetEnabled { part, enabled } => {
                 if let Some(l) = self.parts.get_mut(part) {
                     l.pitch_seq.enabled = enabled;
@@ -3267,8 +2057,8 @@ impl SynthEngine {
                 }
                 self.arpeggiator.set_latch(latch);
             }
+            _ => {}
         }
-
         // Every variant that owns heap memory returns early above; reaching
         // here means the event was plain data and costs nothing to drop.
         None
@@ -3478,196 +2268,32 @@ impl SynthEngine {
             }
         }
 
-        // Pre-compute modulation state for each part (control rate).
-        // `layer_mods` lives on the engine (zero-alloc); disabled parts retain
-        // whatever previous-block values they had — never read while disabled.
-        { let layer_mods = &mut self.layer_mods;
+        // Pre-compute modulation state for each part (control rate). Engine-level
+        // входы собраны один раз ДО цикла (S4-synth 2); слоты выключенных частей
+        // не трогаются (never read while disabled).
+        let inputs = EngineModInputs {
+            mod_wheel: self.mod_wheel,
+            aftertouch_smooth: self.aftertouch_smooth,
+            cc_values: self.cc_values,
+            pitch_bend_semitones: self.pitch_bend_semitones,
+            seq_bpm,
+            block_len,
+            sample_rate: self.sample_rate,
+            lfo_rate,
+            vibrato_val,
+        };
+        // Stack copy (ModulationState is Copy, 8 x 16 B): итерация
+        // self.parts.iter_mut() без конфликта заимствований.
+        // Поле layer_mods удалено (S4-synth 2, ревью: других читателей нет);
+        // выключенные части не читаются, поэтому дефолты вместо «заморозки»
+        // наблюдаемо не отличаются.
+        let mut layer_mods_snapshot = [ModulationState {
+            pitch_mult: 1.0, filter_offset: 0.0, filter_offset_semis: 0.0, amp_mod: 1.0,
+        }; MAX_PARTS];
         for (li, part) in self.parts.iter_mut().enumerate() {
-            if !part.enabled { continue; }
-
-            // Step sequencer (control rate)
-            let seq_evt = part.pitch_seq.tick(self.sample_rate, seq_bpm, block_len);
-            if seq_evt.stepped && seq_evt.gate {
-                for voice in &mut part.voices {
-                    if voice.active && !voice.is_releasing() {
-                        voice.retrigger_envelope();
-                    }
-                }
-            }
-            if seq_evt.stepped && !seq_evt.gate {
-                for voice in &mut part.voices {
-                    if voice.active && !voice.is_releasing() {
-                        voice.note_off();
-                    }
-                }
-            }
-            let seq_raw = if part.pitch_seq.enabled { seq_evt.pitch_offset / 24.0 } else { 0.0 };
-            let seq_pitch = seq_raw * 24.0 * part.params.seq_pitch_depth;
-            let seq_amp = if part.pitch_seq.enabled && !seq_evt.gate { 0.0 } else { 1.0 };
-
-            let bl = block_len as f32;
-
-            // Set BPM, tempo sync, unipolar on all LFOs
-            let lfo_tempo_syncs = [part.params.lfo1_tempo_sync, part.params.lfo2_tempo_sync,
-                                   part.params.lfo3_tempo_sync, part.params.lfo4_tempo_sync];
-            let lfo_unipolars = [part.params.lfo1_unipolar, part.params.lfo2_unipolar,
-                                 part.params.lfo3_unipolar, part.params.lfo4_unipolar];
-            for i in 0..4 {
-                part.lfos[i].set_bpm(seq_bpm);
-                part.lfos[i].tempo_sync = lfo_tempo_syncs[i] > 0.5;
-                part.lfos[i].unipolar = lfo_unipolars[i] > 0.5;
-            }
-
-            // LFO 1
-            let lfo1_wf = LfoWaveform::from_param(part.params.lfo_waveform);
-            let lfo1_active = lfo1_wf == LfoWaveform::StepSeq
-                || part.lfo1_routed
-                || part.params.lfo_pitch_depth > 0.001
-                || part.params.lfo_filter_depth > 0.001
-                || part.params.lfo_amp_depth > 0.001
-                || self.aftertouch_smooth > 0.001;
-            let lfo1_val = if lfo1_active {
-                part.lfos[0].tick_with_deform(lfo_rate * bl, lfo1_wf, part.params.lfo_deform)
-            } else { 0.0 };
-
-            // LFO 2 — also active when routed through mod matrix or in StepSeq mode
-            let lfo2_wf = LfoWaveform::from_param(part.params.lfo2_waveform);
-            let lfo2_active = lfo2_wf == LfoWaveform::StepSeq || part.lfo2_routed
-                || part.params.lfo2_pitch_depth > 0.001
-                || part.params.lfo2_filter_depth > 0.001
-                || part.params.lfo2_amp_depth > 0.001;
-            let lfo2_val = if lfo2_active {
-                part.lfos[1].tick_with_deform(part.params.lfo2_rate * bl, lfo2_wf, part.params.lfo2_deform)
-            } else { 0.0 };
-
-            // LFO 3 & 4 — tick when routed or in StepSeq mode
-            let lfo3_wf = LfoWaveform::from_param(part.params.lfo3_waveform);
-            let lfo3_val = if lfo3_wf == LfoWaveform::StepSeq || part.lfo3_routed {
-                part.lfos[2].tick_with_deform(part.params.lfo3_rate * bl, lfo3_wf, part.params.lfo3_deform)
-            } else { 0.0 };
-            let lfo4_wf = LfoWaveform::from_param(part.params.lfo4_waveform);
-            let lfo4_val = if lfo4_wf == LfoWaveform::StepSeq || part.lfo4_routed {
-                part.lfos[3].tick_with_deform(part.params.lfo4_rate * bl, lfo4_wf, part.params.lfo4_deform)
-            } else { 0.0 };
-
-            // Step sequencer envelope retrigger from any LFO in StepSeq mode
-            let lfo_wfs = [lfo1_wf, lfo2_wf, lfo3_wf, lfo4_wf];
-            for (i, &wf) in lfo_wfs.iter().enumerate() {
-                if wf == LfoWaveform::StepSeq {
-                    let evt = part.lfos[i].last_step_event();
-                    if evt.stepped && (evt.retrigger_aeg || evt.retrigger_feg) {
-                        for voice in &mut part.voices {
-                            if voice.active && !voice.is_releasing() {
-                                if evt.retrigger_aeg && evt.retrigger_feg {
-                                    voice.retrigger_envelope();
-                                } else if evt.retrigger_aeg {
-                                    voice.retrigger_amp_env();
-                                } else {
-                                    voice.retrigger_filter_env();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Scene LFOs — always tick regardless of note state, never retrigger
-            let slfo1_wf = LfoWaveform::from_param(part.params.slfo1_waveform);
-            part.scene_lfos[0].set_bpm(seq_bpm);
-            part.scene_lfos[0].tempo_sync = part.params.slfo1_tempo_sync > 0.5;
-            part.scene_lfos[0].unipolar  = part.params.slfo1_unipolar  > 0.5;
-            let slfo1_val = if part.scene_lfo_routed[0] || slfo1_wf == LfoWaveform::StepSeq {
-                let rate = if part.scene_lfos[0].tempo_sync {
-                    part.params.slfo1_rate
-                } else {
-                    part.params.slfo1_rate * bl
-                };
-                part.scene_lfos[0].tick_with_deform(rate, slfo1_wf, part.params.slfo1_deform)
-            } else { 0.0 };
-
-            let slfo2_wf = LfoWaveform::from_param(part.params.slfo2_waveform);
-            part.scene_lfos[1].set_bpm(seq_bpm);
-            part.scene_lfos[1].tempo_sync = part.params.slfo2_tempo_sync > 0.5;
-            part.scene_lfos[1].unipolar  = part.params.slfo2_unipolar  > 0.5;
-            let slfo2_val = if part.scene_lfo_routed[1] || slfo2_wf == LfoWaveform::StepSeq {
-                let rate = if part.scene_lfos[1].tempo_sync {
-                    part.params.slfo2_rate
-                } else {
-                    part.params.slfo2_rate * bl
-                };
-                part.scene_lfos[1].tick_with_deform(rate, slfo2_wf, part.params.slfo2_deform)
-            } else { 0.0 };
-
-            // MSEGs
-            let mseg1_val = if part.params.mseg_enabled > 0.5 {
-                part.mseg1_state.tick(&part.mseg1)
-            } else { 0.0 };
-            let mseg2_val = if part.params.mseg_enabled > 0.5 {
-                part.mseg2_state.tick(&part.mseg2)
-            } else { 0.0 };
-
-            // Mod matrix
-            let key_track = (part.last_note as f32 - 60.0) / 48.0;
-            let mod_sources = mod_matrix::ModSources {
-                lfo_outputs: [lfo1_val, lfo2_val, lfo3_val, lfo4_val],
-                scene_lfo_outputs: [slfo1_val, slfo2_val],
-                macro_vals: part.macro_vals,
-                amp_env: 0.0, filter_env: 0.0,
-                mseg_outputs: [mseg1_val, mseg2_val],
-                mod_wheel: effective_mw(part.ignore_mw, self.mod_wheel),
-                aftertouch: self.aftertouch_smooth,
-                velocity: part.last_velocity,
-                key_track,
-                step_seq: seq_raw,
-                random_bipolar: part.rand_bipolar,
-                random_unipolar: part.rand_unipolar,
-                alt_bipolar: part.alt_bipolar,
-                alt_unipolar: part.alt_unipolar,
-                release_vel: part.release_vel,
-                pitch_bend: effective_pb(part.ignore_pb, self.pitch_bend_semitones) / 2.0, // normalize -1..+1
-                cc: self.cc_values,
-                breath: part.breath,
-                expression: part.expression,
-                sustain_pedal: part.sustain_pedal,
-                lowest_key: (part.lowest_held as f32 - 60.0) / 48.0,
-                highest_key: (part.highest_held as f32 - 60.0) / 48.0,
-                latest_key: (part.last_note as f32 - 60.0) / 48.0,
-                poly_aftertouch: 0.0, // per-voice; 0 for part-level evaluation
-            };
-            let mod_offsets = part.mod_matrix.evaluate(&mod_sources);
-
-            // Per-part ignore (TECHDEBT #55): маска PB/MW-вкладов
-            let pb_eff = effective_pb(part.ignore_pb, self.pitch_bend_semitones);
-            let mw_eff = effective_mw(part.ignore_mw, self.mod_wheel);
-            let lfo_pitch_offset_base = pb_eff
-                + lfo1_val * part.params.lfo_pitch_depth * 2.0
-                + lfo2_val * part.params.lfo2_pitch_depth * 2.0
-                + mw_eff * 0.5 * vibrato_val
-                + self.aftertouch_smooth * 0.3 * lfo1_val
-                + seq_pitch;
-            let pitch_offset = lfo_pitch_offset_base + mod_offsets.pitch;
-            let pitch_mult = if pitch_offset.abs() < 0.001 { 1.0 } else { (pitch_offset / 12.0).exp2() };
-            // filter_offset is Hz-only (LFO direct routing, aftertouch)
-            // filter_offset_semis is exponential (mod matrix)
-            let filter_offset = lfo1_val * part.params.lfo_filter_depth * 4000.0
-                + lfo2_val * part.params.lfo2_filter_depth * 4000.0
-                + self.aftertouch_smooth * 2000.0;
-            let lfo_amp_base = (1.0 - part.params.lfo_amp_depth * 0.5 * (1.0 - lfo1_val))
-                * (1.0 - part.params.lfo2_amp_depth * 0.5 * (1.0 - lfo2_val))
-                * seq_amp;
-            let amp_mod = lfo_amp_base * (1.0 + mod_offsets.amplitude).max(0.0);
-
-            layer_mods[li] = ModulationState {
-                pitch_mult, filter_offset, filter_offset_semis: mod_offsets.filter_cutoff, amp_mod,
-            };
+            if !part.enabled { continue; } // выключенные части: слот не обновляется (значение по умолчанию — не читается, part.tick скипается)
+            layer_mods_snapshot[li] = part.update_mods(&inputs, li);
         }
-        } // end of layer_mods borrow scope
-
-        // Snapshot of per-part modulation for the voice tick loop below.
-        // `ModulationState` is `Copy` and the array is small (8 × 16 B);
-        // this stack copy lets us iterate `self.parts.iter_mut()` without
-        // a borrow conflict on `self.layer_mods`.
-        let layer_mods_snapshot = self.layer_mods;
 
         // Cache effect params (once per block)
         let ep = self.parts.iter().find(|l| l.enabled).map(|l| &l.params);
