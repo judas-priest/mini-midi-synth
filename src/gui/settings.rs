@@ -272,27 +272,28 @@ impl App {
         engine.set_trash_tx(engine_trash_tx);
         engine.set_program_change_atom(self._program_change_atom.clone());
 
-        // Update shared atoms
-        self.drum_step_atom = engine.drum_engine.step_atom();
-        self.drum_play_atom = engine.drum_engine.play_atom();
-        self.drum_rec_atom = engine.drum_engine.rec_atom();
+        // Update shared atoms (ST1: один пулл вместо 17)
+        let h = engine.handles();
+        self.drum_step_atom = h.drum_step_atom;
+        self.drum_play_atom = h.drum_play_atom;
+        self.drum_rec_atom = h.drum_rec_atom;
         // Fresh engine: chain state is live-only (not persisted).
-        self.drum_pattern_atom = engine.drum_engine.pattern_atom();
+        self.drum_pattern_atom = h.drum_pattern_atom;
         self.drum_chain_on = false;
         self.drum_chain_mask = 0;
-        self.drum_undo_atom = engine.drum_engine.undo_atom();
-        self.drum_redo_atom = engine.drum_engine.redo_atom();
-        self.looper_atoms = engine.looper.atoms();
-        self.looper_display = engine.looper.display();
-        self.seq_target_atom = engine.seq_target_atom();
-        self.active_part_atom = engine.active_part_atom();
-        self.sustain_atom = engine.sustain_atom();
-        self.master_rec_state = engine.master_rec_state_atom();
-        self.master_rec_cycle = engine.master_rec_cycle_atom();
-        self.pitch_seq_step_atoms = engine.pitch_seq_step_atoms();
-        self.scope_buf = engine.scope_buffer();
-        self.midi_seq_play_atom = engine.midi_player_play_atom();
-        self.midi_seq_pos_atom = engine.midi_player_pos_atom();
+        self.drum_undo_atom = h.drum_undo_atom;
+        self.drum_redo_atom = h.drum_redo_atom;
+        self.looper_atoms = h.looper_atoms;
+        self.looper_display = h.looper_display;
+        self.seq_target_atom = h.seq_target_atom;
+        self.active_part_atom = h.active_part_atom;
+        self.sustain_atom = h.sustain_atom;
+        self.master_rec_state = h.master_rec_state_atom;
+        self.master_rec_cycle = h.master_rec_cycle_atom;
+        self.pitch_seq_step_atoms = h.pitch_seq_step_atoms;
+        self.scope_buf = h.scope_buf;
+        self.midi_seq_play_atom = h.midi_seq_play_atom;
+        self.midi_seq_pos_atom = h.midi_seq_pos_atom;
 
         // New audio stream
         let audio_config = crate::audio::AudioConfig {

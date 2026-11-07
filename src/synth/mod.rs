@@ -1757,6 +1757,43 @@ impl SynthEngine {
         self.sustain.clone()
     }
 
+    /// Единая точка пулла общих хэндлов (ST1). Порядок полей = CommonInit.
+    pub fn handles(&self) -> crate::EngineHandles {
+        crate::EngineHandles {
+            #[cfg(feature = "gui")]
+            drum_step_atom: self.drum_engine.step_atom(),
+            #[cfg(feature = "gui")]
+            drum_play_atom: self.drum_engine.play_atom(),
+            #[cfg(feature = "gui")]
+            drum_rec_atom: self.drum_engine.rec_atom(),
+            #[cfg(feature = "gui")]
+            drum_pattern_atom: self.drum_engine.pattern_atom(),
+            #[cfg(feature = "gui")]
+            drum_undo_atom: self.drum_engine.undo_atom(),
+            #[cfg(feature = "gui")]
+            drum_redo_atom: self.drum_engine.redo_atom(),
+            #[cfg(feature = "gui")]
+            looper_atoms: self.looper.atoms(),
+            #[cfg(feature = "gui")]
+            looper_display: self.looper.display(),
+            seq_target_atom: self.seq_target_atom(),
+            active_part_atom: self.active_part_atom(),
+            #[cfg(feature = "gui")]
+            sustain_atom: self.sustain_atom(),
+            #[cfg(feature = "gui")]
+            master_rec_state_atom: self.master_rec_state_atom(),
+            master_rec_cycle_atom: self.master_rec_cycle_atom(),
+            #[cfg(feature = "gui")]
+            pitch_seq_step_atoms: self.pitch_seq_step_atoms(),
+            #[cfg(feature = "gui")]
+            scope_buf: self.scope_buffer(),
+            #[cfg(feature = "gui")]
+            midi_seq_play_atom: self.midi_player_play_atom(),
+            #[cfg(feature = "gui")]
+            midi_seq_pos_atom: self.midi_player_pos_atom(),
+        }
+    }
+
     /// Current SF2 release-time scale (TECHDEBT #7 introspection/tests).
     pub fn sampler_release_scale(&self) -> f32 {
         self.sampler.release_scale()
