@@ -1551,3 +1551,30 @@ fn tc_cc_scope_survives_config_roundtrip() {
         crate::cc_map::ParamScope::Global,
         "registry is SSOT: stale saved scope must be overridden");
 }
+
+// ── QW11: LFO1 routed через mod-matrix обязан тикать ─────────────────
+
+#[test]
+fn tc_lfo1_routed_cache() {
+    let mut e = SynthEngine::new(48_000.0);
+    // Lfo1-слот с depth != 0, все direct depths = 0
+    let part = &mut e.parts[0];
+    part.params.lfo_pitch_depth = 0.0;
+    part.params.lfo_filter_depth = 0.0;
+    part.params.lfo_amp_depth = 0.0;
+    part.mod_matrix.slots[0] = crate::synth::mod_matrix::ModSlot {
+        source: crate::synth::mod_matrix::ModSource::Lfo1,
+        dest: crate::synth::mod_matrix::ModDest::Pitch,
+        depth: 0.5,
+    };
+    part.update_routing_cache();
+    assert!(part.lfo1_routed, "Lfo1 slot with depth must set lfo1_routed");
+    // depth = 0 → false
+    part.mod_matrix.slots[0].depth = 0.0;
+    part.update_routing_cache();
+    assert!(!part.lfo1_routed);
+    // отрицательная глубина — тоже маршрутизация (abs)
+    part.mod_matrix.slots[0].depth = -0.5;
+    part.update_routing_cache();
+    assert!(part.lfo1_routed);
+}

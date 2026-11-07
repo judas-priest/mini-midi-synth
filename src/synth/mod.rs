@@ -613,6 +613,7 @@ struct Part {
     highest_held: u8,       // highest active note (default 60)
     poly_at_in_matrix: bool,  // true if any mod slot uses PolyAftertouch
     // Cached routing flags — updated on patch load, not per-block
+    lfo1_routed: bool,
     lfo2_routed: bool,
     lfo3_routed: bool,
     lfo4_routed: bool,
@@ -651,6 +652,7 @@ impl Part {
             breath: 0.0, expression: 1.0, sustain_pedal: 0.0,
             lowest_held: 60, highest_held: 60,
             poly_at_in_matrix: false,
+            lfo1_routed: false,
             lfo2_routed: false,
             lfo3_routed: false,
             lfo4_routed: false,
@@ -660,6 +662,8 @@ impl Part {
     /// Update cached routing flags from mod matrix slots. Call after loading a patch
     /// or changing mod matrix routing to avoid per-block scanning.
     fn update_routing_cache(&mut self) {
+        self.lfo1_routed = self.mod_matrix.slots.iter()
+            .any(|s| s.source == mod_matrix::ModSource::Lfo1 && s.depth.abs() > 0.001);
         self.lfo2_routed = self.mod_matrix.slots.iter()
             .any(|s| s.source == mod_matrix::ModSource::Lfo2 && s.depth.abs() > 0.001);
         self.lfo3_routed = self.mod_matrix.slots.iter()
@@ -3401,6 +3405,7 @@ impl SynthEngine {
             // LFO 1
             let lfo1_wf = LfoWaveform::from_param(part.params.lfo_waveform);
             let lfo1_active = lfo1_wf == LfoWaveform::StepSeq
+                || part.lfo1_routed
                 || part.params.lfo_pitch_depth > 0.001
                 || part.params.lfo_filter_depth > 0.001
                 || part.params.lfo_amp_depth > 0.001
