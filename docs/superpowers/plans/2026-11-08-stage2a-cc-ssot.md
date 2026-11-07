@@ -289,19 +289,9 @@ git add src/synth/patch_params.rs src/synth/mod.rs src/synth/tests.rs && git com
   tc_cc_bindings_target_set_param_arms — аналогично дополнить
   CC_PATCH_KEYS-набором.
 
-- [ ] **Step 1: registry из таблицы** — patch-записи PARAM_REGISTRY:
-
-```rust
-pub const PARAM_REGISTRY: &[ParamMeta] = &[
-    // Global params (persist across patch changes)
-    ParamMeta { key: "master_volume", label: "Volume", min: 0.0, max: 1.0, logarithmic: false, scope: ParamScope::Global },
-    ParamMeta { key: "master_tone", label: "Tone", min: 200.0, max: 20000.0, logarithmic: true, scope: ParamScope::Global },
-    // Patch params — range SSOT: patch_params::CC_PARAM_RANGES (S2a),
-    // labels живут здесь
-    ParamMeta { key: "filter_cutoff", label: "Filter Cutoff", ..range_of("filter_cutoff") },
-    ...
-];
-```
+- [ ] **Step 1: registry БЕЗ кодовых правок** — PARAM_REGISTRY остаётся
+  литеральным (см. «РЕШЕНО ревью» ниже); в этой задаче только пин-тесты.
+  Сверить, что регистр не менялся с 737005e.
 
 РЕШЕНО ревью: registry остаётся ЛИТЕРАЛЬНЫМ + пин-тест равенства с таблицей
 (TC4). Альтернативы отклонены: (а) const-fn сборка невозможна в const-контексте;
