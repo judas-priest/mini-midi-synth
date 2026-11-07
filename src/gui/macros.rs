@@ -18,9 +18,19 @@ impl App {
         });
         ui.add_space(theme::SP_XS);
 
-        // 8 macros in a 4×2 grid
+        // 8 макросов: 4 колонки на широких панелях, 2 в узких (колонка
+        // параметров браузера ~560px: 4 колонки со слайдером 180px распирают
+        // окно — #38-класс храповика, регресс 2026-11-08).
+        let col_w = 80.0 + ui.style().spacing.slider_width + 60.0;
+        let macro_cols = if ui.available_width() >= col_w * 4.0 {
+            4
+        } else if ui.available_width() >= col_w * 2.0 {
+            2
+        } else {
+            1
+        };
         egui::Grid::new(format!("macros_{part}"))
-            .num_columns(4)
+            .num_columns(macro_cols)
             .spacing([8.0, 4.0])
             .show(ui, |ui| {
                 for i in 0..8 {
@@ -71,7 +81,7 @@ impl App {
                         }
                     });
 
-                    if i % 4 == 3 {
+                    if i % macro_cols == macro_cols - 1 {
                         ui.end_row();
                     }
                 }

@@ -24,6 +24,25 @@ pub const SLIDER_COMPACT: f32 = 120.0;
 /// Drum per-instrument sliders.
 pub const SLIDER_DRUM: f32 = 40.0;
 
+// ── Instrument browser modal ────────────────────────────────────────────────
+// Правка размеров браузера — только здесь (SSOT-канон как SLIDER_*).
+
+/// Жёсткая ширина окна (min = max, режет храповик egui: окно растит до
+/// контента и никогда не сжимает).
+pub const BROWSER_WIN_W: f32 = 880.0;
+/// Дефолтная высота окна = доля высоты монитора (ctx.screen_rect).
+/// Применяется только пока юзер не заресайзил окно сам — ресайз
+/// запоминается в config.ui.inst_browser_size и перебивает дефолт.
+pub const BROWSER_WIN_H_FRAC: f32 = 0.7;
+/// Левая колонка: поиск + дерево.
+pub const BROWSER_LIST_W: f32 = 300.0;
+/// Минимальная ширина окна: список + самая узкая правая колонка (1-колоночный
+/// грид макросов ~640) — ниже контент уже не помещается.
+pub const BROWSER_MIN_W: f32 = 640.0;
+/// Вертикальный резерв под футер Done в ModalWindow
+/// (SP_SM 4 + кнопка 28 + item_spacing) — колонки не должны его съедать.
+pub const BROWSER_FOOTER_RESERVE: f32 = 40.0;
+
 // ── Backgrounds ──────────────────────────────────────────────────────────────
 
 /// Main dark background for scope, filter response, ADSR curve.

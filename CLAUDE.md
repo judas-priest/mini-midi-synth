@@ -112,3 +112,12 @@ cargo deny check
 9. **Panels.** egui panel order is pinned from source (ui_layout_contract):
    when splitting gui, panels stay in update() OR extend the pin's file
    list; CentralPanel stays last.
+10. **Window sizing.** egui windows grow to content and never shrink
+    (ratchet). Never request exact `available_width/height()` inside a
+    Window — request `available - ε` or theme constants. Column UIs inside
+    `ui.horizontal` need `allocate_ui_with_layout` + `Layout::top_down`
+    (plain `allocate_ui` inherits the horizontal layout). `default_size`
+    applies only until the user resizes (egui remembers per Id); persistent
+    resize = config storage + `default_*` fallback. Modal layout sizes are
+    SSOT in `theme.rs` (`BROWSER_*`); overflow of a Grid's min cell widths
+    is what force-grows windows — keep grids adaptive (1/2/4 columns).

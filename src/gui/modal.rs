@@ -24,6 +24,7 @@ pub struct ModalWindow<'a> {
     win_open: &'a mut bool,
     default_width: f32,
     fixed_width: Option<f32>,
+    min_width: Option<f32>,
     default_height: f32,
     default_pos: Option<egui::Pos2>,
     esc_closes: bool,
@@ -46,6 +47,7 @@ impl<'a> ModalWindow<'a> {
             win_open,
             default_width,
             fixed_width: None,
+            min_width: None,
             default_height: 540.0,
             default_pos: None,
             esc_closes: true,
@@ -89,6 +91,13 @@ impl<'a> ModalWindow<'a> {
         self
     }
 
+    /// Нижняя граница ширины (ресайз вверх свободен): контент уже окна не
+    /// помещается — без неё egui растит окно обратно (храповик).
+    pub fn min_width(mut self, w: f32) -> Self {
+        self.min_width = Some(w);
+        self
+    }
+
     pub fn default_pos(mut self, pos: egui::Pos2) -> Self {
         self.default_pos = Some(pos);
         self
@@ -123,6 +132,9 @@ impl<'a> ModalWindow<'a> {
             .default_height(self.default_height);
         if let Some(w) = self.fixed_width {
             win = win.min_width(w).max_width(w);
+        }
+        if let Some(w) = self.min_width {
+            win = win.min_width(w);
         }
         if let Some(pos) = self.default_pos {
             win = win.default_pos(pos);
