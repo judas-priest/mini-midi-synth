@@ -7,7 +7,11 @@
 
 ## Стадии
 
-- [ ] 1. S4-synth — разрез synth/mod.rs (4174): (a) extract Part::update_mods
+- [x] 1. S4-synth — ГОТОВО (PR #98, master 55ee839, 2026-11-08): handle_control
+      → 5 subsystem handlers (verbatim, script-verified); Part::update_mods
+      (borrow-хак растворён, EngineModInputs); events.rs 333 / part.rs 1063 /
+      cached_fx.rs 198; mod.rs 4340→2800. План: 2026-11-08-day1-s4-synth.md.
+- [ ] 1-old. S4-synth — разрез synth/mod.rs (4174): (a) extract Part::update_mods
       (растворяет borrow-хак layer_mods + snapshot), (b) handle_control (699
       строк, 88 вариантов) по подсистемам (part/drums/sf2/looper/transport/seq),
       (c) events/GlobalParams/Part в отдельные файлы (events.rs / part.rs) —
