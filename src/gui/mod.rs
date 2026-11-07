@@ -17,6 +17,10 @@ pub mod led_console;
 pub mod note_flash;
 mod confirm;
 mod modal;
+mod browser;
+mod sf2;
+mod tracks;
+mod performance;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -277,58 +281,9 @@ fn part_redo_step(
     Some(snap)
 }
 
-/// Result of scanning for .sf2 files, including directories that could not be
-/// read — so the UI can explain an empty list instead of just showing one.
-pub struct Sf2Scan {
-    pub files: Vec<(String, std::path::PathBuf)>,
-    pub unreadable: Vec<(std::path::PathBuf, String)>,
-}
-
-/// Scan for .sf2 files in the standard data directory.
-pub fn scan_sf2_files() -> Sf2Scan {
-    let mut files: Vec<(String, std::path::PathBuf)> = Vec::new();
-    let mut unreadable = Vec::new();
-
-    // On Android /sdcard/Download needs storage permissions this app does not
-    // hold, so the scan usually fails there. That has to be reported rather
-    // than silently producing an empty list.
-    #[cfg(target_os = "android")]
-    let dirs_to_scan = vec![sf2_dir(), std::path::PathBuf::from("/sdcard/Download")];
-    #[cfg(not(target_os = "android"))]
-    let dirs_to_scan = vec![sf2_dir()];
-
-    for dir in &dirs_to_scan {
-        match std::fs::read_dir(dir) {
-            Ok(entries) => {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) == Some("sf2") {
-                        let name = path.file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("?")
-                            .to_string();
-                        if !files.iter().any(|(n, _)| n == &name) {
-                            files.push((name, path));
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                // A missing private sf2 dir is normal on first run. Anything
-                // else — permission denied in particular — is worth surfacing.
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    unreadable.push((dir.clone(), e.to_string()));
-                }
-            }
-        }
-    }
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    Sf2Scan { files, unreadable }
-}
-
-fn sf2_dir() -> std::path::PathBuf {
-    crate::config::app_data_dir().join("sf2")
-}
+#[allow(unused_imports)] // Sf2Scan re-exported for gui API parity (no in-crate consumer yet)
+pub use sf2::{Sf2Scan, scan_sf2_files};
+pub(crate) use sf2::sf2_dir;
 
 fn note_name(note: u8) -> String {
     let name = NOTE_NAMES[(note % 12) as usize];
@@ -1009,259 +964,10 @@ impl eframe::App for App {
         }
         self.drum_prev_step = step_now;
 
-        // Bank-2 console pads -> state machine -> actions
-        let mut acts: Vec<led_console::Action> = Vec::new();
-        if let Some(rx) = &self.console_rx {
-            while let Ok((note, is_on)) = rx.try_recv() {
-                let now = std::time::Instant::now();
-                let ev = match (note, is_on) {
-                    (60..=67, true) => Some(led_console::PadEvent::Down((note - 60) as usize)),
-                    (60..=67, false) => Some(led_console::PadEvent::Up((note - 60) as usize)),
-                    (75, true) => Some(led_console::PadEvent::UndoDown),
-                    (75, false) => Some(led_console::PadEvent::UndoUp),
-                    (78, true) => Some(led_console::PadEvent::Prev),
-                    (79, true) => Some(led_console::PadEvent::Next),
-                    (80, true) => Some(led_console::PadEvent::PageBack),
-                    (76, true) => Some(led_console::PadEvent::PageForward),
-                    _ => None,
-                };
-                if let Some(ev) = ev {
-                    if let Some(a) = self.console.on_event(ev, now) {
-                        acts.push(a);
-                    }
-                }
-            }
-        }
-        let _ = self.console.tick(std::time::Instant::now()); // hold -> Menu (snapshot below)
-        for a in acts {
-            self.execute_console_action(a);
-        }
-        // Смена режима консоли: окно режима открывается на текущем выборе
-        // (finding 4: stale-страница при входе; идемпотентно, раз в смену).
-        // refresh_console_list здесь же покрывает первый кадр (prev = None)
-        // и все изменения perf_list/папок до входа консоли в режим (#57).
-        let m = self.console.mode();
-        if self.console_prev_mode != Some(m) {
-            self.console_prev_mode = Some(m);
-            self.refresh_console_list();
-            match m {
-                led_console::Mode::Pattern => {
-                    self.follow_window(self.drum_current_pattern as usize, false);
-                }
-                led_console::Mode::Tracks => {
-                    // Хвост #57: вход показывает страницу активной папки
-                    // (page_start сам clamp'ит при 0 папок → 0)
-                    self.tracks_window = led_console::page_start(
-                        self.config.ui.active_folder.unwrap_or(0),
-                        self.config.ui.perf_folders.len());
-                    // Подсказка входа (#57 UX): как рулить с пэдов
-                    self.show_toast("TRACKS: tap a folder — MENU — назад",
-                        ToastKind::Info);
-                }
-                led_console::Mode::Mute => self.mute_window = 0,
-                led_console::Mode::Home => {
-                    if let Some(i) = self.active_perf_console() {
-                        self.follow_window(i, true);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Companion process lifecycle (TECHDEBT #16): spawn on toggle-on /
-        // first need, kill only OUR child on toggle-off, respawn with 5s
-        // backoff if it dies while enabled.
-        if !self.config.ui.led_companion {
-            if let Some(mut child) = self.led_child.take() {
-                log::info!("[console] killing companion child");
-                if let Err(e) = child.kill() {
-                    log::warn!("[console] companion kill: {e}");
-                }
-                if let Err(e) = child.wait() {
-                    log::warn!("[console] companion wait: {e}");
-                }
-            }
-            self.led_spawn_backoff = None;
-        } else {
-            // reap exited child (crash, foreign kill, guard-exit 0)
-            if let Some(mut child) = self.led_child.take() {
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        log::info!("[console] companion child exited: {status}");
-                        self.led_spawn_backoff = Some(std::time::Instant::now());
-                    }
-                    Ok(None) => self.led_child = Some(child),
-                    Err(e) => log::warn!("[console] companion try_wait: {e}"),
-                }
-            }
-            // Spawn only when nothing connected AND a connect attempt already
-            // failed (a live foreign companion serves the socket within the
-            // 2s retry window — spawning earlier creates a duplicate that
-            // fights the foreign one over BLE).
-            let backoff_ok = self.led_spawn_backoff
-                .map(|t| t.elapsed() > std::time::Duration::from_secs(5))
-                .unwrap_or(true);
-            if self.led_child.is_none()
-                && self.led_socket.is_none()
-                && self.led_socket_failed_at.is_some()
-                && backoff_ok
-            {
-                let path = crate::config::expand_home(&self.config.ui.led_companion_cmd);
-                match std::process::Command::new("python3").arg(&path).spawn() {
-                    Ok(child) => {
-                        log::info!("[console] spawned companion: {}", path.display());
-                        self.led_child = Some(child);
-                    }
-                    Err(e) => {
-                        log::warn!("[console] companion spawn failed: {e}");
-                        self.led_spawn_backoff = Some(std::time::Instant::now());
-                    }
-                }
-            }
-        }
-
-        // LED companion socket lifecycle.
-        // Connect runs on a helper thread: a unix connect() BLOCKS when the
-        // peer's accept backlog is full — on the GUI thread that froze the
-        // whole app before the first frame (observed with a companion stuck
-        // in BLE reconnect).
-        if !self.config.ui.led_companion {
-            if self.led_socket.take().is_some() {
-                log::info!("[console] companion disabled");
-            }
-            self.led_connecting = None;
-        } else if self.led_socket.is_none()
-            && self.led_socket_failed_at
-                .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
-                .unwrap_or(true)
-            && self.led_connecting.is_none()
-        {
-            let (tx, rx) =
-                std::sync::mpsc::channel::<std::io::Result<std::os::unix::net::UnixStream>>();
-            self.led_connecting = Some(rx);
-            std::thread::spawn(move || {
-                let res = std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock");
-                let _ = tx.send(res);
-            });
-        }
-        if self.led_socket.is_none() {
-            if let Some(rx) = &mut self.led_connecting {
-                match rx.try_recv() {
-                    Ok(Ok(stream)) => {
-                        self.led_connecting = None;
-                        let (tx, rx) = std::sync::mpsc::channel::<String>();
-                        // fresh AtomicBool на каждый коннект: старый writer не может
-                        // перезаписать флаг нового (spurious reconnect)
-                        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-                        self.led_socket_alive = Some(alive.clone());
-                        std::thread::spawn(move || {
-                            use std::io::Write;
-                            let mut stream = stream;
-                            for msg in rx {
-                                if stream.write_all(msg.as_bytes()).is_err() {
-                                    alive.store(false, std::sync::atomic::Ordering::Relaxed);
-                                    break;
-                                }
-                            }
-                            alive.store(false, std::sync::atomic::Ordering::Relaxed);
-                        });
-                        self.led_socket = Some(tx);
-                        self.led_socket_failed_at = None;
-                        self.led_dirty = true; // отправить полный STATE сразу после коннекта
-                        log::info!("[console] companion connected");
-                    }
-                    Ok(Err(_)) => {
-                        self.led_connecting = None;
-                        self.led_socket_failed_at = Some(std::time::Instant::now());
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        self.led_connecting = None;
-                        self.led_socket_failed_at = Some(std::time::Instant::now());
-                    }
-                }
-            }
-        }
-        // writer умер (компаньон перезапускается) — забыть сокет, retry через 2с
-        let socket_dead = match &self.led_socket_alive {
-            Some(a) => !a.load(std::sync::atomic::Ordering::Relaxed),
-            None => false,
-        };
-        if self.led_socket.is_some() && socket_dead {
-            self.led_socket = None;
-            self.led_socket_alive = None;
-            self.led_socket_failed_at = Some(std::time::Instant::now());
-        }
-
-        // LED snapshot (16 slots = pads 17..=32, top row first)
-        {
-            // Bottom row shows the MASTER transport (single transport, #32
-            // фаза 4): the union — LED reflects "something runs".
-            let lstate = crate::synth::looper::LooperState::from_u8(
-                self.looper_atoms.state.load(Ordering::Relaxed));
-            let (playing, recording) = (
-                self.drum_playing
-                    || matches!(lstate, crate::synth::looper::LooperState::Playing
-                            | crate::synth::looper::LooperState::Overdubbing
-                            | crate::synth::looper::LooperState::Recording),
-                self.drum_recording
-                    || matches!(lstate, crate::synth::looper::LooperState::Recording
-                            | crate::synth::looper::LooperState::Overdubbing),
-            );
-            let mut mutes = [false; 16];
-            for (i, part) in self.parts.iter().enumerate().take(16) {
-                mutes[i] = part.mute;
-            }
-            let filled = self.console_active_list().len();
-            let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
-            let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
-            let page_depth = match self.console.mode() {
-                led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
-                led_console::Mode::Mute => self.mute_window / 7,
-                led_console::Mode::Tracks => self.tracks_window / 7,
-                // FolderPerfs: PAGE-глубина по перф-страницам — явное плечо
-                // (то же, что `_`; самодокументация)
-                led_console::Mode::FolderPerfs => self.perf_window / 7,
-                _ => self.perf_window / 7,
-            };
-            let top = match self.console.mode() {
-                led_console::Mode::Tracks => self.console.folder_colors(
-                    self.config.ui.active_folder,
-                    self.config.ui.perf_folders.len(), self.tracks_window),
-                led_console::Mode::FolderPerfs => self.console.top_colors(
-                    self.active_perf_console(), self.folder_console_list.len(),
-                    self.drum_current_pattern as usize, &mutes,
-                    self.perf_window, self.pat_window, self.mute_window),
-                _ => self.console.top_colors(self.active_perf_console(), filled,
-                                             self.drum_current_pattern as usize, &mutes,
-                                             self.perf_window, self.pat_window,
-                                             self.mute_window),
-            };
-            let bottom = self.console.bottom_colors(playing, recording, page_depth,
-                                                    undo_avail, redo_avail);
-            let mut snap = [[0u8; 3]; 16];
-            snap[..8].copy_from_slice(&top);
-            snap[8..].copy_from_slice(&bottom);
-            // Send on change, plus a 2s heartbeat: heals dropped writes and
-            // reconnects after a companion restart (otherwise nothing is sent
-            // while the state is idle and the console shows stale colors).
-            let heartbeat_due = self.led_last_send
-                .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
-                .unwrap_or(true);
-            if snap != self.led_snapshot || self.led_dirty || heartbeat_due {
-                self.led_snapshot = snap;
-                self.led_dirty = false;
-                self.led_last_send = Some(std::time::Instant::now());
-                if let Some(sock) = &self.led_socket {
-                    let mut msg = String::from("STATE");
-                    for c in &snap {
-                        msg.push_str(&format!(" {:02X}{:02X}{:02X}", c[0], c[1], c[2]));
-                    }
-                    msg.push('\n');
-                    let _ = sock.send(msg);
-                }
-            }
-        }
+        self.console_event_pump();
+        self.led_companion_lifecycle();
+        self.led_socket_lifecycle();
+        self.led_snapshot_send();
 
         // MIDI Learn indicator
         if let Some(target_name) = self.midi_learn_target {
@@ -1804,6 +1510,265 @@ impl eframe::App for App {
 }
 
 impl App {
+
+    fn console_event_pump(&mut self) {
+        // Bank-2 console pads -> state machine -> actions
+        let mut acts: Vec<led_console::Action> = Vec::new();
+        if let Some(rx) = &self.console_rx {
+            while let Ok((note, is_on)) = rx.try_recv() {
+                let now = std::time::Instant::now();
+                let ev = match (note, is_on) {
+                    (60..=67, true) => Some(led_console::PadEvent::Down((note - 60) as usize)),
+                    (60..=67, false) => Some(led_console::PadEvent::Up((note - 60) as usize)),
+                    (75, true) => Some(led_console::PadEvent::UndoDown),
+                    (75, false) => Some(led_console::PadEvent::UndoUp),
+                    (78, true) => Some(led_console::PadEvent::Prev),
+                    (79, true) => Some(led_console::PadEvent::Next),
+                    (80, true) => Some(led_console::PadEvent::PageBack),
+                    (76, true) => Some(led_console::PadEvent::PageForward),
+                    _ => None,
+                };
+                if let Some(ev) = ev {
+                    if let Some(a) = self.console.on_event(ev, now) {
+                        acts.push(a);
+                    }
+                }
+            }
+        }
+        let _ = self.console.tick(std::time::Instant::now()); // hold -> Menu (snapshot below)
+        for a in acts {
+            self.execute_console_action(a);
+        }
+        // Смена режима консоли: окно режима открывается на текущем выборе
+        // (finding 4: stale-страница при входе; идемпотентно, раз в смену).
+        // refresh_console_list здесь же покрывает первый кадр (prev = None)
+        // и все изменения perf_list/папок до входа консоли в режим (#57).
+        let m = self.console.mode();
+        if self.console_prev_mode != Some(m) {
+            self.console_prev_mode = Some(m);
+            self.refresh_console_list();
+            match m {
+                led_console::Mode::Pattern => {
+                    self.follow_window(self.drum_current_pattern as usize, false);
+                }
+                led_console::Mode::Tracks => {
+                    // Хвост #57: вход показывает страницу активной папки
+                    // (page_start сам clamp'ит при 0 папок → 0)
+                    self.tracks_window = led_console::page_start(
+                        self.config.ui.active_folder.unwrap_or(0),
+                        self.config.ui.perf_folders.len());
+                    // Подсказка входа (#57 UX): как рулить с пэдов
+                    self.show_toast("TRACKS: tap a folder — MENU — назад",
+                        ToastKind::Info);
+                }
+                led_console::Mode::Mute => self.mute_window = 0,
+                led_console::Mode::Home => {
+                    if let Some(i) = self.active_perf_console() {
+                        self.follow_window(i, true);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    fn led_companion_lifecycle(&mut self) {
+        // Companion process lifecycle (TECHDEBT #16): spawn on toggle-on /
+        // first need, kill only OUR child on toggle-off, respawn with 5s
+        // backoff if it dies while enabled.
+        if !self.config.ui.led_companion {
+            if let Some(mut child) = self.led_child.take() {
+                log::info!("[console] killing companion child");
+                if let Err(e) = child.kill() {
+                    log::warn!("[console] companion kill: {e}");
+                }
+                if let Err(e) = child.wait() {
+                    log::warn!("[console] companion wait: {e}");
+                }
+            }
+            self.led_spawn_backoff = None;
+        } else {
+            // reap exited child (crash, foreign kill, guard-exit 0)
+            if let Some(mut child) = self.led_child.take() {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        log::info!("[console] companion child exited: {status}");
+                        self.led_spawn_backoff = Some(std::time::Instant::now());
+                    }
+                    Ok(None) => self.led_child = Some(child),
+                    Err(e) => log::warn!("[console] companion try_wait: {e}"),
+                }
+            }
+            // Spawn only when nothing connected AND a connect attempt already
+            // failed (a live foreign companion serves the socket within the
+            // 2s retry window — spawning earlier creates a duplicate that
+            // fights the foreign one over BLE).
+            let backoff_ok = self.led_spawn_backoff
+                .map(|t| t.elapsed() > std::time::Duration::from_secs(5))
+                .unwrap_or(true);
+            if self.led_child.is_none()
+                && self.led_socket.is_none()
+                && self.led_socket_failed_at.is_some()
+                && backoff_ok
+            {
+                let path = crate::config::expand_home(&self.config.ui.led_companion_cmd);
+                match std::process::Command::new("python3").arg(&path).spawn() {
+                    Ok(child) => {
+                        log::info!("[console] spawned companion: {}", path.display());
+                        self.led_child = Some(child);
+                    }
+                    Err(e) => {
+                        log::warn!("[console] companion spawn failed: {e}");
+                        self.led_spawn_backoff = Some(std::time::Instant::now());
+                    }
+                }
+            }
+        }
+    }
+    fn led_socket_lifecycle(&mut self) {
+        // LED companion socket lifecycle.
+        // Connect runs on a helper thread: a unix connect() BLOCKS when the
+        // peer's accept backlog is full — on the GUI thread that froze the
+        // whole app before the first frame (observed with a companion stuck
+        // in BLE reconnect).
+        if !self.config.ui.led_companion {
+            if self.led_socket.take().is_some() {
+                log::info!("[console] companion disabled");
+            }
+            self.led_connecting = None;
+        } else if self.led_socket.is_none()
+            && self.led_socket_failed_at
+                .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
+                .unwrap_or(true)
+            && self.led_connecting.is_none()
+        {
+            let (tx, rx) =
+                std::sync::mpsc::channel::<std::io::Result<std::os::unix::net::UnixStream>>();
+            self.led_connecting = Some(rx);
+            std::thread::spawn(move || {
+                let res = std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock");
+                let _ = tx.send(res);
+            });
+        }
+        if self.led_socket.is_none() {
+            if let Some(rx) = &mut self.led_connecting {
+                match rx.try_recv() {
+                    Ok(Ok(stream)) => {
+                        self.led_connecting = None;
+                        let (tx, rx) = std::sync::mpsc::channel::<String>();
+                        // fresh AtomicBool на каждый коннект: старый writer не может
+                        // перезаписать флаг нового (spurious reconnect)
+                        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                        self.led_socket_alive = Some(alive.clone());
+                        std::thread::spawn(move || {
+                            use std::io::Write;
+                            let mut stream = stream;
+                            for msg in rx {
+                                if stream.write_all(msg.as_bytes()).is_err() {
+                                    alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                                    break;
+                                }
+                            }
+                            alive.store(false, std::sync::atomic::Ordering::Relaxed);
+                        });
+                        self.led_socket = Some(tx);
+                        self.led_socket_failed_at = None;
+                        self.led_dirty = true; // отправить полный STATE сразу после коннекта
+                        log::info!("[console] companion connected");
+                    }
+                    Ok(Err(_)) => {
+                        self.led_connecting = None;
+                        self.led_socket_failed_at = Some(std::time::Instant::now());
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.led_connecting = None;
+                        self.led_socket_failed_at = Some(std::time::Instant::now());
+                    }
+                }
+            }
+        }
+        // writer умер (компаньон перезапускается) — забыть сокет, retry через 2с
+        let socket_dead = match &self.led_socket_alive {
+            Some(a) => !a.load(std::sync::atomic::Ordering::Relaxed),
+            None => false,
+        };
+        if self.led_socket.is_some() && socket_dead {
+            self.led_socket = None;
+            self.led_socket_alive = None;
+            self.led_socket_failed_at = Some(std::time::Instant::now());
+        }
+    }
+    fn led_snapshot_send(&mut self) {
+        // LED snapshot (16 slots = pads 17..=32, top row first)
+        {
+            // Bottom row shows the MASTER transport (single transport, #32
+            // фаза 4): the union — LED reflects "something runs".
+            let lstate = crate::synth::looper::LooperState::from_u8(
+                self.looper_atoms.state.load(Ordering::Relaxed));
+            let (playing, recording) = (
+                self.drum_playing
+                    || matches!(lstate, crate::synth::looper::LooperState::Playing
+                            | crate::synth::looper::LooperState::Overdubbing
+                            | crate::synth::looper::LooperState::Recording),
+                self.drum_recording
+                    || matches!(lstate, crate::synth::looper::LooperState::Recording
+                            | crate::synth::looper::LooperState::Overdubbing),
+            );
+            let mut mutes = [false; 16];
+            for (i, part) in self.parts.iter().enumerate().take(16) {
+                mutes[i] = part.mute;
+            }
+            let filled = self.console_active_list().len();
+            let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
+            let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
+            let page_depth = match self.console.mode() {
+                led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
+                led_console::Mode::Mute => self.mute_window / 7,
+                led_console::Mode::Tracks => self.tracks_window / 7,
+                // FolderPerfs: PAGE-глубина по перф-страницам — явное плечо
+                // (то же, что `_`; самодокументация)
+                led_console::Mode::FolderPerfs => self.perf_window / 7,
+                _ => self.perf_window / 7,
+            };
+            let top = match self.console.mode() {
+                led_console::Mode::Tracks => self.console.folder_colors(
+                    self.config.ui.active_folder,
+                    self.config.ui.perf_folders.len(), self.tracks_window),
+                led_console::Mode::FolderPerfs => self.console.top_colors(
+                    self.active_perf_console(), self.folder_console_list.len(),
+                    self.drum_current_pattern as usize, &mutes,
+                    self.perf_window, self.pat_window, self.mute_window),
+                _ => self.console.top_colors(self.active_perf_console(), filled,
+                                             self.drum_current_pattern as usize, &mutes,
+                                             self.perf_window, self.pat_window,
+                                             self.mute_window),
+            };
+            let bottom = self.console.bottom_colors(playing, recording, page_depth,
+                                                    undo_avail, redo_avail);
+            let mut snap = [[0u8; 3]; 16];
+            snap[..8].copy_from_slice(&top);
+            snap[8..].copy_from_slice(&bottom);
+            // Send on change, plus a 2s heartbeat: heals dropped writes and
+            // reconnects after a companion restart (otherwise nothing is sent
+            // while the state is idle and the console shows stale colors).
+            let heartbeat_due = self.led_last_send
+                .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
+                .unwrap_or(true);
+            if snap != self.led_snapshot || self.led_dirty || heartbeat_due {
+                self.led_snapshot = snap;
+                self.led_dirty = false;
+                self.led_last_send = Some(std::time::Instant::now());
+                if let Some(sock) = &self.led_socket {
+                    let mut msg = String::from("STATE");
+                    for c in &snap {
+                        msg.push_str(&format!(" {:02X}{:02X}{:02X}", c[0], c[1], c[2]));
+                    }
+                    msg.push('\n');
+                    let _ = sock.send(msg);
+                }
+            }
+        }
+    }
     /// Запомнить «что сейчас крутят» — для индикатора в правом углу топ-бара
     /// (#39/#44: значение видно весь drag, тултип не обязателен). Каждый тик
     /// сбрасывает таймер авто-скрытия (2 с, как OSD volume).
@@ -1815,434 +1780,6 @@ impl App {
         }
     }
 
-    /// Instrument browser modal: search + category tree, applies to `inst_browser_part`.
-    fn draw_instrument_browser_modal(&mut self, ctx: &egui::Context) {
-        let Some(part) = self.inst_browser_part else { return };
-        // #браузер-фидбек: браузер показывает ОБОИХ дерева (DSP + GM). is_sf2 —
-        // ТЕКУЩИЙ движок парта: он задаёт только порядок секций (своя — первой)
-        // и источник seed-курсора; переключение движка следует за выбором.
-        let is_sf2 = self.parts[part].sf2_mode;
-        // Свежее состояние движка парта: после тоггла в том же кадре порядок
-        // секций и seed следуют за НОВЫМ движком
-        let engine_now = self.parts[part].sf2_mode;
-        // Зона/номер вместо LAYER_NAMES (8 имён): парты зоны B (8-15) давали «?»
-        let layer_label = if part < PARTS_PER_ZONE {
-            format!("A{}", part + 1)
-        } else {
-            format!("B{}", part - PARTS_PER_ZONE + 1)
-        };
-
-        let mut close = false;
-        let mut picked_patch: Option<usize> = None;
-        let mut picked_program: Option<u8> = None;
-        let mut toggled_cat: Option<String> = None;
-        // Some(true) = клик в GM-секции, Some(false) = клик в DSP-секции —
-        // движок парта следует за выбранным звуком (post-closure ниже).
-        let mut picked_switch_to_sf2: Option<bool> = None;
-        // Клавиатурная навигация (VS Code Quick Pick): плоский список видимых
-        // элементов (имя, индекс, из GM-секции?), виртуальный выделенный
-        // индекс (поля inst_browser_*).
-        let mut flat: Vec<(String, usize, bool)> = Vec::new();
-
-        // Навигационный ввод — ДО окна: single-line поиск не использует ↑/↓,
-        // поэтому перехват безопасен при любом фокусе (egui 0.31: TextEdit
-        // не консьюмит стрелки/Enter/Esc).
-        let moved = ctx.input(|i| {
-            let mut d: i32 = 0;
-            if i.key_pressed(egui::Key::ArrowDown) { d += 1; }
-            if i.key_pressed(egui::Key::ArrowUp) { d -= 1; }
-            d
-        });
-        if moved != 0 {
-            let new_idx = self.inst_browser_index as i32 + moved;
-            self.inst_browser_index = new_idx.max(0) as usize;
-            self.inst_browser_scroll = true; // (#37) скролл только по смене индекса
-        }
-        if self.inst_browser_last_search != self.preset_search {
-            // Фильтр изменился — выделение на первый результат
-            self.inst_browser_index = 0;
-            self.inst_browser_last_search = self.preset_search.clone();
-            self.inst_browser_scroll = true; // (#37) сброс фильтра — к началу списка
-        }
-        let enter_pressed = ctx.input(|i| i.key_pressed(egui::Key::Enter));
-
-        // Немодальное окно: выбор инструмента обратим (клик по другому патчу
-        // перекроет), полноэкранная модалка избыточна (audit Medium п.8).
-        // Обёртка modal::ModalWindow: Esc-стек, константный Id окна (память
-        // позиции при динамическом заголовке — TECHDEBT #34), футер Done.
-        let mut win_open = true;
-        let title = if is_sf2 {
-            format!("GM Instrument — Part {layer_label}")
-        } else {
-            format!("Patch — Part {layer_label}")
-        };
-        let mut builder = modal::ModalWindow::new(
-            ctx, "inst_browser", format!("Instrument Browser — {layer_label}"),
-            &mut win_open, 400.0,
-        )
-        .default_height(540.0)
-        // #38-регресс: пин ширины — храповик egui растит окно до контента
-        .fixed_width(400.0);
-        // #34: restore the position saved in a previous session (within a
-        // session egui remembers drags itself, keyed by the constant Id).
-        if let Some([x, y]) = self.config.ui.inst_browser_pos {
-            builder = builder.default_pos(egui::pos2(x, y));
-        }
-        let win = builder.show(|ui| {
-            ui.label(egui::RichText::new(title).strong());
-            // Тоггл движка DSP ↔ SF2 — живое переключение прямо в браузере
-            ui.horizontal(|ui| {
-                let cur_sf2 = self.parts[part].sf2_mode;
-                let (label, tip) = if cur_sf2 {
-                    ("\u{27A1} DSP", "Switch this part to the DSP engine")
-                } else {
-                    ("\u{27A1} SF2", "Switch this part to the SF2 (soundfont) engine")
-                };
-                if ui.button(label).on_hover_text(tip).clicked() {
-                    let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                    self.parts[part].sf2_mode = !cur_sf2;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: !cur_sf2 });
-                    if part == 0 { self.config.sf2.layer_a_sf2 = !cur_sf2; }
-                    else if part == 1 { self.config.sf2.layer_b_sf2 = !cur_sf2; }
-                    self.persist_parts_state();
-                    // Курсор — на первую строку новой текущей секции
-                    self.inst_browser_index = 0;
-                    self.inst_browser_seeded = true;
-                    self.inst_browser_scroll = true;
-                }
-                ui.label(egui::RichText::new(if cur_sf2 {
-                    "engine: SF2 (soundfont)"
-                } else {
-                    "engine: DSP"
-                }).weak());
-            });
-            // (#38) фикс-минимальная ширина: длинные строки поиска/результатов
-            // не распирают окно
-            ui.set_min_width(380.0);
-            ui.add_space(theme::SP_XS);
-            ui.add_space(theme::SP_XS);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                let w = ui.available_width();
-                let r = ui.add(egui::TextEdit::singleline(&mut self.preset_search)
-                    .hint_text("\u{1F50D} Search...")
-                    .desired_width((w - 30.0).max(60.0)));
-                if !self.preset_search.is_empty()
-                    && ui.small_button("\u{00D7}").clicked()
-                {
-                    self.preset_search.clear();
-                    r.request_focus();
-                }
-            });
-            ui.separator();
-
-            let query = self.preset_search.to_lowercase();
-            let searching = !query.is_empty();
-
-            egui::ScrollArea::vertical().auto_shrink(false)
-                .max_height(420.0)
-                .show(ui, |ui| {
-                    // Оба дерева всегда видны; секция ТЕКУЩЕГО движка парта —
-                    // первой (план: DSP сверху по умолчанию, osc-парт).
-                    let sections = if engine_now { [true, false] } else { [false, true] };
-                    // Первые строки секций (fallback-курсор, см. post-closure)
-                    let mut first_gm_row: Option<usize> = None;
-                    let mut first_dsp_row: Option<usize> = None;
-                    for (si, section_sf2) in sections.into_iter().enumerate() {
-                        if si > 0 {
-                            ui.add_space(theme::SP_XS);
-                            ui.separator();
-                            ui.add_space(theme::SP_XS);
-                        }
-                    if section_sf2 {
-                        if self.sf2_keys_soundfont.is_some() {
-                        // ── GM categories (перенос mod.rs:1141-1205: клик пишет
-                        //    picked_program, коллапс — toggled_cat) ──
-                        use crate::synth::sampler::GM_PROGRAM_NAMES;
-                        // Заголовок секции; маркер — у текущего движка парта
-                        // (U+26AB: шрифт без U+25CF — см. memory glyph-грабли)
-                        let gm_hdr = if section_sf2 == engine_now {
-                            "\u{26AB} SF2 — GM-инструменты"
-                        } else {
-                            "SF2 — GM-инструменты"
-                        };
-                        ui.strong(gm_hdr);
-                        let current_program = self.parts[part].sf2_program;
-                        let gm_categories: &[(&str, usize, usize)] = &[
-                            ("Piano", 0, 8), ("Chromatic Perc", 8, 16),
-                            ("Organ", 16, 24), ("Guitar", 24, 32),
-                            ("Bass", 32, 40), ("Strings", 40, 48),
-                            ("Ensemble", 48, 56), ("Brass", 56, 64),
-                            ("Reed", 64, 72), ("Pipe", 72, 80),
-                            ("Synth Lead", 80, 88), ("Synth Pad", 88, 96),
-                            ("Synth FX", 96, 104), ("Ethnic", 104, 112),
-                            ("Percussive", 112, 120), ("Sound FX", 120, 128),
-                        ];
-                        // Seed-курсор садится на текущий инструмент: если его
-                        // категория свёрнута — строка skipped и fallback
-                        // уводит курсор наверх. Раскрываем категорию.
-                        if !self.inst_browser_seeded && engine_now {
-                            for &(cat_name, start, end) in gm_categories.iter() {
-                                if (current_program as usize) >= start
-                                    && (current_program as usize) < end
-                                {
-                                    if self.collapsed_categories.remove(cat_name) {
-                                        self.save_collapsed_categories();
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                        for &(cat_name, start, end) in gm_categories {
-                            let matches: Vec<usize> = if searching {
-                                (start..end)
-                                    .filter(|&i| GM_PROGRAM_NAMES[i].to_lowercase().contains(&query)
-                                        || cat_name.to_lowercase().contains(&query))
-                                    .collect()
-                            } else {
-                                (start..end).collect()
-                            };
-                            if searching && matches.is_empty() { continue; }
-                            let is_collapsed =
-                                !searching && self.collapsed_categories.contains(cat_name);
-                            let arrow = if is_collapsed { "\u{25B6}" } else { "\u{2B07}" };
-                            if !searching {
-                                if ui.selectable_label(false, format!("{arrow} {cat_name}")).clicked() {
-                                    toggled_cat = Some(cat_name.to_string());
-                                }
-                            } else {
-                                ui.label(egui::RichText::new(cat_name).strong().small());
-                            }
-                            if !is_collapsed {
-                                for i in matches {
-                                    let name = GM_PROGRAM_NAMES[i];
-                                    if first_gm_row.is_none() { first_gm_row = Some(flat.len()); }
-                                    flat.push((format!("  {name}"), i, true));
-                                    let selected = current_program == i as u8;
-                                    // При открытии курсор садится на текущий
-                                    // инструмент парта — seed только из секции
-                                    // ТЕКУЩЕГО движка (#сож-class: «предлагает не то»)
-                                    // Seed курсора: первая строка секции текущего
-                                    // движка (не selected-строка — она может быть
-                                    // свёрнута/скрыта; фидбек 2026-11-02)
-                                    // Seed — на ТЕКУЩЕМ инструменте парта
-                                    if !self.inst_browser_seeded && engine_now && selected {
-                                        self.inst_browser_index = flat.len() - 1;
-                                        self.inst_browser_seeded = true;
-                                        // Флаг мог быть съеден ранней строкой
-                                        // со «старым» индексом — перевзводим,
-                                        // чтобы ТЕКУЩИЙ курсор прокрутился
-                                        self.inst_browser_scroll = true;
-                                    }
-                                    let is_hi = self.inst_browser_index == flat.len() - 1;
-                                    // Одна подсветка — курсор клавиатуры (#37-класс);
-                                    // активный инструмент помечен точкой, не заливкой
-                                    let mut row_text = egui::RichText::new(format!("  {}", name.chars().take(30).collect::<String>()));
-                                    if selected { row_text = row_text.strong(); }
-                                    let r = ui.selectable_label(is_hi, row_text)
-                                        .on_hover_text(name);
-                                    if is_hi && self.inst_browser_scroll {
-                                        r.scroll_to_me(Some(egui::Align::Center));
-                                        self.inst_browser_scroll = false; // (#37) один раз
-                                    }
-                                    if r.clicked() && !selected {
-                                        self.inst_browser_index = flat.len() - 1;
-                                        picked_program = Some(i as u8);
-                                        picked_switch_to_sf2 = Some(true);
-                                    }
-                                    // Двойной клик = применить + закрыть
-                                    // (Windows select-and-OK)
-                                    if r.double_clicked() {
-                                        picked_program = Some(i as u8);
-                                        picked_switch_to_sf2 = Some(true);
-                                        close = true;
-                                    }
-                                }
-                            }
-                        }
-                        } else {
-                            // SF2 не загружен — GM-секция скрыта целиком, hint
-                            ui.label(egui::RichText::new("SF2: load a soundfont in Settings").weak());
-                        }
-                    } else {
-                        // ── DSP patch tree (перенос mod.rs:1216-1271: клик пишет
-                        //    picked_patch) ──
-                        let dsp_hdr = if section_sf2 == engine_now {
-                            "\u{26AB} DSP — патчи"
-                        } else {
-                            "DSP — патчи"
-                        };
-                        ui.strong(dsp_hdr);
-                        let current_preset_idx = self.parts[part].patch_idx;
-                        // Seed на текущий патч: раскрываем его свёрнутую
-                        // категорию (иначе строка skipped, курсор — наверху)
-                        if !self.inst_browser_seeded && !engine_now {
-                            if let Some(p) = self.patches.get(current_preset_idx) {
-                                if self.collapsed_categories.remove(&p.category) {
-                                    self.save_collapsed_categories();
-                                }
-                            }
-                        }
-                        let categories: Vec<(String, usize)> = {
-                            let mut cats = Vec::new();
-                            let mut last = String::new();
-                            for (i, p) in self.patches.iter().enumerate() {
-                                if p.category != last {
-                                    cats.push((p.category.clone(), i));
-                                    last = p.category.clone();
-                                }
-                            }
-                            cats
-                        };
-                        let mut cat_idx = 0;
-                        for (i, patch) in self.patches.iter().enumerate() {
-                            if cat_idx < categories.len() && categories[cat_idx].1 == i {
-                                cat_idx += 1;
-                            }
-                            if searching {
-                                let name_match = patch.name.to_lowercase().contains(&query);
-                                let cat_match = patch.category.to_lowercase().contains(&query);
-                                if !name_match && !cat_match { continue; }
-                            }
-                            if !searching {
-                                if cat_idx > 0 && categories[cat_idx - 1].1 == i {
-                                    let cat = &categories[cat_idx - 1].0;
-                                    let is_collapsed = self.collapsed_categories.contains(cat);
-                                    let arrow = if is_collapsed { "\u{25B6}" } else { "\u{2B07}" };
-                                    if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
-                                        toggled_cat = Some(cat.clone());
-                                    }
-                                }
-                                if self.collapsed_categories.contains(&patch.category) {
-                                    continue;
-                                }
-                            }
-                            if first_dsp_row.is_none() { first_dsp_row = Some(flat.len()); }
-                            let selected = i == current_preset_idx;
-                            flat.push((format!("  {}", patch.name), i, false));
-                            // Seed курсора на текущий патч — только из секции
-                            // ТЕКУЩЕГО движка (первый кадр после открытия)
-                            // Seed курсора: первая строка секции текущего
-                            // движка (не selected-строка — она может быть
-                            // свёрнута/скрыта; фидбек 2026-11-02)
-                            // Seed — на текущем патче парта
-                            if !self.inst_browser_seeded && !engine_now && selected {
-                                self.inst_browser_index = flat.len() - 1;
-                                self.inst_browser_seeded = true;
-                                // Перевзвод scroll — см. GM-ветку выше
-                                self.inst_browser_scroll = true;
-                            }
-                            let is_hi = self.inst_browser_index == flat.len() - 1;
-                            // Одна подсветка — курсор; активный патч — точкой
-                            let mut row_text = egui::RichText::new(format!("  {}", patch.name.chars().take(30).collect::<String>()));
-                            if selected { row_text = row_text.strong(); }
-                            let r = ui.selectable_label(is_hi, row_text) // (#38)
-                                .on_hover_text(patch.name.clone());
-                            if is_hi && self.inst_browser_scroll {
-                                r.scroll_to_me(Some(egui::Align::Center));
-                                self.inst_browser_scroll = false; // (#37) один раз
-                            }
-                            if r.clicked() && !selected {
-                                self.inst_browser_index = flat.len() - 1;
-                                picked_patch = Some(i);
-                                picked_switch_to_sf2 = Some(false);
-                            }
-                            if r.double_clicked() {
-                                picked_patch = Some(i);
-                                picked_switch_to_sf2 = Some(false);
-                                close = true;
-                            }
-                        }
-                    }
-                    // Fallback-курсор: seed не сработал (selected-строка
-                    // свёрнута/скрыта) — первая строка секции текущего движка;
-                    // scroll — чтобы курсор был виден и в следующем кадре
-                    if !self.inst_browser_seeded {
-                        self.inst_browser_index = match engine_now {
-                            true => first_gm_row.unwrap_or(0),
-                            false => first_dsp_row.unwrap_or(0),
-                        };
-                        self.inst_browser_seeded = true;
-                        self.inst_browser_scroll = true;
-                    }
-                    }
-                });
-            // (#44-фидбек) Клик по инструменту = ПРИМЕНИТЬ и играть дальше —
-            // окно остаётся открытым; закрытие — Done из shell, двойной клик
-            // по инструменту (Windows select-and-OK), Esc, ✕.
-        });
-
-        // ── Post-closure handling (after .show, reads locals + modal) ────
-        // #34: запоминаем позицию КАЖДЫЙ кадр, пока окно открыто — надёжнее,
-        // чем хук «при закрытии»: drag + quit позицию не теряет. egui 0.31:
-        // `Window::show` → Option<InnerResponse>; позиция = inner.response.rect.
-        if let Some(inner) = &win {
-            let min = inner.response.rect.min;
-            self.config.ui.inst_browser_pos = Some([min.x, min.y]);
-        }
-        // Зажим индекса: список мог пересобраться (фильтр/смена парта)
-        let flat_len = flat.len();
-        if self.inst_browser_index >= flat_len {
-            self.inst_browser_index = flat_len.saturating_sub(1);
-        }
-        if enter_pressed && flat_len > 0 {
-            let (_, idx, entry_sf2) = &flat[self.inst_browser_index.min(flat_len - 1)];
-            if *entry_sf2 {
-                picked_program = Some(*idx as u8);
-                picked_switch_to_sf2 = Some(true);
-            } else {
-                picked_patch = Some(*idx);
-                picked_switch_to_sf2 = Some(false);
-            }
-        }
-        if let Some(cat) = toggled_cat {
-            if self.collapsed_categories.contains(&cat) {
-                self.collapsed_categories.remove(&cat);
-            } else {
-                self.collapsed_categories.insert(cat);
-            }
-            self.save_collapsed_categories();
-        }
-        // Движок следует за выбранным звуком (#браузер-фидбек)
-        if let Some(sf2) = picked_switch_to_sf2 {
-            if self.parts[part].sf2_mode != sf2 {
-                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                self.parts[part].sf2_mode = sf2;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2 });
-                if part == 0 { self.config.sf2.layer_a_sf2 = sf2; }
-                else if part == 1 { self.config.sf2.layer_b_sf2 = sf2; }
-                self.persist_parts_state();
-            }
-        }
-        if let Some(prog) = picked_program {
-            self.parts[part].sf2_program = prog;
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                part, program: prog, bank: 0 });
-            // Persist for parts 0/1 only (startup seeds). part >= 2: no persist —
-            // прежний else затирал layer_b_program с любого парта (QW2).
-            if part == 0 { self.config.sf2.layer_a_program = prog; }
-            else if part == 1 { self.config.sf2.layer_b_program = prog; }
-            let _ = self.config.save();
-            // Применили и играем дальше — окно не закрываем (фидбек 2026-11-01)
-        }
-        if let Some(idx) = picked_patch {
-            self.push_undo_snapshot_for(part); // #31: снимок ДО применения патча
-            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-            self.parts[part].patch_idx = idx;
-            self.load_edited_params(part);
-            self.send_edited_params(part);
-            self.save_config();
-            // Применили и играем дальше — окно не закрываем
-        }
-        if !win_open || win.is_none() {
-            close = true;
-        }
-        if close {
-            self.inst_browser_part = None;
-            // #34: позиция уже в config.ui — persisted вместе с остальным.
-            self.save_global_to_config();
-        }
-    }
 
     /// Send initial patches to all parts at startup
     pub fn send_initial_presets(&mut self) {
@@ -2334,24 +1871,6 @@ impl App {
             if self.load_performance_by_name(&name) {
                 log::info!("[init] performance restored: {name}");
             }
-        }
-    }
-
-    fn find_or_add_sf2(&mut self, sf2_path: &str) -> Option<usize> {
-        let idx = self.sf2_file_list.iter().position(|(_, p)| p.to_string_lossy() == sf2_path);
-        if let Some(idx) = idx {
-            return Some(idx);
-        }
-        let path = std::path::PathBuf::from(sf2_path);
-        if path.exists() {
-            let name = path.file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("?")
-                .to_string();
-            self.sf2_file_list.push((name, path));
-            Some(self.sf2_file_list.len() - 1)
-        } else {
-            None
         }
     }
 
@@ -2786,36 +2305,6 @@ impl App {
         else { self.sf2_drums_loaded_name.clone() }
     }
 
-    /// Extract the kit's own drum map (note -> SAMPLE name) for the remap UI.
-    /// All instruments/presets are scanned; per-key sample names are collected.
-    fn extract_kit_names(&mut self, sf: &rustysynth::SoundFont) {
-        self.reset_kit_names();
-        let headers = sf.get_sample_headers();
-        let mut seen = [false; 26];
-        for inst in sf.get_instruments() {
-            for r in inst.get_regions() {
-                let (lo, hi) = (r.get_key_range_start(), r.get_key_range_end());
-                if hi < 30 || lo > 55 { continue; }
-                let sid = r.get_sample_id();
-                if sid >= headers.len() { continue; }
-                let name = headers[sid].get_name().to_string();
-                for k in lo.max(30)..=hi.min(55) {
-                    let i = (k - 30) as usize;
-                    if !seen[i] { self.drum_kit_names[i] = name.clone(); seen[i] = true; }
-                }
-            }
-        }
-    }
-
-    fn reset_kit_names(&mut self) {
-        for (i, n) in self.drum_kit_names.iter_mut().enumerate() {
-            let note = 30 + i as u8;
-            *n = if (36..=51).contains(&note) {
-                crate::synth::drum::DRUM_NAMES[(note - 36) as usize].to_string()
-            } else { String::new() };
-        }
-    }
-
     /// Push the current remap table to the engine.
     fn push_drum_remap(&mut self) {
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetRemap { table: Box::new(self.drum_remap) });
@@ -2872,139 +2361,6 @@ impl App {
         let min_note = self.parts[part].min_note;
         let max_note = self.parts[part].max_note;
         let _ = self.ctrl_tx.push(ControlEvent::SetPartRange { part, min_note, max_note });
-    }
-
-    /// Parse an SF2 file and return the Arc<SoundFont>, or set sf2_status on error.
-    fn parse_sf2(&mut self, path: &std::path::Path) -> Option<std::sync::Arc<rustysynth::SoundFont>> {
-        match std::fs::File::open(path) {
-            Ok(mut file) => {
-                use std::io::BufReader;
-                let mut reader = BufReader::new(&mut file);
-                match rustysynth::SoundFont::new(&mut reader) {
-                    Ok(sf) => Some(std::sync::Arc::new(sf)),
-                    Err(e) => { self.show_toast(format!("SF2 parse error: {e}"), ToastKind::Error); None }
-                }
-            }
-            Err(e) => { self.show_toast(format!("SF2 open error: {e}"), ToastKind::Error); None }
-        }
-    }
-
-    fn load_sf2_keys(&mut self, idx: usize) {
-        let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
-            self.show_toast("SF2 file not found", ToastKind::Error);
-            return;
-        };
-        // Reuse existing drums soundfont if same file
-        let sf = if self.sf2_drums_loaded_name == name {
-            self.sf2_drums_soundfont.clone()
-        } else {
-            None
-        };
-        let sf = match sf {
-            Some(s) => s,
-            None => match self.parse_sf2(&path) {
-                Some(s) => s,
-                None => return,
-            },
-        };
-        self.sf2_keys_soundfont = Some(sf.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
-        let _ = self.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
-        self.sf2_keys_loaded_name = name;
-        self.show_toast("Keys SF2 loaded", ToastKind::Success);
-        // Apply per-part SF2 modes
-        for i in 0..2 {
-            if self.parts[i].sf2_mode {
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                    part: i, program: self.parts[i].sf2_program, bank: 0,
-                });
-            }
-        }
-        self.config.sf2.keys_file_path = Some(path.to_string_lossy().to_string());
-        self.config.sf2.file_path = self.config.sf2.keys_file_path.clone(); // compat
-        let _ = self.config.save();
-    }
-
-    fn load_sf2_drums(&mut self, idx: usize) {
-        let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
-            self.show_toast("SF2 file not found", ToastKind::Error);
-            return;
-        };
-        // Reuse existing keys soundfont if same file
-        let sf = if self.sf2_keys_loaded_name == name {
-            self.sf2_keys_soundfont.clone()
-        } else {
-            None
-        };
-        let sf = match sf {
-            Some(s) => s,
-            None => match self.parse_sf2(&path) {
-                Some(s) => s,
-                None => return,
-            },
-        };
-        self.sf2_drums_soundfont = Some(sf.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
-        let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
-        self.sf2_drums_loaded_name = name;
-        self.extract_kit_names(&sf);
-        self.push_drum_choke_groups();
-        self.show_toast("Drums SF2 loaded", ToastKind::Success);
-        if self.sf2_drums_enabled {
-            let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
-        }
-        // Load the per-kit remap table (identity if none saved for this kit).
-        if let Some(v) = self.config.sf2.drums_remaps.get(&self.drum_remap_key()) {
-            // migrate legacy slot-encoded values (0..16) to kit notes (+36)
-            let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
-            let mut t = [0u8; 16];
-            for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(36 + i as u8).clamp(30, 55); }
-            self.drum_remap = t;
-        } else {
-            for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
-        }
-        self.push_drum_remap();
-        if let Some(v) = self.config.sf2.drums_vels.get(&self.drum_remap_key()) {
-            let mut t = [0u8; 16];
-            for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
-            self.drum_pad_vel = t;
-        } else {
-            self.drum_pad_vel = [0u8; 16];
-        }
-        self.push_drum_pad_vel();
-        self.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
-        let _ = self.config.save();
-    }
-
-    fn unload_sf2_keys(&mut self) {
-        self.sf2_keys_soundfont = None;
-        self.sf2_keys_loaded_name.clear();
-        for i in 0..2 {
-            self.parts[i].sf2_mode = false;
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: false });
-        }
-        let _ = self.ctrl_tx.push(ControlEvent::UnloadKeysSoundFont);
-        self.config.sf2.keys_file_path = None;
-        self.config.sf2.file_path = None;
-        let _ = self.config.save();
-    }
-
-    fn unload_sf2_drums(&mut self) {
-        self.sf2_drums_soundfont = None;
-        self.sf2_drums_loaded_name.clear();
-        self.sf2_drums_enabled = false;
-        self.reset_kit_names();
-        self.push_drum_choke_groups(); // back to GM choke layout
-        // Internal kit: reset to identity remap.
-        for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
-        self.push_drum_remap();
-        self.drum_pad_vel = [0u8; 16];
-        self.push_drum_pad_vel();
-        let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
-        let _ = self.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);
-        self.config.sf2.drums_file_path = None;
-        let _ = self.config.save();
     }
 
     fn save_config(&mut self) {
@@ -3212,438 +2568,10 @@ impl App {
         }
     }
 
-    /// #57: менеджер папок-треков (сетлистов). egui-замыкания не могут держать
-    /// &mut self — решения собираются в ops во время отрисовки (copy-then-act),
-    /// применяются после закрытия окна; КАЖДАЯ мутация — config.save()
-    /// (event-driven, на выходе не гарантирован) + refresh_console_list.
-    fn draw_tracks_manager(&mut self, ctx: &egui::Context) {
-        enum Op {
-            SetActive(usize),
-            Rename(usize, String),
-            MoveUp(usize),
-            MoveDown(usize),
-            MoveAliasUp(usize, usize),
-            MoveAliasDown(usize, usize),
-            DelFolder(usize),
-            DelPerf(usize, usize),
-            AddCur(usize),
-            AddPerf(usize, String),
-            New,
-        }
-        if !self.show_tracks_manager {
-            // Guard-флаг не должен залипать после закрытия окна.
-            self.tracks_rename_focus = false;
-            return;
-        }
-        let mut open = true;
-        let mut ops: Vec<Op> = Vec::new();
-        // #35: фокус rename-TextEdit прошлого кадра — консервативный nav-guard
-        // для update() (draw идёт после update, флаг на кадр позже).
-        let mut rename_focus = false;
-        let cur_perf = self.perf_name.clone();
-        let win = modal::ModalWindow::new(
-            ctx, "tracks_manager", "Track Folders (Setlists)", &mut open, 520.0)
-            .fixed_width(520.0);
-        win.show(|ui| {
-            ui.label(egui::RichText::new(
-                "Setlists are ordered lists of aliases — the original perf is edited in one place.")
-                .weak());
-            let perf_names: Vec<String> =
-                self.perf_list.iter().map(|(n, _)| n.clone()).collect();
-            let sel = self.config.ui.active_folder;
-            let armed = self.tracks_del_armed;
-
-            // ── Left pane: Setlists ──
-            ui.columns(2, |cols| {
-                // ── Left: Setlists ──
-                cols[0].horizontal(|ui| {
-                    ui.label(egui::RichText::new("Setlists").strong());
-                    if ui.small_button("+ New").clicked() {
-                        ops.push(Op::New);
-                    }
-                });
-                if self.config.ui.perf_folders.is_empty() {
-                    cols[0].add_space(theme::SP_MD);
-                    cols[0].label(egui::RichText::new("No setlists yet.").weak());
-                    cols[0].label(egui::RichText::new("Click + New to create one.").weak());
-                }
-                for fi in 0..self.config.ui.perf_folders.len() {
-                    let name = self.config.ui.perf_folders[fi].name.clone();
-                    let active = sel == Some(fi);
-                    let sel_here = self.tracks_sel == Some(fi);
-                    cols[0].horizontal(|ui| {
-                        if ui.selectable_label(sel_here || active, &name)
-                            .on_hover_text(if active { "Active — click to select for editing" } else { "Click/Enter to set active" }).clicked()
-                        {
-                            ops.push(Op::SetActive(fi));
-                            self.tracks_sel = Some(fi);
-                        }
-                        if active {
-                            ui.label(egui::RichText::new("ACTIVE")
-                                .color(egui::Color32::from_rgb(0xFF, 0x00, 0xFF)).small());
-                        }
-                    });
-                }
-                // ── Right: Contents of the selected setlist ──
-                cols[1].horizontal(|ui| {
-                    ui.label(egui::RichText::new(match sel {
-                        Some(fi) => format!(
-                            "Contents: {}", self.config.ui.perf_folders[fi].name),
-                        None => "Contents".to_string(),
-                    }).strong());
-                });
-            });
-
-            match sel {
-                Some(fi) if fi < self.config.ui.perf_folders.len() => {
-                    // ── Toolbar (non-destructive left, destructive right) ──
-                    ui.horizontal(|ui| {
-                        if ui.small_button("+ Current Perf").clicked() {
-                            ops.push(Op::AddCur(fi));
-                        }
-                        egui::ComboBox::from_id_salt("tm_add_perf")
-                            .selected_text("+ Perf…")
-                            .show_ui(ui, |ui| {
-                                for n in &perf_names {
-                                    if ui.selectable_label(false, n).clicked() {
-                                        ops.push(Op::AddPerf(fi, n.clone()));
-                                    }
-                                }
-                            });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("\u{2B07}").on_hover_text("Move setlist down").clicked() {
-                                ops.push(Op::MoveDown(fi));
-                            }
-                            if ui.small_button("\u{2B06}").on_hover_text("Move setlist up").clicked() {
-                                ops.push(Op::MoveUp(fi));
-                            }
-                            let mut armed_now = armed;
-                            if confirm::confirm_button(ui, "Delete Setlist",
-                                &mut armed_now, true,
-                                "Click again to delete this setlist")
-                            {
-                                ops.push(Op::DelFolder(fi));
-                            }
-                            self.tracks_del_armed = armed_now;
-                        });
-                    });
-                    // ── Alias rows: label … reorder ↑↓ … × (right edge) ──
-                    if self.config.ui.perf_folders[fi].perfs.is_empty() {
-                        ui.add_space(theme::SP_SM);
-                        ui.label(egui::RichText::new(
-                            "Empty setlist — add performances above.").weak());
-                    }
-                    for pi in (0..self.config.ui.perf_folders[fi].perfs.len()).rev() {
-                        let pname = self.config.ui.perf_folders[fi].perfs[pi].clone();
-                        ui.horizontal(|ui| {
-                            ui.label(format!("  {}", pname));
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.small_button("\u{00D7}")
-                                    .on_hover_text("Remove from setlist (the perf itself is kept)")
-                                    .clicked()
-                                {
-                                    ops.push(Op::DelPerf(fi, pi));
-                                }
-                                if pi + 1 < self.config.ui.perf_folders[fi].perfs.len()
-                                    && ui.small_button("\u{2B07}").clicked()
-                                {
-                                    ops.push(Op::MoveAliasDown(fi, pi));
-                                }
-                                if pi > 0 && ui.small_button("\u{2B06}").clicked() {
-                                    ops.push(Op::MoveAliasUp(fi, pi));
-                                }
-                            });
-                        });
-                    }
-                    // ── Rename: inline, commits on Enter ──
-                    ui.add_space(theme::SP_SM);
-                    ui.horizontal(|ui| {
-                        ui.label("Rename:");
-                        let mut renamed =
-                            self.config.ui.perf_folders[fi].name.clone();
-                        let resp = ui.add(egui::TextEdit::singleline(&mut renamed)
-                            .desired_width(160.0)
-                            .hint_text("Enter to apply"));
-                        if resp.has_focus() {
-                            rename_focus = true;
-                        }
-                        if resp.lost_focus()
-                            && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                            && !renamed.trim().is_empty()
-                            && renamed.trim()
-                                != self.config.ui.perf_folders[fi].name.as_str()
-                        {
-                            ops.push(Op::Rename(fi, renamed.trim().to_string()));
-                        }
-                    });
-                }
-                Some(_) | None => {
-                    ui.add_space(theme::SP_MD);
-                    ui.label(egui::RichText::new(
-                        "Select a setlist on the left to edit its contents.").weak());
-                }
-            }
-        });
-        // Прошлый кадр для nav-гейта в update(): фокус живёт, пока TextEdit
-        // активен — дребезга нет (канон консервативного guard'а).
-        self.tracks_rename_focus = rename_focus;
-        // Close propagation: Done/Esc/✕ set *win_open=false — propagate to
-        // the flag (was dropped in the UX rewrite — Done did nothing)
-        if !open {
-            self.show_tracks_manager = false;
-        }
-        for op in ops {
-            match op {
-                Op::SetActive(fi) => {
-                    if fi < self.config.ui.perf_folders.len() {
-                        self.config.ui.active_folder = Some(fi);
-                        self.perf_window = 0;
-                        let _ = self.config.save();
-                        self.refresh_console_list();
-                    }
-                }
-                Op::Rename(fi, nm) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) { f.name = nm; }
-                    let _ = self.config.save();
-                }
-                Op::MoveUp(fi) => {
-                    if fi > 0 && fi < self.config.ui.perf_folders.len() {
-                        self.config.ui.perf_folders.swap(fi - 1, fi);
-                        if self.config.ui.active_folder == Some(fi) {
-                            self.config.ui.active_folder = Some(fi - 1);
-                        }
-                        if self.tracks_sel == Some(fi) {
-                            self.tracks_sel = Some(fi - 1);
-                        }
-                        let _ = self.config.save();
-                        self.refresh_console_list();
-                    }
-                }
-                Op::MoveDown(fi) => {
-                    if fi + 1 < self.config.ui.perf_folders.len() {
-                        self.config.ui.perf_folders.swap(fi, fi + 1);
-                        if self.config.ui.active_folder == Some(fi) {
-                            self.config.ui.active_folder = Some(fi + 1);
-                        }
-                        if self.tracks_sel == Some(fi) {
-                            self.tracks_sel = Some(fi + 1);
-                        }
-                        let _ = self.config.save();
-                        self.refresh_console_list();
-                    }
-                }
-                Op::DelFolder(fi) => {
-                    if fi < self.config.ui.perf_folders.len() {
-                        self.config.ui.perf_folders.remove(fi);
-                        match self.config.ui.active_folder {
-                            Some(a) if a == fi => self.config.ui.active_folder = None,
-                            Some(a) if a > fi => self.config.ui.active_folder = Some(a - 1),
-                            _ => {}
-                        }
-                        // sel за пределами после удаления — clamp (канон tracks_window)
-                        if let Some(s) = self.tracks_sel {
-                            if s >= self.config.ui.perf_folders.len() {
-                                self.tracks_sel =
-                                    self.config.ui.perf_folders.len().checked_sub(1);
-                            }
-                        }
-                        let _ = self.config.save();
-                        self.refresh_console_list();
-                    }
-                }
-                Op::MoveAliasUp(fi, pi) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
-                        if pi > 0 && pi < f.perfs.len() {
-                            f.perfs.swap(pi - 1, pi);
-                            let _ = self.config.save();
-                        }
-                    }
-                }
-                Op::MoveAliasDown(fi, pi) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
-                        if pi + 1 < f.perfs.len() {
-                            f.perfs.swap(pi, pi + 1);
-                            let _ = self.config.save();
-                        }
-                    }
-                }
-                Op::DelPerf(fi, pi) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
-                        if pi < f.perfs.len() { f.perfs.remove(pi); }
-                    }
-                    let _ = self.config.save();
-                    self.refresh_console_list();
-                }
-                Op::AddCur(fi) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
-                        f.perfs.push(cur_perf.clone());
-                    }
-                    let _ = self.config.save();
-                    self.refresh_console_list();
-                }
-                Op::AddPerf(fi, n) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
-                        f.perfs.push(n);
-                    }
-                    let _ = self.config.save();
-                    self.refresh_console_list();
-                }
-                Op::New => {
-                    let n = self.config.ui.perf_folders.len() + 1;
-                    self.config.ui.perf_folders.push(crate::config::PerfFolder {
-                        name: format!("Track {n}"),
-                        perfs: Vec::new(),
-                    });
-                    let _ = self.config.save();
-                }
-            }
-        }
-    }
-
     /// Index of the current performance in console_list (None if unknown;
     /// tombstone-active → None — корректно).
     fn active_perf_console(&self) -> Option<usize> {
         self.console_active_list().iter().position(|(n, _)| n == &self.perf_name)
-    }
-
-    /// Load a performance by name (for pad perf switching).
-    /// Returns true if found and loaded.
-    fn load_performance_by_name(&mut self, name: &str) -> bool {
-        let perf = if name == "(Init)" {
-            preset::init_performance()
-        } else {
-            let path = self.perf_list.iter()
-                .find(|(n, _)| n == name)
-                .map(|(_, p)| p.clone());
-            let Some(path) = path else { return false; };
-            match preset::load_performance(&path) {
-                Ok(p) => p,
-                Err(_) => return false,
-            }
-        };
-        // NO AllNotesOff here: seamless perf switch — sounding tails ring out
-        // naturally (SF2 voices keep the old instrument), held keys keep
-        // sustaining without re-attack; new notes use the new perf.
-        // Legacy 8-part migration is centralized in preset::load_performance.
-        self.apply_performance(&perf);
-        true
-    }
-
-    /// ЕДИНАЯ точка применения перфа (обе загрузки: по имени и панельный
-    /// «Load...»). История: пути разъезжались — панельный не восстанавливал
-    /// split_point и last_performance (#49: сплит «слетал» до C3/C4), by-name
-    /// не применял note_mode. Сюда добавлять новые поля PartConfig.
-    fn apply_performance(&mut self, perf: &crate::preset::Performance) {
-        let parts = &perf.parts;
-        // Restore the stored split point; legacy perfs derive it from the
-        // first enabled zone-B part's key_low (fallback: C4=60).
-        self.split_point = perf.split_point.unwrap_or_else(|| {
-            parts.iter()
-                .skip(crate::gui::PARTS_PER_ZONE)
-                .find(|p| p.enabled)
-                .map(|p| p.key_low)
-                .filter(|&v| v > 0)
-                .unwrap_or(60)
-        });
-        self.perf_name = perf.name.clone();
-        // Запомнить перф — восстановится при старте (юзер-репорт 2026-10-31)
-        self.config.ui.last_performance = Some(perf.name.clone());
-        self.save_config();
-        // Анти-stuck: lift the pedal BEFORE applying the new parts, or notes
-        // held by the pedal of the previous perf would ring forever under the
-        // new one (NOT AllNotesOff — seamless tails keep ringing).
-        // Side effects: latch releases, F1 pedal button shows OFF — accepted.
-        let _ = self.ctrl_tx.push(ControlEvent::SetSustain { on: false });
-        for (i, part) in parts.iter().enumerate() {
-            if i >= self.parts.len() { break; }
-            let patch_idx = self.patches.iter()
-                .position(|p| p.name == part.patch_name);
-            if patch_idx.is_none() && !part.patch_name.is_empty() {
-                // #49: тихий fallback на патч 0 = «партия играет чужое» без
-                // единого следа в логе; поведение сохраняем (патч 0), но
-                // диагностируем
-                log::warn!(
-                    "perf '{}': part {}: patch '{}' not found — falling back to patch 0",
-                    perf.name, i, part.patch_name
-                );
-            }
-            let patch_idx = patch_idx.unwrap_or(0);
-            self.parts[i].patch_idx = patch_idx;
-            self.parts[i].enabled = part.enabled;
-            self.parts[i].volume = part.volume;
-            self.parts[i].edited_params = part.param_overrides.clone();
-            // #49: зеркало макросов следует за params, иначе GUI показывает
-            // stale, а push_full_part_state (audio-reconnect) перезапишет
-            // движок старыми значениями через SetMacro
-            self.parts[i].macro_vals = macro_vals_from_params(&self.parts[i].edited_params);
-            // #49: имена макросов и XY-биндинги — GUI-стейт парта.
-            // Пустой список (Init/legacy-перф) = дефолты «Macro 1..8»,
-            // НЕ унаследованные имена от ПРЕДЫДУЩЕГО перфа
-            self.parts[i].macro_names = if part.macro_names.is_empty() {
-                (1..=8).map(|k| format!("Macro {k}")).collect()
-            } else {
-                part.macro_names.clone()
-            };
-            // clamp: битый JSON с индексом ≥8 не должен паниковать при
-            // индексации macro_vals/макро-лейблов
-            self.parts[i].xy_macro_x = part.xy_macro_x.min(7);
-            self.parts[i].xy_macro_y = part.xy_macro_y.min(7);
-            self.parts[i].sf2_mode = part.sf2_mode;
-            self.parts[i].sf2_program = part.sf2_program;
-            self.parts[i].pan = part.pan;
-            self.parts[i].transpose = part.transpose;
-            self.parts[i].mute = part.mute;
-            self.parts[i].note_mode = part.note_mode;
-            self.parts[i].sustain_enabled = part.sustain_enabled;
-            self.parts[i].ignore_pb = part.ignore_pb;
-            self.parts[i].ignore_mw = part.ignore_mw;
-            self.parts[i].vel_min = if part.vel_min == 0 { 1 } else { part.vel_min };
-            self.parts[i].vel_max = if part.vel_max == 0 { 127 } else { part.vel_max };
-            // ST2: один SetPartFull вместо 13-14 пушей. Источники те же, что у
-            // старого блока: scalar-поля из структуры перфа (part), vel_min/max
-            // — уже clamped значения self.parts[i], macro_vals — зеркало
-            // edited_params перфа, min/max_note — из self.parts[i] (stale
-            // до-сплит значения — ровно то, что пушит send_part_range;
-            // apply_split_ranges в хвосте перепушит диапазоны по сплиту).
-            // Порядковая инверсия ПРОВЕРЕНА: раньше LoadPatch уходил ПЕРВЫМ
-            // (send_edited_params), в транзакции — ПОСЛЕДНИМ; end-state не
-            // расходится, LoadPatch не трогает volume/pan/range/сэмплер-каналы.
-            // bank жёстко 0 — как в старом SetPartSf2Program arm:е (bank: 0).
-            let patch = ControlEvent::load_patch_from_edited(
-                i, &self.parts[i].edited_params,
-                self.patches.get(self.parts[i].patch_idx),
-            );
-            let patch = match patch {
-                ControlEvent::LoadPatch(boxed) => Some(boxed),
-                _ => unreachable!(),
-            };
-            let state = crate::synth::PartFullState {
-                enabled: part.enabled, mute: part.mute, volume: part.volume,
-                min_note: self.parts[i].min_note, max_note: self.parts[i].max_note,
-                vel_min: self.parts[i].vel_min, vel_max: self.parts[i].vel_max,
-                pan: part.pan, transpose: part.transpose,
-                note_mode: part.note_mode,
-                sustain_enabled: part.sustain_enabled,
-                ignore_pb: part.ignore_pb, ignore_mw: part.ignore_mw,
-                sf2_mode: part.sf2_mode, sf2_program: part.sf2_program,
-                macro_vals: self.parts[i].macro_vals,
-                patch,
-            };
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartFull { part: i, state: Box::new(state) });
-        }
-        // Parts absent from the performance must not keep playing
-        // the previous patch with their old voices.
-        for i in parts.len()..self.parts.len() {
-            if self.parts[i].enabled {
-                self.parts[i].enabled = false;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
-            }
-        }
-        // Диапазоны партов пересчитываются из сплита ПЕРФОМАНСЕСА (вызов в
-        // КОНЦЕ: все парты уже enabled по перфу; вызов до цикла чинил только
-        // парт 0 — зона B оставалась 0..127 и молчала на низких нотах,
-        // #46/#49)
-        self.apply_split_ranges();
     }
 
     fn save_collapsed_categories(&mut self) {
