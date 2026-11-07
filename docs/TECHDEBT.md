@@ -764,6 +764,31 @@ Swing, слайдеры L/T/D/P (DSP-only), vel ranges, pan.
 Без потери функциональности: ничего не удаляется, раскладка по частоте
 использования. Дополнения #30 выше (looper docked, тоггл docked/in-tab, полный
 юнит) — входят в этот дизайн.
+## Ночной рефакторинг 2026-11-08 — ГОТОВО 5 PR (роадмап: docs/superpowers/plans/2026-11-08-night-roadmap.md)
+
+- PR #92 (stage 1): ST2+ST1 — SetPartFull транзакции (свап 44-46→2 событий,
+  спавн/реконнект 13-21→1, apply ~110→9; handler композицией существующих
+  arm'ов — parity-тесты; Trash::PartFull; rt_safety кейс) + EngineHandles
+  (17 пуллов × 3 сайта → handles()).
+- PR #93 (stage 2a): S2-подсечения — cc_patch_params! SSOT (31 ключ →
+  cc_value_of/cc_set_param/ranges), check_pickup 4/32 → все ключи (behavior
+  fix: pickup от реального значения, не 0), пины registry↔таблица.
+  ОСТАЛОСЬ S2: 2b GUI-слайдеры (150 мест, нужна визуальная проверка), 2c
+  build_voice_params/CachedFxParams генерация.
+- PR #94 (stage 3-prep): slot goldens 31/31 (было 5/31) — S3 разблокирован.
+- PR #95 (stage 3b): S6 — xorshift32 канон ×31 сайт (14 файлов), advance_phase
+  ×10 сайтов, soft_clip/fast_exp канон, dead exp-knee удалён. Goldens
+  байт-стабильны на каждой задаче. ОСТАЛОСЬ S6b: DC-blocker ×13, cubic
+  (flanger), combulator/floaty linear (fmod-wrap) — причины в плане stage3b.
+- PR #96 (stage 4a): S4-lib — lib.rs 1090→219: init.rs/headless.rs/
+  android_jni.rs + gui::App::new (литерал 171 присваиваний из run_gui,
+  machine-verified 1:1). Android build ВЕРИФИЦИРОВАН (build + JNI nm).
+  БОНУС-фикс: android-gui сборка была сломана с 4ce2635 (pending_backend без
+  cfg) — починена.
+- НОЧЬЮ НЕ ДЕЛАЛОСЬ (нужен юзер/день): S3 behavior (байпас legacy-цепочки —
+  двойное звучание эффектов; готово всё кроме diff-ревью звука), S4-gui/S4-synth
+  сплиты, S2b слайдеры, F3 персист, ST8 headless, S6b DC-blocker.
+
 ## QW-батч 2026-11-07 (refactor-audit 2026-11-07) — ГОТОВО
 
 11 Quick wins по свежему аудиту (REFACTOR_AUDIT_2026-11-07.md; НОВАЯ нумерация
