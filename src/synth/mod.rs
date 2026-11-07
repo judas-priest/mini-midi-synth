@@ -2116,11 +2116,6 @@ impl SynthEngine {
         let at_alpha = 1.0 - (-(block_len as f32) / (0.010 * self.sample_rate)).exp();
         self.aftertouch_smooth += at_alpha * (self.aftertouch - self.aftertouch_smooth);
 
-        let active_layer_params = self.parts.iter()
-            .find(|l| l.enabled)
-            .map(|l| &l.params);
-        let lfo_rate = active_layer_params.map(|p| p.lfo_rate).unwrap_or(5.0);
-
         // Vibrato for mod wheel
         let vibrato_val = if self.mod_wheel > 0.001 {
             self.vibrato_phase += 6.0 / self.sample_rate * block_len as f32;
@@ -2279,7 +2274,6 @@ impl SynthEngine {
             seq_bpm,
             block_len,
             sample_rate: self.sample_rate,
-            lfo_rate,
             vibrato_val,
         };
         // Stack copy (ModulationState is Copy, 8 x 16 B): итерация

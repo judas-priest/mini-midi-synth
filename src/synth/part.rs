@@ -189,9 +189,6 @@ pub struct EngineModInputs {
     pub seq_bpm: f32,
     pub block_len: usize,
     pub sample_rate: f32,
-    /// Сквозной инпут: lfo_rate ПЕРВОЙ включённой части (cross-part,
-    /// tick_block) — Part не может пересчитать сам.
-    pub lfo_rate: f32,
     /// Готовое значение вибрато LFO (фаза vibrato_phase живёт в engine,
     /// инкремент остаётся в tick_block).
     pub vibrato_val: f32,
@@ -926,7 +923,7 @@ impl Part {
             || self.params.lfo_amp_depth > 0.001
             || inputs.aftertouch_smooth > 0.001;
         let lfo1_val = if lfo1_active {
-            self.lfos[0].tick_with_deform(inputs.lfo_rate * bl, lfo1_wf, self.params.lfo_deform)
+            self.lfos[0].tick_with_deform(self.params.lfo_rate * bl, lfo1_wf, self.params.lfo_deform)
         } else { 0.0 };
 
         // LFO 2 — also active when routed through mod matrix or in StepSeq mode
