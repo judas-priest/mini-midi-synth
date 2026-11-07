@@ -307,6 +307,12 @@ impl Part {
                 self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
                 self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
                 self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
+                // Envelope wave (from_param 5): one-shot — атака заново на note-on
+                // (audit mod-matrix #4)
+                if self.params.lfo_waveform == 5.0 { self.lfos[0].env_retrigger(); }
+                if self.params.lfo2_waveform == 5.0 { self.lfos[1].env_retrigger(); }
+                if self.params.lfo3_waveform == 5.0 { self.lfos[2].env_retrigger(); }
+                if self.params.lfo4_waveform == 5.0 { self.lfos[3].env_retrigger(); }
                 if self.params.mseg_enabled > 0.5 { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
             }
             self.update_held_range();
@@ -346,6 +352,12 @@ impl Part {
                 self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
                 self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
                 self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
+                // Envelope wave (from_param 5): one-shot — атака заново на note-on
+                // (audit mod-matrix #4)
+                if self.params.lfo_waveform == 5.0 { self.lfos[0].env_retrigger(); }
+                if self.params.lfo2_waveform == 5.0 { self.lfos[1].env_retrigger(); }
+                if self.params.lfo3_waveform == 5.0 { self.lfos[2].env_retrigger(); }
+                if self.params.lfo4_waveform == 5.0 { self.lfos[3].env_retrigger(); }
             }
             if self.params.mseg_enabled > 0.5 && !retrigger { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
             self.update_held_range();
@@ -406,6 +418,12 @@ impl Part {
         self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
         self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
         self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
+        // Envelope wave (from_param 5): one-shot — атака заново на note-on
+        // (audit mod-matrix #4)
+        if self.params.lfo_waveform == 5.0 { self.lfos[0].env_retrigger(); }
+        if self.params.lfo2_waveform == 5.0 { self.lfos[1].env_retrigger(); }
+        if self.params.lfo3_waveform == 5.0 { self.lfos[2].env_retrigger(); }
+        if self.params.lfo4_waveform == 5.0 { self.lfos[3].env_retrigger(); }
         // Trigger MSEGs on note-on (per-part, not per-voice)
         if self.params.mseg_enabled > 0.5 {
             self.mseg1_state.trigger();

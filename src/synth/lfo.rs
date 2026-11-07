@@ -251,6 +251,13 @@ impl Lfo {
         self.last_step_event
     }
 
+    /// Envelope one-shot: (re)start attack (audit mod-matrix #4 — stage 1
+    /// никем не писался, волна была константной -1.0).
+    pub fn env_retrigger(&mut self) {
+        self.env_stage = 1;
+        self.env_value = 0.0;
+    }
+
     /// Compute effective rate in Hz, handling tempo sync.
     fn effective_rate(&self, rate: f32) -> f32 {
         if self.tempo_sync {
@@ -413,7 +420,12 @@ impl Lfo {
                             self.env_stage = 3;
                         }
                     }
-                    3 => { self.env_value = 0.5; }
+                    3 => {
+                        // Нет note-off хука к LFO — «sustain» превращается в
+                        // цикл AD (атака заново), иначе ступор на 0.5 навсегда.
+                        self.env_stage = 1;
+                        self.env_value = 0.0;
+                    }
                     4 => {
                         self.env_value -= coeff;
                         if self.env_value <= 0.0 {
@@ -483,6 +495,24 @@ mod tests {
             let f = free.tick_with_deform(2.0 * bl, LfoWaveform::Sine, 0.0); // 2 Гц
             assert!((s - f).abs() < 1e-4, "sync {s} vs free {f}");
         }
+    }
+
+    #[test]
+    fn envelope_attacks_after_retrigger_and_loops() {
+        let mut lfo = Lfo::new(48000.0);
+        lfo.env_retrigger();
+        let rate = 5.0 * 128.0; // bl=128: dt = rate/sr на tick (как в живом тракте)
+        let mut peak: f32 = -2.0;
+        for _ in 0..120 {
+            let v = lfo.tick_with_deform(rate, LfoWaveform::Envelope, 0.0);
+            peak = peak.max(v);
+        }
+        assert!(peak > 0.9, "no attack, peak={peak}");
+        // цикл: после спада (sustain-stage перезапускает атаку) значение
+        // снова уходит вниз — минимум следующего окна отрицателен (bipolar)
+        let mut mid: f32 = 2.0;
+        for _ in 0..400 { mid = mid.min(lfo.tick_with_deform(rate, LfoWaveform::Envelope, 0.0)); }
+        assert!(mid < -0.5, "no decay/loop, min={mid}");
     }
 
     #[test]
