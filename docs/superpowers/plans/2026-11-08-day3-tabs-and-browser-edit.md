@@ -70,7 +70,8 @@ goldens не затрагиваются (рендер аудио); ui_layout_con
             if ui.selectable_label(self.show_drums && !self.show_midi_seq, "Drums").on_hover_text("Drum sequencer").clicked() {
                 if self.show_drums && !self.show_midi_seq {
                     // повторный клик по активной вкладке = нейтральный вид
-                    self.show_drums = false;
+                    self.show_drums = false; self.show_looper = false;
+                    self.show_midi_seq = false; self.show_fx_chain = false;
                 } else {
                     self.show_drums = true; self.show_looper = false;
                     self.show_midi_seq = false; self.show_fx_chain = false;
@@ -83,30 +84,44 @@ goldens не затрагиваются (рендер аудио); ui_layout_con
 
 ### Task 2: params.rs — draw_params_editable_for(ui, part)
 
-**Files:** Modify `src/gui/params.rs`.
+**Files:** Modify `src/gui/params.rs`, `src/gui/macros.rs`.
 - [ ] Step 1: `draw_params_editable(&mut self, ui)` → тело в новую
-  `draw_params_editable_for(&mut self, ui, part: usize)` (убрать
-  `let part = self.active_part;`); ВСЕ `self.push_undo_snapshot()` внутри →
-  `self.push_undo_snapshot_for(part);` (grep по телу: osc_type :289 и др.).
-- [ ] Step 2: обёртка:
+  `pub(super) fn draw_params_editable_for(&mut self, ui, part: usize)`
+  (убрать `let part = self.active_part;`). В теле **58** сайтов
+  `self.push_undo_snapshot()` → `self.push_undo_snapshot_for(part);`
+  (механическая замена по телу функции :247-1663 — ревью перечислило все
+  строки). ВСЕ `part`-зависимые чтения уже self.* — тело verbatim.
+- [ ] Step 2: **macros.rs — параметризовать парт** (ревью HIGH):
+  `draw_macros(&mut self, ui, part: usize)` + `draw_xy_pad(&mut self, ui,
+  part: usize)` — внутренние `self.active_part` → `part` (включая
+  push_undo_snapshot_for и SetMacro { part }); обёртка для главного экрана:
+  `pub(super) fn draw_macros(&mut self, ui) { self.draw_macros(ui,
+  self.active_part); }` — СТАРЫЕ вызовы не меняются.
+- [ ] Step 3: обёртка в params.rs:
 ```rust
     pub(super) fn draw_params_editable(&mut self, ui: &mut egui::Ui) {
         self.draw_params_editable_for(ui, self.active_part);
     }
 ```
-- [ ] Step 3: гейт + коммит `refactor: draw_params_editable_for(part) — undo targets the edited part`.
+- [ ] Step 4: гейт + коммит `refactor: draw_params_editable_for(part) + draw_macros(part) — undo targets the edited part`.
 
 ### Task 3: браузер — секция параметров
 
 **Files:** Modify `src/gui/browser.rs`.
-- [ ] Step 1: после списка (перед post-closure блоком), внутри win-контента:
+- [ ] Step 1: РЕВЬЮ-ФАКТЫ: окно fixed_width(400) + default_height(540), НЕТ
+  внутреннего скролла (egui Window::neither), контент шире окна клипается,
+  окно растёт по контенту до off-screen. РЕШЕНИЕ: (а) fixed_width 400→520
+  (слайдеры SLIDER_SECONDARY ~180px влезают; список +56px — ок); (б) секция
+  параметров — в ВНУТРЕННИЙ ScrollArea с max_height 200 (ограничивает рост
+  окна); (в) insertion point — после закрытия списка (:356), до `});` (:360).
+- [ ] Step 2: после списка (внутри win-контента, `part` в scope — let-else :7):
 ```rust
             ui.separator();
             if !self.parts[part].sf2_mode {
                 ui.strong("Параметры пресета");
                 egui::ScrollArea::vertical()
                     .id_salt("browser_params_scroll")
-                    .max_height(220.0)
+                    .max_height(200.0)
                     .show(ui, |ui| {
                         self.draw_params_editable_for(ui, part);
                     });
@@ -115,8 +130,8 @@ goldens не затрагиваются (рендер аудио); ui_layout_con
                     "SF2: у семплов нет DSP-параметров").weak());
             }
 ```
-  (part — локал браузера = inst_browser_part.unwrap_or_default; секция
-  скроллится, окно может остаться 540 — контент с прокруткой).
+- [ ] Step 3: гейт (ui_layout_contract входит) + коммит
+  `feat: instrument browser — preset params editor below the list (DSP parts)`.
 - [ ] Step 2: гейт (ui_layout_contract входит) + коммит
   `feat: instrument browser — preset params editor below the list (DSP parts)`.
 
@@ -125,13 +140,12 @@ goldens не затрагиваются (рендер аудио); ui_layout_con
 **Files:** Modify `src/gui/mod.rs` (else-ветка CentralPanel).
 - [ ] Step 1: убрать `self.draw_params_editable(ui);`; после шапки добавить:
 ```rust
-                        self.draw_macros(ui);
+                        self.draw_macros(ui); // обёртка: active_part
                         ui.add_space(theme::SP_SM);
                         ui.label(egui::RichText::new(
-                            "Полные параметры пресета — кнопка Browse на строке парта").weak());
+                            "Полные параметры пресета — кнопка с именем патча на строке парта").weak());
 ```
-  (draw_macros pub(crate)? — проверить видимость из mod.rs: он в gui/mod.rs
-  impl App — mod.rs и есть gui/mod.rs — ок).
+  (draw_macros — 4×2 сетка + XY-пад ~220px; компактная «строка» = сетка + пад.)
 - [ ] Step 2: гейт + коммит `feat: main view compact — macros strip + params in browser (S4-gui polish)`.
 
 ### Task 5: Верификация стадии
