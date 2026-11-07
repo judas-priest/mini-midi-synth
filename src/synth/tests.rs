@@ -1616,7 +1616,7 @@ fn tc_set_part_full_parity_with_event_sequence() {
         for i in 0..8 {
             drop(e.handle_control(ControlEvent::SetMacro { part: 0, index: i, value: 0.1 * i as f32 }));
         }
-        drop(e.handle_control(ControlEvent::load_patch_from(0, &patches[0])));
+        drop(e.handle_control(ControlEvent::load_patch_from(0, &patches[1])));
     };
     let tx_events = |e: &mut SynthEngine| {
         let state = crate::synth::PartFullState {
@@ -1627,7 +1627,7 @@ fn tc_set_part_full_parity_with_event_sequence() {
             sustain_enabled: true, ignore_pb: true, ignore_mw: false,
             sf2_mode: false, sf2_program: 0,
             macro_vals: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
-            patch: Some(Box::new(load_patch_event_for(&patches[0], 0))),
+            patch: Some(Box::new(load_patch_event_for(&patches[1], 0))),
         };
         drop(e.handle_control(ControlEvent::SetPartFull { part: 0, state: Box::new(state) }));
     };
@@ -1655,6 +1655,12 @@ fn tc_set_part_full_parity_with_event_sequence() {
     assert_eq!(l.macro_vals, r.macro_vals);
     assert_eq!(l.params.filter_cutoff, r.params.filter_cutoff, "patch applied");
     assert_eq!(l.params.osc_type, r.params.osc_type);
+    // Non-vacuity pin: patches[1] = grand_piano (osc_type 11, cutoff 12000)
+    // differs from PatchParams::default() — the parity asserts above prove the
+    // patch actually landed, not just that both engines stayed at defaults.
+    let gp = PatchParams::from_map(&patches[1].params);
+    assert_ne!(gp.filter_cutoff, PatchParams::default().filter_cutoff);
+    assert_eq!(r.params.filter_cutoff, gp.filter_cutoff, "grand_piano actually applied");
 }
 
 #[test]
@@ -1728,6 +1734,10 @@ fn tc_set_part_full_sf2_parity() {
     let b = build(true);
     assert_eq!(a.parts[0].sf2_mode, b.parts[0].sf2_mode);
     assert!(b.parts[0].sf2_mode, "transaction enables sf2");
+    // Программа должна доехать до сэмплера (part_addressed кэш, как в
+    // set_part_program), а не только до флага sf2_mode на парте.
+    assert_eq!(a.sampler.part_program(0), b.sampler.part_program(0));
+    assert_eq!(b.sampler.part_program(0), 5);
 }
 
 #[test]
