@@ -1,5 +1,7 @@
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod audio;
+#[cfg(target_os = "android")]
+mod android_jni;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub mod cc_map;
 pub mod chord;
@@ -8,6 +10,8 @@ pub mod config;
 mod gui;
 #[cfg(target_os = "linux")]
 mod input;
+mod headless;
+mod init;
 mod key_action;
 pub mod metrics;
 pub mod midi;
@@ -28,591 +32,42 @@ pub mod trash;
 static RT_ALLOC: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 #[allow(unused_imports)]
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU8, Ordering};
+#[cfg(any(feature = "gui", target_os = "android"))]
+use std::sync::Arc;
+#[cfg(feature = "gui")]
+use std::sync::Mutex;
+
+pub use init::{AMIDI_PORT, EngineHandles};
 
 #[cfg(target_os = "android")]
-use std::sync::OnceLock;
-
-static AMIDI_PORT: std::sync::OnceLock<std::sync::Arc<crate::amidi::AmidiPort>> = std::sync::OnceLock::new();
-
-#[cfg(target_os = "android")]
-static AUDIO_PAUSED: OnceLock<Arc<AtomicBool>> = OnceLock::new();
-#[cfg(target_os = "android")]
-static JNI_MIDI_TX: OnceLock<midi::SharedMidiTx> = OnceLock::new();
-#[cfg(target_os = "android")]
-static JNI_NOTE_STATE: OnceLock<midi::NoteState> = OnceLock::new();
-#[cfg(target_os = "android")]
-static JNI_PAD_STATE: OnceLock<midi::PadState> = OnceLock::new();
+pub use android_jni::{AUDIO_PAUSED, JNI_MIDI_TX, JNI_NOTE_STATE, JNI_PAD_STATE};
 
 use anyhow::Result;
-
-#[cfg(not(target_os = "android"))]
-use cpal::HostId;
+#[cfg(feature = "gui")]
 use midir::MidiInputConnection;
 
-use crate::config::Config;
-
-/// Suppress ALSA lib error messages (not our own stderr).
-#[cfg(target_os = "linux")]
-fn suppress_alsa_errors() {
-    #[link(name = "asound")]
-    extern "C" {
-        fn snd_lib_error_set_handler(handler: *const std::ffi::c_void) -> std::ffi::c_int;
-    }
-    unsafe {
-        snd_lib_error_set_handler(std::ptr::null());
-    }
-}
-
-#[cfg(not(target_os = "android"))]
-fn find_host_idx(hosts: &[(HostId, &str)], name: &str) -> usize {
-    hosts
-        .iter()
-        .position(|(_, n)| n.eq_ignore_ascii_case(name))
-        .unwrap_or(0)
-}
-
-fn find_midi_port(port_names: &[String], saved_name: &str) -> Option<usize> {
-    port_names.iter().position(|n| n == saved_name)
-}
-
-/// Единый бандл общих хэндлов движка (ST1: 17 хэндлов × 6 мест → 3).
-/// Клон = клон Arc'ов (GUI-поток). Новый хэндл: поле здесь + строка в
-/// `SynthEngine::handles()` + присвоение потребителю — больше нигде.
-#[derive(Clone)]
-pub struct EngineHandles {
-    #[cfg(feature = "gui")]
-    pub drum_step_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    pub drum_play_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    pub drum_rec_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    pub drum_pattern_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    pub drum_undo_atom: Arc<std::sync::atomic::AtomicBool>,
-    #[cfg(feature = "gui")]
-    pub drum_redo_atom: Arc<std::sync::atomic::AtomicBool>,
-    #[cfg(feature = "gui")]
-    pub looper_atoms: Arc<synth::looper::LooperAtoms>,
-    #[cfg(feature = "gui")]
-    pub looper_display: Arc<std::sync::Mutex<synth::looper::LooperDisplay>>,
-    pub seq_target_atom: Arc<AtomicU8>,
-    pub active_part_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    pub sustain_atom: Arc<std::sync::atomic::AtomicBool>,
-    #[cfg(feature = "gui")]
-    pub master_rec_state_atom: Arc<std::sync::atomic::AtomicU8>,
-    pub master_rec_cycle_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    pub pitch_seq_step_atoms: Vec<Arc<AtomicU8>>,
-    #[cfg(feature = "gui")]
-    pub scope_buf: Arc<synth::ScopeBuffer>,
-    #[cfg(feature = "gui")]
-    pub midi_seq_play_atom: Arc<AtomicU8>,
-    #[cfg(feature = "gui")]
-    pub midi_seq_pos_atom: Arc<std::sync::atomic::AtomicU32>,
-}
-
-/// Common initialization shared by GUI and headless modes.
-struct CommonInit {
-    config: Config,
-    patches: Vec<preset::Patch>,
-    #[cfg(all(feature = "gui", not(target_os = "android")))]
-    available_hosts: Vec<(HostId, &'static str)>,
-    #[cfg(all(feature = "gui", not(target_os = "android")))]
-    host_name: &'static str,
-    #[cfg(all(feature = "gui", not(target_os = "android")))]
-    host_idx: usize,
-    #[cfg(all(feature = "gui", not(target_os = "android")))]
-    supported_sr: Vec<u32>,
-    #[cfg(feature = "gui")]
-    is_jack: bool,
-    actual_sr: u32,
-    note_state: midi::NoteState,
-    pad_state: midi::PadState,
-    midi_tx_shared: midi::SharedMidiTx,
-    /// Bank-2 console pad notes, mirrored by the engine (Task 4).
-    pub console_rx: std::sync::mpsc::Receiver<(u8, bool)>,
-    flash_rx: rtrb::Consumer<midi::NoteFlash>,
-    ctrl_tx: metrics::CountingProducer<synth::ControlEvent>,
-    feedback_rx: rtrb::Consumer<synth::ParamFeedback>,
-    program_change_atom: Arc<AtomicU8>,
-    /// Общие хэндлы движка (ST1): один бандл вместо 17 полей.
-    handles: EngineHandles,
-    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
-    midi_port_names: Vec<String>,
-    midi_conn: Option<MidiInputConnection<()>>,
-    midi_connected_name: Option<String>,
-    patch_idx: usize,
-    _audio_handle: audio::AudioBackend,
-    audio_disconnected: Arc<AtomicBool>,
-    /// Heap objects handed back by the engine and the audio callback. Drained
-    /// (and thereby freed) on the GUI or headless main thread.
-    engine_trash_rx: trash::TrashRx,
-    cb_trash_rx: trash::TrashRx,
-}
-
-pub(crate) fn init_common() -> Result<CommonInit> {
-    let config = Config::load();
-    let patches = preset::load_all_patches();
-
-    // Warm static DSP tables BEFORE the audio stream exists: both are lazily
-    // built otherwise and the first build would land in the audio callback
-    // (wavetable bank on the first note-on, LFO sine LUT on the first tick).
-    synth::oscillator::warmup_builtin_wavetable();
-    synth::lfo::warmup_sine_lut();
-
-    #[cfg(not(target_os = "android"))]
-    let available_hosts = audio::available_hosts();
-
-    #[cfg(not(target_os = "android"))]
-    let host_idx = find_host_idx(&available_hosts, &config.audio.backend);
-    #[cfg(not(target_os = "android"))]
-    let host_id = available_hosts[host_idx].0;
-    #[cfg(all(feature = "gui", not(target_os = "android")))]
-    let host_name = available_hosts[host_idx].1;
-    #[cfg(feature = "gui")]
-    let is_jack = {
-        #[cfg(not(target_os = "android"))]
-        { host_name == "JACK" }
-        #[cfg(target_os = "android")]
-        { false }
-    };
-
-    #[cfg(all(feature = "gui", not(target_os = "android")))]
-    let supported_sr = audio::supported_sample_rates(host_id);
-
-    #[cfg(target_os = "android")]
-    let host_id = {
-        // On Android, use the default host (AAudio)
-        cpal::default_host().id()
-    };
-
-    let note_state = midi::new_note_state();
-    let pad_state = midi::new_pad_state();
-
-    let (midi_tx, midi_rx) = rtrb::RingBuffer::<synth::MidiEvent>::new(256);
-    // 512 rather than 256: a full state resend (patches, per-part settings,
-    // macros, CC map, drum kit) is around 165 events in one burst, and an
-    // overflow there silently loses settings. 512 events is 16 KB.
-    let (ctrl_tx, ctrl_rx) = rtrb::RingBuffer::<synth::ControlEvent>::new(512);
-    let (feedback_tx, feedback_rx) = rtrb::RingBuffer::<synth::ParamFeedback>::new(64);
-
-    let midi_tx_shared: midi::SharedMidiTx = Arc::new(Mutex::new(midi_tx));
-
-    #[cfg(target_os = "android")]
-    {
-        let _ = JNI_MIDI_TX.set(midi_tx_shared.clone());
-        let _ = JNI_NOTE_STATE.set(note_state.clone());
-        let _ = JNI_PAD_STATE.set(pad_state.clone());
-        log::info!("[init] JNI MIDI bridge globals set");
-    }
-
-    let (console_snd, console_rx) = std::sync::mpsc::channel::<(u8, bool)>();
-    let _ = midi::CONSOLE_TX.set(std::sync::Mutex::new(Some(console_snd)));
-
-    // NoteFlash: затухающие следы нот на клавиатуре (см. src/gui/note_flash.rs)
-    let (flash_tx, flash_rx) = rtrb::RingBuffer::<midi::NoteFlash>::new(128);
-    midi::init_note_flash(flash_tx);
-
-    let program_change_atom = Arc::new(AtomicU8::new(255));
-
-    // Two independent trash queues: rtrb producers cannot be cloned, and both
-    // the engine (displaced soundfonts) and the callback (spent control
-    // events) need somewhere to put heap objects they must not free.
-    let (engine_trash_tx, engine_trash_rx) = trash::channel();
-    let (cb_trash_tx, cb_trash_rx) = trash::channel();
-
-    let mut engine = synth::SynthEngine::new(config.audio.sample_rate as f32);
-    engine.set_patches(patches.clone());
-    engine.set_feedback_tx(feedback_tx);
-    engine.set_trash_tx(engine_trash_tx);
-    engine.set_program_change_atom(program_change_atom.clone());
-    let h = engine.handles();
-
-    let amidi_port = {
-        let port = std::sync::Arc::new(crate::amidi::AmidiPort::new());
-        let _ = AMIDI_PORT.set(port.clone());
-        port
-    };
-
-    let audio_paused = Arc::new(AtomicBool::new(false));
-    #[cfg(target_os = "android")]
-    {
-        let _ = AUDIO_PAUSED.set(audio_paused.clone());
-    }
-
-    let audio_config = audio::AudioConfig {
-        host_id,
-        sample_rate: config.audio.sample_rate,
-        buffer_size: config.audio.buffer_size,
-    };
-    let (audio_backend, actual_sr) = audio::AudioBackend::new(
-        audio_config,
-        engine,
-        midi_rx,
-        ctrl_rx,
-        audio::AudioShared {
-            amidi_port,
-            note_state: note_state.clone(),
-            pad_state: pad_state.clone(),
-            paused: audio_paused,
-            trash: cb_trash_tx,
-        },
-    )?;
-    let audio_disconnected = audio_backend.disconnected.clone();
-    log::info!("[init] Audio: sample_rate={actual_sr}");
-
-    // MIDI — On Android, midir AMidi polling thread causes audio callback starvation
-    // (ring buffer fills up, no sound). BLE MIDI goes through Java MidiBridge → JNI.
-    // USB MIDI: user can connect manually via Settings, but no auto-connect at startup.
-    #[cfg(not(target_os = "android"))]
-    let midi_port_names = midi::list_ports().unwrap_or_default();
-    #[cfg(target_os = "android")]
-    let midi_port_names: Vec<String> = Vec::new();
-
-    log::info!("[init] MIDI ports: {midi_port_names:?}");
-
-    #[cfg(not(target_os = "android"))]
-    let midi_port_idx = config
-        .midi
-        .port_name
-        .as_deref()
-        .and_then(|name| find_midi_port(&midi_port_names, name))
-        .or(if midi_port_names.is_empty() { None } else { Some(0) });
-
-    #[cfg(not(target_os = "android"))]
-    let midi_conn: Option<MidiInputConnection<()>> = midi_port_idx.and_then(|idx| {
-        midi::connect(idx, midi_tx_shared.clone(), note_state.clone(), pad_state.clone()).ok()
-    });
-    #[cfg(target_os = "android")]
-    let midi_conn: Option<MidiInputConnection<()>> = None;
-
-    #[cfg(not(target_os = "android"))]
-    let midi_connected_name = midi_port_idx
-        .and_then(|idx| midi_port_names.get(idx))
-        .filter(|_| midi_conn.is_some())
-        .cloned();
-    #[cfg(target_os = "android")]
-    let midi_connected_name: Option<String> = None;
-
-    let patch_idx = config
-        .ui
-        .last_preset
-        .as_deref()
-        .and_then(|name| patches.iter().position(|p| p.name == name))
-        .unwrap_or(0);
-
-    Ok(CommonInit {
-        config,
-        patches,
-        #[cfg(all(feature = "gui", not(target_os = "android")))]
-        available_hosts,
-        #[cfg(all(feature = "gui", not(target_os = "android")))]
-        host_name,
-        #[cfg(all(feature = "gui", not(target_os = "android")))]
-        host_idx,
-        #[cfg(all(feature = "gui", not(target_os = "android")))]
-        supported_sr,
-        #[cfg(feature = "gui")]
-        is_jack,
-        actual_sr,
-        note_state,
-        pad_state,
-        midi_tx_shared,
-        console_rx,
-        flash_rx,
-        ctrl_tx: metrics::CountingProducer::new(ctrl_tx),
-        feedback_rx,
-        program_change_atom,
-        handles: h,
-        midi_port_names,
-        midi_conn,
-        midi_connected_name,
-        patch_idx,
-        _audio_handle: audio_backend,
-        audio_disconnected,
-        engine_trash_rx,
-        cb_trash_rx,
-    })
-}
-
 /// Desktop entry point. The `mini_midi_synth` binary calls this; on Android
-/// the entry point is `android_main` instead (see bottom of file).
+/// the entry point is `android_main` instead (see `android_jni.rs`).
 #[cfg(not(target_os = "android"))]
 pub fn desktop_main() -> Result<()> {
     let _ = env_logger::try_init(); // RUST_LOG-gated; Android uses android_logger
 
     #[cfg(target_os = "linux")]
-    suppress_alsa_errors();
+    init::suppress_alsa_errors();
 
     #[cfg(feature = "gui")]
     {
         let headless = std::env::args().any(|a| a == "--headless" || a == "-H");
         if headless {
-            run_headless()
+            headless::run_headless()
         } else {
             run_gui()
         }
     }
 
     #[cfg(not(feature = "gui"))]
-    run_headless()
-}
-
-// ---------------------------------------------------------------------------
-// Headless / CLI mode
-// ---------------------------------------------------------------------------
-pub fn run_headless() -> Result<()> {
-    static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-
-    // Signal handler for graceful shutdown (sigaction is MT-safe, unlike signal)
-    #[cfg(target_os = "linux")]
-    {
-        extern "C" fn signal_handler(_sig: i32) {
-            SHUTDOWN.store(true, Ordering::SeqCst);
-        }
-        unsafe {
-            let mut sa: libc::sigaction = std::mem::zeroed();
-            sa.sa_sigaction = signal_handler as *const () as usize;
-            sa.sa_flags = libc::SA_RESTART;
-            libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
-            libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
-        }
-    }
-
-    let mut c = init_common()?;
-
-    // --- Send full state to engine (same as gui::App::send_initial_presets) ---
-
-    // Load patch params for all parts
-    let layer_configs: Vec<(usize, bool, f32, u8, u8, bool, u8)> = vec![
-        (c.patch_idx, true,  c.config.ui.layer_a_volume, 0, 127, c.config.sf2.layer_a_sf2, c.config.sf2.layer_a_program),
-        (0,            false, c.config.ui.layer_b_volume, 60, 127, c.config.sf2.layer_b_sf2, c.config.sf2.layer_b_program),
-    ];
-
-    for i in 0..synth::MAX_PARTS {
-        let (pidx, enabled, volume, min_note, max_note, sf2_mode, sf2_program) =
-            if i < layer_configs.len() {
-                layer_configs[i]
-            } else {
-                (0, false, 0.8, 0u8, 127u8, false, 0u8)
-            };
-
-        // Send preset with full params
-        if let Some(patch) = c.patches.get(pidx) {
-            let _ = c.ctrl_tx.push(synth::ControlEvent::load_patch_from(i, patch));
-        }
-
-        let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartEnabled { part: i, enabled });
-        let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartVolume { part: i, volume });
-        let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartRange { part: i, min_note, max_note });
-
-        if sf2_mode {
-            let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartSf2Mode { part: i, enabled: true });
-            let _ = c.ctrl_tx.push(synth::ControlEvent::SetPartSf2Program { part: i, program: sf2_program, bank: 0 });
-        }
-    }
-
-    // Global params
-    let global_params = [
-        ("master_volume", c.config.ui.master_volume),
-        ("master_tone", c.config.ui.master_tone),
-        ("reverb_mix", c.config.ui.fader_reverb),
-        ("delay_mix", c.config.ui.fader_delay),
-        ("pitch_bend_range", c.config.ui.pitch_bend_range as f32),
-    ];
-    for (key, val) in &global_params {
-        if let Some(static_key) = cc_map::resolve_key(key) {
-            let _ = c.ctrl_tx.push(synth::ControlEvent::SetGlobalParam { key: static_key, value: *val });
-        }
-    }
-    let _ = c.ctrl_tx.push(synth::ControlEvent::DrumSetVolume { volume: c.config.ui.drum_volume });
-    let _ = c.ctrl_tx.push(synth::ControlEvent::SetDspTrim { db: c.config.audio.dsp_trim_db });
-    let _ = c.ctrl_tx.push(synth::ControlEvent::SetSf2Trim { db: c.config.audio.sf2_trim_db });
-
-    // --- SF2 loading ---
-    let keys_path = c.config.sf2.keys_file_path.clone()
-        .or_else(|| c.config.sf2.file_path.clone());
-    if let Some(sf2_path) = keys_path {
-        match parse_sf2_file(&sf2_path) {
-            Ok(sf) => {
-                let _ = c.ctrl_tx.push(synth::ControlEvent::SetSf2BlockSize { size: c.config.sf2.block_size });
-                let _ = c.ctrl_tx.push(synth::ControlEvent::LoadKeysSoundFont { soundfont: sf });
-                eprintln!("[cli] Loaded keys SF2: {sf2_path}");
-            }
-            Err(e) => eprintln!("[cli] Failed to load keys SF2 '{sf2_path}': {e}"),
-        }
-    }
-    if let Some(sf2_path) = c.config.sf2.drums_file_path.clone() {
-        match parse_sf2_file(&sf2_path) {
-            Ok(sf) => {
-                let _ = c.ctrl_tx.push(synth::ControlEvent::SetSf2BlockSize { size: c.config.sf2.block_size });
-                let _ = c.ctrl_tx.push(synth::ControlEvent::LoadDrumsSoundFont { soundfont: sf });
-                if c.config.sf2.drums_sf2 {
-                    let _ = c.ctrl_tx.push(synth::ControlEvent::SetDrumsSf2Mode { enabled: true });
-                }
-                eprintln!("[cli] Loaded drums SF2: {sf2_path}");
-            }
-            Err(e) => eprintln!("[cli] Failed to load drums SF2 '{sf2_path}': {e}"),
-        }
-    }
-
-    // SF2 sample offset
-    if c.config.sf2.sample_offset_ms > 0.0 {
-        let _ = c.ctrl_tx.push(synth::ControlEvent::SetSf2SampleOffset { ms: c.config.sf2.sample_offset_ms });
-    }
-
-    // --- Print status ---
-    eprintln!("[cli] mini_midi_synth running (headless)");
-    eprintln!("[cli] Audio: {}Hz, buffer {}", c.actual_sr, c.config.audio.buffer_size);
-    if let Some(ref name) = c.midi_connected_name {
-        eprintln!("[cli] MIDI: {name}");
-    } else {
-        eprintln!("[cli] MIDI: not connected");
-    }
-    if let Some(patch) = c.patches.get(c.patch_idx) {
-        eprintln!("[cli] Preset: {}", patch.name);
-    }
-    eprintln!("[cli] Press Ctrl+C to exit.");
-
-    // --- Keyboard input thread (evdev) ---
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
-    #[cfg(target_os = "linux")]
-    let kb_rx = input::spawn_keyboard_thread(
-        &c.config.ui.keybinds,
-        shutdown_flag.clone(),
-    );
-    #[cfg(not(target_os = "linux"))]
-    let kb_rx: Option<(std::thread::JoinHandle<()>, std::sync::mpsc::Receiver<key_action::KeyAction>)> = None;
-    let seq_target_local: Arc<AtomicU8> = c.handles.seq_target_atom.clone();
-    let mut drum_playing = false;
-
-    // --- Main loop: MIDI reconnect + Program Change + keyboard actions ---
-    let mut midi_handle: Option<MidiInputConnection<()>> = c.midi_conn.take();
-    let mut last_midi_check = std::time::Instant::now();
-    let mut current_midi_port: Option<String> = c.midi_connected_name.clone();
-
-    loop {
-        if SHUTDOWN.load(Ordering::SeqCst) {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-
-        // Drain feedback (ignore in CLI)
-        while c.feedback_rx.pop().is_ok() {}
-
-        // Free whatever the audio thread handed over.
-        c.engine_trash_rx.drain();
-        c.cb_trash_rx.drain();
-
-        // Headless has no reconnect path (the GUI rebuilds the engine on the
-        // fly); say so instead of going silently mute.
-        if c.audio_disconnected.swap(false, Ordering::SeqCst) {
-            eprintln!("[cli] Audio device disconnected — restart to recover");
-        }
-
-        // Process keyboard actions
-        if let Some((_, ref rx)) = kb_rx {
-            use key_action::KeyAction;
-            while let Ok(action) = rx.try_recv() {
-                match &action {
-                    KeyAction::SwitchPart(p) => {
-                        c.handles.active_part_atom.store(*p, Ordering::Relaxed);
-                        seq_target_local.store(1, Ordering::Relaxed);
-                        eprintln!("[input] Part A{}", p + 1);
-                    }
-                    KeyAction::LooperRecord => {
-                        let _ = c.ctrl_tx.push(synth::ControlEvent::LooperRecord);
-                    }
-                    KeyAction::LooperTogglePlay => {
-                        let _ = c.ctrl_tx.push(synth::ControlEvent::LooperTogglePlay);
-                    }
-                    KeyAction::LooperUndo => {
-                        let _ = c.ctrl_tx.push(synth::ControlEvent::LooperUndo);
-                    }
-                    KeyAction::LooperClear => {
-                        let _ = c.ctrl_tx.push(synth::ControlEvent::LooperClear);
-                    }
-                    KeyAction::DrumTogglePlay => {
-                        drum_playing = !drum_playing;
-                        let _ = c.ctrl_tx.push(synth::ControlEvent::DrumSeqPlay { playing: drum_playing });
-                        eprintln!("[input] Drums: {}", if drum_playing { "Play" } else { "Stop" });
-                    }
-                    KeyAction::ToggleDrumsSynth => {
-                        let next = if seq_target_local.load(Ordering::Relaxed) == 0 { 1 } else { 0 };
-                        seq_target_local.store(next, Ordering::Relaxed);
-                        eprintln!("[input] Mode: {}", if next == 0 { "Drums" } else { "Synth" });
-                    }
-                    KeyAction::PrevPreset | KeyAction::NextPreset => {
-                        // Preset navigation not supported in headless mode
-                    }
-                    KeyAction::TogglePadPerf => {
-                        // Pad performance panel is GUI-only
-                    }
-                }
-            }
-        }
-
-        // MIDI auto-reconnect every 3 seconds
-        if last_midi_check.elapsed() >= std::time::Duration::from_secs(3) {
-            last_midi_check = std::time::Instant::now();
-            if midi_handle.is_none() {
-                let ports = midi::list_ports().unwrap_or_default();
-                let target = c.config.midi.port_name.as_deref()
-                    .and_then(|name| find_midi_port(&ports, name))
-                    .or(if ports.is_empty() { None } else { Some(0) });
-                if let Some(idx) = target {
-                    if let Ok(conn) = midi::connect(idx, c.midi_tx_shared.clone(), c.note_state.clone(), c.pad_state.clone()) {
-                        let name = ports.get(idx).cloned().unwrap_or_default();
-                        eprintln!("[cli] MIDI connected: {name}");
-                        current_midi_port = Some(name);
-                        midi_handle = Some(conn);
-                    }
-                }
-            }
-        }
-
-        // Program Change polling
-        let pc = c.program_change_atom.swap(255, Ordering::SeqCst);
-        if pc != 255 {
-            let idx = pc as usize;
-            if idx < c.patches.len() {
-                if let Some(patch) = c.patches.get(idx) {
-                    let _ = c.ctrl_tx.push(synth::ControlEvent::load_patch_from(0, patch));
-                    eprintln!("[cli] Program Change → {}: {}", idx, patch.name);
-                }
-            }
-        }
-    }
-
-    // Graceful shutdown
-    shutdown_flag.store(true, Ordering::SeqCst);
-    eprintln!("\n[cli] Shutting down...");
-    let _ = c.ctrl_tx.push(synth::ControlEvent::AllNotesOff);
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    // Wait for keyboard thread
-    if let Some((handle, _)) = kb_rx {
-        let _ = handle.join();
-    }
-
-    // Drop MIDI before exit
-    drop(midi_handle);
-    let _ = current_midi_port;
-
-    Ok(())
-}
-
-fn parse_sf2_file(path: &str) -> Result<std::sync::Arc<rustysynth::SoundFont>> {
-    use std::io::BufReader;
-    let file = std::fs::File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let sf = rustysynth::SoundFont::new(&mut reader)
-        .map_err(|e| anyhow::anyhow!("SF2 parse error: {e}"))?;
-    Ok(std::sync::Arc::new(sf))
+    headless::run_headless()
 }
 
 // ---------------------------------------------------------------------------
@@ -654,10 +109,7 @@ pub fn run_gui(
     #[cfg(target_os = "android")]
     android_app: winit::platform::android::activity::AndroidApp,
 ) -> Result<()> {
-    use crate::cc_map::CcMap;
-    use crate::synth::drum::NUM_DRUM_SLOTS;
-
-    let c = init_common()?;
+    let mut c = init::init_common()?;
 
     // #18-резидуал: watch default-sink в фоновом потоке (fork в GUI-потоке
     // дорог на большом RSS; pactl сам по себе 10-50 мс). Смена sink =
@@ -692,7 +144,7 @@ pub fn run_gui(
     }
 
     let midi_handle: Arc<Mutex<Option<MidiInputConnection<()>>>> =
-        Arc::new(Mutex::new(c.midi_conn));
+        Arc::new(Mutex::new(c.midi_conn.take()));
 
     let midi_handle_cb = midi_handle.clone();
     let midi_tx_cb = c.midi_tx_shared.clone();
@@ -718,213 +170,11 @@ pub fn run_gui(
     let empty_part = |_i: usize| make_part(0, false, 0.8, 0, 127, false, 0);
     let parts_extra: Vec<gui::PartState> = (2..crate::synth::MAX_PARTS).map(empty_part).collect();
 
-    let mut app = gui::App {
-        patches: c.patches,
-        note_state: c.note_state,
-        pad_state: c.pad_state,
-        ctrl_tx: c.ctrl_tx,
-        sample_rate: c.actual_sr,
-        config: c.config.clone(),
-        #[cfg(not(target_os = "android"))]
-        current_host: c.host_name.to_string(),
-        #[cfg(target_os = "android")]
-        current_host: "AAudio".to_string(),
-        #[cfg(not(target_os = "android"))]
-        available_hosts: c.available_hosts.clone(),
-        #[cfg(not(target_os = "android"))]
-        supported_sample_rates: c.supported_sr,
-        midi_port_names: c.midi_port_names,
-        midi_connected_port: c.midi_connected_name,
-        show_settings: false,
-        #[cfg(not(target_os = "android"))]
-        selected_host_idx: c.host_idx,
-        selected_sample_rate: c.config.audio.sample_rate,
-        selected_buffer_size: c.config.audio.buffer_size,
-        selected_midi_port: c.config.midi.port_name.clone(),
-        is_jack: c.is_jack,
-        parts: std::iter::once(layer_a).chain(std::iter::once(layer_b)).chain(parts_extra).collect(),
-        active_part: 0,
-        on_midi_reconnect: Some(on_midi_reconnect),
-        collapsed_categories: c.config.ui.collapsed_categories.iter().cloned().collect(),
-        feedback_rx: Some(c.feedback_rx),
-        cc_map: CcMap::from_config(&c.config),
-        midi_learn_target: None,
-        pending_remove_part: None,
-        _program_change_atom: c.program_change_atom,
-        sustain_atom: c.handles.sustain_atom,
-        master_rec_state: c.handles.master_rec_state_atom,
-        master_rec_cycle: c.handles.master_rec_cycle_atom,
-        sustain_release: c.config.ui.sustain_release,
-        sf2_release_scale: c.config.ui.sf2_release_scale,
-        show_help: false,
-        global_params: {
-            let mut gp = std::collections::BTreeMap::new();
-            gp.insert("master_volume".to_string(), c.config.ui.master_volume);
-            gp.insert("master_tone".to_string(), c.config.ui.master_tone);
-            gp.insert("reverb_mix".to_string(), c.config.ui.fader_reverb);
-            gp.insert("delay_mix".to_string(), c.config.ui.fader_delay);
-            gp.insert("pitch_bend_range".to_string(), c.config.ui.pitch_bend_range as f32);
-            gp
-        },
-        pickup_indicators: std::collections::BTreeMap::new(),
-        show_drums: false,
-        show_looper: false,
-        drum_patterns: [synth::drum::DrumPattern::default(); 8],
-        drum_params: [synth::drum::DrumSlotParams::default(); NUM_DRUM_SLOTS],
-        drum_slot_mutes_view: [false; NUM_DRUM_SLOTS],
-        drum_remap: core::array::from_fn(|i| 36 + i as u8),
-        drum_pad_vel: [0u8; 16],
-        drum_kit_names: {
-            let mut n: [String; 26] = Default::default();
-            for (i, entry) in n.iter_mut().enumerate() {
-                let note = 30 + i as u8;
-                *entry = if (36..=51).contains(&note) {
-                    crate::synth::drum::DRUM_NAMES[(note - 36) as usize].to_string()
-                } else { String::new() };
-            }
-            n
-        },
-        show_drum_remap: false,
-        remap_pad: None,
-        drum_volume: c.config.ui.drum_volume,
-        drum_fixed_velocity: c.config.ui.drum_fixed_velocity,
-        drum_bpm: 120.0,
-        drum_swing: 0.0,
-        drum_playing: false,
-        drum_recording: false,
-        drum_current_pattern: 0,
-        drum_step_atom: c.handles.drum_step_atom,
-        drum_play_atom: c.handles.drum_play_atom,
-        drum_rec_atom: c.handles.drum_rec_atom,
-        drum_pattern_atom: c.handles.drum_pattern_atom,
-        drum_chain_on: false,
-        drum_chain_mask: 0,
-        drum_metronome: c.config.ui.drum_metronome,
-        drum_prev_step: 0,
-        drum_beat_flash: None,
-        perf_window: 1,
-        tracks_window: 0,
-        tracks_sel: None,
-        tracks_rename_focus: false,
-        pat_window: 0,
-        mute_window: 0,
-        drum_undo_atom: c.handles.drum_undo_atom,
-        drum_redo_atom: c.handles.drum_redo_atom,
-        console: gui::led_console::LedConsole::default(),
-        console_rx: Some(c.console_rx),
-        flash: gui::note_flash::NoteFlashState::new(),
-        flash_rx: c.flash_rx,
-        led_snapshot: [[0; 3]; 16],
-        led_dirty: true,
-        led_socket: None,
-        led_socket_alive: None,
-        led_socket_failed_at: None,
-        led_connecting: None,
-        led_last_send: None,
-        led_child: None,
-        led_spawn_backoff: None,
-        console_prev_mode: None,
-        part_drag_src: None,
-        part_drag_dst: None,
-        tracks_del_armed: None,
-        drum_kit_name: String::new(),
-        drum_kit_list: preset::list_drum_kits(),
-        drum_midi_import_path: String::new(),
-        looper_atoms: c.handles.looper_atoms,
-        looper_display: c.handles.looper_display,
-        looper_bars: 4,
-        looper_quantize: 0,
-        looper_clear_confirm: None,
-        drum_clear_confirm: None,
-        fx_reset_confirm: None,
-        pad_remap_reset_confirm: None,
-        looper_layer_mute: [false; 256],
-        looper_solo_layer: None,
-        looper_source_mix: true,
-        looper_part_mutes: [false; 16],
-        seq_target_atom: c.handles.seq_target_atom,
-        active_part_atom: c.handles.active_part_atom,
-        keybinds: gui::keybinds::Keybinds::from_config(&c.config.ui.keybinds),
-        show_keybinds_window: false,
-        keybind_capturing: None,
-        keybinds_reset_confirm: None,
-        unbind_confirm: None,
-        perf_name: String::new(),
-        perf_list: {
-            let mut perf_list = preset::list_performances();
-            perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
-            perf_list
-        },
-        // #57: пересчитывается первым кадром (guard в update())
-        console_list: Vec::new(),
-        nav_press_time: None,
-        show_pad_perf: false,
-        show_tracks_manager: false,
-        pad_perf_map: {
-            let saved = &c.config.ui.pad_perf_map;
-            std::array::from_fn(|i| saved.get(i).cloned().flatten())
-        },
-        pad_prev_state: [0u8; 16],
-        last_config_save: std::time::Instant::now(),
-        dsp_load: 0.0,
-        dsp_peak: 0.0,
-        global_dirty: false,
-        active_knob: None,
-        sf2_file_list: {
-            let scan = gui::scan_sf2_files();
-            for (dir, err) in &scan.unreadable {
-                log::warn!("[sf2] cannot read {}: {err}", dir.display());
-                eprintln!("[sf2] cannot read {}: {err}", dir.display());
-            }
-            scan.files
-        },
-        sf2_keys_selected: None,
-        sf2_keys_loaded_name: String::new(),
-        sf2_drums_selected: None,
-        sf2_drums_loaded_name: String::new(),
-        sf2_drums_enabled: c.config.sf2.drums_sf2,
-        sf2_keys_soundfont: None,
-        sf2_drums_soundfont: None,
-        sf2_block_size: c.config.sf2.block_size,
-        sf2_sample_offset_ms: c.config.sf2.sample_offset_ms,
-        pitch_seq_step_atoms: c.handles.pitch_seq_step_atoms,
-        pitch_seq_enabled: [false; 2],
-        pitch_seq_steps: [[synth::step_seq::PitchStep::default(); 16]; 2],
-        pitch_seq_length: [16; 2],
-        pitch_seq_rate: [2; 2],
-        pitch_seq_scale: [0; 2],
-        pitch_seq_swing: [0.0; 2],
-        preset_search: String::new(),
-        inst_browser_part: None,
-        inst_browser_index: 0,
-        inst_browser_seeded: false,
-        inst_browser_last_search: String::new(),
-        inst_browser_scroll: false,
-        scope_buf: c.handles.scope_buf,
-        last_scope_write: 0,
-        split_point: c.config.ui.split_point.unwrap_or(60),
-        show_fx_chain: false,
-        show_midi_seq: false,
-        midi_seq_path: String::new(),
-        midi_seq_tracks: Vec::new(),
-        midi_seq_playing: false,
-        midi_seq_looping: true,
-        midi_seq_bpm: None,
-        midi_seq_play_atom: c.handles.midi_seq_play_atom,
-        midi_seq_pos_atom: c.handles.midi_seq_pos_atom,
-        midi_seq_file_pick: None,
-        undo_stack: std::collections::VecDeque::new(),
-        redo_stack: Vec::new(),
-        toasts: Vec::new(),
-        audio_disconnected: c.audio_disconnected.clone(),
-        audio_device_name: c._audio_handle.device_name.clone(),
-        audio_host_id: c._audio_handle.host_id,
-        audio_watch: crate::audio::ReconnectPolicy::default(),
-        _audio_handle: Some(c._audio_handle),
-        midi_tx_shared: c.midi_tx_shared.clone(),
-        engine_trash_rx: c.engine_trash_rx,
-        cb_trash_rx: c.cb_trash_rx,
-    };
+    // Window size читается до передачи c в App::new (c перемещается).
+    #[cfg(not(target_os = "android"))]
+    let (window_w, window_h) = (c.config.ui.window_width, c.config.ui.window_height);
+
+    let mut app = gui::App::new(c, on_midi_reconnect, layer_a, layer_b, parts_extra);
 
     app.load_edited_params(0);
     app.load_edited_params(1);
@@ -934,7 +184,7 @@ pub fn run_gui(
     let viewport = eframe::egui::ViewportBuilder::default()
         .with_app_id("mini_midi_synth")
         .with_title("Mini MIDI Synth") // TECHDEBT #27: egui-winit defaults to "egui window"
-        .with_inner_size([c.config.ui.window_width, c.config.ui.window_height])
+        .with_inner_size([window_w, window_h])
         .with_min_inner_size([500.0, 300.0])
         .with_icon(make_piano_icon());
 
@@ -966,125 +216,4 @@ pub fn run_gui(
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Android entry point
-// ---------------------------------------------------------------------------
-#[cfg(target_os = "android")]
-#[cfg(feature = "gui")]
-#[unsafe(no_mangle)]
-fn android_main(app: winit::platform::android::activity::AndroidApp) {
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Info)
-            .with_tag("MiniMidiSynth"),
-    );
-
-    // Catch panics — without this, Rust panics silently kill the process
-    // with no error in logcat (looks like instant close, no crash dialog)
-    std::panic::set_hook(Box::new(|info| {
-        let msg = format!("PANIC: {info}");
-        log::error!("{msg}");
-        // Also write to stderr in case android_logger fails
-        eprintln!("{msg}");
-        // Give logger time to flush before abort kills the process
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }));
-
-    log::info!("android_main started");
-
-    // Set data dir from Android internal storage
-    if let Some(path) = app.internal_data_path() {
-        log::info!("data dir: {}", path.display());
-        crate::config::set_android_data_dir(path.to_path_buf());
-    }
-    if let Err(e) = run_gui(app) {
-        log::error!("run_gui failed: {e}");
-    }
-}
-
-/// JNI: Java passes opened USB MidiDevice + output port numbers for AMidi.
-/// Opens all specified ports at once (no per-port race condition).
-#[cfg(target_os = "android")]
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_minimidisynth_SynthActivity_openUsbMidiNative<'local>(
-    env: jni::JNIEnv<'local>,
-    _class: jni::objects::JClass<'local>,
-    midi_device: jni::objects::JObject<'local>,
-    port_numbers: jni::objects::JIntArray<'local>,
-) {
-    let Some(amidi_port) = AMIDI_PORT.get() else {
-        log::warn!("[amidi] AMIDI_PORT not initialized yet");
-        return;
-    };
-
-    let len = match env.get_array_length(&port_numbers) {
-        Ok(l) => l as usize,
-        Err(_) => { log::warn!("[amidi] Failed to get port_numbers length"); return; }
-    };
-    let mut port_nums = vec![0i32; len];
-    if env.get_int_array_region(&port_numbers, 0, &mut port_nums).is_err() {
-        log::warn!("[amidi] Failed to read port_numbers array");
-        return;
-    }
-
-    let opened = amidi_port.open_device(env.get_raw(), midi_device.as_raw(), &port_nums);
-    log::info!("[amidi] Opened {opened}/{} USB MIDI output ports", port_nums.len());
-}
-
-/// JNI: close AMidi ports when USB device disconnected
-#[cfg(target_os = "android")]
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_minimidisynth_SynthActivity_closeUsbMidiNative<'local>(
-    _env: jni::JNIEnv<'local>,
-    _class: jni::objects::JClass<'local>,
-) {
-    if let Some(amidi_port) = AMIDI_PORT.get() {
-        amidi_port.close();
-        log::info!("[amidi] USB MIDI ports closed (device disconnected)");
-    }
-}
-
-/// JNI entry point: called from Java MidiBridge.onMidiData(byte[])
-#[cfg(target_os = "android")]
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_minimidisynth_MidiBridge_onMidiData<'local>(
-    env: jni::JNIEnv<'local>,
-    _class: jni::objects::JClass<'local>,
-    data: jni::objects::JByteArray<'local>,
-) {
-    let Ok(bytes) = env.convert_byte_array(&data) else {
-        log::warn!("[jni_midi] convert_byte_array failed");
-        return;
-    };
-    if bytes.is_empty() { return }
-
-    let (Some(tx), Some(ns), Some(ps)) = (
-        JNI_MIDI_TX.get(), JNI_NOTE_STATE.get(), JNI_PAD_STATE.get()
-    ) else {
-        log::warn!("[jni_midi] OnceLock not set yet");
-        return;
-    };
-
-    let mut offset = 0;
-    while offset < bytes.len() {
-        let consumed = midi::parse_and_push(&bytes[offset..], tx, ns, ps);
-        if consumed == 0 { break }
-        offset += consumed;
-    }
-}
-
-/// JNI: pause/resume audio when app is backgrounded/foregrounded.
-#[cfg(target_os = "android")]
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_minimidisynth_SynthActivity_setAudioPaused<'local>(
-    _env: jni::JNIEnv<'local>,
-    _class: jni::objects::JClass<'local>,
-    paused: jni::sys::jboolean,
-) {
-    if let Some(flag) = AUDIO_PAUSED.get() {
-        flag.store(paused != 0, Ordering::Relaxed);
-        log::info!("[lifecycle] audio paused: {}", paused != 0);
-    }
 }
