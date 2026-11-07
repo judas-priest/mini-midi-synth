@@ -5,10 +5,13 @@ use super::App;
 use super::theme;
 
 impl App {
-    /// Draw the macro panel (called from params.rs, near top of synth params).
+    /// Обёртка для главного экрана: макро-панель активного парта.
     pub(super) fn draw_macros(&mut self, ui: &mut egui::Ui) {
-        let part = self.active_part;
+        self.draw_macros_for(ui, self.active_part);
+    }
 
+    /// Macro panel for a SPECIFIC part (browser edits a non-active part).
+    pub(super) fn draw_macros_for(&mut self, ui: &mut egui::Ui, part: usize) {
         ui.horizontal(|ui| {
             ui.strong("Macros");
             ui.label(egui::RichText::new("— assign in Mod Matrix as sources Macro 1-8").small().weak());
@@ -75,12 +78,11 @@ impl App {
             });
 
         ui.add_space(theme::SP_MD);
-        self.draw_xy_pad(ui);
+        self.draw_xy_pad(ui, part);
     }
 
     /// XY Pad widget: drag to control two macros simultaneously.
-    fn draw_xy_pad(&mut self, ui: &mut egui::Ui) {
-        let part = self.active_part;
+    fn draw_xy_pad(&mut self, ui: &mut egui::Ui, part: usize) {
         let macro_labels: Vec<String> = (0..8)
             .map(|i| {
                 self.parts[part].macro_names.get(i)
