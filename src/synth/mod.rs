@@ -2545,6 +2545,105 @@ impl SynthEngine {
     #[must_use = "heap-owning events must be sent to the trash queue"]
     pub fn handle_control(&mut self, event: ControlEvent) -> Option<ControlEvent> {
         match event {
+            ControlEvent::LoadPatch(_)
+            | ControlEvent::SetPartFull { .. }
+            | ControlEvent::SetPartEnabled { .. }
+            | ControlEvent::SetPartMute { .. }
+            | ControlEvent::SetPartIgnorePb { .. }
+            | ControlEvent::SetPartIgnoreMw { .. }
+            | ControlEvent::SetPartNoteMode { .. }
+            | ControlEvent::SetPartSustain { .. }
+            | ControlEvent::SetPartVolume { .. }
+            | ControlEvent::SetPartRange { .. }
+            | ControlEvent::SetPartVelRange { .. }
+            | ControlEvent::SetPartPan { .. }
+            | ControlEvent::SetPartTranspose { .. }
+            | ControlEvent::SetPartMono { .. }
+            | ControlEvent::SetPartLegato { .. }
+            | ControlEvent::SetPartGlide { .. }
+            | ControlEvent::SetMacro { .. }
+            | ControlEvent::SetCcMap { .. }
+            | ControlEvent::SetGlobalParam { .. }
+            => self.hc_patch_part(event),
+            ControlEvent::DrumSetStep { .. }
+            | ControlEvent::DrumSetParam { .. }
+            | ControlEvent::DrumSetMute { .. }
+            | ControlEvent::DrumSetVolume { .. }
+            | ControlEvent::DrumSeqPlay { .. }
+            | ControlEvent::DrumSeqBpm { .. }
+            | ControlEvent::DrumSeqSwing { .. }
+            | ControlEvent::DrumSeqPattern { .. }
+            | ControlEvent::DrumSeqQueuePattern { .. }
+            | ControlEvent::DrumSeqChain { .. }
+            | ControlEvent::DrumSeqChainToggle { .. }
+            | ControlEvent::DrumSeqLength { .. }
+            | ControlEvent::DrumSeqTimeSig { .. }
+            | ControlEvent::DrumSeqRecord { .. }
+            | ControlEvent::DrumSeqClear
+            | ControlEvent::DrumSeqUndo
+            | ControlEvent::DrumSeqRedo
+            | ControlEvent::DrumLoadKit { .. }
+            | ControlEvent::DrumSetFixedVelocity { .. }
+            | ControlEvent::DrumSetMetronome { .. }
+            | ControlEvent::DrumSetRemap { .. }
+            | ControlEvent::DrumSetChokeGroups { .. }
+            | ControlEvent::DrumSetPadVel { .. }
+            => self.hc_drums(event),
+            ControlEvent::LooperRecord
+            | ControlEvent::LooperStopRecord
+            | ControlEvent::LooperTogglePlay
+            | ControlEvent::LooperUndo
+            | ControlEvent::LooperClear
+            | ControlEvent::LooperSetBars { .. }
+            | ControlEvent::LooperSetQuantize { .. }
+            | ControlEvent::LooperRestore { .. }
+            | ControlEvent::LooperSetLayerMute { .. }
+            | ControlEvent::LooperSetSolo { .. }
+            | ControlEvent::LooperSetPartMute { .. }
+            | ControlEvent::LooperSetSource { .. }
+            | ControlEvent::MasterPlay
+            | ControlEvent::MasterStop
+            | ControlEvent::MasterOverdub
+            | ControlEvent::CaptureCycleAdd
+            | ControlEvent::CaptureCycleRemove
+            | ControlEvent::MasterRecord
+            | ControlEvent::SetSustain { .. }
+            | ControlEvent::SetSustainRelease { .. }
+            | ControlEvent::AllNotesOff
+            => self.hc_looper_transport(event),
+            ControlEvent::LoadKeysSoundFont { .. }
+            | ControlEvent::LoadDrumsSoundFont { .. }
+            | ControlEvent::UnloadKeysSoundFont
+            | ControlEvent::UnloadDrumsSoundFont
+            | ControlEvent::SetPartSf2Mode { .. }
+            | ControlEvent::SetPartSf2Program { .. }
+            | ControlEvent::SetDrumsSf2Mode { .. }
+            | ControlEvent::SetSf2BlockSize { .. }
+            | ControlEvent::SetSf2ReleaseScale { .. }
+            | ControlEvent::SetDspTrim { .. }
+            | ControlEvent::SetSf2Trim { .. }
+            | ControlEvent::SetSf2SampleOffset { .. }
+            => self.hc_sf2(event),
+            ControlEvent::SeqSetEnabled { .. }
+            | ControlEvent::SeqSetStep { .. }
+            | ControlEvent::SeqSetLength { .. }
+            | ControlEvent::SeqSetRate { .. }
+            | ControlEvent::SeqSetScale { .. }
+            | ControlEvent::SeqSetSwing { .. }
+            | ControlEvent::MidiSeqLoad { .. }
+            | ControlEvent::MidiSeqPlay { .. }
+            | ControlEvent::MidiSeqSetBpm { .. }
+            | ControlEvent::MidiSeqSetLooping { .. }
+            | ControlEvent::MidiSeqSetTrackInstrument { .. }
+            | ControlEvent::MidiSeqSetTrackMute { .. }
+            | ControlEvent::SetArpParams { .. }
+            | ControlEvent::SetArpLatch { .. }
+            => self.hc_seq(event),
+        }
+    }
+
+    fn hc_patch_part(&mut self, event: ControlEvent) -> Option<ControlEvent> {
+        match event {
             ControlEvent::LoadPatch(mut ev) => {
                 // Take the contents out of the box rather than unboxing it:
                 // `*ev` would drop the allocation right here, on the audio
@@ -2864,6 +2963,15 @@ impl SynthEngine {
                     self.sampler.set_pitch_bend_range(value.clamp(1.0, 24.0) as u8);
                 }
             }
+            _ => {}
+        }
+        // Every variant that owns heap memory returns early above; reaching
+        // here means the event was plain data and costs nothing to drop.
+        None
+    }
+
+    fn hc_drums(&mut self, event: ControlEvent) -> Option<ControlEvent> {
+        match event {
             ControlEvent::DrumSetStep { slot, step, velocity } => {
                 let pat = self.drum_engine.sequencer.current_pattern as usize;
                 self.drum_engine.sequencer.patterns[pat].steps[slot as usize][step as usize].velocity = velocity;
@@ -2963,6 +3071,34 @@ impl SynthEngine {
                 self.sampler.drum_volume = volume;
                 return Some(ControlEvent::DrumLoadKit { patterns, params, bpm, swing, volume });
             }
+            ControlEvent::DrumSetFixedVelocity { fixed } => {
+                self.drum_engine.fixed_velocity = fixed;
+            }
+            ControlEvent::DrumSetMetronome { on } => {
+                self.drum_engine.metronome = on;
+            }
+            ControlEvent::DrumSetRemap { table } => {
+                // The box travels back for freeing on the GUI thread.
+                self.drum_engine.apply_remap_vec(&*table);
+                return Some(ControlEvent::DrumSetRemap { table });
+            }
+            ControlEvent::DrumSetChokeGroups { table } => {
+                self.drum_engine.set_choke_groups(&table);
+                return Some(ControlEvent::DrumSetChokeGroups { table });
+            }
+            ControlEvent::DrumSetPadVel { table } => {
+                self.drum_engine.apply_pad_vel_vec(&*table);
+                return Some(ControlEvent::DrumSetPadVel { table });
+            }
+            _ => {}
+        }
+        // Every variant that owns heap memory returns early above; reaching
+        // here means the event was plain data and costs nothing to drop.
+        None
+    }
+
+    fn hc_looper_transport(&mut self, event: ControlEvent) -> Option<ControlEvent> {
+        match event {
             ControlEvent::LooperRecord => { self.looper.start_record(); }
             ControlEvent::LooperStopRecord => { self.looper.stop_record(); }
             ControlEvent::LooperTogglePlay => { self.looper.toggle_play(); }
@@ -3020,25 +3156,6 @@ impl SynthEngine {
             ControlEvent::MasterRecord => {
                 self.master_toggle_record();
             }
-            ControlEvent::DrumSetFixedVelocity { fixed } => {
-                self.drum_engine.fixed_velocity = fixed;
-            }
-            ControlEvent::DrumSetMetronome { on } => {
-                self.drum_engine.metronome = on;
-            }
-            ControlEvent::DrumSetRemap { table } => {
-                // The box travels back for freeing on the GUI thread.
-                self.drum_engine.apply_remap_vec(&*table);
-                return Some(ControlEvent::DrumSetRemap { table });
-            }
-            ControlEvent::DrumSetChokeGroups { table } => {
-                self.drum_engine.set_choke_groups(&table);
-                return Some(ControlEvent::DrumSetChokeGroups { table });
-            }
-            ControlEvent::DrumSetPadVel { table } => {
-                self.drum_engine.apply_pad_vel_vec(&*table);
-                return Some(ControlEvent::DrumSetPadVel { table });
-            }
             ControlEvent::SetSustain { on } => {
                 self.set_sustain(if on { 127 } else { 0 });
             }
@@ -3059,6 +3176,15 @@ impl SynthEngine {
                 }
                 self.arpeggiator.clear();
             }
+            _ => {}
+        }
+        // Every variant that owns heap memory returns early above; reaching
+        // here means the event was plain data and costs nothing to drop.
+        None
+    }
+
+    fn hc_sf2(&mut self, event: ControlEvent) -> Option<ControlEvent> {
+        match event {
             ControlEvent::LoadKeysSoundFont { soundfont } => {
                 // Clone bumps the Arc refcount; the original travels back to
                 // the GUI thread with the event, and whatever the sampler
@@ -3141,6 +3267,15 @@ impl SynthEngine {
             ControlEvent::SetSf2SampleOffset { ms } => {
                 self.sampler.set_sample_offset_ms(ms);
             }
+            _ => {}
+        }
+        // Every variant that owns heap memory returns early above; reaching
+        // here means the event was plain data and costs nothing to drop.
+        None
+    }
+
+    fn hc_seq(&mut self, event: ControlEvent) -> Option<ControlEvent> {
+        match event {
             ControlEvent::SeqSetEnabled { part, enabled } => {
                 if let Some(l) = self.parts.get_mut(part) {
                     l.pitch_seq.enabled = enabled;
@@ -3267,8 +3402,8 @@ impl SynthEngine {
                 }
                 self.arpeggiator.set_latch(latch);
             }
+            _ => {}
         }
-
         // Every variant that owns heap memory returns early above; reaching
         // here means the event was plain data and costs nothing to drop.
         None
