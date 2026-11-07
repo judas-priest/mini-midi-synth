@@ -1412,11 +1412,17 @@ fn match_arms_between(src: &str, start_marker: &str) -> Vec<String> {
 
 #[test]
 fn tc_set_param_arms_synced_with_map() {
+    // S2a: 31 CC-live arm'ов генерятся макросом cc_patch_params! в
+    // patch_params.rs — парсер mod.rs видит только рукописные (~76).
     let arms = match_arms_between(MOD_SRC, "fn set_param(&mut self, key: &str, value: f32)");
-    assert!(arms.len() > 100, "suspiciously few arms: {}", arms.len());
+    assert!(arms.len() > 70, "suspiciously few arms: {}", arms.len());
     let map = PatchParams::default().to_map();
     let missing: Vec<&str> = arms.iter().filter(|a| !map.contains_key(*a)).map(|s| s.as_str()).collect();
     assert!(missing.is_empty(), "set_param arms missing from to_map: {missing:?}");
+    // макро-arm'ы не видны парсеру — белый-list CC-live ключей вместо них:
+    for &k in crate::synth::patch_params::CC_PATCH_KEYS {
+        assert!(map.contains_key(k), "{k}");
+    }
 }
 
 #[test]
@@ -1427,7 +1433,9 @@ fn tc_cc_bindings_target_set_param_arms() {
     let cc = crate::cc_map::CcMap::default_map();
     let mut bad: Vec<&'static str> = Vec::new();
     for b in cc.bindings.iter().flatten() {
+        // known = рукописные arm'ы ∪ макро CC_PATCH_KEYS ∪ глобальные
         let known = patch_arms.iter().any(|a| a == b.param_key)
+            || crate::synth::patch_params::CC_PATCH_KEYS.contains(&b.param_key)
             || global_arms.iter().any(|a| a == b.param_key);
         let scope_ok = crate::cc_map::is_global_param(b.param_key)
             == (b.scope == crate::cc_map::ParamScope::Global);
@@ -1796,4 +1804,45 @@ fn tc_set_part_full_heap_return() {
     let spent = e.handle_control(ControlEvent::SetPartFull { part: 0, state: Box::new(state) });
     assert!(spent.is_some(), "patch-carrying transaction must return heap event");
     assert!(matches!(spent, Some(ControlEvent::LoadPatch(_))));
+}
+
+// ── S2a: CC-live SSOT ────────────────────────────────────────────────
+
+#[test]
+fn tc_cc_value_roundtrip() {
+    let mut e = SynthEngine::new(48_000.0);
+    for &key in crate::synth::patch_params::CC_PATCH_KEYS {
+        e.parts[0].set_param(key, 0.42);
+        let v = e.parts[0].cc_value(key);
+        assert_eq!(v, Some(0.42), "roundtrip {key}");
+    }
+}
+
+#[test]
+fn tc_cc_value_globals_and_unknown_are_none() {
+    let e = SynthEngine::new(48_000.0);
+    assert_eq!(e.parts[0].cc_value("master_volume"), None);
+    assert_eq!(e.parts[0].cc_value("pitch_bend_range"), None);
+    assert_eq!(e.parts[0].cc_value("no_such_key"), None);
+    assert_eq!(e.parts[0].cc_value("macro_0"), None);
+}
+
+#[test]
+fn tc_check_pickup_uses_real_value_not_zero() {
+    // behavior fix: ключ вне старых 4 arm'ов — target от реального значения
+    let mut e = SynthEngine::new(48_000.0);
+    e.parts[0].set_param("chorus_mix", 0.8);
+    let binding = crate::cc_map::CcBinding {
+        param_key: "chorus_mix", min_val: 0.0, max_val: 1.0,
+        logarithmic: false, scope: crate::cc_map::ParamScope::Patch,
+    };
+    // убедиться, что pickup-состояние не picked_up:
+    e.pickup_states[b'0' as usize] = crate::synth::PickupState {
+        last_cc_value: None, picked_up: false,
+    };
+    // Прямой вызов check_pickup (метод SynthEngine, тест в том же модуле):
+    let crossed = e.check_pickup(b'0', 102, binding);
+    assert!(!crossed, "first call: last=None -> stores, returns false");
+    let crossed2 = e.check_pickup(b'0', 127, binding);
+    assert!(crossed2, "0.8 of 0..1 => target_cc=102; 127 crosses it");
 }

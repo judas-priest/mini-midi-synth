@@ -1228,41 +1228,20 @@ impl Part {
         (out_l * vol, out_r * vol)
     }
 
+    /// Текущее значение CC-live patch-параметра (S2a: SSOT-макрос
+    /// cc_patch_params! в patch_params.rs). None = ключ не CC-live.
+    fn cc_value(&self, key: &str) -> Option<f32> {
+        crate::synth::patch_params::cc_value_of(&self.params, key)
+    }
+
     fn set_param(&mut self, key: &str, value: f32) {
+        // 31 CC-live ключ — SSOT-таблица (S2a); остальные — рукописные arm'ы
+        if crate::synth::patch_params::cc_set_param(&mut self.params, key, value) {
+            return;
+        }
         match key {
-            "filter_cutoff" => self.params.filter_cutoff = value,
-            "filter_resonance" => self.params.filter_resonance = value,
-            "filter_env_amount" => self.params.filter_env_amount = value,
             "filter_key_track" => self.params.filter_key_track = value,
-            "amp_attack" => self.params.amp_attack = value,
-            "amp_decay" => self.params.amp_decay = value,
-            "amp_sustain" => self.params.amp_sustain = value,
-            "amp_release" => self.params.amp_release = value,
-            "filter_attack" => self.params.filter_attack = value,
-            "filter_decay" => self.params.filter_decay = value,
-            "filter_sustain" => self.params.filter_sustain = value,
-            "filter_release" => self.params.filter_release = value,
-            "noise_level" => self.params.noise_level = value,
-            "osc_detune" => self.params.osc_detune = value,
-            "lfo_rate" => self.params.lfo_rate = value,
-            "lfo_pitch_depth" => self.params.lfo_pitch_depth = value,
-            "lfo_filter_depth" => self.params.lfo_filter_depth = value,
-            "lfo_amp_depth" => self.params.lfo_amp_depth = value,
-            "vel_to_filter" => self.params.vel_to_filter = value,
-            "portamento_time" => self.params.portamento_time = value,
-            "unison_detune" => self.params.unison_detune = value,
-            "chorus_mix" => self.params.chorus_mix = value,
-            "delay_mix" => self.params.delay_mix = value,
-            "delay_time_l" => self.params.delay_time_l = value,
-            "delay_time_r" => self.params.delay_time_r = value,
-            "delay_feedback" => self.params.delay_feedback = value,
             "delay_ping_pong" => self.params.delay_ping_pong = value,
-            "delay_filter" => self.params.delay_filter = value,
-            "reverb_mix" => self.params.reverb_mix = value,
-            "reverb_room_size" => self.params.reverb_room_size = value,
-            "reverb_damping" => self.params.reverb_damping = value,
-            "reverb_width" => self.params.reverb_width = value,
-            "reverb_pre_delay" => self.params.reverb_pre_delay = value,
             "ring_mod_freq" => self.params.ring_mod_freq = value,
             "ring_mod_shape" => self.params.ring_mod_shape = value,
             "ring_mod_bias" => self.params.ring_mod_bias = value,
@@ -2247,14 +2226,10 @@ impl SynthEngine {
             return true;
         }
         // Get current param value and convert to CC equivalent
+        // S2a: все 31 CC-live ключа через SSOT-таблицу (раньше только 4 arm'а,
+        // остальные читались как 0.0 → pickup требовал прогрузки ручки в 0)
         let current_val = self.parts.first()
-            .and_then(|l| match binding.param_key {
-                "filter_cutoff" => Some(l.params.filter_cutoff),
-                "filter_resonance" => Some(l.params.filter_resonance),
-                "amp_attack" => Some(l.params.amp_attack),
-                "amp_release" => Some(l.params.amp_release),
-                _ => None,
-            })
+            .and_then(|l| l.cc_value(binding.param_key))
             .unwrap_or(0.0);
         let target_cc = CcMap::param_to_cc(&binding, current_val);
 

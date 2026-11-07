@@ -701,3 +701,73 @@ impl PatchParams {
         m
     }
 }
+
+/// CC-live patch-параметры — SSOT (S2a): один список порождает getter
+/// (Part::cc_value), arm'ы Part::set_param и таблицу range'ов
+/// CC_PARAM_RANGES для cc_map::PARAM_REGISTRY. Новый CC-live параметр:
+/// добавить строку ЗДЕСЬ — больше нигде (кроме label/scope в cc_map).
+macro_rules! cc_patch_params {
+    ($($key:literal => $field:ident : $min:literal .. $max:literal : $log:literal),+ $(,)?) => {
+        /// (key, min, max, logarithmic) — единственный источник range'ов
+        /// для CC-биндингов этих ключей. Пинится тестом к PARAM_REGISTRY
+        /// (tc_registry_ranges_match_cc_table); не-тестовый потребитель — 2b.
+        #[allow(dead_code)]
+        pub const CC_PARAM_RANGES: &[(&str, f32, f32, bool)] = &[
+            $( ($key, $min, $max, $log), )+
+        ];
+        /// CC-live patch ключи (для пинов и cc_map-проверок). Потребители
+        /// пока только в тестах → allow до подсечения 2b (ревью: иначе
+        /// dead_code уронит clippy; прецедент ParamMeta cc_map.rs:13).
+        #[allow(dead_code)]
+        pub const CC_PATCH_KEYS: &[&str] = &[ $( $key ),+ ];
+        /// Значение поля по CC-live ключу (генерится из cc_patch_params!).
+        pub fn cc_value_of(p: &PatchParams, key: &str) -> Option<f32> {
+            match key {
+                $( $key => Some(p.$field), )+
+                _ => None,
+            }
+        }
+        /// Установка поля по CC-live ключу (генерится из cc_patch_params!).
+        /// true = ключ из таблицы, поле установлено; false = не CC-live.
+        pub fn cc_set_param(p: &mut PatchParams, key: &str, value: f32) -> bool {
+            match key {
+                $( $key => { p.$field = value; true }, )+
+                _ => false,
+            }
+        }
+    };
+}
+
+cc_patch_params! {
+    "filter_cutoff"     => filter_cutoff     : 20.0   .. 20000.0 : true,
+    "filter_resonance"  => filter_resonance  : 0.0    .. 1.0     : false,
+    "filter_env_amount" => filter_env_amount : 0.0    .. 15000.0 : false,
+    "amp_attack"        => amp_attack        : 0.001  .. 5.0     : true,
+    "amp_decay"         => amp_decay         : 0.0    .. 5.0     : false,
+    "amp_sustain"       => amp_sustain       : 0.0    .. 1.0     : false,
+    "amp_release"       => amp_release       : 0.001  .. 5.0     : true,
+    "filter_attack"     => filter_attack     : 0.001  .. 5.0     : true,
+    "filter_decay"      => filter_decay      : 0.0    .. 5.0     : false,
+    "filter_sustain"    => filter_sustain    : 0.0    .. 1.0     : false,
+    "filter_release"    => filter_release    : 0.001  .. 5.0     : true,
+    "lfo_rate"          => lfo_rate          : 0.1    .. 20.0    : true,
+    "lfo_pitch_depth"   => lfo_pitch_depth   : 0.0    .. 1.0     : false,
+    "lfo_filter_depth"  => lfo_filter_depth  : 0.0    .. 1.0     : false,
+    "lfo_amp_depth"     => lfo_amp_depth     : 0.0    .. 1.0     : false,
+    "vel_to_filter"     => vel_to_filter     : 0.0    .. 1.0     : false,
+    "noise_level"       => noise_level       : 0.0    .. 1.0     : false,
+    "osc_detune"        => osc_detune        : 0.0    .. 0.05    : false,
+    "portamento_time"   => portamento_time   : 0.0    .. 2.0     : false,
+    "unison_detune"     => unison_detune     : 0.0    .. 50.0    : false,
+    "chorus_mix"        => chorus_mix        : 0.0    .. 1.0     : false,
+    "delay_mix"         => delay_mix         : 0.0    .. 1.0     : false,
+    "delay_time_l"      => delay_time_l      : 0.01   .. 2.0     : false,
+    "delay_time_r"      => delay_time_r      : 0.01   .. 2.0     : false,
+    "delay_feedback"    => delay_feedback    : 0.0    .. 0.95    : false,
+    "delay_filter"      => delay_filter      : 0.0    .. 0.95    : false,
+    "reverb_mix"        => reverb_mix        : 0.0    .. 1.0     : false,
+    "reverb_room_size"  => reverb_room_size  : 0.0    .. 1.0     : false,
+    "reverb_damping"    => reverb_damping    : 0.0    .. 1.0     : false,
+    "reverb_width"      => reverb_width      : 0.0    .. 1.0     : false,
+    "reverb_pre_delay"  => reverb_pre_delay  : 0.0    .. 0.1     : false,
+}
