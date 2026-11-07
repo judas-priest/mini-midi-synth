@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 
+status: executed 2026-11-08
+
 anchor-checked: 2026-11-08 (база = master 37dcec0)
 
 **Goal:** Golden-пин рендера для ВСЕХ 31 слотовых типов FxChain (сейчас 5/31) —
@@ -37,13 +39,13 @@ Compressor, MsTool, Conditioner, Exciter.
 
 ### Task 1: расширение + регенерация
 **Files:** Modify `tests/golden_fx.rs:284-287`, regenerate `tests/golden/fx_chain_engine_hashes.txt`.
-- [ ] Step 1: CHAIN_SLOTS → 31 запись (тип как f32 литерал + имя = варианту).
-- [ ] Step 2: `MINI_MIDI_GOLDEN_UPDATE=1 cargo test --test golden_fx golden_engine_fx_chain_slots 2>&1 | tail -3`
-- [ ] Step 3: TC2 — `git diff tests/golden/fx_chain_engine_hashes.txt` — строки
+- [x] Step 1: CHAIN_SLOTS → 31 запись (тип как f32 литерал + имя = варианту).
+- [x] Step 2: `MINI_MIDI_GOLDEN_UPDATE=1 cargo test --test golden_fx golden_engine_fx_chain_slots 2>&1 | tail -3`
+- [x] Step 3: TC2 — `git diff tests/golden/fx_chain_engine_hashes.txt` — строки
   5 старых типов идентичны (только +26 новых). Красный diff старых → STOP/BLOCKED.
-- [ ] Step 4: повторный прогон БЕЗ env → 6 passed, стабильно дважды.
-- [ ] Step 5: полный гейт (clippy/test/rt_safety).
-- [ ] Step 6: коммит `test: slot goldens 31/31 — S3 prerequisite (behavior-preserving, 5 legacy hashes unchanged)`; PR → squash → merge.
+- [x] Step 4: повторный прогон БЕЗ env → 6 passed, стабильно дважды.
+- [x] Step 5: полный гейт (clippy/test/rt_safety).
+- [x] Step 6: коммит `test: slot goldens 31/31 — S3 prerequisite (behavior-preserving, 5 legacy hashes unchanged)`; PR → squash → merge.
 
 ## Out of scope
 - Сам S3 behavior change (байпас legacy) — ДНЁМ с юзером (diff-ревью звука).
