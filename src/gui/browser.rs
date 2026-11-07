@@ -105,18 +105,9 @@ impl App {
             });
             // (#38) фикс-минимальная ширина: длинные строки поиска/результатов
             // не распирают окно
-            ui.set_min_width(660.0);
-
-            // Двухколонный браузер (юзер 2026-11-08): слева поиск+список,
-            // справа — параметры пресета. Явные ширины колонок: SidePanel
-            // внутри Window разносил окно на весь экран.
-            // Fallback-курсоры секций (читаются post-closure — hoisted)
-            let mut first_gm_row: Option<usize> = None;
-            let mut first_dsp_row: Option<usize> = None;
-            ui.horizontal(|ui| {
-                // ── Левая колонка: поиск + список ──
-                ui.allocate_ui(egui::vec2(268.0, ui.available_height()), |ui| {
-                    ui.set_min_width(252.0);
+            ui.set_min_width(380.0);
+            ui.add_space(theme::SP_XS);
+            ui.add_space(theme::SP_XS);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let w = ui.available_width();
@@ -132,6 +123,26 @@ impl App {
             });
             ui.separator();
 
+            // Параметры пресета — ПРАВАЯ колонка (юзер 2026-11-08: окно
+            // узкое, логичнее занять ширину; высота ограничена окном).
+            egui::SidePanel::right("inst_browser_params")
+                .exact_width(390.0)
+                .resizable(false)
+                .show_inside(ui, |ui| {
+                    ui.add_space(theme::SP_XS);
+                    if !self.parts[part].sf2_mode {
+                        ui.strong("Параметры пресета");
+                        egui::ScrollArea::vertical().auto_shrink(false)
+                            .show(ui, |ui| {
+                                self.draw_params_editable_for(ui, part);
+                            });
+                    } else {
+                        ui.add_space(theme::SP_MD);
+                        ui.label(egui::RichText::new(
+                            "SF2: у семплов нет DSP-параметров").weak());
+                    }
+                });
+
             let query = self.preset_search.to_lowercase();
             let searching = !query.is_empty();
 
@@ -141,6 +152,8 @@ impl App {
                     // первой (план: DSP сверху по умолчанию, osc-парт).
                     let sections = if engine_now { [true, false] } else { [false, true] };
                     // Первые строки секций (fallback-курсор, см. post-closure)
+                    let mut first_gm_row: Option<usize> = None;
+                    let mut first_dsp_row: Option<usize> = None;
                     for (si, section_sf2) in sections.into_iter().enumerate() {
                         if si > 0 {
                             ui.add_space(theme::SP_XS);
@@ -363,24 +376,6 @@ impl App {
             // (#44-фидбек) Клик по инструменту = ПРИМЕНИТЬ и играть дальше —
             // окно остаётся открытым; закрытие — Done из shell, двойной клик
             // по инструменту (Windows select-and-OK), Esc, ✕.
-                });
-
-                // ── Правая колонка: параметры пресета ──
-                ui.allocate_ui(egui::vec2(392.0, ui.available_height()), |ui| {
-                    ui.add_space(theme::SP_XS);
-                    if !self.parts[part].sf2_mode {
-                        ui.strong("Параметры пресета");
-                        egui::ScrollArea::vertical().auto_shrink(false)
-                            .show(ui, |ui| {
-                                self.draw_params_editable_for(ui, part);
-                            });
-                    } else {
-                        ui.add_space(theme::SP_MD);
-                        ui.label(egui::RichText::new(
-                            "SF2: у семплов нет DSP-параметров").weak());
-                    }
-                });
-            });
         });
 
         // ── Post-closure handling (after .show, reads locals + modal) ────
