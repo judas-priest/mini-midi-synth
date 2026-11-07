@@ -3809,8 +3809,8 @@ impl SynthEngine {
         }
 
         // Pre-compute modulation state for each part (control rate). Engine-level
-        // входы собраны один раз ДО цикла (S4-synth 2); disabled parts не
-        // трогаются — их предыдущие значения остаются (never read while disabled).
+        // входы собраны один раз ДО цикла (S4-synth 2); слоты выключенных частей
+        // не трогаются (never read while disabled).
         let inputs = EngineModInputs {
             mod_wheel: self.mod_wheel,
             aftertouch_smooth: self.aftertouch_smooth,
