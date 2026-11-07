@@ -267,7 +267,7 @@ impl App {
         let mut changed = false;
 
         // Macro knobs (always visible at top — key performance controls)
-        self.draw_macros(ui);
+        self.draw_macros_for(ui, part);
         ui.add_space(theme::SP_SM);
 
         // Oscillator section
