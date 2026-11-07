@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+status: executed 2026-11-08 (PR стадии 2a; полный S2 — 2b/2c осталось)
+
 anchor-checked: 2026-11-08 (база = master 737005e; канон — Tavily 2026-11-07/08:
 SSOT-таблица + макро-генерация = nih-plug derive Params паттерн; подсечение
 полного S2 — см. Out of scope)
@@ -92,7 +94,7 @@ check_pickup меняется ТОЛЬКО для 27 ранее не покры�
   макроса в set_param для 31 arm'ов, check_pickup (4-arm → cc_value)
 - Test: `src/synth/tests.rs`
 
-- [ ] **Step 1: макрос в patch_params.rs** (в конец файла):
+- [x] **Step 1: макрос в patch_params.rs** (в конец файла):
 
 ```rust
 /// CC-live patch-параметры — SSOT (S2a): один список порождает getter
@@ -154,7 +156,7 @@ cc_patch_params! {
 Range'ы = ТОЧНО копия текущих PARAM_REGISTRY (cc_map.rs:26-60), сверить
 каждый построчно при переносе. 31 запись.
 
-- [ ] **Step 2: getter** — в impl Part (рядом с set_param):
+- [x] **Step 2: getter** — в impl Part (рядом с set_param):
 
 ```rust
     /// Текущее значение CC-live patch-параметра (S2a: SSOT-макрос
@@ -179,7 +181,7 @@ pub fn cc_value_of(p: &PatchParams, key: &str) -> Option<f32> {
 (расширить макрос третьим выходом: `pub fn cc_value_of` — добавить в
 макро-тело arm `$($key => Some(p.$field),)+` внутри fn).
 
-- [ ] **Step 3: set_param делегирование** (ЕДИНСТВЕННЫЙ путь — макрос НЕ
+- [x] **Step 3: set_param делегирование** (ЕДИНСТВЕННЫЙ путь — макрос НЕ
   может расширяться в arm-позицию чужого match на stable Rust; ревью 2026-11-08).
   В макрос добавить четвёртый выход и в Part::set_param — 31 рукописных arm'ов
   удалить, делегирование стоит ПЕРВЫМ:
@@ -196,7 +198,7 @@ pub fn cc_value_of(p: &PatchParams, key: &str) -> Option<f32> {
 
 cc_set_param генерится макросом: `match key { $($key => { p.$field = value; true },)+ _ => false }`.
 
-- [ ] **Step 4: check_pickup** — 4-arm блок (:2250-2258) заменить:
+- [x] **Step 4: check_pickup** — 4-arm блок (:2250-2258) заменить:
 
 ```rust
         let current_val = self.parts.first()
@@ -204,7 +206,7 @@ cc_set_param генерится макросом: `match key { $($key => { p.$fi
             .unwrap_or(0.0);
 ```
 
-- [ ] **Step 5: тесты** — src/synth/tests.rs:
+- [x] **Step 5: тесты** — src/synth/tests.rs:
 
 ```rust
 
@@ -256,7 +258,7 @@ cc: u8, ...)`), тест в том же модуле — прямой вызов
 last=None → false; второй с 127 → crossed=true. ДО фикса current_val=0.0 →
 target=0 → crossed2=false (тест красный до реализации).
 
-- [ ] **Step 5b: переписать source-parse пины (ИЗ Task 2 — ревью: иначе
+- [x] **Step 5b: переписать source-parse пины (ИЗ Task 2 — ревью: иначе
   гейт Task 1 красный, т.к. 31 arm уезжает из парсер-текста set_param):**
   tc_set_param_arms_synced_with_map: match_arms_between теперь даёт ~76
   рукописных arm'ов — заменить assert >100 на >70 И добавить:
@@ -264,12 +266,12 @@ target=0 → crossed2=false (тест красный до реализации).
   (белый-list CC-live ключей ↔ to_map). tc_cc_bindings_target_set_param_arms:
   union known = parsed_arms ∪ CC_PATCH_KEYS ∪ global_arms.
 
-- [ ] **Step 6: красный → зелёный → гейт**
+- [x] **Step 6: красный → зелёный → гейт**
 
 Run: `cargo test --lib tc_cc_value tc_check_pickup tc_set_param_arms tc_cc_bindings 2>&1 | tail -6` (красный: нет cc_value/CC_PATCH_KEYS) → реализация → зелёный.
 Полный гейт: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok" && cargo test --test golden_fx 2>&1 | tail -2`
 
-- [ ] **Step 7: коммит**
+- [x] **Step 7: коммит**
 
 ```bash
 git add src/synth/patch_params.rs src/synth/mod.rs src/synth/tests.rs && git commit -m "feat: CC-live param SSOT table — cc_value getter, generated set arms, full pickup coverage (S2a)"
@@ -289,7 +291,7 @@ git add src/synth/patch_params.rs src/synth/mod.rs src/synth/tests.rs && git com
   tc_cc_bindings_target_set_param_arms — аналогично дополнить
   CC_PATCH_KEYS-набором.
 
-- [ ] **Step 1: registry БЕЗ кодовых правок** — PARAM_REGISTRY остаётся
+- [x] **Step 1: registry БЕЗ кодовых правок** — PARAM_REGISTRY остаётся
   литеральным (см. «РЕШЕНО ревью» ниже); в этой задаче только пин-тесты.
   Сверить, что регистр не менялся с 737005e.
 
@@ -299,7 +301,7 @@ git add src/synth/patch_params.rs src/synth/mod.rs src/synth/tests.rs && git com
 приватный, mod.rs:55) — не делать. Расхождение таблицы и registry = красный
 тест; единственный источник range'ов — CC_PARAM_RANGES.
 
-- [ ] **Step 2: пин-тесты** — src/synth/tests.rs:
+- [x] **Step 2: пин-тесты** — src/synth/tests.rs:
 
 ```rust
 #[test]
@@ -321,18 +323,18 @@ fn tc_registry_ranges_match_cc_table() {
 (Примечание: reverb_mix/delay_mix — Global scope, но В таблице есть; исключение
 в continue-условии только для трёх действительно-несинтовых глобальных.)
 
-- [ ] **Step 3: переписать source-parse пины** — tc_set_param_arms_synced_with_map:
+- [x] **Step 3: переписать source-parse пины** — tc_set_param_arms_synced_with_map:
   `match_arms_between` даёт только рукописные arm'ы (~76); проверка
   дополнить: `for &k in CC_PATCH_KEYS { assert!(map.contains_key(k)); }`;
   tc_cc_bindings_target_set_param_arms — известное множество дополнить
   CC_PATCH_KEYS (сейчас сверяется с парс-результатом — макро-arm'ы больше
   не в парс-тексте: `patch_arms` + `CC_PATCH_KEYS` как union).
 
-- [ ] **Step 4: гейт**
+- [x] **Step 4: гейт**
 
 Run: `cargo clippy --all-targets -- -D warnings 2>&1 | tail -1 && cargo test 2>&1 | grep -cE "test result: ok" && cargo test --test golden_fx 2>&1 | tail -2`
 
-- [ ] **Step 5: коммит**
+- [x] **Step 5: коммит**
 
 ```bash
 git add src/cc_map.rs src/synth/tests.rs && git commit -m "refactor: cc_map registry pinned to CC_PARAM_RANGES SSOT, source-parse pins updated for macro arms (S2a/2)"
@@ -340,14 +342,14 @@ git add src/cc_map.rs src/synth/tests.rs && git commit -m "refactor: cc_map regi
 
 ### Task 3: Верификация стадии
 
-- [ ] **Step 1:** полный гейт (clippy/test/rt_safety/deny/gui-less check).
-- [ ] **Step 2:** PR → squash → rebuild → launch-check → roadmap чекбокс
+- [x] **Step 1:** полный гейт (clippy/test/rt_safety/deny/gui-less check).
+- [x] **Step 2:** PR → squash → rebuild → launch-check → roadmap чекбокс
   (частично: полный S2 — GUI-слайдеры и build_voice_params — остаётся;
   пометить «2a done, 2b (GUI sliders) awaiting screen check»).
-- [ ] **Step 3:** TECHDEBT подсекция + «УТРОМ: что проверить» пункт: MIDI-learn
+- [x] **Step 3:** TECHDEBT подсекция + «УТРОМ: что проверить» пункт: MIDI-learn
   на новом ключе (напр. chorus_mix на CC) — pickup: ручка подхватывает БЕЗ
   прыжка в 0.
-- [ ] **Step 4:** Tavily постчек: macro-generated match arms — гигиена/канон.
+- [x] **Step 4:** Tavily постчек: macro-generated match arms — гигиена/канон.
 
 ## Out of scope (полный S2 — подсечения 2b/2c)
 
