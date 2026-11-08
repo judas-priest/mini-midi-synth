@@ -41,8 +41,12 @@ offs (текущий tick). При закрытии capture (master_stop/close) 
   on на 2450) — review I1. УЗКОЕ МЕСТО: арп-гейты ритмичные — defer рвал бы
   паттерн на рваные гейты и забивал бы pending за один проход → РЕШЕНИЕ:
   arp-generated offs НЕ деферятся (пишутся сразу).
-- master_stop 672-699; close 2255-2270; FALLBACK close 2285-2297 (review I3 —
-  третий выход из Recording; pending без flush пережил бы capture).
+- ВЫХОДЫ из Recording/Overdubbing — ВСЕ СЕМЬ (review round-2 F1, HEAD c80f62a):
+  master_stop mod.rs:694; quantized close 2269; fallback 2296; free-close
+  (master_toggle_record_free_looper) 825; overdub-layer finish на boundary
+  2233 (Overdubbing→Playing); LooperStopRecord 1784 (looper.rs:341-348);
+  LooperTogglePlay при Overdubbing 1785 (→ stop → Idle). Pending без flush
+  на любом из них — stale offs/зависшие ноты.
 
 ---
 
@@ -113,17 +117,25 @@ close-пути), возможно `src/synth/looper.rs` (если flush нуже
         }
 ```
   is_capturing — новый pub fn в looper.rs (state ∈ {Recording, Overdubbing});
-  arp-сайты различить: реализатор читает 625/1017/1052 vs 2436-2443 —
-  передать флаг defer_ok: bool из call-site (минимум вторжения).
+  defer_ok по сайтам (review round-2 F2: сайт 625 — внутри flush_arp_note_off
+  615-628, это ARP-generated off → false!): TRUE только 1017/1052 (arp-ветка
+  1003-1010 перехватывает arp offs раньше — безопасно); FALSE 625 и 2442.
+  ВЕТКА ПОСЛЕ source_mix guard'а (review round-2 F3: иначе части вне записи
+  копят pending впустую, съедая лимит 16).
 - [ ] Step 3: set_sustain: flush ОДИН РАЗ после per-part цикла (не внутри
   него — review M6): рекурсии нет без флага — `sustain.store(false)` на 469
   стоит ДО ветки, record_for_looper уже видит педаль вверх и пишет off
   напрямую (зафиксировать комментарием).
-- [ ] Step 4: ВСЕ ТРИ выхода из capture (review I3): master_stop (672-699),
-  штатный close (2255-2270), fallback (2285-2297). flush ДО trim_after
-  (679/2260) и ДО toggle_record (694/2269/2296) — record_event требует
-  Recording/Overdubbing (looper.rs:575). На fallback/panic-путях —
-  ОЧИСТИТЬ pending без записи (состояние уже мёртвое, review I3).
+- [ ] Step 4: ВСЕ СЕМЬ выходов (review round-2 F1): flush-ДО-выхода на
+  694 / 825 / 2233 / 2269 / 2296 (запись ещё валидна: flush ПЕРЕД
+  trim_after 679/2260 и ПЕРЕД toggle_record 694/2269/2296 — record_event
+  требует Recording/Overdubbing, looper.rs:575). Для 1784 (LooperStopRecord)
+  и 1785 (TogglePlay→Idle): flush ДО stop (состояние ещё Recording/Overdubbing)
+  — выбрать один вариант и закрепить (рекомендация: flush везде, pending
+  очищается в конце каждого пути).
+  При этом fallback 2296 — flush ДО toggle_record 2296, затем pending = 0.
+- [ ] Step 4b: инвариант: после ЛЮБОГО выхода pending_len == 0 (закрепить
+  debug_assert).
 - [ ] Step 5: gates: clippy; cargo test (все characterization зелёные,
   включая вчерашние red); rt_safety (фикс-массив — без аллокаций);
   golden_fx.
