@@ -43,8 +43,6 @@ offs (текущий tick). При закрытии capture (master_stop/close) 
   arp-generated offs НЕ деферятся (пишутся сразу).
 - master_stop 672-699; close 2255-2270; FALLBACK close 2285-2297 (review I3 —
   третий выход из Recording; pending без flush пережил бы capture).
-- master_stop 672-699 и close-путь capture (~2255-2270) — точки flush'а при
-  остановке.
 
 ---
 
@@ -98,11 +96,10 @@ offs (текущий tick). При закрытии capture (master_stop/close) 
 close-пути), возможно `src/synth/looper.rs` (если flush нужен helper — по
 факту record_event достаточно).
 
-- [ ] Step 1: поля SynthEngine: `looper_sustain_pending: Vec<(u8, u8)>`
-  (note, part) — init пустой. ВНИМАНИЕ RT: Vec push на RT = аллокация!
-  Максимум held-нот = 128 (note-уникальность через active_notes) →
-  фикс-массив `[(u8,u8); 16]` + len (максимум 16 одновременных pending,
-  переполнение → записать off немедленно как раньше + счётчик). БЕЗ Vec.
+- [ ] Step 1: поля SynthEngine: `looper_sustain_pending: [(u8, u8); 16]` +
+  `looper_sustain_pending_len: usize` (НЕ Vec: push на RT = аллокация).
+  Максимум 16 одновременных pending; переполнение → off записывается
+  немедленно как раньше + metrics-счётчик.
 - [ ] Step 2: record_for_looper: ветка velocity==0:
 ```rust
         if velocity == 0
