@@ -47,8 +47,8 @@ MidiSeqData уже Send. Тесты: логика poll-обработки тес
 - TC3 (guard): повторный клик при in-flight (в т.ч. КРОСС-KIND keys↔drums и
   unload «(none)» при in-flight) → не спавнит второй поток / не перезаписывает
   rx — код-ревью гварда.
-- TC4: midi-результат → список треков + MidiSeqLoad как в синхронной ветке
-  (поля data эквивалентны).
+- TC4 (код-ревью): midi-результат → список треков + MidiSeqLoad как в
+  синхронной ветке (apply_midi_result = бывшее тело Ok-ветки 1:1).
 - Негатив: канал пуст (обычный кадр) — try_recv Err → no-op; RX при
   завершённом sender — не паникуем (Disconnected = toast «loader died»).
 - startup-restore: SF2 из config при старте — async (см. Task 1 Step 2
@@ -61,10 +61,10 @@ MidiSeqData уже Send. Тесты: логика poll-обработки тес
 ### Task 1: SF2 worker
 
 **Files:** Modify `src/gui/mod.rs` (App поля: `sf2_worker_rx:
-Option<std::sync::mpsc::Receiver<(Sf2WorkerKind, String, Option<Arc<rustysynth::SoundFont>>)>>`,
+Option<std::sync::mpsc::Receiver<(Sf2WorkerKind, String, Result<Arc<rustysynth::SoundFont>, String>)>>`,
 `sf2_loading: bool`; init-литерал 737-779), `src/gui/sf2.rs` (parse_sf2 →
-статическая fn без self: `fn parse_sf2_file(path: &Path) -> Option<Arc<SoundFont>>`
-— тело нынешнего parse_sf2 минус self-статусы), `src/gui/settings.rs`/callers
+статическая `fn parse_sf2_file(path: &Path) -> Result<Arc<SoundFont>, String>`
+— тело нынешнего parse_sf2 минус self-статусы, ошибки строкой), callers
 load_sf2_keys/load_sf2_drums.
 
 - [ ] Step 1: тип `Sf2WorkerKind { Keys, Drums }` (+ путь/имя). spawn в
@@ -131,11 +131,11 @@ load_sf2_keys/load_sf2_drums.
   Task 3.)
 - [ ] Step 3: UI-статус: кнопки загрузки SF2 при `sf2_loading` показывают
   «Loading...» и игнорируют клик (guard в load_sf2_keys/load_sf2_drums).
-- [ ] Step 4: тест: App-harness если существует (gui-тесты в crate? если
-  App не собирается в тестах — логику poll вынести в fn
-  `poll_sf2_worker(&mut self)` и тестовать на уровне «результат применён»
-  через подставной receiver; если App-harness невозможен — код-ревью ветки +
-  ручная проверка); gates: clippy; cargo test; rt_safety (не задет).
+- [ ] Step 4: тест: App-harness НЕ существует (review I8 — все gui #[cfg(test)]
+  pure-function) → верификация = код-ревью apply/poll веток + экран
+  (Task 3 Step 3). Логику apply_sf2_result держать чистой (без egui-вызовов
+  кроме show_toast) для будущей тестируемости. Gates: clippy; cargo test;
+  rt_safety (не задет).
 - [ ] Step 5: коммит `fix: SF2 parsing off the GUI thread — worker + mpsc (techdebt GUI I/O)`.
 
 ### Task 2: MIDI worker
@@ -170,8 +170,8 @@ load_sf2_keys/load_sf2_drums.
   toast; Disconnected → toast «loader died». Guard `midi_loading` на
   повторный enter/pick; request_repaint_after(33ms) при loading — общий
   блок со SF2.
-- [ ] Step 3: тест (по тем же правилам, что Task 1 Step 4); gates: clippy;
-  cargo test; rt_safety.
+- [ ] Step 3: тест — как Task 1 Step 4 (App-harness нет; код-ревью + экран);
+  gates: clippy; cargo test; rt_safety.
 - [ ] Step 4: коммит `fix: MIDI parse off the GUI thread — worker + mpsc (techdebt GUI I/O)`.
 
 ### Task 3: Верификация
