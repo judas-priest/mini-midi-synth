@@ -170,6 +170,7 @@ pub struct Lfo {
     // Tempo sync
     pub tempo_sync: bool,
     pub bpm: f32,
+    block_len: f32,
     // Unipolar
     pub unipolar: bool,
     // Cached last step event
@@ -198,6 +199,7 @@ impl Lfo {
             step_prev_value: 0.0,
             tempo_sync: false,
             bpm: 120.0,
+            block_len: 128.0,
             unipolar: false,
             last_step_event: StepSeqEvent::default(),
         }
@@ -210,6 +212,10 @@ impl Lfo {
     pub fn set_bpm(&mut self, bpm: f32) {
         self.bpm = bpm.max(20.0);
     }
+
+    /// Длина блока в сэмплах — tick вызывается раз на блок, sync-ветка
+    /// компенсирует блочность сама (audit mod-matrix #3b).
+    pub fn set_block_len(&mut self, bl: f32) { self.block_len = bl.max(1.0); }
 
     /// Reset LFO phase to 0 (retrigger on note-on). Does not affect noise state.
     pub fn reset_phase(&mut self) {
@@ -245,11 +251,20 @@ impl Lfo {
         self.last_step_event
     }
 
+    /// Envelope one-shot: (re)start attack (audit mod-matrix #4 — stage 1
+    /// никем не писался, волна была константной -1.0).
+    pub fn env_retrigger(&mut self) {
+        self.env_stage = 1;
+        self.env_value = 0.0;
+    }
+
     /// Compute effective rate in Hz, handling tempo sync.
     fn effective_rate(&self, rate: f32) -> f32 {
         if self.tempo_sync {
-            let cpb = tempo_sync_cycles_per_beat(rate as u8);
-            self.bpm / 60.0 * cpb
+            // rate = ИНДЕКС деления 0..15 (не Hz); ×block_len: tick раз на
+            // блок, advance_phase добавляет hz/sample_rate за вызов
+            let idx = (rate as u8).min(15);
+            self.bpm / 60.0 * tempo_sync_cycles_per_beat(idx) * self.block_len
         } else {
             rate
         }
@@ -376,7 +391,10 @@ impl Lfo {
                 super::dsp_utils::xorshift32(&mut self.noise_state);
                 let raw = (self.noise_state as f32 / u32::MAX as f32) * 2.0 - 1.0;
                 // deform 0=very smooth (coeff~0.999), 1=less smooth (coeff~0.9)
-                let coeff = 0.999 - deform * 0.099;
+                // deform < -0.0101 давал coeff > 1 = неустойчивый полюс
+                // (экспоненциальный разлёт → inf → NaN навсегда). Клэмп
+                // держит полюс внутри единичного круга.
+                let coeff = (0.999 - deform * 0.099).min(0.999);
                 self.sh_smooth = self.sh_smooth * coeff + raw * (1.0 - coeff);
                 let val = self.sh_smooth;
                 return if self.unipolar { (val + 1.0) * 0.5 } else { val };
@@ -402,7 +420,12 @@ impl Lfo {
                             self.env_stage = 3;
                         }
                     }
-                    3 => { self.env_value = 0.5; }
+                    3 => {
+                        // Нет note-off хука к LFO — «sustain» превращается в
+                        // цикл AD (атака заново), иначе ступор на 0.5 навсегда.
+                        self.env_stage = 1;
+                        self.env_value = 0.0;
+                    }
                     4 => {
                         self.env_value -= coeff;
                         if self.env_value <= 0.0 {
@@ -455,6 +478,50 @@ mod tests {
                 (sine_lut(-p) - (-p * std::f32::consts::TAU).sin()).abs() < 1e-2,
                 "phase -{p}"
             );
+        }
+    }
+
+    #[test]
+    fn tempo_sync_advances_like_freerun_at_division_hz() {
+        // rate = индекс деления 4 (1 beat) при bpm 120 → 2.0 Гц
+        let bl = 128.0_f32;
+        let mut synced = Lfo::new(48000.0);
+        synced.tempo_sync = true;
+        synced.set_bpm(120.0);
+        synced.set_block_len(bl);
+        let mut free = Lfo::new(48000.0);
+        for _ in 0..64 {
+            let s = synced.tick_with_deform(4.0, LfoWaveform::Sine, 0.0); // индекс 4
+            let f = free.tick_with_deform(2.0 * bl, LfoWaveform::Sine, 0.0); // 2 Гц
+            assert!((s - f).abs() < 1e-4, "sync {s} vs free {f}");
+        }
+    }
+
+    #[test]
+    fn envelope_attacks_after_retrigger_and_loops() {
+        let mut lfo = Lfo::new(48000.0);
+        lfo.env_retrigger();
+        let rate = 5.0 * 128.0; // bl=128: dt = rate/sr на tick (как в живом тракте)
+        let mut peak: f32 = -2.0;
+        for _ in 0..120 {
+            let v = lfo.tick_with_deform(rate, LfoWaveform::Envelope, 0.0);
+            peak = peak.max(v);
+        }
+        assert!(peak > 0.9, "no attack, peak={peak}");
+        // цикл: после спада (sustain-stage перезапускает атаку) значение
+        // снова уходит вниз — минимум следующего окна отрицателен (bipolar)
+        let mut mid: f32 = 2.0;
+        for _ in 0..400 { mid = mid.min(lfo.tick_with_deform(rate, LfoWaveform::Envelope, 0.0)); }
+        assert!(mid < -0.5, "no decay/loop, min={mid}");
+    }
+
+    #[test]
+    fn smooth_noise_stays_finite_for_negative_deform() {
+        let mut lfo = Lfo::new(48000.0);
+        lfo.unipolar = false;
+        for _ in 0..5000 {
+            let v = lfo.tick_with_deform(5.0, LfoWaveform::SmoothNoise, -1.0);
+            assert!(v.is_finite(), "diverged: {v}");
         }
     }
 }

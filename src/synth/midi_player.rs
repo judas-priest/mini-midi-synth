@@ -70,6 +70,11 @@ pub struct TrackState {
 // MidiPlayer — runs entirely on the audio thread
 // ---------------------------------------------------------------------------
 
+/// RT-контракт: плотный блок (стопка событий на wrap) раньше растил буфер
+/// → malloc в аудио-колбэке (audit rhythm #13). Cap = осознанный дроп.
+/// Note-offs не капятся (висячие голоса дороже буфера).
+pub const MIDI_SEQ_BUF_CAP: usize = 4096;
+
 pub struct MidiPlayer {
     pub data: Option<Box<MidiSeqData>>,
     pub tracks: Vec<TrackState>,
@@ -205,7 +210,7 @@ impl MidiPlayer {
                     // Note-offs must never be muted: a muted track's sounding
                     // voice would otherwise hang forever.
                     let is_note_off = matches!(d, SeqEventData::NoteOff { .. });
-                    if is_note_off || !self.is_muted(ch) {
+                    if is_note_off || (!self.is_muted(ch) && out.len() < MIDI_SEQ_BUF_CAP) {
                         out.push((ch, d.clone()));
                     }
                 }

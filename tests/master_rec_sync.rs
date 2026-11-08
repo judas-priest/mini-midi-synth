@@ -210,6 +210,66 @@ fn tc10_rec_after_close_starts_fresh() {
     }
 }
 
+/// MasterStop ПОСЛЕ закрытия capture не должен трогать готовый луп:
+/// looper_capture_quantized остаётся true (гейтит стирание свежего захвата),
+/// но looper_rec_cycles == 0 — без guard'а trim_after(0) стирает все события
+/// (regression: review fix trim guard).
+#[test]
+fn tc13_stop_after_close_keeps_loop() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // граница: захват
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть
+    run(&mut e, steps(16)); // граница: Playing
+    assert!(matches!(e.looper.state, LooperState::Playing));
+    let events_before = e.looper.len();
+    assert!(events_before > 0);
+
+    let _ = e.handle_control(ControlEvent::MasterStop);
+    assert!(e.looper.len() == events_before, "loop events intact after stop");
+    assert!(
+        (e.looper.loop_len_ticks() as i64 - 96000).abs() <= 64,
+        "loop length unchanged: {}", e.looper.loop_len_ticks()
+    );
+}
+
+/// MasterStop в середине ЗАХВАТА (не закрытия) обрезает луп до записанных
+/// циклов — audit rhythm #2.
+#[test]
+fn tc14_stop_mid_capture_trims() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // граница: захват, cycle 1
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    run(&mut e, steps(16)); // граница: cycle 2 (looper_rec_cycles = 2)
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 67, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 67 });
+    let _ = e.handle_control(ControlEvent::MasterStop); // посреди захвата
+    // master_stop останавливает всё: Recording -> Playing -> Idle
+    assert!(matches!(e.looper.state, LooperState::Idle));
+    // Цикл ~96000 тиков: петля = 2 цикла, cycle-2 нота жива, cycle-3 тишины нет
+    assert!(
+        (e.looper.loop_len_ticks() as i64 - 2 * 96000).abs() <= 64,
+        "loop trimmed to 2 cycles: got {}", e.looper.loop_len_ticks()
+    );
+    {
+        let disp = e.looper.display();
+        let disp = disp.lock().unwrap();
+        let ons: Vec<_> = disp.events.iter().filter(|ev| ev.velocity > 0).collect();
+        assert!(ons.iter().any(|ev| ev.note == 60), "cycle-1 note kept");
+        assert!(ons.iter().any(|ev| ev.note == 67), "cycle-2 note kept");
+    }
+}
+
 #[test]
 fn tc11_overdub_layer_boundary_aligned() {
     let mut e = engine();

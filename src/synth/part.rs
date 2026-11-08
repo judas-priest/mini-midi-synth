@@ -186,6 +186,9 @@ pub struct EngineModInputs {
     pub aftertouch_smooth: f32,
     pub cc_values: [f32; 4],
     pub pitch_bend_semitones: f32,
+    /// Нормированный ±1 ДО умножения на bend range (от продюсера,
+    /// `pitch_bend_norm` движка).
+    pub pitch_bend_norm: f32,
     pub seq_bpm: f32,
     pub block_len: usize,
     pub sample_rate: f32,
@@ -307,6 +310,12 @@ impl Part {
                 self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
                 self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
                 self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
+                // Envelope wave (from_param 5): one-shot — атака заново на note-on
+                // (audit mod-matrix #4)
+                if self.params.lfo_waveform == 5.0 { self.lfos[0].env_retrigger(); }
+                if self.params.lfo2_waveform == 5.0 { self.lfos[1].env_retrigger(); }
+                if self.params.lfo3_waveform == 5.0 { self.lfos[2].env_retrigger(); }
+                if self.params.lfo4_waveform == 5.0 { self.lfos[3].env_retrigger(); }
                 if self.params.mseg_enabled > 0.5 { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
             }
             self.update_held_range();
@@ -346,6 +355,12 @@ impl Part {
                 self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
                 self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
                 self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
+                // Envelope wave (from_param 5): one-shot — атака заново на note-on
+                // (audit mod-matrix #4)
+                if self.params.lfo_waveform == 5.0 { self.lfos[0].env_retrigger(); }
+                if self.params.lfo2_waveform == 5.0 { self.lfos[1].env_retrigger(); }
+                if self.params.lfo3_waveform == 5.0 { self.lfos[2].env_retrigger(); }
+                if self.params.lfo4_waveform == 5.0 { self.lfos[3].env_retrigger(); }
             }
             if self.params.mseg_enabled > 0.5 && !retrigger { self.mseg1_state.trigger(); self.mseg2_state.trigger(); }
             self.update_held_range();
@@ -406,6 +421,12 @@ impl Part {
         self.lfos[1].trigger_mode(self.params.lfo2_trigger_mode as u8);
         self.lfos[2].trigger_mode(self.params.lfo3_trigger_mode as u8);
         self.lfos[3].trigger_mode(self.params.lfo4_trigger_mode as u8);
+        // Envelope wave (from_param 5): one-shot — атака заново на note-on
+        // (audit mod-matrix #4)
+        if self.params.lfo_waveform == 5.0 { self.lfos[0].env_retrigger(); }
+        if self.params.lfo2_waveform == 5.0 { self.lfos[1].env_retrigger(); }
+        if self.params.lfo3_waveform == 5.0 { self.lfos[2].env_retrigger(); }
+        if self.params.lfo4_waveform == 5.0 { self.lfos[3].env_retrigger(); }
         // Trigger MSEGs on note-on (per-part, not per-voice)
         if self.params.mseg_enabled > 0.5 {
             self.mseg1_state.trigger();
@@ -903,6 +924,11 @@ impl Part {
 
         let bl = inputs.block_len as f32;
 
+        // Блочная длина для sync-ветки LFO (компенсация внутри Lfo, audit mod-matrix #3b)
+        for l in self.lfos.iter_mut().chain(self.scene_lfos.iter_mut()) {
+            l.set_block_len(bl);
+        }
+
         // Set BPM, tempo sync, unipolar on all LFOs
         let lfo_tempo_syncs = [self.params.lfo1_tempo_sync, self.params.lfo2_tempo_sync,
                                self.params.lfo3_tempo_sync, self.params.lfo4_tempo_sync];
@@ -923,9 +949,8 @@ impl Part {
             || self.params.lfo_amp_depth > 0.001
             || inputs.aftertouch_smooth > 0.001;
         let lfo1_val = if lfo1_active {
-            // tempo_sync ждёт ИНДЕКС деления 0..15 (lfo.rs), а не герцы; GUI-пикера
-            // нет — фича спит (0 пользователей в пресетах/конфиге); полный дизайн —
-            // отдельная задача.
+            // tempo_sync ждёт ИНДЕКС деления 0..15 (не герцы): clamp 15 внутри
+            // Lfo::effective_rate, блочная компенсация тоже внутри Lfo (set_block_len).
             let rate = if self.lfos[0].tempo_sync { self.params.lfo_rate } else { self.params.lfo_rate * bl };
             self.lfos[0].tick_with_deform(rate, lfo1_wf, self.params.lfo_deform)
         } else { 0.0 };
@@ -1027,7 +1052,10 @@ impl Part {
             alt_bipolar: self.alt_bipolar,
             alt_unipolar: self.alt_unipolar,
             release_vel: self.release_vel,
-            pitch_bend: effective_pb(self.ignore_pb, inputs.pitch_bend_semitones) / 2.0, // normalize -1..+1
+            // Нормированный ±1 ОТ ПРОДЮСЕРА (хардкод /2.0 = ±2 st давал
+            // source ±12 при range 24 → до ±288 полутонов на dest; делить
+            // semitones на текущее значение нельзя — это не range).
+            pitch_bend: effective_pb(self.ignore_pb, inputs.pitch_bend_norm),
             cc: inputs.cc_values,
             breath: self.breath,
             expression: self.expression,

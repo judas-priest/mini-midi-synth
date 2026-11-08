@@ -389,6 +389,13 @@ impl SamplerEngine {
         if part >= 16 { return; }
         if enabled && self.part_channel[part].is_none() {
             self.part_channel[part] = self.alloc_channel();
+            // Свежий/переиспользованный канал стартует на program 0 от
+            // rustysynth — выставляем кэш парта немедленно (иначе браузерный
+            // тоггл DSP→SF2 играет Grand Piano, а кэш/GUI говорят X;
+            // reuse-канал наследует патч предыдущего occupant'а).
+            if let Some(ch) = self.part_channel[part] {
+                self.keys.midi(ch as i32, 0xC0, self.part_program[part] as i32, 0);
+            }
         } else if !enabled {
             if let Some(ch) = self.part_channel[part].take() {
                 if let Some(synth) = &mut self.keys.synth {

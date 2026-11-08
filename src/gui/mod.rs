@@ -1882,6 +1882,8 @@ impl App {
         if let Some(name) = self.config.ui.last_performance.clone() {
             if self.load_performance_by_name(&name) {
                 log::info!("[init] performance restored: {name}");
+            } else {
+                log::warn!("perf restore: failed to load last_performance {:?} — defaults kept", name);
             }
         }
     }

@@ -671,6 +671,14 @@ impl SynthEngine {
     /// drain on the next looper tick, как и в ручном Stop).
     pub fn master_stop(&mut self) {
         self.looper_arm_pending = false;
+        // Стоп посреди quantized capture: обрезать луп до записанных
+        // циклов (события + длина), иначе он остаётся cycle*64 с тишиной
+        // в хвосте (audit rhythm #2).
+        if self.looper_capture_quantized && self.looper_rec_cycles > 0 {
+            let kept = self.looper_rec_cycles.saturating_mul(self.looper_cycle_ticks);
+            self.looper.trim_after(kept);
+            self.looper.set_loop_len_ticks(kept);
+        }
         self.looper_capture_quantized = false;
         self.looper_overdub_pending = false;
         self.looper_overdub_active = false;
@@ -1130,7 +1138,7 @@ impl SynthEngine {
                     }
                 }
             }
-            MidiEvent::ControlChange { cc, value, .. } => {
+            MidiEvent::ControlChange { cc, value, channel, .. } => {
                 // Channel mode messages. 120 = All Sound Off, 123 = All Notes
                 // Off. Hardware sends these from the panic button and when the
                 // transport stops, so they take priority over any CC mapping.
@@ -1159,6 +1167,12 @@ impl SynthEngine {
                     self.arpeggiator.clear();
                     return;
                 }
+                // Drum-канал (9 = GM ch10): CC на нём не должен управлять
+                // синт-партами (breath/expression/sustain/CC1-4), как
+                // Aftertouch/PolyAT выше (audit mod-matrix #CC-channel).
+                // Принятый side-effect: channel-9 CC исчезают из CcReceived
+                // GUI-фидбека — осознанно (CC-learn на drum-канале не фича).
+                if channel == 9 { return; }
                 // Check assignable mod sources (CC1..CC4)
                 for i in 0..4 {
                     if cc == self.cc_numbers[i] {
@@ -2247,6 +2261,10 @@ impl SynthEngine {
                     self.looper.set_loop_len_ticks(kept);
                     self.looper.set_display_cycle_ticks(None);
                     self.looper_rec_cycles = 0;
+                    // REC/CLOSING-атом надо гасить ЗДЕСЬ: единственные сбросы
+                    // были в master_stop/disarm — GUI висел в «REC n тактов»/
+                    // «CLOSING» с мёртвыми +1/−1 (audit rhythm #1).
+                    self.set_master_rec_state(0, 0);
                     self.drum_engine.set_recording(false); // сетка тоже разармирована
                     self.looper.toggle_record(); // Recording/Overdubbing -> Playing
                 } else {
@@ -2270,6 +2288,10 @@ impl SynthEngine {
                 self.looper_finish_pending = false;
                 self.looper.set_display_cycle_ticks(None);
                 self.looper_rec_cycles = 0;
+                // REC/CLOSING-атом надо гасить ЗДЕСЬ: единственные сбросы
+                // были в master_stop/disarm — GUI висел в «REC n тактов»/
+                // «CLOSING» с мёртвыми +1/−1 (audit rhythm #1).
+                self.set_master_rec_state(0, 0);
                 self.drum_engine.set_recording(false);
                 self.looper.toggle_record();
             }
@@ -2283,6 +2305,7 @@ impl SynthEngine {
             aftertouch_smooth: self.aftertouch_smooth,
             cc_values: self.cc_values,
             pitch_bend_semitones: self.pitch_bend_semitones,
+            pitch_bend_norm: self.pitch_bend_norm,
             seq_bpm,
             block_len,
             sample_rate: self.sample_rate,

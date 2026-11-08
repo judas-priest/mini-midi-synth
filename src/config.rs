@@ -24,7 +24,7 @@ pub struct Config {
     pub sf2: Sf2Settings,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sf2Settings {
     /// Path to the loaded SF2 file (legacy, used as fallback for keys_file_path).
     #[serde(default)]
@@ -66,6 +66,27 @@ pub struct Sf2Settings {
 }
 
 fn default_sf2_block_size() -> usize { 8 }
+
+impl Default for Sf2Settings {
+    /// derive(Default) давал block_size: 0 (serde-default = 8) — свежий
+    /// конфиг нёс 0 до клэмпа в sampler (audit data #F8).
+    fn default() -> Self {
+        Self {
+            file_path: None,
+            keys_file_path: None,
+            drums_file_path: None,
+            layer_a_sf2: false,
+            layer_a_program: 0,
+            layer_b_sf2: false,
+            layer_b_program: 0,
+            drums_sf2: false,
+            drums_remaps: Default::default(),
+            drums_vels: Default::default(),
+            block_size: default_sf2_block_size(),
+            sample_offset_ms: 0.0,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioSettings {
@@ -404,6 +425,11 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sf2_settings_default_block_size_is_not_zero() {
+        assert_eq!(crate::config::Sf2Settings::default().block_size, 8);
+    }
 
     #[test]
     fn legacy_config_with_looper_sync_bpm_key_parses() {

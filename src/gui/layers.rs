@@ -323,7 +323,10 @@ impl App {
                             if name == "(Init)" {
                                 load_perf = Some(preset::init_performance());
                             } else {
-                                load_perf = preset::load_performance(path).ok();
+                                match preset::load_performance(path) {
+                                    Ok(p) => load_perf = Some(p),
+                                    Err(e) => log::warn!("perf combo load failed: {e}"),
+                                }
                             }
                         }
                     }

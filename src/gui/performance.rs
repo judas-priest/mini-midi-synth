@@ -14,7 +14,7 @@ impl App {
             let Some(path) = path else { return false; };
             match preset::load_performance(&path) {
                 Ok(p) => p,
-                Err(_) => return false,
+                Err(e) => { log::warn!("apply_performance failed: {e}"); return false; }
             }
         };
         // NO AllNotesOff here: seamless perf switch — sounding tails ring out
