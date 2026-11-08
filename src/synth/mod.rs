@@ -674,7 +674,7 @@ impl SynthEngine {
         // Стоп посреди quantized capture: обрезать луп до записанных
         // циклов (события + длина), иначе он остаётся cycle*64 с тишиной
         // в хвосте (audit rhythm #2).
-        if self.looper_capture_quantized {
+        if self.looper_capture_quantized && self.looper_rec_cycles > 0 {
             let kept = self.looper_rec_cycles.saturating_mul(self.looper_cycle_ticks);
             self.looper.trim_after(kept);
             self.looper.set_loop_len_ticks(kept);
