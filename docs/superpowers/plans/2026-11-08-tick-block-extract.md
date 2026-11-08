@@ -96,8 +96,8 @@ Modify `src/synth/mod.rs` (вырезанный блок → вызов; mod-д�
 
 - [ ] Step 1: вырезать цельный блок машины из tick_block (от
   `let prev = self.looper_prev_step;` до конца закрытия capture, ГРАНИЦЫ
-  по фактическим скобкам — реализатор проверяет, что блок не использует
-  внешние let'ы кроме step/cur_pat; если использует — передать параметрами).
+  по фактическим скобкам — блок не использует внешние let'ы кроме step
+  (cur_pat наружный шэдоуится внутри на 2185 — review round-2).
   Вставить в новый файл:
 ```rust
 //! Looper-capture машина: quantized arm→record→close, overdub, cycle
