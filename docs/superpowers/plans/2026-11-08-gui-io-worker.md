@@ -81,13 +81,12 @@ load_sf2_keys/load_sf2_drums.
         let (tx, rx) = std::sync::mpsc::channel();
         let path = path_buf.clone();
         std::thread::spawn(move || {
-            let res = std::fs::File::open(&path)
-                .map_err(|e| format!("open: {e}"))
-                .and_then(|mut f| rustysynth::SoundFont::new(&mut f)
-                    .map_err(|e| format!("parse: {e}")))
-                .map(std::sync::Arc::new);
-            let _ = tx.send((Sf2WorkerKind::Keys, name, res));
+            let res = parse_sf2_file(&path);
+            let _ = tx.send((Sf2WorkerKind::Keys, name.clone(), res));
         });
+        // (name: String — забинден выше рядом с path; parse_sf2_file —
+        // статический helper из Files выше: File::open + SoundFont::new +
+        // Arc::new, ошибки строкой "open:/parse: {e}".)
         self.sf2_worker_rx = Some(rx);
         // review M9: во время загрузки кадры 4 Гц — ускоряем отклик индикатора
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
@@ -117,7 +116,9 @@ load_sf2_keys/load_sf2_drums.
                     }
                 }
             }
-            while sf2_loading || midi_loading { ctx.request_repaint_after(33ms); break; }
+            // Общий repaint-блок (sf2_loading || midi_loading) ЗАВЕРШАЕТСЯ
+            // в Task 2; в рамках Task 1 — только sf2_loading:
+            if self.sf2_loading { ctx.request_repaint_after(std::time::Duration::from_millis(33)); }
 ```
   (рефакторинг: post-parse тела load_sf2_keys/load_sf2_drums выделить в
   `apply_sf2_result(&mut self, kind, name, sf: Arc<SoundFont>)` — общий для
