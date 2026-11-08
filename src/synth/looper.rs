@@ -324,7 +324,7 @@ impl MidiLooper {
             self.state = LooperState::Recording;
         } else if self.state == LooperState::Playing {
             // Start overdub
-            self.current_layer += 1;
+            self.current_layer = self.current_layer.saturating_add(1);
             self.state = LooperState::Overdubbing;
         }
     }
@@ -652,7 +652,7 @@ impl MidiLooper {
                 self.playback_tick = 0;
                 self.playback_cursor = 0;
                 self.state = LooperState::Overdubbing;
-                self.current_layer += 1;
+                self.current_layer = self.current_layer.saturating_add(1);
             }
             self.update_atoms();
             return out;
@@ -765,7 +765,8 @@ impl MidiLooper {
         // лейбл Loop, Bars ≠ длина после квантованного захвата)
         let sps = (self.sample_rate as f64 * 60.0) / ((self.bpm.max(1.0) as f64) * 4.0);
         let loop_steps = if sps > 0.0 { (self.loop_length_ticks as f64 / sps).round() as u16 } else { 0 };
-        let next = (self.state.to_u8(), pos as u16, self.len, self.current_layer + 1);
+        let next =
+            (self.state.to_u8(), pos as u16, self.len, self.current_layer.saturating_add(1));
         if next.0 != self.atom_cache.0 {
             self.atoms.state.store(next.0, Ordering::Relaxed);
             self.atom_cache.0 = next.0;

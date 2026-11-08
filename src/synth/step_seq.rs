@@ -229,21 +229,33 @@ impl PitchSequencer {
         let samples_per_step = (sample_rate as f64 * 60.0)
             / (bpm as f64 * self.rate.steps_per_beat());
 
-        // Swing: delay odd steps
-        let swing_offset = if self.current_step % 2 == 1 {
-            samples_per_step * self.swing as f64 * 0.5
-        } else {
-            0.0
-        };
+        // Swing: delay odd steps — см. swing_offset внутри цикла ниже
 
         self.phase_acc += block_len as f64;
         let mut stepped = false;
 
-        if self.phase_acc >= samples_per_step + swing_offset {
+        // block_len > samples_per_step (1/32 @ высокий BPM, большие буферы):
+        // один `if` пропускал шаги — догоняем все переносы (audit rhythm #17).
+        // swing_offset пересчитывается на каждой итерации: зависит от чётности
+        // ТЕКУЩЕГО шага, иначе swing-задержанный нечётный шаг стрельнул бы рано.
+        loop {
+            let swing_offset = if self.current_step % 2 == 1 {
+                samples_per_step * self.swing as f64 * 0.5
+            } else {
+                0.0
+            };
+            if self.phase_acc < samples_per_step + swing_offset {
+                break;
+            }
+            // swing_offset >= 0 → phase_acc строго убывает, цикл конечен
             self.phase_acc -= samples_per_step + swing_offset;
             self.current_step = (self.current_step + 1) % self.length.max(1);
-            self.step_atom.store(self.current_step, Ordering::Relaxed);
             stepped = true;
+        }
+        // atoms/событие — по последнему шагу блока (один store вместо
+        // промежуточных: GUI читает только актуальное значение)
+        if stepped {
+            self.step_atom.store(self.current_step, Ordering::Relaxed);
         }
 
         let step = &self.steps[self.current_step as usize];
