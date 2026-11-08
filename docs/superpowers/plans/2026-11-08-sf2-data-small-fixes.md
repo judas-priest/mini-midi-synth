@@ -1,4 +1,4 @@
-# SF2/data мелочи батч: F2-F5 + F12-F15 Implementation Plan
+# SF2/data мелочи батч: F2+F4+F5+F12-F15 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -6,7 +6,7 @@ anchor-checked: 2026-11-08 (HEAD d351ce9; все якоря верифициро
 data-layer верификатором против 663b03d, QW3 #106 synth-файлы не трогал —
 сверить по именам при исполнении, номера могли слегка съехать)
 
-**Goal:** 6 LOW-находок data-аудита: starvation retry (F2), документация skip_samples (F4), pitch_bend_range внутрь
+**Goal:** 7 LOW-находок data-аудита: starvation retry (F2), документация skip_samples (F4), pitch_bend_range внутрь
 load_keys_soundfont (F5), лог stale param_key (F12), обновление range из
 реестра (F13), лог unknown keybinds (F14), "?"-round-trip keybinds (F15).
 
@@ -15,17 +15,13 @@ src/cc_map.rs, src/gui/keybinds.rs. F4 — только документиров
 accepted). Каждый фикс независим, порядок свободный.
 
 **Tech Stack:** Rust; юнит-тесты где тестируемо; goldens не затрагиваются
-(DSP-рендер не меняется; F5/F3 — SF2-события, не рендер-путь factory
-пресетов).
+(DSP-рендер не меняется; F5 — SF2-события, не рендер-путь factory пресетов).
 
 **Проверенные факты (663b03d → имена; номера примерные):**
 - F2: sampler.rs комментарий 210-213 «16th part stays DSP until a channel
   frees up»; единственная аллокация — set_part_mode (391), освобождение (393)
   не ре-аллоцирует ждущие части.
-- F3: sampler.rs 616 (all_notes_off) / 628 (all_sound_off) зануляют
-  part_sustain=[false;16]; маска возвращается только следующим CC64
-  (set_part_sustain 496-505); паника-сайты mod.rs:1149/1837/1987/2021
-  ре-ассерт не делают.
+
 - F4: sampler.rs 480-487 note_on → skip_samples (159-183) на ОБЩЕМ keys
   synth; clamp 0-50ms на 476; рендер-и-дроп до 50 ms для ВСЕХ звучащих SF2
   частей. Design accepted — комментировать, не менять.
@@ -48,9 +44,7 @@ accepted). Каждый фикс независим, порядок свобод
 - TC-F2: 15 частей SF2- enabled; 16-я включается (каналов нет) → остаётся
   DSP; одна выключается → 16-я получает освободившийся канал (retry) +
   program этой части.
-- TC-F3: педаль CC64=127 удерживается → panic (CC120) → part_sustain НЕ
-  всую false для каналов: sustain-состояние возвращено (held-педаль
-  пере-ассертнута); при CC64=0 паника → всё false как раньше.
+
 - TC-F4: код-ревью комментария (рендер-семантика не меняется).
 - TC-F5: load_keys_soundfont после загрузки применяет pitch_bend_range
   сам; вызовы-коллеры больше не дублируют (grep: 0 внешних до-патчей).
@@ -65,8 +59,7 @@ accepted). Каждый фикс независим, порядок свобод
 
 - F2: часть НЕ sf2-enabled без канала — не участвует в retry (гвард по
   part_sf2[i]); alloc_channel вернул None (все заняты) — остаётся DSP.
-- F3: sustain-значение неизвестно на старте (0) — паника до первого CC64
-  ведёт себя по-старому (всё false).
+
 - F4: sample_offset=0 — skip не вызывается (существующая ветка).
 - F5: pb-range равен дефолту — ре-ассерт идемпотентен.
 - F13: параметр исчез из registry → resolve fail → ветка F12 (warn + дефолт).
