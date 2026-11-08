@@ -639,3 +639,37 @@ fn sustain_part_disabled_records_immediately() {
         "парт без sustain: off при key-release (~0.0625), НЕ в pedal-up: {}", offs[0].0
     );
 }
+
+/// Слоёный сетап (регрессия на review b510437): пары 0 и 2 включены на одном
+/// диапазоне — note-on записывается в ОБА парта, active_notes[60] хранит
+/// ПОСЛЕДНИЙ (part 2). Отложенный off должен сесть в петлю с part_id
+/// держателя (2), иначе flush-guard его отбросит и нота зависнет на каждом
+/// проходе петли. Проверяем и off от заглушенного нижнего парта: mute-парт
+/// не должен перехватывать pending-запись.
+#[test]
+fn sustain_layered_holder_off_recorded() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 2, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // граница: захват
+    run(&mut e, steps(1)); // ~тик 6000
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 }); // пары 0+2, holder = 2
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pending
+    run(&mut e, steps(3)); // pedal-UP ~тик 24000
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false }); // flush
+    close_one_cycle(&mut e);
+    let disp = e.looper.display();
+    let disp = disp.lock().unwrap();
+    let offs: Vec<_> = disp.events.iter()
+        .filter(|ev| ev.note == 60 && ev.velocity == 0)
+        .collect();
+    assert_eq!(offs.len(), 1, "ровно один off в петле: {:?}", offs.iter().map(|ev| (ev.part_id, ev.position)).collect::<Vec<_>>());
+    assert_eq!(
+        offs[0].part_id, 2,
+        "off принадлежит держателю ноты (последний прозвучавший парт)"
+    );
+}

@@ -680,21 +680,27 @@ impl SynthEngine {
         if velocity == 0 && defer_ok
             && self.sustain.load(std::sync::atomic::Ordering::Relaxed)
             && (part as usize) < self.parts.len()
+            && self.parts[part as usize].enabled
+            && !self.parts[part as usize].mute
             && self.parts[part as usize].sustain_enabled
             && self.looper.is_capturing()
         {
-            // One pending entry per NOTE is enough: the NoteOff broadcast
-            // loops over every part, but the looper's active_notes guard
-            // drops any off from a part that is not holding the note, so
-            // duplicate entries would never produce events. Restrikes under
-            // the pedal land here too — the flush must write exactly one off.
-            if self.looper_sustain_pending[..self.looper_sustain_pending_len]
-                .iter()
-                .any(|&(n, _)| n == note)
-            {
-                return;
-            }
-            if self.looper_sustain_pending_len < self.looper_sustain_pending.len() {
+            // One pending entry per NOTE is enough: the looper's
+            // active_notes guard drops any off from a part that is not
+            // holding the note, so duplicate entries would never produce
+            // events. The off broadcast loops parts ASCENDING and
+            // active_notes holds the LAST part that received the note-on —
+            // so later eligible parts OVERWRITE the entry's part and the
+            // final write matches the holder (review of b510437: keeping
+            // the first eligible part dropped layered offs -> hanging
+            // notes). Eligibility mirrors the note-on path (enabled, not
+            // muted, sustain-enabled) so a dead part cannot steal the
+            // entry. Restrikes under the pedal land here too — the flush
+            // must write exactly one off.
+            let pend = &mut self.looper_sustain_pending[..self.looper_sustain_pending_len];
+            if let Some(slot) = pend.iter_mut().find(|(n, _)| *n == note) {
+                slot.1 = part;
+            } else if self.looper_sustain_pending_len < self.looper_sustain_pending.len() {
                 self.looper_sustain_pending[self.looper_sustain_pending_len] = (note, part);
                 self.looper_sustain_pending_len += 1;
             } else {
