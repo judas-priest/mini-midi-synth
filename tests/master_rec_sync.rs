@@ -5,7 +5,20 @@ use mini_midi_synth::synth::looper::LooperState;
 use mini_midi_synth::synth::{ControlEvent, MidiEvent, SynthEngine};
 use std::sync::atomic::Ordering;
 
+// Sustain-capture characterization (plan fix/looper-sustain-capture, Task 1).
+//
+// Цель: пока педаль (CC64/SetSustain) ВНИЗУ, note-off ОТКЛАДЫВАЕТСЯ — в лупер
+// он пишется в момент pedal-UP, а не отпускания клавиши. Сейчас отложенной
+// записи нет: off пишется сразу при key-release — таргет-тесты (TC1/5/6/7/8/9)
+// RED до Task 2, регрессионные замки (TC2/3/4/10) GREEN.
+//
+// Все тесты атомарные (handle_control + tick_block), как tc13/tc14.
+// Позиции в display() нормированы на ДЛИНУ закрытой петли: во время
+// безостановочного захвата тики непрерывны (mod.rs:2246), поэтому assert'ы
+// по позициям делаются после закрытия петли (Rec -> граница -> Playing).
+
 const SR: f32 = 48_000.0;
+
 const BLOCK: usize = 64;
 
 fn engine() -> SynthEngine {
@@ -330,4 +343,290 @@ fn tc12_cycle_remove_cuts_last_cycle() {
         assert!(ons.iter().any(|ev| ev.note == 60), "cycle-1 note kept");
         assert!(!ons.iter().any(|ev| ev.note == 67), "cycle-2 note removed");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Sustain capture (Task 1, TC1-TC10)
+// ---------------------------------------------------------------------------
+
+/// (position, layer_id) of every recorded event for `note`;
+/// `off = true` -> note-offs (velocity 0), `off = false` -> note-ons.
+fn note_events(e: &SynthEngine, note: u8, off: bool) -> Vec<(f32, u8)> {
+    let disp = e.looper.display();
+    let disp = disp.lock().unwrap();
+    disp.events
+        .iter()
+        .filter(|ev| {
+            ev.note == note && if off { ev.velocity == 0 } else { ev.velocity > 0 }
+        })
+        .map(|ev| (ev.position, ev.layer_id))
+        .collect()
+}
+
+/// Close a capturing loop the tc13 way: Rec now, boundary next -> Playing,
+/// петля = ровно 1 цикл (96000 тиков), позиции display() нормированы.
+fn close_one_cycle(e: &mut SynthEngine) {
+    let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть
+    run(e, steps(16)); // граница: Playing
+    assert!(matches!(e.looper.state, LooperState::Playing), "loop closed");
+    assert!(
+        (e.looper.loop_len_ticks() as i64 - 96000).abs() <= 64,
+        "loop = 1 cycle: got {}", e.looper.loop_len_ticks()
+    );
+}
+
+/// Start a quantized capture at the pattern boundary (tc13 pattern).
+fn capture_at_boundary(e: &mut SynthEngine) {
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(e, steps(13)); // граница: захват, playback_tick ~0 (±блок)
+}
+
+/// TC1 (sustain_captured): педаль внизу, клавиша отпущена под педалью —
+/// TARGET: off пишется в момент pedal-UP (~позиция 0.25), а НЕ при
+/// key-release (~0.0625). RED до Task 2 (отложенной записи нет — off
+/// записывается сразу при key-release).
+#[test]
+fn sustain_captured() {
+    let mut e = engine();
+    capture_at_boundary(&mut e);
+    run(&mut e, steps(1)); // key-release ~тик 6000 (позиция ~0.0625)
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // клавиша вверх
+    run(&mut e, steps(3)); // pedal-UP ~тик 24000 (позиция ~0.25)
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false }); // TARGET: off здесь
+    close_one_cycle(&mut e);
+    let offs = note_events(&e, 60, true);
+    assert_eq!(offs.len(), 1, "ровно один off для ноты 60");
+    assert!(
+        offs[0].0 > 0.2 && offs[0].0 < 0.31,
+        "off должен сидеть в pedal-up (~0.25), а не в key-release (~0.0625): {}",
+        offs[0].0
+    );
+    let ons = note_events(&e, 60, false);
+    assert!(!ons.is_empty() && ons[0].0 < 0.1, "on у старта захвата");
+}
+
+/// TC2 (регрессионный замок, GREEN и до Task 2): педаль отпущена ДО
+/// key-release — off пишется немедленно в момент note-off (~0.125),
+/// никаких артефактов отложенной записи.
+#[test]
+fn sustain_off_before_key_release_immediate() {
+    let mut e = engine();
+    capture_at_boundary(&mut e);
+    run(&mut e, steps(1)); // ~тик 6000
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 62, velocity: 100 });
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false }); // педаль вверх, клавиши не трогали
+    run(&mut e, steps(1)); // key-release ~тик 12000 (позиция ~0.125)
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 62 });
+    close_one_cycle(&mut e);
+    let offs = note_events(&e, 62, true);
+    assert_eq!(offs.len(), 1, "ровно один off");
+    assert!(
+        offs[0].0 > 0.08 && offs[0].0 < 0.17,
+        "off при key-release (~0.125): {}", offs[0].0
+    );
+}
+
+/// TC3 (GREEN сейчас; flush-vs-clear при стопе — дизайн Task 2): педаль
+/// внизу с ожидающим off, MasterStop посреди захвата — без паники, петля
+/// вменяемая (обрезана до записанных циклов, контент жив).
+#[test]
+fn sustain_pending_master_stop_sane() {
+    let mut e = engine();
+    capture_at_boundary(&mut e);
+    run(&mut e, steps(1));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pending в TARGET
+    let _ = e.handle_control(ControlEvent::MasterStop); // посреди захвата
+    assert!(matches!(e.looper.state, LooperState::Idle), "стоп = Idle");
+    assert!(
+        (e.looper.loop_len_ticks() as i64 - 96000).abs() <= 64,
+        "петля обрезана до 1 цикла: {}", e.looper.loop_len_ticks()
+    );
+    let ons = note_events(&e, 60, false);
+    assert!(!ons.is_empty(), "нота цикла 1 сохранена");
+}
+
+/// TC4 (регрессионный замок, GREEN): pedal up/down БЕЗ записи — set_sustain
+/// ведёт себя как раньше: без паники, лупер не тронут.
+#[test]
+fn sustain_not_recording_untouched() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 55, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 55 });
+    run(&mut e, steps(2));
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false });
+    run(&mut e, steps(2));
+    assert!(matches!(e.looper.state, LooperState::Idle));
+    assert_eq!(e.looper.len(), 0, "без захвата лупер пуст");
+}
+
+/// TC5: аккорд (3 ноты) под педалью — TARGET: все offs отложены к pedal-UP
+/// (~0.25). RED до Task 2 (сейчас все offs при key-release ~0.0625).
+#[test]
+fn sustain_chord_all_deferred() {
+    let mut e = engine();
+    capture_at_boundary(&mut e);
+    run(&mut e, steps(1)); // ~тик 6000
+    for n in [60u8, 64, 67] {
+        e.handle_event(MidiEvent::NoteOn { channel: 0, note: n, velocity: 100 });
+    }
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    for n in [60u8, 64, 67] {
+        e.handle_event(MidiEvent::NoteOff { channel: 0, note: n }); // key-release
+    }
+    run(&mut e, steps(3)); // pedal-UP ~тик 24000 (позиция ~0.25)
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false });
+    close_one_cycle(&mut e);
+    for n in [60u8, 64, 67] {
+        let offs = note_events(&e, n, true);
+        assert_eq!(offs.len(), 1, "один off для {n}");
+        assert!(
+            offs[0].0 > 0.2 && offs[0].0 < 0.31,
+            "off {n} в pedal-up (~0.25): {}", offs[0].0
+        );
+    }
+}
+
+/// TC6: рестирай той же ноты под педалью при уже отложенном off — TARGET:
+/// flush пишет off РОВНО ОДИН раз (второй отсекается guard'ом active_notes),
+/// позиция = pedal-UP. RED до Task 2 (сейчас пишутся оба off при key-release).
+#[test]
+fn sustain_restrike_duplicate_pending_one_flush() {
+    let mut e = engine();
+    capture_at_boundary(&mut e);
+    run(&mut e, steps(1)); // ~тик 6000
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pending #1
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 }); // рестирай
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pending #2 (дубль)
+    run(&mut e, steps(3)); // pedal-UP ~тик 24000
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false }); // flush: один off
+    close_one_cycle(&mut e);
+    let offs = note_events(&e, 60, true);
+    assert_eq!(offs.len(), 1, "flush пишет off один раз: {:?}", offs);
+    assert!(
+        offs[0].0 > 0.2 && offs[0].0 < 0.31,
+        "единственный off в pedal-up (~0.25): {}", offs[0].0
+    );
+}
+
+/// TC7: педаль держится ЧЕРЕЗ wrap замкнутой петли (overdub-слой): на wrap
+/// forced-off чистит active_notes, поздний flush отсекается guard'ом —
+/// TARGET: off в лупе НЕ появляется вовсе (звук слышен до wrap, обрезка —
+/// playback-side). RED до Task 2 (сейчас off пишется при key-release).
+/// Wrap с forced-off бывает только на замкнутой петле (Во время захвата тики
+/// непрерывны, mod.rs:2246), поэтому сценарий строится на overdub-слое.
+#[test]
+fn sustain_pending_across_wrap_guard_dropped() {
+    let mut e = engine();
+    capture_at_boundary(&mut e);
+    run(&mut e, steps(1));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    close_one_cycle(&mut e); // базовая петля = 1 цикл
+    // Overdub-слой: Ovr -> граница -> Overdubbing
+    let _ = e.handle_control(ControlEvent::MasterOverdub);
+    run(&mut e, steps(16));
+    assert!(matches!(e.looper.state, LooperState::Overdubbing));
+    run(&mut e, steps(1)); // ~тик 6000
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 70, velocity: 100 });
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 70 }); // pending
+    run(&mut e, steps(15)); // через wrap (тик 96000): forced-off чистит active
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false }); // поздний flush — мимо
+    let _ = e.handle_control(ControlEvent::MasterOverdub); // закрыть слой
+    run(&mut e, steps(16));
+    assert!(matches!(e.looper.state, LooperState::Playing), "слой закрыт");
+    assert_eq!(note_events(&e, 70, true).len(), 0, "off через wrap не пишется");
+    assert!(!note_events(&e, 70, false).is_empty(), "on слоя записан");
+}
+
+/// TC8: отложенная запись работает и в Overdubbing — TARGET: off слоя в
+/// pedal-UP (on + 2 шага), а не в key-release. RED до Task 2.
+#[test]
+fn sustain_overdub_deferred() {
+    let mut e = engine();
+    capture_at_boundary(&mut e);
+    run(&mut e, steps(1));
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    close_one_cycle(&mut e);
+    let _ = e.handle_control(ControlEvent::MasterOverdub);
+    run(&mut e, steps(16));
+    assert!(matches!(e.looper.state, LooperState::Overdubbing));
+    run(&mut e, steps(1)); // key-release ~тик 6000 (позиция ~0.0625)
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 70, velocity: 100 });
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 70 });
+    run(&mut e, steps(2)); // pedal-UP = key-release + 2 шага
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false });
+    let _ = e.handle_control(ControlEvent::MasterOverdub);
+    run(&mut e, steps(16));
+    assert!(matches!(e.looper.state, LooperState::Playing));
+    let offs = note_events(&e, 70, true);
+    assert_eq!(offs.len(), 1, "один off слоя");
+    // Оверdub-граница пересекается СЕРЕДИНЕ run(steps(16)): key-release
+    // реально ~0.13, pedal-up = +2 шага (~0.25). Ось — позиция ON-события.
+    let ons = note_events(&e, 70, false);
+    assert_eq!(ons.len(), 1, "один on слоя");
+    assert!(
+        offs[0].0 > ons[0].0 + 0.10 && offs[0].0 < ons[0].0 + 0.16,
+        "off слоя в pedal-up (on + 2 шага = +0.125): off {} on {}",
+        offs[0].0, ons[0].0
+    );
+}
+
+/// TC9: AllNotesOff (CC123) при захвате с ожидающим off — TARGET:
+/// set_sustain(0) сначала flush'ит отложенный off (позиция ~0.1875 = момент
+/// AllNotesOff), потом глушит. RED до Task 2 (off сейчас в key-release ~0.0625).
+#[test]
+fn sustain_all_notes_off_flushes_pending() {
+    let mut e = engine();
+    capture_at_boundary(&mut e);
+    run(&mut e, steps(1)); // ~тик 6000
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pending
+    run(&mut e, steps(2)); // AllNotesOff ~тик 18000 (позиция ~0.1875)
+    let _ = e.handle_control(ControlEvent::AllNotesOff); // set_sustain(0) -> flush
+    close_one_cycle(&mut e);
+    let offs = note_events(&e, 60, true);
+    assert_eq!(offs.len(), 1, "один off для ноты 60");
+    assert!(
+        offs[0].0 > 0.14 && offs[0].0 < 0.24,
+        "off должен попасть в момент AllNotesOff (~0.1875): {}", offs[0].0
+    );
+}
+
+/// TC10 (регрессионный замок, GREEN; лок для Task 2): парт с
+/// sustain_enabled=false — его off пишется НЕМЕДЛЕННО при key-release (~0.0625),
+/// отложение педали его не касается.
+#[test]
+fn sustain_part_disabled_records_immediately() {
+    let mut e = engine();
+    capture_at_boundary(&mut e);
+    let _ = e.handle_control(ControlEvent::SetPartSustain { part: 0, on: false });
+    run(&mut e, steps(1)); // ~тик 6000
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true }); // педаль глобально внизу
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 63, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 63 }); // key-release: сразу
+    run(&mut e, steps(3)); // pedal-UP ~тик 24000
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false });
+    close_one_cycle(&mut e);
+    let offs = note_events(&e, 63, true);
+    assert_eq!(offs.len(), 1, "один off");
+    assert!(
+        offs[0].0 > 0.03 && offs[0].0 < 0.12,
+        "парт без sustain: off при key-release (~0.0625), НЕ в pedal-up: {}", offs[0].0
+    );
 }
