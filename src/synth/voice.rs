@@ -210,6 +210,9 @@ impl Voice {
         self.src_note = src_note;
         self.active = true;
         self.age = age;
+        // Новая нота на переиспользованном голосе не должна наследовать
+        // полифоническое давление предыдущей клавиши (audit data #stale-AT).
+        self.poly_aftertouch = 0.0;
         let new_freq = midi_to_freq(note);
         self.target_freq = new_freq;
 
