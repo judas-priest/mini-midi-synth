@@ -575,6 +575,15 @@ impl MidiLooper {
         matches!(self.state, LooperState::Recording | LooperState::Overdubbing)
     }
 
+    /// Part currently holding `note` (255 = none). The holder is the last
+    /// part whose note-on was actually recorded — i.e. it passed the full
+    /// sounding path (enabled, not muted, in range, velocity window), so
+    /// the engine's defer machinery keys eligibility off this, not off
+    /// part config.
+    pub fn note_holder(&self, note: usize) -> u8 {
+        self.active_notes[note.min(127)]
+    }
+
     /// Record a MIDI event. Called from audio thread when a note event arrives.
     /// `part` is the synth part index that was active when this note was played.
     pub fn record_event(&mut self, note: u8, velocity: u8, part: u8) {

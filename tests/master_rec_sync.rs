@@ -644,8 +644,7 @@ fn sustain_part_disabled_records_immediately() {
 /// диапазоне — note-on записывается в ОБА парта, active_notes[60] хранит
 /// ПОСЛЕДНИЙ (part 2). Отложенный off должен сесть в петлю с part_id
 /// держателя (2), иначе flush-guard его отбросит и нота зависнет на каждом
-/// проходе петли. Проверяем и off от заглушенного нижнего парта: mute-парт
-/// не должен перехватывать pending-запись.
+/// проходе петли.
 #[test]
 fn sustain_layered_holder_off_recorded() {
     let mut e = engine();
@@ -671,5 +670,40 @@ fn sustain_layered_holder_off_recorded() {
     assert_eq!(
         offs[0].part_id, 2,
         "off принадлежит держателю ноты (последний прозвучавший парт)"
+    );
+}
+
+/// Сплит (регрессия на final review a11582f): part0 = 0..60, part1 = 61..127.
+/// Нота 60 звучит ТОЛЬКО в part0 (part1 вне диапазона, route_note_on не
+/// прозвучал — active_notes[60] = 0). Конфиг-гейты (enabled/sustain_enabled
+/// part1) пропускали запись part1 → overwrote → flush-guard отбрасывал off →
+/// зависшая нота. Гейт должен быть по ДЕРЖАТЕЛЮ.
+#[test]
+fn sustain_split_holder_off_recorded() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 1, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartRange { part: 0, min_note: 0, max_note: 60 });
+    let _ = e.handle_control(ControlEvent::SetPartRange { part: 1, min_note: 61, max_note: 127 });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // граница: захват
+    run(&mut e, steps(1)); // ~тик 6000
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 }); // holder = part 0
+    let _ = e.handle_control(ControlEvent::SetSustain { on: true });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pending
+    run(&mut e, steps(3)); // pedal-UP ~тик 24000
+    let _ = e.handle_control(ControlEvent::SetSustain { on: false }); // flush
+    close_one_cycle(&mut e);
+    let disp = e.looper.display();
+    let disp = disp.lock().unwrap();
+    let offs: Vec<_> = disp.events.iter()
+        .filter(|ev| ev.note == 60 && ev.velocity == 0)
+        .collect();
+    assert_eq!(offs.len(), 1, "ровно один off в петле: {:?}", offs.iter().map(|ev| (ev.part_id, ev.position)).collect::<Vec<_>>());
+    assert_eq!(
+        offs[0].part_id, 0,
+        "off принадлежит держателю ноты (единственный парт в диапазоне)"
     );
 }
