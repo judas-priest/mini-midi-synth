@@ -2283,6 +2283,7 @@ impl SynthEngine {
             aftertouch_smooth: self.aftertouch_smooth,
             cc_values: self.cc_values,
             pitch_bend_semitones: self.pitch_bend_semitones,
+            pitch_bend_norm: self.pitch_bend_norm,
             seq_bpm,
             block_len,
             sample_rate: self.sample_rate,

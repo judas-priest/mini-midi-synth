@@ -186,6 +186,9 @@ pub struct EngineModInputs {
     pub aftertouch_smooth: f32,
     pub cc_values: [f32; 4],
     pub pitch_bend_semitones: f32,
+    /// Нормированный ±1 ДО умножения на bend range (от продюсера,
+    /// `pitch_bend_norm` движка).
+    pub pitch_bend_norm: f32,
     pub seq_bpm: f32,
     pub block_len: usize,
     pub sample_rate: f32,
@@ -1049,7 +1052,10 @@ impl Part {
             alt_bipolar: self.alt_bipolar,
             alt_unipolar: self.alt_unipolar,
             release_vel: self.release_vel,
-            pitch_bend: effective_pb(self.ignore_pb, inputs.pitch_bend_semitones) / 2.0, // normalize -1..+1
+            // Нормированный ±1 ОТ ПРОДЮСЕРА (хардкод /2.0 = ±2 st давал
+            // source ±12 при range 24 → до ±288 полутонов на dest; делить
+            // semitones на текущее значение нельзя — это не range).
+            pitch_bend: effective_pb(self.ignore_pb, inputs.pitch_bend_norm),
             cc: inputs.cc_values,
             breath: self.breath,
             expression: self.expression,
