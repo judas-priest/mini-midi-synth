@@ -114,6 +114,10 @@ impl App {
                     let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                     self.parts[part].sf2_mode = !cur_sf2;
                     let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: !cur_sf2 });
+                    if !cur_sf2 {
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                            part, program: self.parts[part].sf2_program, bank: 0 });
+                    }
                     if part == 0 { self.config.sf2.layer_a_sf2 = !cur_sf2; }
                     else if part == 1 { self.config.sf2.layer_b_sf2 = !cur_sf2; }
                     self.persist_parts_state();
@@ -463,6 +467,10 @@ impl App {
                 let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                 self.parts[part].sf2_mode = sf2;
                 let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2 });
+                if sf2 {
+                    let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                        part, program: self.parts[part].sf2_program, bank: 0 });
+                }
                 if part == 0 { self.config.sf2.layer_a_sf2 = sf2; }
                 else if part == 1 { self.config.sf2.layer_b_sf2 = sf2; }
                 self.persist_parts_state();
