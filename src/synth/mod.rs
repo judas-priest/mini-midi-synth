@@ -2253,6 +2253,10 @@ impl SynthEngine {
                     self.looper.set_loop_len_ticks(kept);
                     self.looper.set_display_cycle_ticks(None);
                     self.looper_rec_cycles = 0;
+                    // REC/CLOSING-атом надо гасить ЗДЕСЬ: единственные сбросы
+                    // были в master_stop/disarm — GUI висел в «REC n тактов»/
+                    // «CLOSING» с мёртвыми +1/−1 (audit rhythm #1).
+                    self.set_master_rec_state(0, 0);
                     self.drum_engine.set_recording(false); // сетка тоже разармирована
                     self.looper.toggle_record(); // Recording/Overdubbing -> Playing
                 } else {
@@ -2276,6 +2280,10 @@ impl SynthEngine {
                 self.looper_finish_pending = false;
                 self.looper.set_display_cycle_ticks(None);
                 self.looper_rec_cycles = 0;
+                // REC/CLOSING-атом надо гасить ЗДЕСЬ: единственные сбросы
+                // были в master_stop/disarm — GUI висел в «REC n тактов»/
+                // «CLOSING» с мёртвыми +1/−1 (audit rhythm #1).
+                self.set_master_rec_state(0, 0);
                 self.drum_engine.set_recording(false);
                 self.looper.toggle_record();
             }
