@@ -383,7 +383,7 @@ fn midi_learn_rejects_cc64() {
     });
     let config = mini_midi_synth::config::Config::default();
     let mut config = config;
-    config.cc_map = Some(CcMapRaw { bindings });
+    config.cc_map = Some(CcMapRaw { bindings, cleared: Vec::new() });
     let map = CcMap::from_config(&config);
     assert!(map.bindings[64].is_none(), "CC64 must never be a parameter binding");
 }

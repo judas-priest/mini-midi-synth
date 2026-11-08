@@ -181,6 +181,14 @@ impl CcMap {
                 }
             }
         }
+        // Снятые пользователем дефолтные бинды: default_map их вернул выше —
+        // гасим явно (без этого «Clear MIDI» воскресал дефолты при рестарте).
+        for cc in &raw.cleared {
+            let cc = *cc as usize;
+            if cc < 128 && cc != 64 {
+                map.bindings[cc] = None;
+            }
+        }
         map
     }
 
@@ -226,6 +234,11 @@ fn default_scope() -> ParamScope { ParamScope::Patch }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CcMapRaw {
     pub bindings: std::collections::BTreeMap<u8, CcBindingRaw>,
+    /// CCs, unbound пользователем относительно default_map (снятые дефолтные
+    /// бинды переживают рестарт — audit data #F11). serde default = [] (старые
+    /// конфиги без поля).
+    #[serde(default)]
+    pub cleared: Vec<u8>,
 }
 
 impl CcMapRaw {
@@ -243,6 +256,52 @@ impl CcMapRaw {
                 });
             }
         }
-        Self { bindings }
+        let cleared = CcMap::default_map()
+            .bindings
+            .iter()
+            .enumerate()
+            .filter(|(i, slot)| slot.is_some() && map.bindings[*i].is_none())
+            .map(|(i, _)| i as u8)
+            .collect();
+        Self { bindings, cleared }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleared_default_binding_survives_roundtrip() {
+        let mut live = CcMap::default_map();
+        live.bindings[55] = None; // «Clear» дефолтного CC55
+        let raw = CcMapRaw::from_cc_map(&live);
+        assert!(raw.cleared.contains(&55));
+        // round-trip через serde (как config.json)
+        let json = serde_json::to_string(&raw).unwrap();
+        let back: CcMapRaw = serde_json::from_str(&json).unwrap();
+        let config = crate::config::Config { cc_map: Some(back), ..Default::default() };
+        let restored = CcMap::from_config(&config);
+        assert!(restored.bindings[55].is_none(), "cleared binding resurrected");
+        assert!(restored.bindings[48].is_some(), "untouched default binding lost");
+    }
+
+    #[test]
+    fn legacy_config_without_cleared_field_loads() {
+        // Старые конфиги: поле cleared отсутствует — serde default = [].
+        let json = r#"{"bindings": {}}"#;
+        let raw: CcMapRaw = serde_json::from_str(json).unwrap();
+        assert!(raw.cleared.is_empty());
+        let config = crate::config::Config { cc_map: Some(raw), ..Default::default() };
+        let restored = CcMap::from_config(&config);
+        assert!(restored.bindings[48].is_some(), "defaults must survive legacy config");
+    }
+
+    #[test]
+    fn cleared_never_touches_cc64() {
+        let mut live = CcMap::default_map();
+        live.bindings[64] = None; // педаль и так не забиндена, но defensive
+        let raw = CcMapRaw::from_cc_map(&live);
+        assert!(!raw.cleared.contains(&64), "CC64 must never be recorded as cleared");
     }
 }
