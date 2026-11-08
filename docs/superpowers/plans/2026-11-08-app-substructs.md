@@ -5,7 +5,7 @@
 anchor-checked: 2026-11-08 (re-checked на 603ee87: App struct gui/mod.rs:296-579,
 литерал App::new 592-791; механика = compiler-driven move)
 
-**Goal:** App struct (≈180 полей, god-struct) разбивается на 8 подсистем-сабструктов;
+**Goal:** App struct (≈180 полей, god-struct) разбивается на 12 подсистем-сабструктов;
 доступ `self.x` → `self.group.x`; behavior-preserving, чистый mechanical move.
 
 **Architecture:** все substruct-ы в ОДНОМ файле `src/gui/app_structs.rs`
@@ -20,11 +20,10 @@ substruct-полей (util-файлы gui обращаются напрямую)
 все behavior-preserving; gui pure-fn тесты (mod.rs:2635 и др.) остаются
 зелёными (трогают только задетые поля — compiler укажет).
 
-**Проверенные факты (bbfae59):**
-- App struct: src/gui/mod.rs ~440-830 (≈180 полей; точный список — реализатор
-  строит инвентарь Task 0-шагом и прикладывает к отчёту группы).
-- Литерал App::new: ~640-830 (все поля инициализируются литералом — E0063
-  гарант полноты переноса).
+**Проверенные факты (603ee87):**
+- App struct: src/gui/mod.rs:296-579 (≈170-180 полей; точный список —
+  инвентарь Task 0).
+- Литерал App::new: 592-791 (все поля литералом — E0063 гарант полноты).
 - Группировка-рубрика (12 групп — расширено по review #3: иначе misc = 70
   полей, не-подсистема):
   transport (play/rec/bpm/metro/undo/redo), drum_seq (паттерны/chain/steps),
@@ -90,10 +89,9 @@ drum_seq → looper → core_state+misc)
 
 Каждый таск (шаблон, X = группа):
 
-**Files:** Create `src/gui/<group>_ui.rs` (или держать все substruct в
-`src/gui/app_structs.rs` — единый файл предпочтительнее для 8 маленьких
-структур: РЕШЕНИЕ — один файл `src/gui/app_structs.rs`); Modify
-`src/gui/mod.rs` (struct App минус поля; литерал; sites).
+**Files:** Create `src/gui/app_structs.rs` (ОДИН файл для всех substruct —
+решение фикс); Modify `src/gui/mod.rs` (struct App минус поля; литерал;
+sites).
 
 - [ ] Step 1: `src/gui/app_structs.rs`: struct XUi { поля verbatim с теми же
   vis }; `mod app_structs;` + `pub use` в gui/mod.rs.
