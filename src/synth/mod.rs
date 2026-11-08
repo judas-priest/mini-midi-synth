@@ -1130,7 +1130,7 @@ impl SynthEngine {
                     }
                 }
             }
-            MidiEvent::ControlChange { cc, value, .. } => {
+            MidiEvent::ControlChange { cc, value, channel, .. } => {
                 // Channel mode messages. 120 = All Sound Off, 123 = All Notes
                 // Off. Hardware sends these from the panic button and when the
                 // transport stops, so they take priority over any CC mapping.
@@ -1159,6 +1159,12 @@ impl SynthEngine {
                     self.arpeggiator.clear();
                     return;
                 }
+                // Drum-канал (9 = GM ch10): CC на нём не должен управлять
+                // синт-партами (breath/expression/sustain/CC1-4), как
+                // Aftertouch/PolyAT выше (audit mod-matrix #CC-channel).
+                // Принятый side-effect: channel-9 CC исчезают из CcReceived
+                // GUI-фидбека — осознанно (CC-learn на drum-канале не фича).
+                if channel == 9 { return; }
                 // Check assignable mod sources (CC1..CC4)
                 for i in 0..4 {
                     if cc == self.cc_numbers[i] {
