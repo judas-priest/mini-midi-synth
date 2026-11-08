@@ -45,8 +45,8 @@ params_matrix.rs — behavior-preserving, goldens не задеты (GUI-рен�
 **Проверенные факты (603ee87):**
 - Свободные хелперы 24-249: filter_vis_category, compute_filter_response,
   freq_to_x, db_to_y, draw_filter_response (82), env_shape_combo (137),
-  draw_lfo_trigger_mode (162) + метод draw_adsr_curve (190) — переезжают в
-  файлы соответствующих секций.
+  draw_lfo_trigger_mode (162) + метод draw_adsr_curve (190-245) — переезжают
+  в файлы соответствующих секций.
 - draw_params_editable_for: 251+; 9 Frame-секций (концы-маркеры выше);
   хвост 1645-1648: `if changed { parts[part].params_dirty = true;
   send_edited_params(part); }`; undo-пуши inline внутри секций
@@ -108,7 +108,9 @@ params_matrix.rs — behavior-preserving, goldens не задеты (GUI-рен�
 `params_lfo.rs`, `params_matrix.rs`; Modify `src/gui/params.rs`,
 `src/gui/mod.rs` (mod-декларации).
 
-- [ ] Step 1: перенос по владельцу: osc-секции + osc-хелперы → params_osc.rs;
+- [ ] Step 1: перенос по владельцу (pin `params_sections_pin` обновить:
+  пути источников = новые params_*.rs, семантика пина НЕ меняется —
+  CLAUDE.md #8): osc-секции + osc-хелперы → params_osc.rs;
   filter (draw_filter_response + compute/freq/db/db_y + filter-секции) →
   params_filter.rs; env (draw_adsr_curve — impl App метод, env_shape_combo +
   env-секции) → params_env.rs; lfo (draw_lfo_trigger_mode + LFO/Scene) →
