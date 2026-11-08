@@ -671,6 +671,14 @@ impl SynthEngine {
     /// drain on the next looper tick, как и в ручном Stop).
     pub fn master_stop(&mut self) {
         self.looper_arm_pending = false;
+        // Стоп посреди quantized capture: обрезать луп до записанных
+        // циклов (события + длина), иначе он остаётся cycle*64 с тишиной
+        // в хвосте (audit rhythm #2).
+        if self.looper_capture_quantized {
+            let kept = self.looper_rec_cycles.saturating_mul(self.looper_cycle_ticks);
+            self.looper.trim_after(kept);
+            self.looper.set_loop_len_ticks(kept);
+        }
         self.looper_capture_quantized = false;
         self.looper_overdub_pending = false;
         self.looper_overdub_active = false;
