@@ -92,9 +92,15 @@ ControlEvent::DrumPatternsSyncReturn хендлер); `src/synth/events.rs`
   коробок — DrumLoadKit «boxes travel back», mod.rs:1746):
   - поля: `undo_buf`/`redo_buf`/`sync_buf`: `Box<[DrumPattern; MAX_PATTERNS]>`
     (создаются ТОЛЬКО в конструкторе, не-RT) + `undo_used`/`redo_used: bool`;
-  - снапшот-сайты 865/896: `*self.undo_buf = self.patterns; self.undo_used = true;`
-    (swap-копия массива, без Box::new); cancel_redo 876-879: `redo_used = false`
-    (Box не дропается — это и был RT-free);
+  - ВСЕ ЧЕТЫРЕ Box::new-сайта (review round-2 M1): 865 (redo→undo_snapshot),
+    896 (clear_pattern), 910 (undo→redo_snapshot — план-версия пропустила!),
+    922 (save_snapshot) → замены на `*buf = ...; used = true` формы:
+    snapshot-сайты 865/896/922 → undo_buf/redo_buf по смыслу текущего кода;
+    undo() 907-917: swap patterns↔undo_buf + ЗАПОЛНИТЬ redo_buf
+    (`*redo_buf = старые patterns до swap` — прочитать текущее тело и
+    сохранить семантику redo-проталкивания);
+  - cancel_redo 876-879: `redo_used = false` (Box не дропается — это и был
+    RT-free);
   - undo()/redo(): `std::mem::swap(&mut self.patterns, &mut *self.undo_buf);`
     затем GUI-синк из ПУЛА: `sync_buf_pool: [Option<Box<[DrumPattern;8]>>; 2]`
     (заполняется в конструкторе); если есть свободный box: `*box = self.patterns;`
@@ -103,6 +109,12 @@ ControlEvent::DrumPatternsSyncReturn хендлер); `src/synth/events.rs`
   - НОВЫЙ ControlEvent::DrumPatternsSyncReturn(Box<[DrumPattern;8]>):
     GUI, прочитав паттерны, возвращает коробку (`ctrl_tx.push`) → engine-хендлер
     кладёт её в свободный слот sync_buf_pool (store на RT без аллокаций).
+    GUI-СТОРОНА КОНСЬЮМЕР: src/gui/settings.rs:421
+    (`self.drum_patterns = *patterns;`) — НЕ mod.rs (950-953/1731-1742 — это
+    RT-продюсеры); push-back добавить именно там (review round-2 M2;
+    DrumPattern Copy — copy-out + push back).
+    Enum fanout: новый variant дамбит exhaustive match'и за пределами
+    mod.rs:1327 (filter match ~1228, headless.rs) — компилятор укажет.
   Реализатор сверяет фактические сигнатуры undo/redo (862-917) и ParamFeedback
   путь (950-953, 1731-1742).
 - [ ] Step 3: gates: clippy; cargo test (существующие drum undo/redo тесты
@@ -128,8 +140,11 @@ init_twist ~2860-2871 — сайт ленивой инициализации).
   voice уже есть; НО при смене osc_type reclaim не трогает twist_voice —
   инвариант сохраняется).
 - [ ] Step 3: un-ignore пина twist_note_on_allocates; добавить `(29.0, "Twist")`
-  в FAMILIES (таблица станет 28 записей — 27.0 Wavetable намеренно исключён,
-  покрыт QW-планом, rt_safety.rs:238-239 — review M7).
+  в FAMILIES (21 → 22 записей сейчас; полный набор 29 минус 27.0 Wavetable
+  (намеренно исключён, покрыт QW-планом) = 28 после закрытия Task 3 —
+  review round-2 LOW). ПАМЯТЬ (review round-2): eager creation = plaits Voice
+  на КАЖДЫЙ oscillator (все голоса/парты) вместо одного ленивого — осознанный
+  cost, зафиксировать комментарием.
 - [ ] Step 4: gates: clippy; cargo test; rt_safety; golden_fx стабилен
   (Twist рендер не меняется: та же voice, тот же init).
 - [ ] Step 5: коммит `fix: Twist voice allocated at oscillator creation — lazy init allocates on first note (audit rhythm debt)`.
@@ -137,7 +152,9 @@ init_twist ~2860-2871 — сайт ленивой инициализации).
 ### Task 3: pool swap-not-clobber (7 семейств, TDD по пинам)
 
 **Files:** Modify `src/synth/oscillator.rs` (пулы 450-453; take_buf 467-472;
-return_buf 475-477; reclaim_buffers 490-513); пины 304-345 по одному.
+return_buf 475-477; reclaim_buffers 490-526; init_banded_wg 906-911;
+init_bass_guitar 1444-1445 — raw mem::take → take_buf), `src/synth/bass.rs:168`
+(BassModel::return_buffers bypass); пины rt_safety.rs:304-345 по одному.
 
 - [ ] Step 1: инвариант и механизм:
   - поле `pool_overflow: [Option<Vec<f32>>; 4]` (init None в new());
