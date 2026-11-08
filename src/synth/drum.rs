@@ -754,6 +754,10 @@ pub struct StepSequencer {
     /// Shared atom with the live pattern: the GUI mirror reads ONLY this, so
     /// grid/console/LED stay truthful after chain switches.
     pattern_atom: Arc<AtomicU8>,
+    /// True on the sample where the phase actually stepped (wrap branch of
+    /// tick). Length-1 patterns never change current_step, so the metronome
+    /// gate uses this instead of a step comparison (audit rhythm #9).
+    pub step_wrapped: bool,
 }
 
 impl StepSequencer {
@@ -774,6 +778,7 @@ impl StepSequencer {
             pending_pattern: NO_PATTERN,
             chain_mask: 0,
             pattern_atom: Arc::new(AtomicU8::new(0)),
+            step_wrapped: false,
         }
     }
 
@@ -798,6 +803,7 @@ impl StepSequencer {
         if pattern as usize >= self.patterns.len() { return; }
         if !self.playing || self.patterns[self.current_pattern as usize].length <= 1 {
             self.current_pattern = pattern;
+            self.pending_pattern = NO_PATTERN; // немедленный выбор перебивает очередь (audit rhythm #7)
             self.sync_pattern_atom();
         } else {
             self.pending_pattern = pattern;
@@ -823,6 +829,7 @@ impl StepSequencer {
     pub fn set_pattern_immediate(&mut self, pattern: u8) {
         if pattern as usize >= self.patterns.len() { return; }
         self.current_pattern = pattern;
+        self.pending_pattern = NO_PATTERN; // немедленный выбор перебивает очередь (audit rhythm #7)
         self.sync_pattern_atom();
     }
 
@@ -921,6 +928,7 @@ impl StepSequencer {
     #[inline]
     fn tick(&mut self, sample_rate: f32) -> [(u8, u8); NUM_DRUM_SLOTS] {
         let mut triggers = [(0u8, 0u8); NUM_DRUM_SLOTS];
+        self.step_wrapped = false;
         if !self.playing { return triggers; }
 
         let steps_per_beat = 4.0_f64; // 16th notes
@@ -936,6 +944,7 @@ impl StepSequencer {
         self.phase_acc += 1.0;
         if self.phase_acc >= samples_per_step + swing_offset {
             self.phase_acc -= samples_per_step + swing_offset;
+            self.step_wrapped = true;
             let pattern = &self.patterns[self.current_pattern as usize];
             let step = self.current_step as usize;
             if step < pattern.length as usize {
@@ -1218,7 +1227,7 @@ impl DrumEngine {
         let i = (note - KIT_NOTE_LO) as usize;
         if i >= self.choke_groups.len() { return 0; }
         let g = self.choke_groups[i] as usize;
-        if g == 0 { return 0; }
+        if g == 0 || g > NUM_CHOKE_GROUPS { return 0; } // latent OOB panic на RT (audit rhythm #8)
         let prev = self.group_last_note[g - 1];
         self.group_last_note[g - 1] = note;
         prev
@@ -1317,9 +1326,12 @@ impl DrumEngine {
         // Metronome: the sequencer has already advanced past the step that
         // just fired, so `prev_step` is the step that sounded. Fire a click on
         // every beat boundary (step % 4 == 0), accent on step 0.
-        if self.metronome && self.sequencer.playing
-            && self.sequencer.current_step != prev_step
-        {
+        let beat_boundary = if self.sequencer.patterns[self.sequencer.current_pattern as usize].length <= 1 {
+            self.sequencer.step_wrapped // length-1: current_step не меняется, смотрим сам перенос фазы
+        } else {
+            self.sequencer.current_step != prev_step
+        };
+        if self.metronome && self.sequencer.playing && beat_boundary {
             let fired = prev_step;
             if fired.is_multiple_of(4) {
                 let accent = fired == 0;
