@@ -45,8 +45,10 @@ pool-фикса (пулы влияют на KS/CP/BWG/Brass/Sax/Bowed/BassGuitar
 - oscillator.rs:432: `twist_voice: Option<TwistVoice>` (НЕ Box — value),
   TwistVoice::new Box-аллоцирует mi-plaits Voice внутри (пин 346: сайт
   oscillator.rs:2752, struct :64).
-- drum.rs:742 `undo_snapshot: Option<Box<[DrumPattern; MAX_PATTERNS]>>`;
-  Box::new на 865 (redo) и 896 (snapshot-push); undo 907 возвращает Box.
+- drum.rs:742/746 `undo_snapshot`/`redo_snapshot: Option<Box<[DrumPattern;
+  MAX_PATTERNS]>>`; Box::new на ЧЕТЫРЁХ сайтах: 865 (redo→undo_snapshot),
+  896 (clear_pattern), 910 (undo→redo_snapshot), 922 (save_snapshot);
+  undo 907 возвращает Box (GUI-синк).
 
 ---
 
@@ -140,11 +142,11 @@ init_twist ~2860-2871 — сайт ленивой инициализации).
   voice уже есть; НО при смене osc_type reclaim не трогает twist_voice —
   инвариант сохраняется).
 - [ ] Step 3: un-ignore пина twist_note_on_allocates; добавить `(29.0, "Twist")`
-  в FAMILIES (21 → 22 записей сейчас; полный набор 29 минус 27.0 Wavetable
-  (намеренно исключён, покрыт QW-планом) = 28 после закрытия Task 3 —
-  review round-2 LOW). ПАМЯТЬ (review round-2): eager creation = plaits Voice
-  на КАЖДЫЙ oscillator (все голоса/парты) вместо одного ленивого — осознанный
-  cost, зафиксировать комментарием.
+  в FAMILIES (21 → 22 записей сейчас; финал после Task 3 = 29 — 30 вариантов
+  OscType минус 27.0 Wavetable, намеренно исключён (QW-план); «28» в ранних
+  ревью было двойным вычитанием). ПАМЯТЬ (review round-2): eager creation =
+  plaits Voice на КАЖДЫЙ oscillator (все голоса/парты) вместо одного ленивого
+  — осознанный cost, зафиксировать комментарием.
 - [ ] Step 4: gates: clippy; cargo test; rt_safety; golden_fx стабилен
   (Twist рендер не меняется: та же voice, тот же init).
 - [ ] Step 5: коммит `fix: Twist voice allocated at oscillator creation — lazy init allocates on first note (audit rhythm debt)`.
@@ -156,21 +158,42 @@ return_buf 475-477; reclaim_buffers 490-526; init_banded_wg 906-911;
 init_bass_guitar 1444-1445 — raw mem::take → take_buf), `src/synth/bass.rs:168`
 (BassModel::return_buffers bypass); пины rt_safety.rs:304-345 по одному.
 
-- [ ] Step 1: инвариант и механизм:
+- [ ] Step 1: механизм (review round-2 HIGH-1 — правило cap-0 ОБЯЗАТЕЛЬНО:
+  `Oscillator::reset` (528-531) ставит в состояние пустые `Vec::new()`
+  плейсхолдеры (540, 555-556, 577 BandedWG `buffers: Default::default()`,
+  604-606, 615, 673; 687 — Wavetable Arc, в пул не возвращается: reclaim
+  521-523 намеренно Drop — review LOW-2); следующий init_* (reclaim
+  705/739/904/1442/1522/1789/2271) возвращает cap-0 пустышку в слот, CLOBBERЯ
+  свежий 7000-cap буфер (free 28KB!) → take забирает cap-0 → resize = ALLOC):
   - поле `pool_overflow: [Option<Vec<f32>>; 4]` (init None в new());
-  - `take_buf(pool, overflow, n)`: источник = main если непусто, иначе
-    overflow если непусто, иначе pool сам (capacity 0); после take:
-    `if buf.capacity() >= n { resize+fill }` — существующий resize УЖЕ не
-    ре-аллоцирует при capacity≥n (Vec::resize не трогает heap при len<cap);
-    пустой слот → resize = ALLOC (это и ловят пины на «второй» буфер);
-  - `return_buf(pool, overflow, buf)`: main пуст → main=buf; main занят →
-    сравнить capacity: больший остаётся в main, меньший идёт в overflow;
-    overflow занят → СВЕРИТЬ capacity: если меньший из трёх —
-    `debug_assert!(false, "pool overflow: 3rd buffer for slot")` + metrics-счётчик
-    + вытесненный с меньшей capacity... СТОП-правило: если этот кейс
-    реально воспроизводится пином — НЕ изобретать самовольно, ДОЛОЖИТЬ
-    (юзер-решение по trash-расширению). Инвариант ≤2/слот ожидаем
-    (reclaim/take баланс 1:1 на семейство).
+  - ПУСТОТА СЛОТА = `capacity() == 0` (НЕ len: после mem::take хороший слот
+    len-0 но cap-28k);
+  - `return_buf(pool, overflow, buf)`:
+    * `if buf.capacity() == 0 { return; }` — дроп cap-0 Vec НЕ трогает heap,
+      легален на RT; это убивает clobber пустышками;
+    * `if pool.capacity() == 0 { *pool = buf; return; }`;
+    * если `pool.capacity() < buf.capacity()` → `std::mem::swap(pool, &mut buf)`
+      (больший остаётся в main, buf теперь старое содержимое слота);
+    * buf (cap>0) → overflow: None → `*overflow = Some(buf)`; Some(existing) →
+      оставить больший из (overflow, buf) в overflow; вытесненный при
+      cap==0 — discard (легально); при cap>0 — `debug_assert!` +
+      metrics-счётчик + СТОП-доклад (инвариант ≤2 live/слот с cap-0 discard
+      должен держаться: reclaim/take баланс 1:1 на семейство; ломается —
+      юзер-решение по Trash-расширению). ОГОВОРКА release (review LOW-1):
+      debug_assert вырезается в release — если ветка когда-то сработает,
+      вытесненный cap>0 Vec тихо дропнется = free на RT; инвариант считаем
+      доказанным, счётчик metrics — детектор, коммент в коде обязателен.
+  - `take_buf(pool, overflow, n)`: источник по CAPACITY (не len!): main
+    cap≥n → иначе overflow cap≥n → иначе main как есть; resize+fill как
+    сейчас (при cap≥n resize не ходит в heap; оба слота cap-0 = баг
+    инварианта — new() рождает пулы with_capacity(MAX_DELAY), debug_assert);
+  - сигнатуры меняются — ВСЕ call-sites: reclaim_buffers (491-526) +
+    take-сайты 711/816/817/1545/1546/1825/2563;
+  - ТРИ BYPASS-сайта (review round-2 HIGH-2): `init_banded_wg` 906-911 и
+    `init_bass_guitar` 1444-1445 используют RAW `std::mem::take(&mut
+    self.pool_*)` — переписать на новый take_buf; `src/synth/bass.rs:168`
+    `BassModel::return_buffers` пишет `*pool_a = self.buffer` НАПРЯМУЮ —
+    routed через новую логику (bass.rs в Files выше).
 - [ ] Step 2: цикл на КАЖДОЕ семейство (порядок: 6.0 KS → 15.0 Brass →
   23.0 Sax → 13.0 BassGuitar → 14.0 BowedString → 9.0 CommutedPiano →
   10.0 BandedWG — от простого к многобуферному):
@@ -181,7 +204,7 @@ init_bass_guitar 1444-1445 — raw mem::take → take_buf), `src/synth/bass.rs:1
      STOP (буферное содержимое утекло: искать fill-логику);
   c) коммит на семейство: `fix: pool <Family> note-on allocation-free (audit S1)`.
 - [ ] Step 3: полный rt_safety: 0 ignored осталось из 7 пуловых (twist уже в
-  Task 2); FAMILIES полный (29 семейств).
+  Task 2); FAMILIES финал = 29 записей (30 вариантов − 27.0 Wavetable).
 - [ ] Step 4: gates: clippy / cargo test / rt_safety / deny / goldens +
   `git status tests/golden` пустой.
 - [ ] Step 5: коммит общий (если останутся незакрытые — список в отчёт
