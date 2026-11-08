@@ -569,6 +569,12 @@ impl MidiLooper {
         !self.part_mutes.get(part_id as usize).copied().unwrap_or(false)
     }
 
+    /// Capture gate for the engine's sustain-defer machinery: true while
+    /// note events are being recorded (Recording/Overdubbing).
+    pub fn is_capturing(&self) -> bool {
+        matches!(self.state, LooperState::Recording | LooperState::Overdubbing)
+    }
+
     /// Record a MIDI event. Called from audio thread when a note event arrives.
     /// `part` is the synth part index that was active when this note was played.
     pub fn record_event(&mut self, note: u8, velocity: u8, part: u8) {

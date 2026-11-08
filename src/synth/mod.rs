@@ -276,6 +276,13 @@ pub struct SynthEngine {
     /// default), false = only the active part (LooperSetSource; live
     /// transport state, not persisted).
     looper_source_mix: bool,
+    /// Sustain capture (user decision 2026-11-08): note-offs received while
+    /// the pedal is down during capture are parked here until pedal-up, so
+    /// loop gates match the audible length. Fixed array — RT thread, no
+    /// allocs; overflow falls back to immediate recording (see the defer
+    /// branch in record_for_looper). Entry = (note, part).
+    looper_sustain_pending: [(u8, u8); 16],
+    looper_sustain_pending_len: usize,
     /// Sustain pedal state (CC64 from pedal/fader or GUI toggle), shared with GUI
     sustain: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Static pedal-up release duration (None = patch release)
@@ -371,6 +378,8 @@ impl SynthEngine {
             master_rec_cycle: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             active_part: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
             looper_source_mix: true,
+            looper_sustain_pending: [(0, 0); 16],
+            looper_sustain_pending_len: 0,
             sustain: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             sustain_release: None,
             scope_buf: std::sync::Arc::new(ScopeBuffer::new()),
@@ -476,6 +485,13 @@ impl SynthEngine {
             if !on {
                 part.release_pedal_held(sr);
             }
+        }
+        // Sustain capture: pedal-up flushes the deferred note-offs. The
+        // pedal atom was already stored false above, so this is where the
+        // deferred offs land (gate = audible length, user decision
+        // 2026-11-08).
+        if !on {
+            self.flush_looper_sustain_pending();
         }
     }
 
@@ -622,7 +638,7 @@ impl SynthEngine {
             // loop) — used to be a single event tagged with the active part.
             for i in 0..self.parts.len() {
                 if !self.parts[i].enabled { continue; }
-                self.record_for_looper(off, 0, i as u8);
+                self.record_for_looper(off, 0, i as u8, false);
             }
         }
     }
@@ -648,14 +664,63 @@ impl SynthEngine {
     /// sounding part is recorded — the note dispatch loop tags each event
     /// with its own part id; in Part source only the active part is
     /// recorded. RT-safe: one atomic load + branch.
+    ///
+    /// Sustain capture: pedal down → note-off is DEFERRED to pedal-up
+    /// (gate = audible length; user decision 2026-11-08). `defer_ok` is
+    /// true only for user MIDI offs — ARP-offs are rhythmic and are never
+    /// deferred. Flush paths pass false to force-write past the defer
+    /// branch (the pedal may still be down at a capture exit).
     #[inline]
-    fn record_for_looper(&mut self, note: u8, velocity: u8, part: u8) {
+    fn record_for_looper(&mut self, note: u8, velocity: u8, part: u8, defer_ok: bool) {
         if !self.looper_source_mix
             && part != self.active_part.load(std::sync::atomic::Ordering::Relaxed)
         {
             return;
         }
+        if velocity == 0 && defer_ok
+            && self.sustain.load(std::sync::atomic::Ordering::Relaxed)
+            && (part as usize) < self.parts.len()
+            && self.parts[part as usize].sustain_enabled
+            && self.looper.is_capturing()
+        {
+            // One pending entry per NOTE is enough: the NoteOff broadcast
+            // loops over every part, but the looper's active_notes guard
+            // drops any off from a part that is not holding the note, so
+            // duplicate entries would never produce events. Restrikes under
+            // the pedal land here too — the flush must write exactly one off.
+            if self.looper_sustain_pending[..self.looper_sustain_pending_len]
+                .iter()
+                .any(|&(n, _)| n == note)
+            {
+                return;
+            }
+            if self.looper_sustain_pending_len < self.looper_sustain_pending.len() {
+                self.looper_sustain_pending[self.looper_sustain_pending_len] = (note, part);
+                self.looper_sustain_pending_len += 1;
+            } else {
+                // Pending full: old behavior (write the off immediately),
+                // counted so the loss stays visible.
+                crate::metrics::METRICS.note_looper_pending_overflow();
+                self.looper.record_event(note, velocity, part);
+            }
+            return;
+        }
         self.looper.record_event(note, velocity, part);
+    }
+
+    /// Writes all deferred (sustain-held) note-offs to the looper and clears
+    /// the pending list. Called from set_sustain on pedal-up and before every
+    /// capture exit. Entries are force-written (`defer_ok = false`): during a
+    /// capture exit the pedal may still be DOWN, so the defer branch must not
+    /// re-catch them. The looper's active_notes guard still applies on the
+    /// flush path (a pending off whose note was force-cleared by a wrap is
+    /// dropped, not written). Flush on empty pending = no-op.
+    fn flush_looper_sustain_pending(&mut self) {
+        for i in 0..self.looper_sustain_pending_len {
+            let (note, part) = self.looper_sustain_pending[i];
+            self.record_for_looper(note, 0, part, false);
+        }
+        self.looper_sustain_pending_len = 0;
     }
 
     /// Master transport (#32): start both transports (drums + looper).
@@ -670,6 +735,9 @@ impl SynthEngine {
     /// first, then stops (stop() flags needs_note_offs; actual note-offs
     /// drain on the next looper tick, как и в ручном Stop).
     pub fn master_stop(&mut self) {
+        // Sustain capture: any pending note-offs must land in the loop before
+        // trim/toggle decide its final content (exit #1 of the capture exits).
+        self.flush_looper_sustain_pending();
         self.looper_arm_pending = false;
         // Стоп посреди quantized capture: обрезать луп до записанных
         // циклов (события + длина), иначе он остаётся cycle*64 с тишиной
@@ -697,6 +765,7 @@ impl SynthEngine {
             crate::synth::looper::LooperState::Playing => self.looper.toggle_play(),
             _ => {}
         }
+        debug_assert_eq!(self.looper_sustain_pending_len, 0, "master_stop: pending must be flushed");
     }
 
     /// Master transport: toggle play — if anything plays, stop everything;
@@ -822,7 +891,14 @@ impl SynthEngine {
                 | crate::synth::looper::LooperState::Idle
                 | crate::synth::looper::LooperState::Playing
         ) {
+            // Sustain capture exit #4: pending offs land in the loop before
+            // the close (flush is a no-op when empty).
+            self.flush_looper_sustain_pending();
             self.looper.toggle_record();
+            debug_assert_eq!(
+                self.looper_sustain_pending_len, 0,
+                "free close: pending must be flushed"
+            );
         }
     }
 
@@ -1014,7 +1090,8 @@ impl SynthEngine {
                         self.route_note_off(i, note);
                         // Whole-performance recording: tag with the part that
                         // receives the off (looper replay routes per part id).
-                        self.record_for_looper(note, 0, i as u8);
+                        // defer_ok: user MIDI off — subject to sustain capture.
+                        self.record_for_looper(note, 0, i as u8, true);
                     }
                 } else {
                     for i in 0..self.parts.len() {
@@ -1028,7 +1105,7 @@ impl SynthEngine {
                             // looper.record_event; split overlap активных нот
                             // двух частей — оверрайд одиночного слота
                             // active_notes остаётся accepted.
-                            self.record_for_looper(note, velocity, i as u8);
+                            self.record_for_looper(note, velocity, i as u8, false);
                         }
                     }
                 }
@@ -1049,7 +1126,8 @@ impl SynthEngine {
                         self.route_note_off(i, note);
                         // Whole-performance recording: tag with the part that
                         // receives the off (looper replay routes per part id).
-                        self.record_for_looper(note, 0, i as u8);
+                        // defer_ok: user MIDI off — subject to sustain capture.
+                        self.record_for_looper(note, 0, i as u8, true);
                     }
                 }
             }
@@ -1781,8 +1859,24 @@ impl SynthEngine {
     fn hc_looper_transport(&mut self, event: ControlEvent) -> Option<ControlEvent> {
         match event {
             ControlEvent::LooperRecord => { self.looper.start_record(); }
-            ControlEvent::LooperStopRecord => { self.looper.stop_record(); }
-            ControlEvent::LooperTogglePlay => { self.looper.toggle_play(); }
+            ControlEvent::LooperStopRecord => {
+                // Sustain capture exits #6/#7: pending offs land in the loop
+                // before the capture ends (no-op when pending is empty).
+                self.flush_looper_sustain_pending();
+                self.looper.stop_record();
+                debug_assert_eq!(
+                    self.looper_sustain_pending_len, 0,
+                    "LooperStopRecord: pending must be flushed"
+                );
+            }
+            ControlEvent::LooperTogglePlay => {
+                self.flush_looper_sustain_pending();
+                self.looper.toggle_play();
+                debug_assert_eq!(
+                    self.looper_sustain_pending_len, 0,
+                    "LooperTogglePlay: pending must be flushed"
+                );
+            }
             ControlEvent::LooperUndo => { self.looper.undo(); }
             ControlEvent::LooperClear => { self.looper.clear(); }
             ControlEvent::LooperSetBars { bars } => { self.looper.bars = bars; }
@@ -2230,7 +2324,14 @@ impl SynthEngine {
                 if self.looper_finish_pending {
                     self.looper_finish_pending = false;
                     self.looper_overdub_active = false;
+                    // Sustain capture exit #5: pending offs belong in the
+                    // layer being closed, not the next one.
+                    self.flush_looper_sustain_pending();
                     self.looper.toggle_record(); // Overdubbing -> Playing
+                    debug_assert_eq!(
+                        self.looper_sustain_pending_len, 0,
+                        "layer finish: pending must be flushed"
+                    );
                 }
             } else if boundary && self.looper_arm_pending {
                 self.looper_arm_pending = false;
@@ -2256,6 +2357,9 @@ impl SynthEngine {
                 // Закрытие — ТОЛЬКО по Rec (finish_pending). Безостановочный режим.
                 if self.looper_finish_pending {
                     self.looper_finish_pending = false;
+                    // Sustain capture exit #2: flush BEFORE trim, so pending
+                    // offs are trimmed on the same rules as everything else.
+                    self.flush_looper_sustain_pending();
                     let kept = self.looper_rec_cycles.saturating_mul(self.looper_cycle_ticks);
                     self.looper.trim_after(kept);
                     self.looper.set_loop_len_ticks(kept);
@@ -2267,6 +2371,10 @@ impl SynthEngine {
                     self.set_master_rec_state(0, 0);
                     self.drum_engine.set_recording(false); // сетка тоже разармирована
                     self.looper.toggle_record(); // Recording/Overdubbing -> Playing
+                    debug_assert_eq!(
+                        self.looper_sustain_pending_len, 0,
+                        "quantized close: pending must be flushed"
+                    );
                 } else {
                     // Новый цикл начался: логическая длина +1, ёмкость с запасом
                     self.looper_rec_cycles += 1;
@@ -2293,7 +2401,14 @@ impl SynthEngine {
                 // «CLOSING» с мёртвыми +1/−1 (audit rhythm #1).
                 self.set_master_rec_state(0, 0);
                 self.drum_engine.set_recording(false);
+                // Sustain capture exit #3: clock died mid-capture — pending
+                // offs still belong in the loop (flush is a no-op when empty).
+                self.flush_looper_sustain_pending();
                 self.looper.toggle_record();
+                debug_assert_eq!(
+                    self.looper_sustain_pending_len, 0,
+                    "fallback close: pending must be flushed"
+                );
             }
         }
 
@@ -2439,7 +2554,8 @@ impl SynthEngine {
                         // Source-consistent recording: per part, like the
                         // note dispatch loop (used to be one active-part
                         // event — the loop replayed arps on one part only).
-                        self.record_for_looper(off_note, 0, i as u8);
+                        // defer_ok=false: ARP-offs are rhythmic — never deferred.
+                        self.record_for_looper(off_note, 0, i as u8, false);
                     }
                 }
                 if let Some((note, vel)) = arp_on {
@@ -2447,7 +2563,7 @@ impl SynthEngine {
                         if !self.parts[i].enabled || self.parts[i].mute { continue; }
                         // Мультитрек: писать только реально звучащую часть
                         if self.route_note_on(i, note, vel) {
-                            self.record_for_looper(note, vel, i as u8);
+                            self.record_for_looper(note, vel, i as u8, false);
                         }
                     }
                 }

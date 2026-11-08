@@ -451,6 +451,15 @@ fn sustain_pending_master_stop_sane() {
     );
     let ons = note_events(&e, 60, false);
     assert!(!ons.is_empty(), "нота цикла 1 сохранена");
+    // Task 2 strengthening: MasterStop ФЛУШИТ отложенный off в петлю
+    // (до trim_after) — off в display после стопа, на момент стопа
+    // (~0.0625), а не потерян и не в pedal-up.
+    let offs = note_events(&e, 60, true);
+    assert_eq!(offs.len(), 1, "pending off флушится в петлю при MasterStop: {:?}", offs);
+    assert!(
+        offs[0].0 < 0.2,
+        "off в момент стопа (~0.0625), не потерян: {}", offs[0].0
+    );
 }
 
 /// TC4 (регрессионный замок, GREEN): pedal up/down БЕЗ записи — set_sustain
