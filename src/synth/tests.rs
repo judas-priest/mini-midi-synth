@@ -1117,6 +1117,34 @@ fn default_poly_steals_the_oldest_sustained_voice() {
     assert!(recent.active && recent.note == 43);
 }
 
+// ── Scene LFO Envelope autostart (audit QW3-review) ───────────────
+
+#[test]
+fn scene_lfo_envelope_autostarts_from_idle() {
+    // Сборка inputs — по ЕДИНСТВЕННОМУ production-сайту mod.rs:2303-2313
+    // (в tests.rs соседей с EngineModInputs нет).
+    let inputs = EngineModInputs {
+        mod_wheel: 0.0,
+        aftertouch_smooth: 0.0,
+        cc_values: [0.0; 4],
+        pitch_bend_semitones: 0.0,
+        pitch_bend_norm: 0.0,
+        seq_bpm: 120.0,
+        block_len: 128,
+        sample_rate: 48_000.0,
+        vibrato_val: 0.0,
+    };
+    // Позитив: wf=5 (Envelope) — один update_mods-блок выводит из idle.
+    let mut part = Part::new(48_000.0);
+    part.params.slfo1_waveform = 5.0;
+    part.update_mods(&inputs, 0);
+    assert!(!part.scene_lfos[0].env_idle(), "autostart failed");
+    // Негатив: волна по умолчанию (не Envelope) остаётся idle.
+    let mut part2 = Part::new(48_000.0);
+    part2.update_mods(&inputs, 0);
+    assert!(part2.scene_lfos[0].env_idle(), "non-envelope started");
+}
+
 // ── SF2 no-op mode switch (seamless perf switch) ───────────────
 
 #[test]
