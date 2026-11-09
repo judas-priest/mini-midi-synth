@@ -60,6 +60,11 @@ pub struct SpringReverb {
     // Feedback state
     fb_l: f32,
     fb_r: f32,
+    // Cached T60 feedback gain — recomputed only when size/decay params
+    // change bit-exactly or sr changes (per-sample powf hoist, audit exp/powf)
+    fb_gain: f32,
+    fb_last_size: f32,
+    fb_last_decay: f32,
 }
 
 impl SpringReverb {
@@ -75,6 +80,9 @@ impl SpringReverb {
             er_gains: [0.4, -0.3, 0.2, -0.15],
             er_delays: [113, 337, 557, 773],
             fb_l: 0.0, fb_r: 0.0,
+            fb_gain: 0.0,
+            fb_last_size: f32::NAN,
+            fb_last_decay: f32::NAN,
         };
         // Initialize allpass filters with prime-number delays for dispersion.
         // Buffers are sized once for SR_CAP; set_sample_rate only rescales
@@ -101,6 +109,9 @@ impl SpringReverb {
         self.delay_pos = 0;
         self.damp_l = 0.0; self.damp_r = 0.0;
         self.fb_l = 0.0; self.fb_r = 0.0;
+        // invalidate cached T60 gain (sr changed)
+        self.fb_last_size = f32::NAN;
+        self.fb_last_decay = f32::NAN;
 
         let ap_delays = [139, 193, 263, 349, 421, 509, 601, 701];
         for (i, &d) in ap_delays.iter().enumerate() {
@@ -144,8 +155,15 @@ impl SpringReverb {
         let delay_samples = 200.0 + size * (MAX_DELAY as f32 - 400.0);
 
         // Feedback gain from decay (T60)
-        let t60 = 0.2 + decay * 5.0;
-        let fb_gain = 10.0_f32.powf(-3.0 * delay_samples / (t60 * self.sample_rate)).min(0.98);
+        // per-sample powf hoist: depends only on size/decay params + sr —
+        // cached, recomputed on exact param change (audit exp/powf)
+        if size != self.fb_last_size || decay != self.fb_last_decay {
+            self.fb_last_size = size;
+            self.fb_last_decay = decay;
+            let t60 = 0.2 + decay * 5.0;
+            self.fb_gain = 10.0_f32.powf(-3.0 * delay_samples / (t60 * self.sample_rate)).min(0.98);
+        }
+        let fb_gain = self.fb_gain;
 
         // Allpass gain from spin
         let ap_gain = 0.3 + spin * 0.35;
