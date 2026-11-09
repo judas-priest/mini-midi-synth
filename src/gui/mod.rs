@@ -511,6 +511,17 @@ pub struct App {
     pub sf2_drums_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
     pub sf2_block_size: usize,
     pub sf2_sample_offset_ms: f32,
+    /// One-shot SF2 parse worker (techdebt GUI I/O): receiver of the in-flight
+    /// load. None = idle. Polled unconditionally in update() — the settings
+    /// panel may be closed while a load runs.
+    pub sf2_worker_rx: Option<sf2::Sf2WorkerRx>,
+    /// True while an SF2 parse is on a worker thread: shared keys/drums guard
+    /// (a second spawn would overwrite the receiver and lose the result).
+    pub sf2_loading: bool,
+    /// Startup only: drums SF2 index queued behind the in-flight keys load
+    /// (the shared guard would silently drop a direct second call); drained
+    /// by the SF2 worker poll after the keys result applies.
+    pub sf2_pending_drums: Option<usize>,
     // Pitch step sequencer
     pub pitch_seq_step_atoms: Vec<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     pub pitch_seq_enabled: [bool; 2],
@@ -554,6 +565,12 @@ pub struct App {
     pub midi_seq_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// Result of an async file picker (zenity/kdialog subprocess). None = no pending pick.
     pub midi_seq_file_pick: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+    /// One-shot MIDI parse worker (techdebt GUI I/O): fs::read + parse_midi
+    /// off the GUI thread. None = idle. Polled unconditionally in update().
+    pub midi_worker_rx: Option<midi_seq::MidiWorkerRx>,
+    /// True while a MIDI parse is on a worker thread: re-enter guard for
+    /// Load button / file pick.
+    pub midi_loading: bool,
     // Undo/redo (#31): UNIFIED per-part snapshots — patch parameter editing
     // AND live part actions (mute/pan/transpose/patch click) in one stack.
     pub undo_stack: std::collections::VecDeque<PartUndoSnapshot>,
@@ -751,6 +768,9 @@ impl App {
             sf2_drums_soundfont: None,
             sf2_block_size: c.config.sf2.block_size,
             sf2_sample_offset_ms: c.config.sf2.sample_offset_ms,
+            sf2_worker_rx: None,
+            sf2_loading: false,
+            sf2_pending_drums: None,
             pitch_seq_step_atoms: c.handles.pitch_seq_step_atoms,
             pitch_seq_enabled: [false; 2],
             pitch_seq_steps: [[crate::synth::step_seq::PitchStep::default(); 16]; 2],
@@ -777,6 +797,8 @@ impl App {
             midi_seq_play_atom: c.handles.midi_seq_play_atom,
             midi_seq_pos_atom: c.handles.midi_seq_pos_atom,
             midi_seq_file_pick: None,
+            midi_worker_rx: None,
+            midi_loading: false,
             undo_stack: std::collections::VecDeque::new(),
             redo_stack: Vec::new(),
             toasts: Vec::new(),
@@ -883,6 +905,62 @@ impl eframe::App for App {
         // Free whatever the audio thread handed over this frame.
         self.engine_trash_rx.drain();
         self.cb_trash_rx.drain();
+
+        // SF2 worker poll (techdebt GUI I/O). Top-level and UNCONDITIONAL:
+        // the settings panel may be closed while a load is in flight —
+        // polling inside the panel would leave sf2_loading stuck forever.
+        if let Some(rx) = self.sf2_worker_rx.take() {
+            match rx.try_recv() {
+                Ok((kind, name, res)) => {
+                    self.sf2_loading = false;
+                    match res {
+                        Ok(sf) => self.apply_sf2_result(kind, name, sf),
+                        Err(e) => self.show_toast(format!("SF2 load failed: {e}"), ToastKind::Error),
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    self.sf2_worker_rx = Some(rx);
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.sf2_loading = false;
+                    self.show_toast("SF2 loader thread died".to_string(), ToastKind::Error);
+                }
+            }
+            // Startup queue: drums SF2 was held back by the shared loading
+            // guard while keys parsed — load it now (cache hit if same file).
+            // Runs on Err too: a failed keys load must not swallow the drums.
+            if !self.sf2_loading {
+                if let Some(idx) = self.sf2_pending_drums.take() {
+                    self.load_sf2_drums(idx);
+                }
+            }
+        }
+
+        // MIDI worker poll — same top-level placement as the SF2 poll: the
+        // MIDI Seq panel may be closed while a parse is in flight.
+        if let Some(rx) = self.midi_worker_rx.take() {
+            match rx.try_recv() {
+                Ok((_path, res)) => {
+                    self.midi_loading = false;
+                    match res {
+                        Ok(data) => self.apply_midi_result(data),
+                        Err(e) => self.show_toast(e, ToastKind::Error),
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    self.midi_worker_rx = Some(rx);
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.midi_loading = false;
+                    self.show_toast("MIDI loader thread died".to_string(), ToastKind::Error);
+                }
+            }
+        }
+
+        // Keep the UI responsive while worker loads are in flight.
+        if self.sf2_loading || self.midi_loading {
+            ctx.request_repaint_after(Duration::from_millis(33));
+        }
 
         // Pad performance switching (only when pad perf panel is open)
         if self.show_pad_perf {
@@ -1857,7 +1935,13 @@ impl App {
             let _ = self.ctrl_tx.push(ControlEvent::SetSf2SampleOffset { ms: self.sf2_sample_offset_ms });
         }
 
-        // Load SF2 from config if set
+        // Load SF2 from config if set.
+        // STARTUP-СЕМАНТИКА (techdebt GUI I/O): load_sf2_* now spawn worker
+        // threads — the window appears BEFORE the SF2 is parsed. The
+        // per-part SF2 modes/programs are pushed from apply_sf2_result and
+        // read the CURRENT self.parts, i.e. after the performance restore
+        // below; engine events stay FIFO, so the effective order matches the
+        // old synchronous path.
         // Keys SF2 (fallback to legacy file_path)
         let keys_path = self.config.sf2.keys_file_path.clone()
             .or_else(|| self.config.sf2.file_path.clone());
@@ -1868,12 +1952,18 @@ impl App {
                 self.load_sf2_keys(idx);
             }
         }
-        // Drums SF2
+        // Drums SF2 — queued behind an in-flight keys load: the shared
+        // sf2_loading guard would silently drop a direct call; the worker
+        // poll drains sf2_pending_drums once the keys result applied.
         if let Some(sf2_path) = self.config.sf2.drums_file_path.clone() {
             let idx = self.find_or_add_sf2(&sf2_path);
             if let Some(idx) = idx {
                 self.sf2_drums_selected = Some(idx);
-                self.load_sf2_drums(idx);
+                if self.sf2_loading {
+                    self.sf2_pending_drums = Some(idx);
+                } else {
+                    self.load_sf2_drums(idx);
+                }
             }
         }
 
