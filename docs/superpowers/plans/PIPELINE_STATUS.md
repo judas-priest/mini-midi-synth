@@ -12,8 +12,8 @@ looper-sustain-capture).
 |---|------|--------|-------|----|
 | 11 | looper-sustain-capture | DONE (PR #107, не смержен) | fix/looper-sustain-capture | #107 |
 | 1 | scene-lfo-envelope | DONE (PR #108, не смержен) | fix/scene-lfo-envelope | #108 |
-| 2 | golden-hermeticity | in_progress | test/golden-hermeticity | — |
-| 3 | sf2-data-small-fixes | pending | — | — |
+| 2 | golden-hermeticity | DONE (PR #109, не смержен) | test/golden-hermeticity | #109 |
+| 3 | sf2-data-small-fixes | in_progress | fix/sf2-data-small | — |
 | 7 | per-sample-exp-powf | pending | — | — |
 | 6 | gui-io-worker | pending | — | — |
 | 4 | rhythm-low-batch | pending | — | — |
@@ -30,3 +30,6 @@ looper-sustain-capture).
 - 2026-11-09: план 1 ГОТОВ → PR #108 (не смержен). Ревью APPROVE с первого
   раза. Начат план 2 (golden hermeticity: fixture-пресеты + положительный
   контроль утечки на СТАРОМ коде до фикса).
+- 2026-11-09: план 2 ГОТОВ → PR #109 (не смержен). Позитивный контроль RED
+  доказал утечку; 884→282 строк, factory-хэши 1:1; fakehome-грязь → GREEN
+  без реген. Начат план 3.
