@@ -10,8 +10,8 @@ looper-sustain-capture).
 
 | # | План | Статус | Ветка | PR |
 |---|------|--------|-------|----|
-| 11 | looper-sustain-capture | in_progress | fix/looper-sustain-capture | — |
-| 1 | scene-lfo-envelope | pending | — | — |
+| 11 | looper-sustain-capture | DONE (PR #107, не смержен) | fix/looper-sustain-capture | #107 |
+| 1 | scene-lfo-envelope | in_progress | fix/scene-lfo-envelope | — |
 | 2 | golden-hermeticity | pending | — | — |
 | 3 | sf2-data-small-fixes | pending | — | — |
 | 7 | per-sample-exp-powf | pending | — | — |
@@ -24,3 +24,6 @@ looper-sustain-capture).
 
 ## Журнал
 - 2026-11-09: конвейер запущен; план 11 начат (Task 1 — characterization).
+- 2026-11-09: план 11 ГОТОВ → PR #107 (не смержен). Ревью поймало 2 HIGH
+  (dedup хранил не-держателя ноты; split-кража записи) — оба с регресс-тестами
+  RED→GREEN. Начат план 1.
