@@ -258,6 +258,10 @@ impl Lfo {
         self.env_value = 0.0;
     }
 
+    /// Stage 0 (idle) — Envelope ждёт запуска (keyed: нота; scene: автостарт
+    /// снаружи). AD-цикл (QW3) никогда не возвращает stage 0.
+    pub fn env_idle(&self) -> bool { self.env_stage == 0 }
+
     /// Compute effective rate in Hz, handling tempo sync.
     fn effective_rate(&self, rate: f32) -> f32 {
         if self.tempo_sync {
@@ -513,6 +517,19 @@ mod tests {
         let mut mid: f32 = 2.0;
         for _ in 0..400 { mid = mid.min(lfo.tick_with_deform(rate, LfoWaveform::Envelope, 0.0)); }
         assert!(mid < -0.5, "no decay/loop, min={mid}");
+    }
+
+    #[test]
+    fn env_idle_true_until_retrigger_and_never_returns() {
+        let mut lfo = Lfo::new(48000.0);
+        assert!(lfo.env_idle());
+        lfo.env_retrigger();
+        assert!(!lfo.env_idle());
+        let rate = 5.0 * 128.0;
+        for _ in 0..5000 {
+            lfo.tick_with_deform(rate, LfoWaveform::Envelope, 0.0);
+        }
+        assert!(!lfo.env_idle(), "AD loop returned to idle");
     }
 
     #[test]
