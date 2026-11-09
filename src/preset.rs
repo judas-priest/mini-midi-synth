@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -506,7 +506,7 @@ fn user_preset_dir() -> Option<PathBuf> {
 
 /// Load all presets from a directory recursively (subdirs = categories).
 /// Also loads .wt wavetable data if patch references one.
-pub fn load_presets_from_dir(dir: &PathBuf, presets: &mut Vec<Patch>) {
+pub fn load_presets_from_dir(dir: &Path, presets: &mut Vec<Patch>) {
     if !dir.exists() { return; }
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -566,6 +566,20 @@ pub fn load_factory_patches() -> Vec<Patch> {
             p.category = category.to_string();
             presets.push(p);
         }
+    }
+    presets
+}
+
+/// Core: factory + explicitly given directories (None = skip). Hermetic
+/// access for tests: tests must not depend on live user directories
+/// (QW3 incident #106 — preset_hashes went red from user preset edits).
+pub fn load_all_patches_from(ext_dir: Option<&Path>, user_dir: Option<&Path>) -> Vec<Patch> {
+    let mut presets = load_factory_patches();
+    if let Some(d) = ext_dir {
+        load_presets_from_dir(d, &mut presets);
+    }
+    if let Some(d) = user_dir {
+        load_presets_from_dir(d, &mut presets);
     }
     presets
 }
@@ -892,6 +906,14 @@ pub fn init_performance() -> Performance {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn load_all_patches_from_none_equals_factory() {
+        let a = load_all_patches_from(None, None);
+        let b = load_factory_patches();
+        assert_eq!(a.len(), b.len());
+        assert!(a.iter().map(|p| &p.name).eq(b.iter().map(|p| &p.name)));
+    }
 
     #[test]
     fn legacy_perf_root_only_migrates_to_bass() {
