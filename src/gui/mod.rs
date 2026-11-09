@@ -21,6 +21,8 @@ mod browser;
 mod sf2;
 mod tracks;
 mod performance;
+mod app_structs;
+pub use app_structs::*;
 
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -405,30 +407,9 @@ pub struct App {
     /// conservative nav guard (set during draw, read next frame in update()).
     pub tracks_rename_focus: bool,
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
-    pub mute_window: usize,   // first part idx visible on MUTE slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub drum_redo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    // Bank-2 pad console
-    pub console: led_console::LedConsole,
-    pub console_rx: Option<std::sync::mpsc::Receiver<(u8, bool)>>,
-    pub flash: note_flash::NoteFlashState,
-    pub flash_rx: rtrb::Consumer<crate::midi::NoteFlash>,
-    pub led_snapshot: [[u8; 3]; 16],
-    pub led_dirty: bool,
-    pub led_socket: Option<std::sync::mpsc::Sender<String>>,
-    pub led_socket_alive: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    pub led_socket_failed_at: Option<std::time::Instant>,
-    /// In-flight connect attempt (runs off the GUI thread — unix connect
-    /// blocks on a full peer backlog).
-    pub led_connecting:
-        Option<std::sync::mpsc::Receiver<std::io::Result<std::os::unix::net::UnixStream>>>,
-    pub led_last_send: Option<std::time::Instant>,
-    /// Companion process WE spawned (never kill a foreign one).
-    pub led_child: Option<std::process::Child>,
-    /// Backoff gate for (re)spawn attempts (crash / spawn failure).
-    pub led_spawn_backoff: Option<std::time::Instant>,
-    /// Last seen console mode — mode-entry window sync (#50 finding 4).
-    pub console_prev_mode: Option<led_console::Mode>,
+    pub led_ui: LedUi,
     /// Drag-and-drop part swap (#54): исходный слот драга за хендл ⠿,
     /// живёт в пределах GUI-фрейма/драга (Some пока pointer down).
     pub part_drag_src: Option<usize>,
@@ -480,8 +461,6 @@ pub struct App {
     /// (ВСЕГДА полный список перфов, независимо от трека — юзер 2026-11-08);
     /// папка-фильтрация живёт ТОЛЬКО в этом списке.
     pub folder_console_list: Vec<(String, Option<std::path::PathBuf>)>,
-    // Navigate button timing
-    pub nav_press_time: Option<std::time::Instant>,
     // Pad performance map: 16 pads (notes 36-51) → performance names
     pub show_pad_perf: bool,
     /// Track folders manager modal (#57).
@@ -669,23 +648,26 @@ impl App {
             tracks_sel: None,
             tracks_rename_focus: false,
             pat_window: 0,
-            mute_window: 0,
             drum_undo_atom: c.handles.drum_undo_atom,
             drum_redo_atom: c.handles.drum_redo_atom,
-            console: led_console::LedConsole::default(),
-            console_rx: Some(c.console_rx),
-            flash: note_flash::NoteFlashState::new(),
-            flash_rx: c.flash_rx,
-            led_snapshot: [[0; 3]; 16],
-            led_dirty: true,
-            led_socket: None,
-            led_socket_alive: None,
-            led_socket_failed_at: None,
-            led_connecting: None,
-            led_last_send: None,
-            led_child: None,
-            led_spawn_backoff: None,
-            console_prev_mode: None,
+            led_ui: LedUi {
+                console: led_console::LedConsole::default(),
+                console_rx: Some(c.console_rx),
+                flash: note_flash::NoteFlashState::new(),
+                flash_rx: c.flash_rx,
+                led_snapshot: [[0; 3]; 16],
+                led_dirty: true,
+                led_socket: None,
+                led_socket_alive: None,
+                led_socket_failed_at: None,
+                led_connecting: None,
+                led_last_send: None,
+                led_child: None,
+                led_spawn_backoff: None,
+                console_prev_mode: None,
+                nav_press_time: None,
+                mute_window: 0,
+            },
             part_drag_src: None,
             part_drag_dst: None,
             tracks_del_armed: None,
@@ -720,7 +702,6 @@ impl App {
             // #57: пересчитывается первым кадром (guard в update())
             console_list: Vec::new(),
             folder_console_list: Vec::new(),
-            nav_press_time: None,
             show_pad_perf: false,
             show_tracks_manager: false,
             pad_perf_map: {
@@ -843,8 +824,8 @@ impl eframe::App for App {
         }
 
         // NoteFlash: быстрые ноты — атомик on→off в кадре, событие терялось
-        let seen = self.flash.drain(&mut self.flash_rx);
-        if self.flash.any_active() || seen {
+        let seen = self.led_ui.flash.drain(&mut self.led_ui.flash_rx);
+        if self.led_ui.flash.any_active() || seen {
             ctx.request_repaint_after(Duration::from_millis(33));
         }
 
@@ -1526,7 +1507,7 @@ impl App {
     fn console_event_pump(&mut self) {
         // Bank-2 console pads -> state machine -> actions
         let mut acts: Vec<led_console::Action> = Vec::new();
-        if let Some(rx) = &self.console_rx {
+        if let Some(rx) = &self.led_ui.console_rx {
             while let Ok((note, is_on)) = rx.try_recv() {
                 let now = std::time::Instant::now();
                 let ev = match (note, is_on) {
@@ -1541,13 +1522,13 @@ impl App {
                     _ => None,
                 };
                 if let Some(ev) = ev {
-                    if let Some(a) = self.console.on_event(ev, now) {
+                    if let Some(a) = self.led_ui.console.on_event(ev, now) {
                         acts.push(a);
                     }
                 }
             }
         }
-        let _ = self.console.tick(std::time::Instant::now()); // hold -> Menu (snapshot below)
+        let _ = self.led_ui.console.tick(std::time::Instant::now()); // hold -> Menu (snapshot below)
         for a in acts {
             self.execute_console_action(a);
         }
@@ -1555,9 +1536,9 @@ impl App {
         // (finding 4: stale-страница при входе; идемпотентно, раз в смену).
         // refresh_console_list здесь же покрывает первый кадр (prev = None)
         // и все изменения perf_list/папок до входа консоли в режим (#57).
-        let m = self.console.mode();
-        if self.console_prev_mode != Some(m) {
-            self.console_prev_mode = Some(m);
+        let m = self.led_ui.console.mode();
+        if self.led_ui.console_prev_mode != Some(m) {
+            self.led_ui.console_prev_mode = Some(m);
             self.refresh_console_list();
             match m {
                 led_console::Mode::Pattern => {
@@ -1573,7 +1554,7 @@ impl App {
                     self.show_toast("TRACKS: tap a folder — MENU — назад",
                         ToastKind::Info);
                 }
-                led_console::Mode::Mute => self.mute_window = 0,
+                led_console::Mode::Mute => self.led_ui.mute_window = 0,
                 led_console::Mode::Home => {
                     if let Some(i) = self.active_perf_console() {
                         self.follow_window(i, true);
@@ -1588,7 +1569,7 @@ impl App {
         // first need, kill only OUR child on toggle-off, respawn with 5s
         // backoff if it dies while enabled.
         if !self.config.ui.led_companion {
-            if let Some(mut child) = self.led_child.take() {
+            if let Some(mut child) = self.led_ui.led_child.take() {
                 log::info!("[console] killing companion child");
                 if let Err(e) = child.kill() {
                     log::warn!("[console] companion kill: {e}");
@@ -1597,16 +1578,16 @@ impl App {
                     log::warn!("[console] companion wait: {e}");
                 }
             }
-            self.led_spawn_backoff = None;
+            self.led_ui.led_spawn_backoff = None;
         } else {
             // reap exited child (crash, foreign kill, guard-exit 0)
-            if let Some(mut child) = self.led_child.take() {
+            if let Some(mut child) = self.led_ui.led_child.take() {
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         log::info!("[console] companion child exited: {status}");
-                        self.led_spawn_backoff = Some(std::time::Instant::now());
+                        self.led_ui.led_spawn_backoff = Some(std::time::Instant::now());
                     }
-                    Ok(None) => self.led_child = Some(child),
+                    Ok(None) => self.led_ui.led_child = Some(child),
                     Err(e) => log::warn!("[console] companion try_wait: {e}"),
                 }
             }
@@ -1614,23 +1595,23 @@ impl App {
             // failed (a live foreign companion serves the socket within the
             // 2s retry window — spawning earlier creates a duplicate that
             // fights the foreign one over BLE).
-            let backoff_ok = self.led_spawn_backoff
+            let backoff_ok = self.led_ui.led_spawn_backoff
                 .map(|t| t.elapsed() > std::time::Duration::from_secs(5))
                 .unwrap_or(true);
-            if self.led_child.is_none()
-                && self.led_socket.is_none()
-                && self.led_socket_failed_at.is_some()
+            if self.led_ui.led_child.is_none()
+                && self.led_ui.led_socket.is_none()
+                && self.led_ui.led_socket_failed_at.is_some()
                 && backoff_ok
             {
                 let path = crate::config::expand_home(&self.config.ui.led_companion_cmd);
                 match std::process::Command::new("python3").arg(&path).spawn() {
                     Ok(child) => {
                         log::info!("[console] spawned companion: {}", path.display());
-                        self.led_child = Some(child);
+                        self.led_ui.led_child = Some(child);
                     }
                     Err(e) => {
                         log::warn!("[console] companion spawn failed: {e}");
-                        self.led_spawn_backoff = Some(std::time::Instant::now());
+                        self.led_ui.led_spawn_backoff = Some(std::time::Instant::now());
                     }
                 }
             }
@@ -1643,34 +1624,34 @@ impl App {
         // whole app before the first frame (observed with a companion stuck
         // in BLE reconnect).
         if !self.config.ui.led_companion {
-            if self.led_socket.take().is_some() {
+            if self.led_ui.led_socket.take().is_some() {
                 log::info!("[console] companion disabled");
             }
-            self.led_connecting = None;
-        } else if self.led_socket.is_none()
-            && self.led_socket_failed_at
+            self.led_ui.led_connecting = None;
+        } else if self.led_ui.led_socket.is_none()
+            && self.led_ui.led_socket_failed_at
                 .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
                 .unwrap_or(true)
-            && self.led_connecting.is_none()
+            && self.led_ui.led_connecting.is_none()
         {
             let (tx, rx) =
                 std::sync::mpsc::channel::<std::io::Result<std::os::unix::net::UnixStream>>();
-            self.led_connecting = Some(rx);
+            self.led_ui.led_connecting = Some(rx);
             std::thread::spawn(move || {
                 let res = std::os::unix::net::UnixStream::connect("/tmp/mini_midi_synth_led.sock");
                 let _ = tx.send(res);
             });
         }
-        if self.led_socket.is_none() {
-            if let Some(rx) = &mut self.led_connecting {
+        if self.led_ui.led_socket.is_none() {
+            if let Some(rx) = &mut self.led_ui.led_connecting {
                 match rx.try_recv() {
                     Ok(Ok(stream)) => {
-                        self.led_connecting = None;
+                        self.led_ui.led_connecting = None;
                         let (tx, rx) = std::sync::mpsc::channel::<String>();
                         // fresh AtomicBool на каждый коннект: старый writer не может
                         // перезаписать флаг нового (spurious reconnect)
                         let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-                        self.led_socket_alive = Some(alive.clone());
+                        self.led_ui.led_socket_alive = Some(alive.clone());
                         std::thread::spawn(move || {
                             use std::io::Write;
                             let mut stream = stream;
@@ -1682,32 +1663,32 @@ impl App {
                             }
                             alive.store(false, std::sync::atomic::Ordering::Relaxed);
                         });
-                        self.led_socket = Some(tx);
-                        self.led_socket_failed_at = None;
-                        self.led_dirty = true; // отправить полный STATE сразу после коннекта
+                        self.led_ui.led_socket = Some(tx);
+                        self.led_ui.led_socket_failed_at = None;
+                        self.led_ui.led_dirty = true; // отправить полный STATE сразу после коннекта
                         log::info!("[console] companion connected");
                     }
                     Ok(Err(_)) => {
-                        self.led_connecting = None;
-                        self.led_socket_failed_at = Some(std::time::Instant::now());
+                        self.led_ui.led_connecting = None;
+                        self.led_ui.led_socket_failed_at = Some(std::time::Instant::now());
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {}
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        self.led_connecting = None;
-                        self.led_socket_failed_at = Some(std::time::Instant::now());
+                        self.led_ui.led_connecting = None;
+                        self.led_ui.led_socket_failed_at = Some(std::time::Instant::now());
                     }
                 }
             }
         }
         // writer умер (компаньон перезапускается) — забыть сокет, retry через 2с
-        let socket_dead = match &self.led_socket_alive {
+        let socket_dead = match &self.led_ui.led_socket_alive {
             Some(a) => !a.load(std::sync::atomic::Ordering::Relaxed),
             None => false,
         };
-        if self.led_socket.is_some() && socket_dead {
-            self.led_socket = None;
-            self.led_socket_alive = None;
-            self.led_socket_failed_at = Some(std::time::Instant::now());
+        if self.led_ui.led_socket.is_some() && socket_dead {
+            self.led_ui.led_socket = None;
+            self.led_ui.led_socket_alive = None;
+            self.led_ui.led_socket_failed_at = Some(std::time::Instant::now());
         }
     }
     fn led_snapshot_send(&mut self) {
@@ -1733,29 +1714,29 @@ impl App {
             let filled = self.console_active_list().len();
             let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
             let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
-            let page_depth = match self.console.mode() {
+            let page_depth = match self.led_ui.console.mode() {
                 led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
-                led_console::Mode::Mute => self.mute_window / 7,
+                led_console::Mode::Mute => self.led_ui.mute_window / 7,
                 led_console::Mode::Tracks => self.tracks_window / 7,
                 // FolderPerfs: PAGE-глубина по перф-страницам — явное плечо
                 // (то же, что `_`; самодокументация)
                 led_console::Mode::FolderPerfs => self.perf_window / 7,
                 _ => self.perf_window / 7,
             };
-            let top = match self.console.mode() {
-                led_console::Mode::Tracks => self.console.folder_colors(
+            let top = match self.led_ui.console.mode() {
+                led_console::Mode::Tracks => self.led_ui.console.folder_colors(
                     self.config.ui.active_folder,
                     self.config.ui.perf_folders.len(), self.tracks_window),
-                led_console::Mode::FolderPerfs => self.console.top_colors(
+                led_console::Mode::FolderPerfs => self.led_ui.console.top_colors(
                     self.active_perf_console(), self.folder_console_list.len(),
                     self.drum_current_pattern as usize, &mutes,
-                    self.perf_window, self.pat_window, self.mute_window),
-                _ => self.console.top_colors(self.active_perf_console(), filled,
+                    self.perf_window, self.pat_window, self.led_ui.mute_window),
+                _ => self.led_ui.console.top_colors(self.active_perf_console(), filled,
                                              self.drum_current_pattern as usize, &mutes,
                                              self.perf_window, self.pat_window,
-                                             self.mute_window),
+                                             self.led_ui.mute_window),
             };
-            let bottom = self.console.bottom_colors(playing, recording, page_depth,
+            let bottom = self.led_ui.console.bottom_colors(playing, recording, page_depth,
                                                     undo_avail, redo_avail);
             let mut snap = [[0u8; 3]; 16];
             snap[..8].copy_from_slice(&top);
@@ -1763,14 +1744,14 @@ impl App {
             // Send on change, plus a 2s heartbeat: heals dropped writes and
             // reconnects after a companion restart (otherwise nothing is sent
             // while the state is idle and the console shows stale colors).
-            let heartbeat_due = self.led_last_send
+            let heartbeat_due = self.led_ui.led_last_send
                 .map(|t| t.elapsed() > std::time::Duration::from_secs(2))
                 .unwrap_or(true);
-            if snap != self.led_snapshot || self.led_dirty || heartbeat_due {
-                self.led_snapshot = snap;
-                self.led_dirty = false;
-                self.led_last_send = Some(std::time::Instant::now());
-                if let Some(sock) = &self.led_socket {
+            if snap != self.led_ui.led_snapshot || self.led_ui.led_dirty || heartbeat_due {
+                self.led_ui.led_snapshot = snap;
+                self.led_ui.led_dirty = false;
+                self.led_ui.led_last_send = Some(std::time::Instant::now());
+                if let Some(sock) = &self.led_ui.led_socket {
                     let mut msg = String::from("STATE");
                     for c in &snap {
                         msg.push_str(&format!(" {:02X}{:02X}{:02X}", c[0], c[1], c[2]));
@@ -2449,7 +2430,7 @@ impl App {
                 }
             }
             led_console::Action::ToggleMute(i) => {
-                let part = self.mute_window + i; // i уже 0-based (slot-1 из консоли) // slot -> real part
+                let part = self.led_ui.mute_window + i; // i уже 0-based (slot-1 из консоли) // slot -> real part
                 let mute = self.parts.get(part).map(|p| !p.mute);
                 if let Some(mute) = mute {
                     self.push_undo_snapshot_for(part); // #31: снимок ДО изменения
@@ -2528,7 +2509,7 @@ impl App {
 
     /// Shift the active mode's window by `delta` slots, clamped to the list.
     fn page_window(&mut self, delta: i32) {
-        match self.console.mode() {
+        match self.led_ui.console.mode() {
             led_console::Mode::Home => {
                 let max_w = led_console::window_max_start(self.console_list.len());
                 self.perf_window = (self.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
@@ -2539,7 +2520,7 @@ impl App {
             }
             led_console::Mode::Mute => {
                 let max_w = led_console::window_max_start(self.parts.len());
-                self.mute_window = (self.mute_window as i32 + delta).clamp(0, max_w as i32) as usize;
+                self.led_ui.mute_window = (self.led_ui.mute_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             led_console::Mode::Tracks => {
                 let max_w = led_console::window_max_start(
@@ -2596,7 +2577,7 @@ impl App {
     /// Список, активный для ТЕКУЩЕГО режима консоли: FolderPerfs = алиасы
     /// папки, остальное (HOME) = полный список перфов.
     fn console_active_list(&self) -> &Vec<(String, Option<std::path::PathBuf>)> {
-        if self.console.mode() == led_console::Mode::FolderPerfs {
+        if self.led_ui.console.mode() == led_console::Mode::FolderPerfs {
             &self.folder_console_list
         } else {
             &self.console_list

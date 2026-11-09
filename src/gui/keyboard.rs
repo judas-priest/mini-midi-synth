@@ -93,7 +93,7 @@ impl App {
                 if is_black_key(note) { continue; }
                 let vel = self.note_state[note as usize].load(Ordering::Relaxed);
                 let held = vel > 0;
-                let tail = self.flash.brightness(note as usize, held);
+                let tail = self.led_ui.flash.brightness(note as usize, held);
                 let key_rect = egui::Rect::from_min_size(
                     rect.min + egui::vec2(wx, 0.0),
                     egui::vec2(key_w - 1.0, key_h),
@@ -110,7 +110,7 @@ impl App {
                 if is_black_key(note) {
                     let vel = self.note_state[note as usize].load(Ordering::Relaxed);
                     let held = vel > 0;
-                    let tail = self.flash.brightness(note as usize, held);
+                    let tail = self.led_ui.flash.brightness(note as usize, held);
                     let bw = key_w * 0.65;
                     let key_rect = egui::Rect::from_min_size(
                         rect.min + egui::vec2(wx - bw * 0.5, 0.0),

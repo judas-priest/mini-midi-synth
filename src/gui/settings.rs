@@ -436,10 +436,10 @@ impl App {
                         self.pickup_indicators.remove(key);
                     }
                     ParamFeedback::NavigatePress => {
-                        self.nav_press_time = Some(std::time::Instant::now());
+                        self.led_ui.nav_press_time = Some(std::time::Instant::now());
                     }
                     ParamFeedback::NavigateRelease => {
-                        if let Some(press_time) = self.nav_press_time.take() {
+                        if let Some(press_time) = self.led_ui.nav_press_time.take() {
                             let held = press_time.elapsed();
                             if held < std::time::Duration::from_millis(400) {
                                 // Short press: toggle keys ↔ drums
