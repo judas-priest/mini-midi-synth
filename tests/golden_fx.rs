@@ -51,6 +51,16 @@ fn golden_path(name: &str) -> std::path::PathBuf {
         .join(name)
 }
 
+/// Factory presets + the committed fixture dir (tests/golden/fixtures/external)
+/// — never the live user/external preset directories. Golden tests must stay
+/// machine-independent: a user editing their own presets must not flip them
+/// (QW3 incident #106).
+fn hermetic_patches() -> Vec<preset::Patch> {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden/fixtures/external");
+    preset::load_all_patches_from(Some(fixture.as_path()), None)
+}
+
 /// Compares `entries` against tests/golden/<file>, or (re)writes the file
 /// when MINI_MIDI_GOLDEN_UPDATE is set.
 fn check_golden(file: &str, entries: &[(String, u64)]) {
@@ -237,7 +247,7 @@ fn render_preset_hash(patch: &preset::Patch) -> u64 {
 
 #[test]
 fn engine_preset_render_bit_deterministic() {
-    let patches = preset::load_all_patches();
+    let patches = hermetic_patches();
     let keys = ["epiano", "piano", "chorus", "neuron", "reverb", "vocoder", "nimbus",
         "combulator", "resonator", "exciter", "spring", "bonsai", "organ", "fm", "bell", "saw"];
     let mut subset: Vec<&preset::Patch> = patches
@@ -260,12 +270,12 @@ fn engine_preset_render_bit_deterministic() {
 
 #[test]
 fn golden_preset_hashes_match() {
-    let patches = preset::load_all_patches();
+    let patches = hermetic_patches();
     let mut entries = Vec::new();
-    // load_all_patches merges factory + external + user dirs; names collide
-    // across sources ("Clarinet" exists both as a factory preset and as a
-    // converted Surge preset). Keys must stay unique or the golden map
-    // collapses the duplicates and every second entry is a false RED.
+    // hermetic_patches merges factory + the committed fixture dir; the fixture
+    // "Chorus Pad" deliberately duplicates the factory name, so names collide
+    // across sources. Keys must stay unique or the golden map collapses the
+    // duplicates and every second entry is a false RED.
     let mut seen = std::collections::HashSet::new();
     for p in &patches {
         let mut key = p.name.clone();
@@ -298,7 +308,7 @@ const CHAIN_SLOTS: &[(f32, &str)] = &[
 
 #[test]
 fn golden_engine_fx_chain_slots() {
-    let base = preset::load_all_patches()
+    let base = hermetic_patches()
         .into_iter()
         .find(|p| p.name.eq_ignore_ascii_case("init"))
         .expect("init preset exists");
@@ -333,7 +343,7 @@ fn render_sweep(
     name: &str, overlays: &[(&str, f32)],
     key_filter: impl Fn(&str) -> bool,
 ) -> Vec<(String, u64)> {
-    let patches = preset::load_all_patches();
+    let patches = hermetic_patches();
     let patch = patches.iter().find(|p| p.name.eq_ignore_ascii_case("Init"))
         .expect("Init preset not found").clone();
     // Полный дефолтный набор ключей (JSON пресетов sparse) + оверлей
