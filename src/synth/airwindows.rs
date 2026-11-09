@@ -890,6 +890,10 @@ pub struct AirwindowsButterComp2 {
     ctrl_a_pos_r: f64, ctrl_a_neg_r: f64,
     ctrl_b_pos_r: f64, ctrl_b_neg_r: f64,
     flip: bool,
+    // Cached input gain — recomputed only when drive changes bit-exactly
+    // (per-sample powf hoist, audit exp/powf)
+    input_gain: f64,
+    last_drive: f32,
 }
 impl AirwindowsButterComp2 {
     pub fn new() -> Self {
@@ -902,11 +906,19 @@ impl AirwindowsButterComp2 {
             ctrl_a_pos_r: 1.0, ctrl_a_neg_r: 1.0,
             ctrl_b_pos_r: 1.0, ctrl_b_neg_r: 1.0,
             flip: false,
+            input_gain: 0.0,
+            last_drive: f32::NAN,
         }
     }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
         let overallscale = sr as f64 / 44100.0;
-        let input_gain = 10f64.powf(drive as f64 * 14.0 / 20.0);
+        // per-sample powf hoist: depends only on drive — cached, recomputed
+        // on exact param change (audit exp/powf)
+        if drive != self.last_drive {
+            self.last_drive = drive;
+            self.input_gain = 10f64.powf(drive as f64 * 14.0 / 20.0);
+        }
+        let input_gain = self.input_gain;
         let comp_factor = 0.012 * (drive as f64 / 135.0);
         let mut output_gain = input_gain;
         output_gain = (output_gain - 1.0) / 1.5 + 1.0;
