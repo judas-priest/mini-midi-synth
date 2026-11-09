@@ -134,15 +134,19 @@ impl MidiPlayer {
         }).collect();
         let old_tracks = std::mem::replace(&mut self.tracks, tracks);
         let old_data = self.data.replace(data);
+        // Fresh file: default tempo until its first TempoChange — otherwise
+        // the new file would inherit the previous file's tempo.
+        self.us_per_beat = 500_000;
         self.reset_position();
         (old_data, old_tracks)
     }
 
-    /// Seek to the beginning and reset file tempo.
+    /// Seek to the beginning. Keeps the current tempo: resetting it here would
+    /// play the first block after a loop wrap at 120 BPM before the file's
+    /// TempoChange event re-applies (audit rhythm #16).
     pub fn reset_position(&mut self) {
         self.tick_pos = 0.0;
         self.event_idx = 0;
-        self.us_per_beat = 500_000;
         self.position_atom.store(0, Ordering::Relaxed);
     }
 
