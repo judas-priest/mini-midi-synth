@@ -98,6 +98,7 @@ impl WaveShaper {
                 (gained * steps).floor() / steps
             }
             // 6: Diode — half-wave rectifier style
+            // per-sample exp: argument is signal-dependent (audit)
             6 => (1.0 - (-gained * 4.0).exp()).max(0.0),
             // 7: Rectify — full-wave rectification
             7 => gained.abs(),

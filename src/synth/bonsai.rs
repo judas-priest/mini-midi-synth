@@ -153,6 +153,7 @@ impl Bonsai {
             }
             BonsaiMode::Fuzz => {
                 // Diode-style asymmetric fuzz
+                // per-sample exp: argument is signal-dependent (audit)
                 if x >= 0.0 {
                     // Hard clip positive (forward diode)
                     (1.0 - (-x * (2.0 + asym * 3.0)).exp()).min(1.0)

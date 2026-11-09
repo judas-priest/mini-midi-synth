@@ -94,6 +94,7 @@ impl Treemonster {
         // --- Ring modulator oscillator ---
 
         // Apply pitch shift: f_osc = f_smooth * 2^(shift/12)
+        // per-sample powf: argument is signal-dependent (audit)
         let shift_clamped = shift.clamp(-24.0, 24.0);
         let osc_freq = self.freq_smooth * 2.0_f32.powf(shift_clamped / 12.0);
 

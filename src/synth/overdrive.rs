@@ -6,6 +6,7 @@ use super::dsp_utils::{soft_clip, DcBlocker};
 /// Asymmetric tube-like distortion
 #[inline(always)]
 fn tube_clip(x: f32, drive: f32) -> f32 {
+    // per-sample exp: argument is signal-dependent (audit)
     let g = x * drive;
     if g >= 0.0 {
         1.0 - (-g).exp()

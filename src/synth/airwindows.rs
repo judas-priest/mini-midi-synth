@@ -2389,6 +2389,8 @@ impl AirwindowsDeRez2 {
         }
 
         // uLaw decode
+        // per-sample powf: argument is signal-dependent (audit); exact LUT
+        // is a separate optimization task (1:1 port, approximations forbidden)
         let decl = if sl > 0.0 { (256f64.powf(sl.abs()) - 1.0) / 255.0 }
                    else { -(256f64.powf(sl.abs()) - 1.0) / 255.0 };
         let decr = if sr > 0.0 { (256f64.powf(sr.abs()) - 1.0) / 255.0 }

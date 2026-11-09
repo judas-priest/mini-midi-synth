@@ -61,6 +61,7 @@ impl Phaser {
         advance_phase(&mut self.lfo_phase, self.rate, self.sample_rate);
 
         // Map LFO to frequency range (100Hz - 8kHz, logarithmic)
+        // per-sample powf: argument is signal-dependent (audit)
         let min_freq = 100.0_f32;
         let max_freq = 8000.0_f32;
         let freq = min_freq * (max_freq / min_freq).powf((lfo * self.depth + 1.0) * 0.5);
