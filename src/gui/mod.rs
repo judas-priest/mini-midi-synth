@@ -303,22 +303,7 @@ pub struct App {
     pub sample_rate: u32,
 
     pub config: Config,
-    pub current_host: String,
-    #[cfg(not(target_os = "android"))]
-    pub available_hosts: Vec<(cpal::HostId, &'static str)>,
-    #[cfg(not(target_os = "android"))]
-    pub supported_sample_rates: Vec<u32>,
-
-    pub midi_port_names: Vec<String>,
-    pub midi_connected_port: Option<String>,
-
-    pub show_settings: bool,
-    #[cfg(not(target_os = "android"))]
-    pub selected_host_idx: usize,
-    pub selected_sample_rate: u32,
-    pub selected_buffer_size: u32,
-    pub selected_midi_port: Option<String>,
-    pub is_jack: bool,
+    pub settings_audio_ui: SettingsAudioUi,
 
     /// Layer states
     pub parts: Vec<PartState>,
@@ -487,23 +472,25 @@ impl App {
             ctrl_tx: c.ctrl_tx,
             sample_rate: c.actual_sr,
             config: c.config.clone(),
-            #[cfg(not(target_os = "android"))]
-            current_host: c.host_name.to_string(),
-            #[cfg(target_os = "android")]
-            current_host: "AAudio".to_string(),
-            #[cfg(not(target_os = "android"))]
-            available_hosts: c.available_hosts.clone(),
-            #[cfg(not(target_os = "android"))]
-            supported_sample_rates: c.supported_sr,
-            midi_port_names: c.midi_port_names,
-            midi_connected_port: c.midi_connected_name,
-            show_settings: false,
-            #[cfg(not(target_os = "android"))]
-            selected_host_idx: c.host_idx,
-            selected_sample_rate: c.config.audio.sample_rate,
-            selected_buffer_size: c.config.audio.buffer_size,
-            selected_midi_port: c.config.midi.port_name.clone(),
-            is_jack: c.is_jack,
+            settings_audio_ui: SettingsAudioUi {
+                #[cfg(not(target_os = "android"))]
+                current_host: c.host_name.to_string(),
+                #[cfg(target_os = "android")]
+                current_host: "AAudio".to_string(),
+                #[cfg(not(target_os = "android"))]
+                available_hosts: c.available_hosts.clone(),
+                #[cfg(not(target_os = "android"))]
+                supported_sample_rates: c.supported_sr,
+                midi_port_names: c.midi_port_names,
+                midi_connected_port: c.midi_connected_name,
+                show_settings: false,
+                #[cfg(not(target_os = "android"))]
+                selected_host_idx: c.host_idx,
+                selected_sample_rate: c.config.audio.sample_rate,
+                selected_buffer_size: c.config.audio.buffer_size,
+                selected_midi_port: c.config.midi.port_name.clone(),
+                is_jack: c.is_jack,
+            },
             parts: std::iter::once(layer_a).chain(std::iter::once(layer_b)).chain(parts_extra).collect(),
             active_part: 0,
             on_midi_reconnect: Some(on_midi_reconnect),
@@ -894,8 +881,8 @@ impl eframe::App for App {
             ui.add_space(theme::SP_XS);
             ui.horizontal(|ui| {
                 if ui.button("\u{2699}").on_hover_text("Settings").clicked() {
-                    self.show_settings = !self.show_settings;
-                    if self.show_settings {
+                    self.settings_audio_ui.show_settings = !self.settings_audio_ui.show_settings;
+                    if self.settings_audio_ui.show_settings {
                         self.refresh_midi_ports();
                     }
                 }
@@ -926,7 +913,7 @@ impl eframe::App for App {
                 ui.separator();
 
                 let midi_status = self
-                    .midi_connected_port
+                    .settings_audio_ui.midi_connected_port
                     .as_deref()
                     .unwrap_or("(disconnected)");
                 ui.label(format!("MIDI: {midi_status}"));
@@ -971,7 +958,7 @@ impl eframe::App for App {
                     if self.config.ui.show_telemetry {
                         ui.label(format!(
                             "{} | {}Hz | buf {} | dsp {:.0}% (peak {:.0}%)",
-                            self.current_host,
+                            self.settings_audio_ui.current_host,
                             self.sample_rate,
                             buf,
                             self.dsp_load,
@@ -1238,7 +1225,7 @@ impl eframe::App for App {
         }
 
         // Settings window
-        if self.show_settings {
+        if self.settings_audio_ui.show_settings {
             self.draw_settings(ctx);
         }
         // Help window
@@ -2522,14 +2509,14 @@ impl App {
     }
 
     fn refresh_midi_ports(&mut self) {
-        self.midi_port_names = midi::list_ports().unwrap_or_default();
+        self.settings_audio_ui.midi_port_names = midi::list_ports().unwrap_or_default();
     }
 
     #[cfg(not(target_os = "android"))]
     fn refresh_sample_rates(&mut self) {
-        if let Some((host_id, _)) = self.available_hosts.get(self.selected_host_idx) {
-            self.supported_sample_rates = crate::audio::supported_sample_rates(*host_id);
-            self.is_jack = self.available_hosts[self.selected_host_idx].1 == "JACK";
+        if let Some((host_id, _)) = self.settings_audio_ui.available_hosts.get(self.settings_audio_ui.selected_host_idx) {
+            self.settings_audio_ui.supported_sample_rates = crate::audio::supported_sample_rates(*host_id);
+            self.settings_audio_ui.is_jack = self.settings_audio_ui.available_hosts[self.settings_audio_ui.selected_host_idx].1 == "JACK";
         }
     }
 

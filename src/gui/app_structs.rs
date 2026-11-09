@@ -153,3 +153,23 @@ pub struct TransportUi {
     /// 0 = SEQ buttons → drums, 1 = SEQ buttons → looper
     pub seq_target_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
 }
+
+/// Audio/MIDI device settings dialog state.
+pub struct SettingsAudioUi {
+    pub current_host: String,
+    #[cfg(not(target_os = "android"))]
+    pub available_hosts: Vec<(cpal::HostId, &'static str)>,
+    #[cfg(not(target_os = "android"))]
+    pub supported_sample_rates: Vec<u32>,
+
+    pub midi_port_names: Vec<String>,
+    pub midi_connected_port: Option<String>,
+
+    pub show_settings: bool,
+    #[cfg(not(target_os = "android"))]
+    pub selected_host_idx: usize,
+    pub selected_sample_rate: u32,
+    pub selected_buffer_size: u32,
+    pub selected_midi_port: Option<String>,
+    pub is_jack: bool,
+}

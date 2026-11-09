@@ -604,7 +604,7 @@ impl App {
     }
 
     pub(super) fn draw_settings(&mut self, ctx: &egui::Context) {
-        let mut open = self.show_settings;
+        let mut open = self.settings_audio_ui.show_settings;
         // Обёртка modal::ModalWindow: Esc-стек (с гейтом popup'ов — здесь есть
         // ComboBox'ы), константный Id окна. footer_done(false): закрывается Esc/✕.
         super::modal::ModalWindow::new(ctx, "settings", "Settings", &mut open, 500.0)
@@ -613,7 +613,7 @@ impl App {
             .show(|ui| {
                 ui.heading("Audio");
 
-                if self.is_jack {
+                if self.settings_audio_ui.is_jack {
                     ui.colored_label(
                         theme::TEXT_MUTED,
                         format!("JACK server: {}Hz", self.sample_rate),
@@ -628,27 +628,27 @@ impl App {
                         #[cfg(not(target_os = "android"))]
                         {
                         ui.label("Backend:");
-                        let host_name = self.available_hosts.get(self.selected_host_idx)
+                        let host_name = self.settings_audio_ui.available_hosts.get(self.settings_audio_ui.selected_host_idx)
                             .map(|(_, n)| *n).unwrap_or("?");
-                        let old_idx = self.selected_host_idx;
+                        let old_idx = self.settings_audio_ui.selected_host_idx;
                         egui::ComboBox::from_id_salt("host")
                             .selected_text(host_name)
                             .show_ui(ui, |ui| {
-                                for (i, (_, name)) in self.available_hosts.iter().enumerate() {
-                                    ui.selectable_value(&mut self.selected_host_idx, i, *name);
+                                for (i, (_, name)) in self.settings_audio_ui.available_hosts.iter().enumerate() {
+                                    ui.selectable_value(&mut self.settings_audio_ui.selected_host_idx, i, *name);
                                 }
                             });
-                        if self.selected_host_idx != old_idx {
+                        if self.settings_audio_ui.selected_host_idx != old_idx {
                             self.refresh_sample_rates();
                         }
                         ui.end_row();
 
                         ui.label("Sample Rate:");
                         egui::ComboBox::from_id_salt("samplerate")
-                            .selected_text(format!("{}", self.selected_sample_rate))
+                            .selected_text(format!("{}", self.settings_audio_ui.selected_sample_rate))
                             .show_ui(ui, |ui| {
-                                for &rate in &self.supported_sample_rates {
-                                    ui.selectable_value(&mut self.selected_sample_rate, rate, format!("{rate} Hz"));
+                                for &rate in &self.settings_audio_ui.supported_sample_rates {
+                                    ui.selectable_value(&mut self.settings_audio_ui.selected_sample_rate, rate, format!("{rate} Hz"));
                                 }
                             });
                         ui.end_row();
@@ -656,16 +656,16 @@ impl App {
 
                         ui.label("Buffer Size:");
                         egui::ComboBox::from_id_salt("buffer")
-                            .selected_text(buffer_label(self.selected_buffer_size))
+                            .selected_text(buffer_label(self.settings_audio_ui.selected_buffer_size))
                             .show_ui(ui, |ui| {
                                 for &size in BUFFER_SIZES {
                                     let label = if size == 0 {
                                         "Default".to_string()
                                     } else {
-                                        let ms = size as f32 / self.selected_sample_rate as f32 * 1000.0;
+                                        let ms = size as f32 / self.settings_audio_ui.selected_sample_rate as f32 * 1000.0;
                                         format!("{size} ({ms:.1}ms)")
                                     };
-                                    ui.selectable_value(&mut self.selected_buffer_size, size, label);
+                                    ui.selectable_value(&mut self.settings_audio_ui.selected_buffer_size, size, label);
                                 }
                             });
                         ui.end_row();
@@ -677,30 +677,30 @@ impl App {
                 // тоже требует рестарта — включён в сравнение.
                 #[cfg(not(target_os = "android"))]
                 let pending_backend = self
-                    .available_hosts
-                    .get(self.selected_host_idx)
+                    .settings_audio_ui.available_hosts
+                    .get(self.settings_audio_ui.selected_host_idx)
                     .map(|(_, name)| self.config.audio.backend != *name)
                     .unwrap_or(false);
                 #[cfg(target_os = "android")]
                 let pending_backend = false; // нет выбора backend на android
                 let pending = pending_backend
-                    || self.selected_sample_rate != self.config.audio.sample_rate
-                    || self.selected_buffer_size != self.config.audio.buffer_size;
+                    || self.settings_audio_ui.selected_sample_rate != self.config.audio.sample_rate
+                    || self.settings_audio_ui.selected_buffer_size != self.config.audio.buffer_size;
                 if pending {
                     ui.colored_label(theme::TEXT_WARN, "Restart required to apply audio changes.");
                 }
                 if ui.button("Save Audio Settings").clicked() {
                     #[cfg(not(target_os = "android"))]
-                    if let Some((_, host_name)) = self.available_hosts.get(self.selected_host_idx) {
+                    if let Some((_, host_name)) = self.settings_audio_ui.available_hosts.get(self.settings_audio_ui.selected_host_idx) {
                         self.config.audio.backend = host_name.to_string();
-                        self.config.audio.sample_rate = self.selected_sample_rate;
-                        self.config.audio.buffer_size = self.selected_buffer_size;
+                        self.config.audio.sample_rate = self.settings_audio_ui.selected_sample_rate;
+                        self.config.audio.buffer_size = self.settings_audio_ui.selected_buffer_size;
                         self.snapshot_preset_and_mark_dirty();
                     }
                     #[cfg(target_os = "android")]
                     {
-                        self.config.audio.sample_rate = self.selected_sample_rate;
-                        self.config.audio.buffer_size = self.selected_buffer_size;
+                        self.config.audio.sample_rate = self.settings_audio_ui.selected_sample_rate;
+                        self.config.audio.buffer_size = self.settings_audio_ui.selected_buffer_size;
                         self.snapshot_preset_and_mark_dirty();
                     }
                 }
@@ -763,16 +763,16 @@ impl App {
                     .spacing([12.0, 6.0])
                     .show(ui, |ui| {
                         ui.label("Port:");
-                        let current_label = self.selected_midi_port.clone()
+                        let current_label = self.settings_audio_ui.selected_midi_port.clone()
                             .unwrap_or_else(|| "(none)".to_string());
                         egui::ComboBox::from_id_salt("midi_port")
                             .selected_text(&current_label)
                             .width(280.0)
                             .show_ui(ui, |ui| {
                                 let none_val: Option<String> = None;
-                                ui.selectable_value(&mut self.selected_midi_port, none_val, "(none)");
-                                for name in &self.midi_port_names {
-                                    ui.selectable_value(&mut self.selected_midi_port, Some(name.clone()), name.as_str());
+                                ui.selectable_value(&mut self.settings_audio_ui.selected_midi_port, none_val, "(none)");
+                                for name in &self.settings_audio_ui.midi_port_names {
+                                    ui.selectable_value(&mut self.settings_audio_ui.selected_midi_port, Some(name.clone()), name.as_str());
                                 }
                             });
                         ui.end_row();
@@ -945,16 +945,16 @@ impl App {
                 );
 
             });
-        self.show_settings = open;
+        self.settings_audio_ui.show_settings = open;
     }
 
     pub(super) fn apply_midi(&mut self) {
-        if let Some(port_name) = &self.selected_midi_port {
+        if let Some(port_name) = &self.settings_audio_ui.selected_midi_port {
             let port_name = port_name.clone();
             if let Some(reconnect) = &mut self.on_midi_reconnect {
                 match reconnect(&port_name) {
                     Ok(()) => {
-                        self.midi_connected_port = Some(port_name.clone());
+                        self.settings_audio_ui.midi_connected_port = Some(port_name.clone());
                         self.config.midi.port_name = Some(port_name.clone());
                         self.show_toast(format!("MIDI: {port_name}"), ToastKind::Success);
                         self.snapshot_preset_and_mark_dirty();
@@ -963,7 +963,7 @@ impl App {
                 }
             }
         } else {
-            self.midi_connected_port = None;
+            self.settings_audio_ui.midi_connected_port = None;
             self.config.midi.port_name = None;
             self.show_toast("MIDI disconnected", ToastKind::Info);
             self.snapshot_preset_and_mark_dirty();
