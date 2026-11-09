@@ -349,8 +349,6 @@ pub struct App {
     pub master_rec_cycle: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Static pedal-up release duration (None = off, patch release)
     pub sustain_release: Option<f32>,
-    /// SF2 release-time scale (1.0 = file defaults)
-    pub sf2_release_scale: f32,
     /// Show help dialog
     pub show_help: bool,
     /// Global params display values (effects, volume, lfo rate)
@@ -480,16 +478,7 @@ pub struct App {
     /// через 2 с после последнего изменения (fade 300 мс; практика OSD HUD).
     pub active_knob: Option<(String, String, std::time::Instant)>,
     // SF2 sampler
-    pub sf2_file_list: Vec<(String, std::path::PathBuf)>,
-    pub sf2_keys_selected: Option<usize>,
-    pub sf2_keys_loaded_name: String,
-    pub sf2_drums_selected: Option<usize>,
-    pub sf2_drums_loaded_name: String,
-    pub sf2_drums_enabled: bool,
-    pub sf2_keys_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
-    pub sf2_drums_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
-    pub sf2_block_size: usize,
-    pub sf2_sample_offset_ms: f32,
+    pub sf2_ui: Sf2Ui,
     pub pitch_seq_ui: PitchSeqUi,
     // Toast notifications
     pub toasts: Vec<Toast>,
@@ -581,7 +570,6 @@ impl App {
             master_rec_state: c.handles.master_rec_state_atom,
             master_rec_cycle: c.handles.master_rec_cycle_atom,
             sustain_release: c.config.ui.sustain_release,
-            sf2_release_scale: c.config.ui.sf2_release_scale,
             show_help: false,
             global_params: {
                 let mut gp = std::collections::BTreeMap::new();
@@ -691,23 +679,26 @@ impl App {
             dsp_peak: 0.0,
             global_dirty: false,
             active_knob: None,
-            sf2_file_list: {
-                let scan = scan_sf2_files();
-                for (dir, err) in &scan.unreadable {
-                    log::warn!("[sf2] cannot read {}: {err}", dir.display());
-                    eprintln!("[sf2] cannot read {}: {err}", dir.display());
-                }
-                scan.files
+            sf2_ui: Sf2Ui {
+                sf2_release_scale: c.config.ui.sf2_release_scale,
+                sf2_file_list: {
+                    let scan = scan_sf2_files();
+                    for (dir, err) in &scan.unreadable {
+                        log::warn!("[sf2] cannot read {}: {err}", dir.display());
+                        eprintln!("[sf2] cannot read {}: {err}", dir.display());
+                    }
+                    scan.files
+                },
+                sf2_keys_selected: None,
+                sf2_keys_loaded_name: String::new(),
+                sf2_drums_selected: None,
+                sf2_drums_loaded_name: String::new(),
+                sf2_drums_enabled: c.config.sf2.drums_sf2,
+                sf2_keys_soundfont: None,
+                sf2_drums_soundfont: None,
+                sf2_block_size: c.config.sf2.block_size,
+                sf2_sample_offset_ms: c.config.sf2.sample_offset_ms,
             },
-            sf2_keys_selected: None,
-            sf2_keys_loaded_name: String::new(),
-            sf2_drums_selected: None,
-            sf2_drums_loaded_name: String::new(),
-            sf2_drums_enabled: c.config.sf2.drums_sf2,
-            sf2_keys_soundfont: None,
-            sf2_drums_soundfont: None,
-            sf2_block_size: c.config.sf2.block_size,
-            sf2_sample_offset_ms: c.config.sf2.sample_offset_ms,
             pitch_seq_ui: PitchSeqUi {
                 pitch_seq_step_atoms: c.handles.pitch_seq_step_atoms,
                 pitch_seq_enabled: [false; 2],
@@ -1425,7 +1416,7 @@ impl eframe::App for App {
                     ui.add_space(theme::SP_MD);
                     let part = self.active_part;
                     let is_sf2 = self.parts[part].sf2_mode;
-                    if is_sf2 && self.sf2_keys_soundfont.is_some() {
+                    if is_sf2 && self.sf2_ui.sf2_keys_soundfont.is_some() {
                         use crate::synth::sampler::GM_PROGRAM_NAMES;
                         let prog = self.parts[part].sf2_program;
                         let name = GM_PROGRAM_NAMES.get(prog as usize).unwrap_or(&"?");
@@ -1433,7 +1424,7 @@ impl eframe::App for App {
                         ui.colored_label(
                             theme::TEXT_SF2_STATUS,
                             format!("SF2-парт (семплы): {} — {} | параметры DSP не применяются",
-                                self.sf2_keys_loaded_name, name),
+                                self.sf2_ui.sf2_keys_loaded_name, name),
                         );
                         ui.label(egui::RichText::new(
                             "Настройка тембра — браузер (кнопка с именем пресета) или ⇨ DSP").weak());
@@ -1784,14 +1775,14 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
         let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: self.sustain_release });
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale: self.sf2_release_scale });
+        let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale: self.sf2_ui.sf2_release_scale });
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
         // Per-engine loudness trims (Settings → Audio, persisted in config.audio)
         let _ = self.ctrl_tx.push(ControlEvent::SetDspTrim { db: self.config.audio.dsp_trim_db });
         let _ = self.ctrl_tx.push(ControlEvent::SetSf2Trim { db: self.config.audio.sf2_trim_db });
         // Restore the internal-kit remap before the initial push (if an SF2 kit is
         // configured, load_sf2_drums below overwrites this with the per-kit table).
-        if self.sf2_drums_loaded_name.is_empty() {
+        if self.sf2_ui.sf2_drums_loaded_name.is_empty() {
             if let Some(v) = self.config.sf2.drums_remaps.get("internal") {
                 // migrate legacy slot-encoded values (0..16) to kit notes (+36)
                 let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
@@ -1814,8 +1805,8 @@ impl App {
         self.save_global_to_config();
 
         // SF2 sample offset
-        if self.sf2_sample_offset_ms > 0.0 {
-            let _ = self.ctrl_tx.push(ControlEvent::SetSf2SampleOffset { ms: self.sf2_sample_offset_ms });
+        if self.sf2_ui.sf2_sample_offset_ms > 0.0 {
+            let _ = self.ctrl_tx.push(ControlEvent::SetSf2SampleOffset { ms: self.sf2_ui.sf2_sample_offset_ms });
         }
 
         // Load SF2 from config if set
@@ -1825,7 +1816,7 @@ impl App {
         if let Some(sf2_path) = keys_path {
             let idx = self.find_or_add_sf2(&sf2_path);
             if let Some(idx) = idx {
-                self.sf2_keys_selected = Some(idx);
+                self.sf2_ui.sf2_keys_selected = Some(idx);
                 self.load_sf2_keys(idx);
             }
         }
@@ -1833,7 +1824,7 @@ impl App {
         if let Some(sf2_path) = self.config.sf2.drums_file_path.clone() {
             let idx = self.find_or_add_sf2(&sf2_path);
             if let Some(idx) = idx {
-                self.sf2_drums_selected = Some(idx);
+                self.sf2_ui.sf2_drums_selected = Some(idx);
                 self.load_sf2_drums(idx);
             }
         }
@@ -1879,7 +1870,7 @@ impl App {
         self.config.ui.drum_volume = self.drum_volume;
         self.config.ui.drum_fixed_velocity = self.drum_fixed_velocity;
         self.config.ui.sustain_release = self.sustain_release;
-        self.config.ui.sf2_release_scale = self.sf2_release_scale;
+        self.config.ui.sf2_release_scale = self.sf2_ui.sf2_release_scale;
         self.config.ui.drum_metronome = self.drum_metronome;
         if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
@@ -2298,8 +2289,8 @@ impl App {
     }
 
     fn drum_remap_key(&self) -> String {
-        if self.sf2_drums_loaded_name.is_empty() { "internal".to_string() }
-        else { self.sf2_drums_loaded_name.clone() }
+        if self.sf2_ui.sf2_drums_loaded_name.is_empty() { "internal".to_string() }
+        else { self.sf2_ui.sf2_drums_loaded_name.clone() }
     }
 
     /// Push the current remap table to the engine.

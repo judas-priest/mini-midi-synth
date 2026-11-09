@@ -181,7 +181,7 @@ impl App {
                                     ui.add_space(theme::SP_XS);
                                 }
                             if section_sf2 {
-                                if self.sf2_keys_soundfont.is_some() {
+                                if self.sf2_ui.sf2_keys_soundfont.is_some() {
                                 // ── GM categories (перенос mod.rs:1141-1205: клик пишет
                                 //    picked_program, коллапс — toggled_cat) ──
                                 use crate::synth::sampler::GM_PROGRAM_NAMES;

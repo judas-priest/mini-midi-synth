@@ -424,7 +424,7 @@ impl App {
             // Instrument select (кнопка открывает браузер; тоггл движка — в браузере)
             let sf2 = self.parts[i].sf2_mode;
             if sf2 {
-                if self.sf2_keys_soundfont.is_some() {
+                if self.sf2_ui.sf2_keys_soundfont.is_some() {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
                     let prog = self.parts[i].sf2_program;
                     let cur_name = GM_PROGRAM_NAMES.get(prog as usize).copied().unwrap_or("?");

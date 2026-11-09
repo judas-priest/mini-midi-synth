@@ -132,7 +132,7 @@ impl App {
             return;
         }
 
-        let has_sf2 = self.sf2_keys_soundfont.is_some();
+        let has_sf2 = self.sf2_ui.sf2_keys_soundfont.is_some();
 
         // ── Track list ─────────────────────────────────────────────────────
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {

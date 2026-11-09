@@ -793,27 +793,27 @@ impl App {
 
                 // Keys SF2
                 ui.horizontal(|ui| {
-                    let current = if self.sf2_keys_loaded_name.is_empty() {
+                    let current = if self.sf2_ui.sf2_keys_loaded_name.is_empty() {
                         "(none)".to_string()
                     } else {
-                        self.sf2_keys_loaded_name.clone()
+                        self.sf2_ui.sf2_keys_loaded_name.clone()
                     };
                     ui.label("Keys:");
                     egui::ComboBox::from_id_salt("sf2_keys_file")
                         .selected_text(&current)
                         .width(220.0)
                         .show_ui(ui, |ui| {
-                            if ui.selectable_label(self.sf2_keys_selected.is_none(), "(none)").clicked() {
-                                self.sf2_keys_selected = None;
+                            if ui.selectable_label(self.sf2_ui.sf2_keys_selected.is_none(), "(none)").clicked() {
+                                self.sf2_ui.sf2_keys_selected = None;
                             }
-                            for (i, (name, _)) in self.sf2_file_list.iter().enumerate() {
-                                if ui.selectable_label(self.sf2_keys_selected == Some(i), name).clicked() {
-                                    self.sf2_keys_selected = Some(i);
+                            for (i, (name, _)) in self.sf2_ui.sf2_file_list.iter().enumerate() {
+                                if ui.selectable_label(self.sf2_ui.sf2_keys_selected == Some(i), name).clicked() {
+                                    self.sf2_ui.sf2_keys_selected = Some(i);
                                 }
                             }
                         });
                     if ui.button("Load").clicked() {
-                        if let Some(idx) = self.sf2_keys_selected {
+                        if let Some(idx) = self.sf2_ui.sf2_keys_selected {
                             self.load_sf2_keys(idx);
                         } else {
                             self.unload_sf2_keys();
@@ -823,27 +823,27 @@ impl App {
 
                 // Drums SF2
                 ui.horizontal(|ui| {
-                    let current = if self.sf2_drums_loaded_name.is_empty() {
+                    let current = if self.sf2_ui.sf2_drums_loaded_name.is_empty() {
                         "(none)".to_string()
                     } else {
-                        self.sf2_drums_loaded_name.clone()
+                        self.sf2_ui.sf2_drums_loaded_name.clone()
                     };
                     ui.label("Drums:");
                     egui::ComboBox::from_id_salt("sf2_drums_file")
                         .selected_text(&current)
                         .width(220.0)
                         .show_ui(ui, |ui| {
-                            if ui.selectable_label(self.sf2_drums_selected.is_none(), "(none)").clicked() {
-                                self.sf2_drums_selected = None;
+                            if ui.selectable_label(self.sf2_ui.sf2_drums_selected.is_none(), "(none)").clicked() {
+                                self.sf2_ui.sf2_drums_selected = None;
                             }
-                            for (i, (name, _)) in self.sf2_file_list.iter().enumerate() {
-                                if ui.selectable_label(self.sf2_drums_selected == Some(i), name).clicked() {
-                                    self.sf2_drums_selected = Some(i);
+                            for (i, (name, _)) in self.sf2_ui.sf2_file_list.iter().enumerate() {
+                                if ui.selectable_label(self.sf2_ui.sf2_drums_selected == Some(i), name).clicked() {
+                                    self.sf2_ui.sf2_drums_selected = Some(i);
                                 }
                             }
                         });
                     if ui.button("Load").clicked() {
-                        if let Some(idx) = self.sf2_drums_selected {
+                        if let Some(idx) = self.sf2_ui.sf2_drums_selected {
                             self.load_sf2_drums(idx);
                         } else {
                             self.unload_sf2_drums();
@@ -863,7 +863,7 @@ impl App {
                                 ToastKind::Error,
                             );
                         }
-                        self.sf2_file_list = scan.files;
+                        self.sf2_ui.sf2_file_list = scan.files;
                     }
                     // Show where files are actually picked up from. On Android
                     // this is the app's own storage: /sdcard/Download is
@@ -885,11 +885,11 @@ impl App {
                     }
                 });
 
-                if !self.sf2_drums_loaded_name.is_empty() {
+                if !self.sf2_ui.sf2_drums_loaded_name.is_empty() {
                     ui.horizontal(|ui| {
-                        let mut drums = self.sf2_drums_enabled;
+                        let mut drums = self.sf2_ui.sf2_drums_enabled;
                         if ui.checkbox(&mut drums, "SF2 Drums").changed() {
-                            self.sf2_drums_enabled = drums;
+                            self.sf2_ui.sf2_drums_enabled = drums;
                             let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: drums });
                             self.config.sf2.drums_sf2 = drums;
                             self.mark_config_dirty();
@@ -905,10 +905,10 @@ impl App {
                     self.mark_config_dirty();
                 }
 
-                if self.sf2_keys_soundfont.is_some() || self.sf2_drums_soundfont.is_some() {
+                if self.sf2_ui.sf2_keys_soundfont.is_some() || self.sf2_ui.sf2_drums_soundfont.is_some() {
                     ui.horizontal(|ui| {
                         ui.label("Block size:");
-                        let mut bs = self.sf2_block_size;
+                        let mut bs = self.sf2_ui.sf2_block_size;
                         let old = bs;
                         egui::ComboBox::from_id_salt("sf2_block")
                             .selected_text(format!("{bs} samples"))
@@ -919,7 +919,7 @@ impl App {
                                 }
                             });
                         if bs != old {
-                            self.sf2_block_size = bs;
+                            self.sf2_ui.sf2_block_size = bs;
                             let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: bs });
                             self.config.sf2.block_size = bs;
                             self.mark_config_dirty();
@@ -927,13 +927,13 @@ impl App {
                     });
                     ui.horizontal(|ui| {
                         ui.label("Sample offset:");
-                        let old = self.sf2_sample_offset_ms;
-                        ui.add(egui::Slider::new(&mut self.sf2_sample_offset_ms, 0.0..=50.0)
+                        let old = self.sf2_ui.sf2_sample_offset_ms;
+                        ui.add(egui::Slider::new(&mut self.sf2_ui.sf2_sample_offset_ms, 0.0..=50.0)
                             .suffix(" ms")
                             .fixed_decimals(1));
-                        if self.sf2_sample_offset_ms != old {
-                            let _ = self.ctrl_tx.push(ControlEvent::SetSf2SampleOffset { ms: self.sf2_sample_offset_ms });
-                            self.config.sf2.sample_offset_ms = self.sf2_sample_offset_ms;
+                        if self.sf2_ui.sf2_sample_offset_ms != old {
+                            let _ = self.ctrl_tx.push(ControlEvent::SetSf2SampleOffset { ms: self.sf2_ui.sf2_sample_offset_ms });
+                            self.config.sf2.sample_offset_ms = self.sf2_ui.sf2_sample_offset_ms;
                             self.global_dirty = true;
                         }
                     });

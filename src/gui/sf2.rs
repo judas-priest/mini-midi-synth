@@ -56,7 +56,7 @@ pub(crate) fn sf2_dir() -> std::path::PathBuf {
 
 impl App {
     pub(crate) fn find_or_add_sf2(&mut self, sf2_path: &str) -> Option<usize> {
-        let idx = self.sf2_file_list.iter().position(|(_, p)| p.to_string_lossy() == sf2_path);
+        let idx = self.sf2_ui.sf2_file_list.iter().position(|(_, p)| p.to_string_lossy() == sf2_path);
         if let Some(idx) = idx {
             return Some(idx);
         }
@@ -66,8 +66,8 @@ impl App {
                 .and_then(|s| s.to_str())
                 .unwrap_or("?")
                 .to_string();
-            self.sf2_file_list.push((name, path));
-            Some(self.sf2_file_list.len() - 1)
+            self.sf2_ui.sf2_file_list.push((name, path));
+            Some(self.sf2_ui.sf2_file_list.len() - 1)
         } else {
             None
         }
@@ -119,13 +119,13 @@ impl App {
     }
 
     pub(crate) fn load_sf2_keys(&mut self, idx: usize) {
-        let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
+        let Some((name, path)) = self.sf2_ui.sf2_file_list.get(idx).cloned() else {
             self.show_toast("SF2 file not found", ToastKind::Error);
             return;
         };
         // Reuse existing drums soundfont if same file
-        let sf = if self.sf2_drums_loaded_name == name {
-            self.sf2_drums_soundfont.clone()
+        let sf = if self.sf2_ui.sf2_drums_loaded_name == name {
+            self.sf2_ui.sf2_drums_soundfont.clone()
         } else {
             None
         };
@@ -136,10 +136,10 @@ impl App {
                 None => return,
             },
         };
-        self.sf2_keys_soundfont = Some(sf.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
+        self.sf2_ui.sf2_keys_soundfont = Some(sf.clone());
+        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_ui.sf2_block_size });
         let _ = self.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
-        self.sf2_keys_loaded_name = name;
+        self.sf2_ui.sf2_keys_loaded_name = name;
         self.show_toast("Keys SF2 loaded", ToastKind::Success);
         // Apply per-part SF2 modes
         for i in 0..2 {
@@ -156,13 +156,13 @@ impl App {
     }
 
     pub(crate) fn load_sf2_drums(&mut self, idx: usize) {
-        let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
+        let Some((name, path)) = self.sf2_ui.sf2_file_list.get(idx).cloned() else {
             self.show_toast("SF2 file not found", ToastKind::Error);
             return;
         };
         // Reuse existing keys soundfont if same file
-        let sf = if self.sf2_keys_loaded_name == name {
-            self.sf2_keys_soundfont.clone()
+        let sf = if self.sf2_ui.sf2_keys_loaded_name == name {
+            self.sf2_ui.sf2_keys_soundfont.clone()
         } else {
             None
         };
@@ -173,14 +173,14 @@ impl App {
                 None => return,
             },
         };
-        self.sf2_drums_soundfont = Some(sf.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
+        self.sf2_ui.sf2_drums_soundfont = Some(sf.clone());
+        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_ui.sf2_block_size });
         let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
-        self.sf2_drums_loaded_name = name;
+        self.sf2_ui.sf2_drums_loaded_name = name;
         self.extract_kit_names(&sf);
         self.push_drum_choke_groups();
         self.show_toast("Drums SF2 loaded", ToastKind::Success);
-        if self.sf2_drums_enabled {
+        if self.sf2_ui.sf2_drums_enabled {
             let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
         }
         // Load the per-kit remap table (identity if none saved for this kit).
@@ -207,8 +207,8 @@ impl App {
     }
 
     pub(crate) fn unload_sf2_keys(&mut self) {
-        self.sf2_keys_soundfont = None;
-        self.sf2_keys_loaded_name.clear();
+        self.sf2_ui.sf2_keys_soundfont = None;
+        self.sf2_ui.sf2_keys_loaded_name.clear();
         for i in 0..2 {
             self.parts[i].sf2_mode = false;
             let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: false });
@@ -220,9 +220,9 @@ impl App {
     }
 
     pub(crate) fn unload_sf2_drums(&mut self) {
-        self.sf2_drums_soundfont = None;
-        self.sf2_drums_loaded_name.clear();
-        self.sf2_drums_enabled = false;
+        self.sf2_ui.sf2_drums_soundfont = None;
+        self.sf2_ui.sf2_drums_loaded_name.clear();
+        self.sf2_ui.sf2_drums_enabled = false;
         self.reset_kit_names();
         self.push_drum_choke_groups(); // back to GM choke layout
         // Internal kit: reset to identity remap.

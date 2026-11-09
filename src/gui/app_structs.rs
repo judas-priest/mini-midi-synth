@@ -63,3 +63,19 @@ pub struct PitchSeqUi {
     pub pitch_seq_scale: [u8; 2],
     pub pitch_seq_swing: [f32; 2],
 }
+
+/// SF2 sampler.
+pub struct Sf2Ui {
+    /// SF2 release-time scale (1.0 = file defaults)
+    pub sf2_release_scale: f32,
+    pub sf2_file_list: Vec<(String, std::path::PathBuf)>,
+    pub sf2_keys_selected: Option<usize>,
+    pub sf2_keys_loaded_name: String,
+    pub sf2_drums_selected: Option<usize>,
+    pub sf2_drums_loaded_name: String,
+    pub sf2_drums_enabled: bool,
+    pub sf2_keys_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
+    pub sf2_drums_soundfont: Option<std::sync::Arc<rustysynth::SoundFont>>,
+    pub sf2_block_size: usize,
+    pub sf2_sample_offset_ms: f32,
+}

@@ -292,7 +292,7 @@ impl App {
                 // synth/mod.rs drum_triggers loop), so these params have no
                 // effect on SF2 kits (TECHDEBT #33). Grayed out with a tooltip
                 // instead of silently doing nothing.
-                let dsp_kit = !(self.sf2_drums_enabled && self.sf2_drums_soundfont.is_some());
+                let dsp_kit = !(self.sf2_ui.sf2_drums_enabled && self.sf2_ui.sf2_drums_soundfont.is_some());
                 let dsp_hint = if dsp_kit { "" } else { " — DSP only (rustysynth limitation: one drum channel, global release)" };
                 // L и T работают на обоих движках: на SF2 — velocity-scale и
                 // транспозиция ноты (раунд 4). P/D — только DSP (см. hover).
