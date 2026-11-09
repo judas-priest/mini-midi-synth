@@ -31,3 +31,24 @@ pub struct LedUi {
     pub nav_press_time: Option<std::time::Instant>,
     pub mute_window: usize,   // first part idx visible on MUTE slots 1..=7
 }
+
+/// Audio device disconnect detection + reconnect, shared handles.
+pub struct AudioReconnectUi {
+    pub audio_disconnected: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Device name the current stream was built on (TECHDEBT #18). `None` =
+    /// unknown (device.name() failed) — name poll disabled, dead-stream flag
+    /// still works.
+    pub audio_device_name: Option<String>,
+    /// Host the current stream was built on (PR #9). The default-device name
+    /// poll only makes sense when the stream itself lives on the default
+    /// host; cross-host names never match and cause false reconnects.
+    pub audio_host_id: cpal::HostId,
+    /// Hotplug reconnect retry state machine (TECHDEBT #18).
+    pub audio_watch: crate::audio::ReconnectPolicy,
+    pub _audio_handle: Option<crate::audio::AudioBackend>,
+    pub midi_tx_shared: crate::midi::SharedMidiTx,
+    /// Heap objects the engine and the audio callback handed back. Dropping
+    /// them here is what keeps free() off the audio thread.
+    pub engine_trash_rx: crate::trash::TrashRx,
+    pub cb_trash_rx: crate::trash::TrashRx,
+}

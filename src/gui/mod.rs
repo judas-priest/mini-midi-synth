@@ -537,24 +537,7 @@ pub struct App {
     // AND live part actions (mute/pan/transpose/patch click) in one stack.
     pub undo_stack: std::collections::VecDeque<PartUndoSnapshot>,
     pub redo_stack: Vec<PartUndoSnapshot>,
-    // Audio device disconnect detection + reconnect
-    pub audio_disconnected: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Device name the current stream was built on (TECHDEBT #18). `None` =
-    /// unknown (device.name() failed) — name poll disabled, dead-stream flag
-    /// still works.
-    pub audio_device_name: Option<String>,
-    /// Host the current stream was built on (PR #9). The default-device name
-    /// poll only makes sense when the stream itself lives on the default
-    /// host; cross-host names never match and cause false reconnects.
-    pub audio_host_id: cpal::HostId,
-    /// Hotplug reconnect retry state machine (TECHDEBT #18).
-    pub audio_watch: crate::audio::ReconnectPolicy,
-    pub _audio_handle: Option<crate::audio::AudioBackend>,
-    pub midi_tx_shared: crate::midi::SharedMidiTx,
-    /// Heap objects the engine and the audio callback handed back. Dropping
-    /// them here is what keeps free() off the audio thread.
-    pub engine_trash_rx: crate::trash::TrashRx,
-    pub cb_trash_rx: crate::trash::TrashRx,
+    pub audio_reconnect_ui: AudioReconnectUi,
 }
 
 impl App {
@@ -761,14 +744,16 @@ impl App {
             undo_stack: std::collections::VecDeque::new(),
             redo_stack: Vec::new(),
             toasts: Vec::new(),
-            audio_disconnected: c.audio_disconnected.clone(),
-            audio_device_name: c._audio_handle.device_name.clone(),
-            audio_host_id: c._audio_handle.host_id,
-            audio_watch: crate::audio::ReconnectPolicy::default(),
-            _audio_handle: Some(c._audio_handle),
-            midi_tx_shared: c.midi_tx_shared.clone(),
-            engine_trash_rx: c.engine_trash_rx,
-            cb_trash_rx: c.cb_trash_rx,
+            audio_reconnect_ui: AudioReconnectUi {
+                audio_disconnected: c.audio_disconnected.clone(),
+                audio_device_name: c._audio_handle.device_name.clone(),
+                audio_host_id: c._audio_handle.host_id,
+                audio_watch: crate::audio::ReconnectPolicy::default(),
+                _audio_handle: Some(c._audio_handle),
+                midi_tx_shared: c.midi_tx_shared.clone(),
+                engine_trash_rx: c.engine_trash_rx,
+                cb_trash_rx: c.cb_trash_rx,
+            },
         };
         app.reset_kit_names();
         app
@@ -839,19 +824,19 @@ impl eframe::App for App {
         // a GUI-thread operation (rebuilds the stream); the audio callback
         // only ever sees the finished new stream.
         let now = Instant::now();
-        if self.audio_disconnected.swap(false, Ordering::Relaxed) || self.audio_watch.retry_due(now) {
+        if self.audio_reconnect_ui.audio_disconnected.swap(false, Ordering::Relaxed) || self.audio_reconnect_ui.audio_watch.retry_due(now) {
             match self.reconnect_audio() {
                 Ok(()) => {
-                    self.audio_watch.on_success();
-                    self.audio_device_name =
-                        self._audio_handle.as_ref().and_then(|b| b.device_name.clone());
-                    if let Some(b) = self._audio_handle.as_ref() {
-                        self.audio_host_id = b.host_id;
+                    self.audio_reconnect_ui.audio_watch.on_success();
+                    self.audio_reconnect_ui.audio_device_name =
+                        self.audio_reconnect_ui._audio_handle.as_ref().and_then(|b| b.device_name.clone());
+                    if let Some(b) = self.audio_reconnect_ui._audio_handle.as_ref() {
+                        self.audio_reconnect_ui.audio_host_id = b.host_id;
                     }
                     self.show_toast("Audio reconnected".to_string(), ToastKind::Success);
                 }
                 Err(e) => {
-                    if self.audio_watch.on_failure(now) {
+                    if self.audio_reconnect_ui.audio_watch.on_failure(now) {
                         self.show_toast(format!("Audio reconnect failed: {e}"), ToastKind::Error);
                     }
                 }
@@ -862,8 +847,8 @@ impl eframe::App for App {
         self.drain_feedback();
 
         // Free whatever the audio thread handed over this frame.
-        self.engine_trash_rx.drain();
-        self.cb_trash_rx.drain();
+        self.audio_reconnect_ui.engine_trash_rx.drain();
+        self.audio_reconnect_ui.cb_trash_rx.drain();
 
         // Pad performance switching (only when pad perf panel is open)
         if self.show_pad_perf {

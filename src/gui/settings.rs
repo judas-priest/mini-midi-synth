@@ -227,7 +227,7 @@ impl App {
         }
 
         // Drop old audio backend (dead stream + old synth engine)
-        self._audio_handle = None;
+        self.audio_reconnect_ui._audio_handle = None;
 
         // Rebuild on the ORIGINAL configured host (PR #9), not the default
         // host: if the app runs under JACK, default_host() is PipeWire and
@@ -254,7 +254,7 @@ impl App {
         let (feedback_tx, feedback_rx) = rtrb::RingBuffer::<synth::ParamFeedback>::new(64);
 
         // Swap MIDI producer inside SharedMidiTx (for JNI bridge on Android)
-        if let Ok(mut guard) = self.midi_tx_shared.lock() {
+        if let Ok(mut guard) = self.audio_reconnect_ui.midi_tx_shared.lock() {
             *guard = midi_tx;
         }
 
@@ -322,12 +322,12 @@ impl App {
                 trash: cb_trash_tx,
             },
         )?;
-        self.engine_trash_rx = engine_trash_rx;
-        self.cb_trash_rx = cb_trash_rx;
+        self.audio_reconnect_ui.engine_trash_rx = engine_trash_rx;
+        self.audio_reconnect_ui.cb_trash_rx = cb_trash_rx;
 
         // Update GUI state
-        self.audio_disconnected = audio_backend.disconnected.clone();
-        self._audio_handle = Some(audio_backend);
+        self.audio_reconnect_ui.audio_disconnected = audio_backend.disconnected.clone();
+        self.audio_reconnect_ui._audio_handle = Some(audio_backend);
         self.ctrl_tx = crate::metrics::CountingProducer::new(ctrl_tx);
         self.feedback_rx = Some(feedback_rx);
         self.sample_rate = actual_sr;
@@ -714,11 +714,11 @@ impl App {
                 {
                     match self.reconnect_audio() {
                         Ok(()) => {
-                            self.audio_watch.on_success();
-                            self.audio_device_name = self._audio_handle.as_ref()
+                            self.audio_reconnect_ui.audio_watch.on_success();
+                            self.audio_reconnect_ui.audio_device_name = self.audio_reconnect_ui._audio_handle.as_ref()
                                 .and_then(|b| b.device_name.clone());
-                            if let Some(b) = self._audio_handle.as_ref() {
-                                self.audio_host_id = b.host_id;
+                            if let Some(b) = self.audio_reconnect_ui._audio_handle.as_ref() {
+                                self.audio_reconnect_ui.audio_host_id = b.host_id;
                             }
                             self.show_toast("Audio reconnected", ToastKind::Success);
                         }
