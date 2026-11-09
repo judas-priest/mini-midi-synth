@@ -270,6 +270,139 @@ fn tc14_stop_mid_capture_trims() {
     }
 }
 
+/// Clock-death fallback: часы умерли посреди quantized capture (sequencer
+/// остановлен напрямую, field poke — сценарий не driven атомами) → fallback
+/// в tick_block закрывает capture СЕЙЧАС: атом гасится, лупер уходит в
+/// Playing, записанное живо. Длину петли fallback НЕ перекраивает
+/// (нечётный кусок) — фиксируем как есть.
+#[test]
+fn tc15_clock_death_fallback_closes_capture() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // граница: захват, cycle 1
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 2, "capturing");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    // Клок умирает посреди записи
+    e.drum_engine.sequencer.playing = false;
+    run(&mut e, 2); // >= 1 блок: fallback закрывает capture
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 0, "rec atom reset");
+    assert!(matches!(e.looper.state, LooperState::Playing), "closed by fallback");
+    // Петля не перекроена: осталась ёмкостью 64 цикла (безостановочный захват)
+    assert!(
+        (e.looper.loop_len_ticks() as i64 - 64 * 96000).abs() <= 64,
+        "fallback keeps loop length (no reshape): got {}", e.looper.loop_len_ticks()
+    );
+    {
+        let disp = e.looper.display();
+        let disp = disp.lock().unwrap();
+        let ons: Vec<_> = disp.events.iter().filter(|ev| ev.velocity > 0).collect();
+        assert!(ons.iter().any(|ev| ev.note == 60), "captured note kept");
+    }
+}
+
+/// Негатив: смерть клока при НЕ-capturing — no-op (fallback-арм не должен
+/// трогать Idle-лупер и атомы).
+#[test]
+fn tc16_clock_death_no_capture_noop() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    e.drum_engine.sequencer.playing = false;
+    run(&mut e, 4);
+    assert_eq!(e.master_rec_state_atom().load(Ordering::Relaxed), 0, "atom untouched");
+    assert!(matches!(e.looper.state, LooperState::Idle), "no capture started");
+    assert_eq!(e.looper.len(), 0, "no events recorded");
+}
+
+/// CaptureCycleAdd (плюс-такт) во время quantized capture: логическая длина
+/// растёт, закрытие отдаёт петлю = rec_cycles циклов (здесь 3 цикла:
+/// 2 записанных и 1 добавленный с тишиной). Хендлер живёт в handle_control
+/// ВНЕ машины — тест фиксирует семантику rec_cycles и охраняет вырезку
+/// косвенно: машина читает looper_rec_cycles на границе закрытия.
+#[test]
+fn tc17_cycle_add_extends_loop() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // граница: захват, cycle 1 (rec_cycles = 1)
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    run(&mut e, steps(16)); // граница: cycle 2 (rec_cycles = 2)
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 67, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 67 });
+    let _ = e.handle_control(ControlEvent::CaptureCycleAdd); // +1: rec_cycles = 3
+    let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть
+    run(&mut e, steps(16)); // граница: закрылось, петля = 3 цикла
+    assert!(matches!(e.looper.state, LooperState::Playing));
+    assert!(
+        (e.looper.loop_len_ticks() as i64 - 3 * 96000).abs() <= 64,
+        "loop = 3 cycles (2 recorded + 1 added): got {}", e.looper.loop_len_ticks()
+    );
+    {
+        let disp = e.looper.display();
+        let disp = disp.lock().unwrap();
+        let ons: Vec<_> = disp.events.iter().filter(|ev| ev.velocity > 0).collect();
+        assert!(ons.iter().any(|ev| ev.note == 60 && ev.position < 0.2), "cycle-1 note in first third");
+        assert!(
+            ons.iter().any(|ev| ev.note == 67 && ev.position > 0.25 && ev.position < 0.45),
+            "cycle-2 note in second third"
+        );
+        assert!(!ons.iter().any(|ev| ev.position > 0.6), "added cycle 3 is silence");
+    }
+}
+
+/// LooperSetSource в процессе capture: в Part-режиме (mix=false) пишется
+/// ТОЛЬКО активная часть (default 0); возврат в Mix снова пишет все части.
+/// Behavior lock по display()-контенту.
+#[test]
+fn tc18_source_part_gates_capture() {
+    let mut e = engine();
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 0, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartEnabled { part: 1, enabled: true });
+    let _ = e.handle_control(ControlEvent::SetPartRange { part: 0, min_note: 0, max_note: 59 });
+    let _ = e.handle_control(ControlEvent::SetPartRange { part: 1, min_note: 60, max_note: 127 });
+    let _ = e.handle_control(ControlEvent::MasterPlay);
+    run(&mut e, steps(3));
+    let _ = e.handle_control(ControlEvent::MasterRecord); // arm
+    run(&mut e, steps(13)); // граница: захват
+    // Part source: part 1 (не активная) не пишется
+    let _ = e.handle_control(ControlEvent::LooperSetSource { mix: false });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 40, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 40 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 72 });
+    run(&mut e, 94);
+    {
+        let disp = e.looper.display();
+        let disp = disp.lock().unwrap();
+        let ons: Vec<_> = disp.events.iter().filter(|ev| ev.velocity > 0).collect();
+        assert!(ons.iter().any(|ev| ev.note == 40), "active part (0) recorded");
+        assert!(!ons.iter().any(|ev| ev.note == 72), "inactive part (1) gated in Part source");
+    }
+    // Mix source: part 1 снова пишется
+    let _ = e.handle_control(ControlEvent::LooperSetSource { mix: true });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 72 });
+    run(&mut e, 94);
+    let _ = e.handle_control(ControlEvent::MasterRecord); // закрыть
+    run(&mut e, steps(16)); // граница: Playing
+    assert!(matches!(e.looper.state, LooperState::Playing));
+    {
+        let disp = e.looper.display();
+        let disp = disp.lock().unwrap();
+        let ons: Vec<_> = disp.events.iter().filter(|ev| ev.velocity > 0).collect();
+        assert!(ons.iter().any(|ev| ev.note == 72), "part 1 recorded after Mix toggle");
+        assert!(ons.iter().any(|ev| ev.note == 40), "part 0 still there");
+    }
+}
+
 #[test]
 fn tc11_overdub_layer_boundary_aligned() {
     let mut e = engine();
