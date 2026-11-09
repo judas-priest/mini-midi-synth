@@ -29,6 +29,10 @@ pub struct Reverb2 {
     /// LFO phases for per-line modulation (0..1).
     lfo_phases: [f32; 8],
     sample_rate: f32,
+    // Cached damping LP coefficient — recomputed only when the damping param
+    // changes bit-exactly or sr changes (per-sample exp hoist, audit exp/powf)
+    damp_coeff: f32,
+    damp_last: f32,
 }
 
 impl Reverb2 {
@@ -55,11 +59,15 @@ impl Reverb2 {
             lp_state: [0.0; 8],
             lfo_phases: [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875],
             sample_rate: sr,
+            damp_coeff: 0.0,
+            damp_last: f32::NAN,
         }
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        // invalidate cached coefficients (sr changed)
+        self.damp_last = f32::NAN;
         let scale = sr / 44100.0;
         for (i, &base) in BASE_DELAYS.iter().enumerate() {
             self.delay_len[i] = ((base as f32 * scale) as usize).clamp(1, MAX_DELAY - 1);
@@ -125,8 +133,15 @@ impl Reverb2 {
 
         // Map parameters
         let decay_s = 0.1 + decay * 19.9;                     // 0.1..20.0 seconds
-        let damp_cutoff = 500.0 + damping * 19500.0;           // 500Hz..20kHz
-        let damp_coeff = 1.0 - (-2.0 * PI * damp_cutoff / sr).exp();
+        // per-sample exp hoist: damping coefficient depends only on the
+        // damping param + sr — cached, recomputed on exact param change
+        // (audit exp/powf)
+        if damping != self.damp_last {
+            self.damp_last = damping;
+            let damp_cutoff = 500.0 + damping * 19500.0;       // 500Hz..20kHz
+            self.damp_coeff = 1.0 - (-2.0 * PI * damp_cutoff / sr).exp();
+        }
+        let damp_coeff = self.damp_coeff;
         let size_scale = 0.5 + size * 1.5;                     // 0.5..2.0x
 
         // Mono input sum fed equally into all 8 delay lines
