@@ -226,3 +226,28 @@ pub struct DrumSeqUi {
     pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
     pub drum_midi_import_path: String,
 }
+
+/// Live looper: capture/layers, mutes, master-capture atoms.
+pub struct LooperUi {
+    // Looper
+    pub show_looper: bool,
+    pub looper_atoms: std::sync::Arc<LooperAtoms>,
+    pub looper_display: std::sync::Arc<std::sync::Mutex<LooperDisplay>>,
+    pub looper_bars: u8,
+    pub looper_quantize: u8,
+    pub looper_clear_confirm: Option<std::time::Instant>,
+    pub looper_layer_mute: [bool; 256],
+    pub looper_solo_layer: Option<u8>,
+    /// Looper record source: true = Mix (all sounding parts, default),
+    /// false = active part only. Live transport state — not persisted
+    /// (like seq_target); re-pushed on audio reconnect.
+    pub looper_source_mix: bool,
+    /// Per-part looper replay mute (TECHDEBT #30/#34), indexed by part.
+    /// Not persisted; re-pushed on audio reconnect (same as layer mutes).
+    pub looper_part_mutes: [bool; 16],
+    /// Master capture state: 0 idle, 1 armed, 2 capturing, 3 closing —
+    /// looper state label shows "ARMED" / "REC k/N"
+    pub master_rec_state: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Current capture cycle (1-based)
+    pub master_rec_cycle: std::sync::Arc<std::sync::atomic::AtomicU8>,
+}

@@ -25,7 +25,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Master").strong().small());
             let lstate = crate::synth::looper::LooperState::from_u8(
-                self.looper_atoms.state.load(std::sync::atomic::Ordering::Relaxed));
+                self.looper_ui.looper_atoms.state.load(std::sync::atomic::Ordering::Relaxed));
             let looper_active = matches!(lstate,
                 crate::synth::looper::LooperState::Playing
                 | crate::synth::looper::LooperState::Overdubbing
@@ -917,10 +917,10 @@ impl App {
     pub(super) fn draw_looper(&mut self, ui: &mut egui::Ui) {
         use crate::synth::looper::LooperState;
 
-        let state_u8 = self.looper_atoms.state.load(Ordering::Relaxed);
-        let position = self.looper_atoms.position.load(Ordering::Relaxed);
-        let event_count = self.looper_atoms.event_count.load(Ordering::Relaxed);
-        let layer_count = self.looper_atoms.layer_count.load(Ordering::Relaxed);
+        let state_u8 = self.looper_ui.looper_atoms.state.load(Ordering::Relaxed);
+        let position = self.looper_ui.looper_atoms.position.load(Ordering::Relaxed);
+        let event_count = self.looper_ui.looper_atoms.event_count.load(Ordering::Relaxed);
+        let layer_count = self.looper_ui.looper_atoms.layer_count.load(Ordering::Relaxed);
         let state = LooperState::from_u8(state_u8);
 
         let part_colors = theme::PART_COLORS;
@@ -938,7 +938,7 @@ impl App {
             if super::confirm::confirm_button(
                 ui,
                 "Clear",
-                &mut self.looper_clear_confirm,
+                &mut self.looper_ui.looper_clear_confirm,
                 event_count > 0 || state != LooperState::Idle,
                 "Clear the whole looper (destructive)",
             ) {
@@ -965,8 +965,8 @@ impl App {
             // WAIT = ждём границу такта (count-in), REC n = захвачено n тактов
             // (открытая длина — закрывает Rec), CLOSING = ждём границу для
             // закрытия. PLAY/OVR — без чисел.
-            let rec_state = self.master_rec_state.load(std::sync::atomic::Ordering::Relaxed);
-            let rec_cycle = self.master_rec_cycle.load(std::sync::atomic::Ordering::Relaxed);
+            let rec_state = self.looper_ui.master_rec_state.load(std::sync::atomic::Ordering::Relaxed);
+            let rec_cycle = self.looper_ui.master_rec_cycle.load(std::sync::atomic::Ordering::Relaxed);
             let (label, label_color) = match rec_state {
                 1 => ("WAIT".to_string(), theme::CURVE_FILTER),
                 2 => (
@@ -1010,13 +1010,13 @@ impl App {
             ui.label(egui::RichText::new("Bars").weak().small())
                 .on_hover_text("Loop length for the looper's free (non-quantized) recording. Quantized master capture is open-ended: press Rec to close, +1/−1 bar while capturing");
             for &b in &[1u8, 2, 4, 8] {
-                if ui.selectable_label(self.looper_bars == b, format!("{b}")).clicked() {
-                    self.looper_bars = b;
+                if ui.selectable_label(self.looper_ui.looper_bars == b, format!("{b}")).clicked() {
+                    self.looper_ui.looper_bars = b;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: b });
                 }
             }
             // Честная длина петли: после квантованного захвата = цикл паттерна
-            let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
+            let loop_steps = self.looper_ui.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
             if loop_steps > 0 {
                 ui.label(egui::RichText::new(format!("Loop: {loop_steps} st")).small().weak());
             }
@@ -1026,8 +1026,8 @@ impl App {
                 .on_hover_text("Quantize notes to the grid while recording (Loop Quantize)");
             for (idx, &label) in ["Off", "1/4", "1/8", "1/16"].iter().enumerate() {
                 let idx = idx as u8;
-                if ui.selectable_label(self.looper_quantize == idx, label).clicked() {
-                    self.looper_quantize = idx;
+                if ui.selectable_label(self.looper_ui.looper_quantize == idx, label).clicked() {
+                    self.looper_ui.looper_quantize = idx;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: idx });
                 }
             }
@@ -1043,22 +1043,22 @@ impl App {
                 .map(|p| p.name.as_str()).unwrap_or("---");
             let is_recording = matches!(state, LooperState::Recording | LooperState::Overdubbing);
             ui.label(egui::RichText::new("Source").weak().small());
-            let mix_color = if self.looper_source_mix { egui::Color32::GREEN } else { egui::Color32::GRAY };
-            if ui.selectable_label(self.looper_source_mix, egui::RichText::new("Mix").color(mix_color))
+            let mix_color = if self.looper_ui.looper_source_mix { egui::Color32::GREEN } else { egui::Color32::GRAY };
+            if ui.selectable_label(self.looper_ui.looper_source_mix, egui::RichText::new("Mix").color(mix_color))
                 .on_hover_text("Record every sounding enabled part")
                 .clicked()
-                && !self.looper_source_mix
+                && !self.looper_ui.looper_source_mix
             {
-                self.looper_source_mix = true;
+                self.looper_ui.looper_source_mix = true;
                 let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: true });
             }
-            if self.looper_source_mix {
+            if self.looper_ui.looper_source_mix {
                 // Collapsed: a single "Part" switch to leave Mix mode.
                 if ui.selectable_label(false, "Part")
                     .on_hover_text("Record only the active part")
                     .clicked()
                 {
-                    self.looper_source_mix = false;
+                    self.looper_ui.looper_source_mix = false;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: false });
                 }
             } else {
@@ -1092,9 +1092,9 @@ impl App {
         if any_part_enabled {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("Mute parts").weak().small());
-                for i in 0..self.parts.len().min(self.looper_part_mutes.len()) {
+                for i in 0..self.parts.len().min(self.looper_ui.looper_part_mutes.len()) {
                     if !self.parts[i].enabled { continue; }
-                    let muted = self.looper_part_mutes[i];
+                    let muted = self.looper_ui.looper_part_mutes[i];
                     let color = if muted { egui::Color32::RED } else { part_colors[i % 8] };
                     let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
                     let n = (i % super::PARTS_PER_ZONE) + 1;
@@ -1106,7 +1106,7 @@ impl App {
                         })
                         .clicked()
                     {
-                        self.looper_part_mutes[i] = !muted;
+                        self.looper_ui.looper_part_mutes[i] = !muted;
                         let _ = self.ctrl_tx.push(ControlEvent::LooperSetPartMute { part: i as u8, mute: !muted });
                     }
                 }
@@ -1129,7 +1129,7 @@ impl App {
     fn draw_looper_layers(&mut self, ui: &mut egui::Ui, layer_count: u8, part_colors: &[egui::Color32; 8]) {
         // Collect layer→part info from display snapshot
         let layer_info: Vec<(u8, Vec<u8>)> = {
-            let display = match self.looper_display.try_lock() {
+            let display = match self.looper_ui.looper_display.try_lock() {
                 Ok(d) => d,
                 Err(_) => return,
             };
@@ -1151,8 +1151,8 @@ impl App {
         for (layer_id, part_ids) in &layer_info {
             ui.horizontal(|ui| {
                 let l = layer_id + 1;
-                let muted = self.looper_layer_mute[*layer_id as usize];
-                let soloed = self.looper_solo_layer == Some(*layer_id);
+                let muted = self.looper_ui.looper_layer_mute[*layer_id as usize];
+                let soloed = self.looper_ui.looper_solo_layer == Some(*layer_id);
 
                 // Layer label with part color
                 let primary_part = part_ids[0] as usize % 8;
@@ -1195,10 +1195,10 @@ impl App {
                 if soloed { s_text = s_text.underline(); } // неколоровый признак (WCAG 1.4.1)
                 if ui.button(s_text).on_hover_text("Solo layer").clicked() {
                     if soloed {
-                        self.looper_solo_layer = None;
+                        self.looper_ui.looper_solo_layer = None;
                         let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: None });
                     } else {
-                        self.looper_solo_layer = Some(*layer_id);
+                        self.looper_ui.looper_solo_layer = Some(*layer_id);
                         let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: Some(*layer_id) });
                     }
                 }
@@ -1209,7 +1209,7 @@ impl App {
                 if muted { m_text = m_text.strikethrough(); } // неколоровый признак (WCAG 1.4.1)
                 if ui.button(m_text).on_hover_text("Mute layer").clicked() {
                     let new_mute = !muted;
-                    self.looper_layer_mute[*layer_id as usize] = new_mute;
+                    self.looper_ui.looper_layer_mute[*layer_id as usize] = new_mute;
                     let _ = self.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: *layer_id, mute: new_mute });
                 }
 
@@ -1232,7 +1232,7 @@ impl App {
 
         // Snapshot display data under lock, then release immediately
         let (events, current_layer) = {
-            let display = match self.looper_display.try_lock() {
+            let display = match self.looper_ui.looper_display.try_lock() {
                 Ok(d) => d,
                 Err(_) => return,
             };
@@ -1251,8 +1251,8 @@ impl App {
 
         // Beat grid lines — по РЕАЛЬНОЙ длине петли (loop_steps из движка):
         // после квантованного захвата длина = цикл паттерна, Bars ≠ длина.
-        let loop_steps = self.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
-        let loop_steps = if loop_steps == 0 { self.looper_bars as u32 * 16 } else { loop_steps as u32 };
+        let loop_steps = self.looper_ui.looper_atoms.loop_steps.load(std::sync::atomic::Ordering::Relaxed);
+        let loop_steps = if loop_steps == 0 { self.looper_ui.looper_bars as u32 * 16 } else { loop_steps as u32 };
         let beats = loop_steps / 4;
         // Сигнатура = сигнатура текущего паттерна (лупер пишется поверх него);
         // раньше бар-линии были жёстко каждые 4 бита — в 3/4 врали (аудит #21).
@@ -1296,9 +1296,9 @@ impl App {
             let y = rect.bottom() - ((ev.note as f32 - note_lo) / note_span) * height;
             let color = part_colors[ev.part_id as usize % 8];
             // Dim muted/non-solo layers, muted parts, older layers slightly dimmer
-            let layer_muted = self.looper_layer_mute[ev.layer_id as usize];
-            let part_muted = self.looper_part_mutes.get(ev.part_id as usize).copied().unwrap_or(false);
-            let layer_hidden = if let Some(solo) = self.looper_solo_layer {
+            let layer_muted = self.looper_ui.looper_layer_mute[ev.layer_id as usize];
+            let part_muted = self.looper_ui.looper_part_mutes.get(ev.part_id as usize).copied().unwrap_or(false);
+            let layer_hidden = if let Some(solo) = self.looper_ui.looper_solo_layer {
                 ev.layer_id != solo
             } else { layer_muted || part_muted };
             let alpha = if layer_hidden { 40 }

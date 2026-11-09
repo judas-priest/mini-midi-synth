@@ -327,11 +327,6 @@ pub struct App {
     pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
     pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Master capture state: 0 idle, 1 armed, 2 capturing, 3 closing —
-    /// looper state label shows "ARMED" / "REC k/N"
-    pub master_rec_state: std::sync::Arc<std::sync::atomic::AtomicU8>,
-    /// Current capture cycle (1-based)
-    pub master_rec_cycle: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// Static pedal-up release duration (None = off, patch release)
     pub sustain_release: Option<f32>,
     /// Show help dialog
@@ -350,23 +345,8 @@ pub struct App {
     /// #54: цель драга (строка под pointer во время драга) — commit на
     /// drag_stopped хендла
     pub part_drag_dst: Option<usize>,
-    // Looper
-    pub show_looper: bool,
-    pub looper_atoms: std::sync::Arc<LooperAtoms>,
-    pub looper_display: std::sync::Arc<std::sync::Mutex<LooperDisplay>>,
-    pub looper_bars: u8,
-    pub looper_quantize: u8,
-    pub looper_clear_confirm: Option<std::time::Instant>,
+    pub looper_ui: LooperUi,
     pub fx_reset_confirm: Option<std::time::Instant>,
-    pub looper_layer_mute: [bool; 256],
-    pub looper_solo_layer: Option<u8>,
-    /// Looper record source: true = Mix (all sounding parts, default),
-    /// false = active part only. Live transport state — not persisted
-    /// (like seq_target); re-pushed on audio reconnect.
-    pub looper_source_mix: bool,
-    /// Per-part looper replay mute (TECHDEBT #30/#34), indexed by part.
-    /// Not persisted; re-pushed on audio reconnect (same as layer mutes).
-    pub looper_part_mutes: [bool; 16],
     pub active_part_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     // Keybindings
     pub keybinds: keybinds::Keybinds,
@@ -453,8 +433,6 @@ impl App {
             pending_remove_part: None,
             _program_change_atom: c.program_change_atom,
             sustain_atom: c.handles.sustain_atom,
-            master_rec_state: c.handles.master_rec_state_atom,
-            master_rec_cycle: c.handles.master_rec_cycle_atom,
             sustain_release: c.config.ui.sustain_release,
             show_help: false,
             global_params: {
@@ -502,7 +480,20 @@ impl App {
                 drum_kit_list: preset::list_drum_kits(),
                 drum_midi_import_path: String::new(),
             },
-            show_looper: false,
+            looper_ui: LooperUi {
+                show_looper: false,
+                looper_atoms: c.handles.looper_atoms,
+                looper_display: c.handles.looper_display,
+                looper_bars: 4,
+                looper_quantize: 0,
+                looper_clear_confirm: None,
+                looper_layer_mute: [false; 256],
+                looper_solo_layer: None,
+                looper_source_mix: true,
+                looper_part_mutes: [false; 16],
+                master_rec_state: c.handles.master_rec_state_atom,
+                master_rec_cycle: c.handles.master_rec_cycle_atom,
+            },
             perf_ui: PerfUi {
                 perf_window: 1,
                 tracks_window: 0,
@@ -546,16 +537,7 @@ impl App {
             },
             part_drag_src: None,
             part_drag_dst: None,
-            looper_atoms: c.handles.looper_atoms,
-            looper_display: c.handles.looper_display,
-            looper_bars: 4,
-            looper_quantize: 0,
-            looper_clear_confirm: None,
             fx_reset_confirm: None,
-            looper_layer_mute: [false; 256],
-            looper_solo_layer: None,
-            looper_source_mix: true,
-            looper_part_mutes: [false; 16],
             active_part_atom: c.handles.active_part_atom,
             keybinds: keybinds::Keybinds::from_config(c.config.ui.keybinds.as_ref()),
             show_keybinds_window: false,
@@ -679,7 +661,7 @@ impl eframe::App for App {
 
         let has_active_notes = (0..128u8)
             .any(|i| self.note_state[i as usize].load(Ordering::Relaxed) > 0);
-        let looper_active = self.looper_atoms.state.load(Ordering::Relaxed) != 0;
+        let looper_active = self.looper_ui.looper_atoms.state.load(Ordering::Relaxed) != 0;
         let midi_seq_active = self.midi_seq_ui.midi_seq_play_atom.load(Ordering::Relaxed) != 0;
         if has_active_notes || self.drum_seq_ui.drum_playing || looper_active || midi_seq_active {
             ctx.request_repaint_after(Duration::from_millis(33));
@@ -1564,7 +1546,7 @@ impl App {
             // Bottom row shows the MASTER transport (single transport, #32
             // фаза 4): the union — LED reflects "something runs".
             let lstate = crate::synth::looper::LooperState::from_u8(
-                self.looper_atoms.state.load(Ordering::Relaxed));
+                self.looper_ui.looper_atoms.state.load(Ordering::Relaxed));
             let (playing, recording) = (
                 self.drum_seq_ui.drum_playing
                     || matches!(lstate, crate::synth::looper::LooperState::Playing
@@ -1826,13 +1808,13 @@ impl App {
                 KeyAction::LooperClear => {
                     // Тот же 2s-confirm, что у кнопки Clear (audit High п.2):
                     // первое нажатие взводит, второе в течение окна — очищает.
-                    let armed = matches!(self.looper_clear_confirm, Some(t)
+                    let armed = matches!(self.looper_ui.looper_clear_confirm, Some(t)
                         if t.elapsed() < confirm::CONFIRM_WINDOW);
                     if armed {
                         let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
-                        self.looper_clear_confirm = None;
+                        self.looper_ui.looper_clear_confirm = None;
                     } else {
-                        self.looper_clear_confirm = Some(Instant::now());
+                        self.looper_ui.looper_clear_confirm = Some(Instant::now());
                     }
                 }
                 KeyAction::DrumTogglePlay => {
@@ -1841,7 +1823,7 @@ impl App {
                 }
                 KeyAction::ToggleDrumsSynth => {
                     self.drum_seq_ui.show_drums = !self.drum_seq_ui.show_drums;
-                    self.show_looper = false;
+                    self.looper_ui.show_looper = false;
                     if !self.drum_seq_ui.show_drums {
                         self.transport_ui.seq_target_atom.store(1, Ordering::Relaxed);
                     } else {
@@ -2226,8 +2208,8 @@ impl App {
         let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_seq_ui.drum_fixed_velocity });
         self.push_drum_remap();
         self.push_drum_pad_vel();
-        let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: self.looper_bars });
-        let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: self.looper_quantize });
+        let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: self.looper_ui.looper_bars });
+        let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: self.looper_ui.looper_quantize });
         // Choke semantics survive reconnect even if the SF2 restore path bails
         // (missing file). For the internal kit (no SF2 loaded) this pushes a
         // derived table over the engine's GM default — harmless: `sf2_choke_take`

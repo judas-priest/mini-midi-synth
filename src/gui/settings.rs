@@ -209,7 +209,7 @@ impl App {
         {
             let mut snap = Vec::new();
             let mut len_ticks = 0u32;
-            if let Ok(d) = self.looper_display.lock() {
+            if let Ok(d) = self.looper_ui.looper_display.lock() {
                 len_ticks = d.loop_length_ticks;
                 if len_ticks > 0 {
                     let inv_len = len_ticks as f32;
@@ -282,13 +282,13 @@ impl App {
         self.drum_seq_ui.drum_chain_mask = 0;
         self.drum_seq_ui.drum_undo_atom = h.drum_undo_atom;
         self.drum_seq_ui.drum_redo_atom = h.drum_redo_atom;
-        self.looper_atoms = h.looper_atoms;
-        self.looper_display = h.looper_display;
+        self.looper_ui.looper_atoms = h.looper_atoms;
+        self.looper_ui.looper_display = h.looper_display;
         self.transport_ui.seq_target_atom = h.seq_target_atom;
         self.active_part_atom = h.active_part_atom;
         self.sustain_atom = h.sustain_atom;
-        self.master_rec_state = h.master_rec_state_atom;
-        self.master_rec_cycle = h.master_rec_cycle_atom;
+        self.looper_ui.master_rec_state = h.master_rec_state_atom;
+        self.looper_ui.master_rec_cycle = h.master_rec_cycle_atom;
         self.pitch_seq_ui.pitch_seq_step_atoms = h.pitch_seq_step_atoms;
         self.scope_buf = h.scope_buf;
         self.midi_seq_ui.midi_seq_play_atom = h.midi_seq_play_atom;
@@ -370,15 +370,15 @@ impl App {
         // (looper_layer_mute / looper_solo_layer) survives the reconnect.
         // Re-push it so the engine matches what the UI shows; layer ids are
         // preserved 1:1 by the restore.
-        for (layer, &mute) in self.looper_layer_mute.iter().enumerate() {
+        for (layer, &mute) in self.looper_ui.looper_layer_mute.iter().enumerate() {
             if mute {
                 let _ = self.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: layer as u8, mute });
             }
         }
-        if let Some(layer) = self.looper_solo_layer {
+        if let Some(layer) = self.looper_ui.looper_solo_layer {
             let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: Some(layer) });
         }
-        for (part, &mute) in self.looper_part_mutes.iter().enumerate() {
+        for (part, &mute) in self.looper_ui.looper_part_mutes.iter().enumerate() {
             if mute {
                 let _ = self.ctrl_tx.push(ControlEvent::LooperSetPartMute { part: part as u8, mute });
             }
@@ -386,7 +386,7 @@ impl App {
         // Record source is live transport state (engine defaults to Mix); the
         // GUI's choice survives the reconnect — re-push it (same pattern as
         // the layer mutes above).
-        if !self.looper_source_mix {
+        if !self.looper_ui.looper_source_mix {
             let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: false });
         }
 
@@ -444,7 +444,7 @@ impl App {
                             if held < std::time::Duration::from_millis(400) {
                                 // Short press: toggle keys ↔ drums
                                 self.drum_seq_ui.show_drums = !self.drum_seq_ui.show_drums;
-                                self.show_looper = false;
+                                self.looper_ui.show_looper = false;
                                 if !self.drum_seq_ui.show_drums {
                                     self.transport_ui.seq_target_atom.store(1, std::sync::atomic::Ordering::Relaxed);
                                 } else {
