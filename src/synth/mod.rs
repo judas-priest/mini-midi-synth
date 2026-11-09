@@ -293,6 +293,12 @@ pub struct SynthEngine {
     /// 1 = SF2 took it, 2 = drums. Note-offs must follow the note-on's
     /// route, even if the track instrument changed mid-note.
     seq_route: [u8; 16],
+    /// Bitmask of MIDI-file channels with an ACTIVE seq drum note. Keeps the
+    /// note-off following the note-on's route even after an intermediate
+    /// non-drum note-on re-routed seq_route away from drums (audit rhythm
+    /// #14): without it the drum sample hangs until panic. First delivered
+    /// off clears the bit; a second off still reaches drums via seq_route==2.
+    seq_drum_active: u16,
 }
 
 mod cached_fx;
@@ -304,6 +310,12 @@ impl SynthEngine {
     pub fn sampler_voices_in_release(&mut self) -> usize {
         self.sampler.voices_in_release()
     }
+
+    /// Тест-аксессор #52а. НЕ для RT-пути.
+    pub fn seq_drum_active(&self) -> u16 { self.seq_drum_active }
+
+    /// Тест-аксессор #52а. НЕ для RT-пути.
+    pub fn seq_route_for_test(&self) -> [u8; 16] { self.seq_route }
 
     pub fn new(sample_rate: f32) -> Self {
         // All 8 parts pre-allocated; only part 0 enabled by default
@@ -379,6 +391,7 @@ impl SynthEngine {
             midi_player: midi_player::MidiPlayer::new(),
             midi_seq_buf: Vec::new(),
             seq_route: [0u8; 16],
+            seq_drum_active: 0,
         }
     }
 
@@ -1157,6 +1170,10 @@ impl SynthEngine {
                         self.sampler.all_notes_off();
                     }
                     self.drum_engine.reset_choke_state();
+                    // Panic also drops the seq drum route memory: a stale bit
+                    // would misroute LATER synth note-offs of that channel
+                    // into drum_note_off (the same hang class as #14).
+                    self.seq_drum_active = 0;
                     if let Some(off_note) = self.arpeggiator.flush_current_note() {
                         // Same transposed routing as flush_arp_note_off.
                         self.dispatch_arp_note_off(off_note);
@@ -2010,6 +2027,7 @@ impl SynthEngine {
                     part.drain_notes(&mut self.sampler, i, false);
                 }
                 self.seq_route = [0u8; 16];
+                self.seq_drum_active = 0;
                 // The Box moves into the player; what it displaced comes back
                 // out and goes to the GUI thread for freeing.
                 let (old_data, old_tracks) = self.midi_player.load(data);
@@ -2040,6 +2058,10 @@ impl SynthEngine {
                     for (i, part) in self.parts.iter_mut().enumerate() {
                         part.drain_notes(&mut self.sampler, i, false);
                     }
+                    // Stop also drops the seq drum route memory (see panic
+                    // CC120/123 above): stale bits would misroute later
+                    // synth note-offs into drum_note_off.
+                    self.seq_drum_active = 0;
                 }
             }
             ControlEvent::MidiSeqSetBpm { bpm } => {
@@ -2376,6 +2398,7 @@ impl SynthEngine {
                     midi_player::SeqEventData::NoteOn { note, velocity } => match instr {
                         midi_player::TrackInstrument::Drums => {
                             self.seq_route[ch as usize] = 2;
+                            self.seq_drum_active |= 1 << ch as usize;
                             let sf2 = self.drum_engine.sf2_mode;
                             if sf2 {
                                 let choke = self.drum_engine.sf2_choke_take(note);
@@ -2400,22 +2423,35 @@ impl SynthEngine {
                             self.sampler.seq_note_on(ch, note, velocity);
                         }
                     },
-                    midi_player::SeqEventData::NoteOff { note } => match self.seq_route[ch as usize] {
-                        0 => {
-                            if self.parts.first().map(|p| p.note_mode != NOTE_MODE_POLY).unwrap_or(false) {
-                                if !self.parts.is_empty() { self.route_note_off(0, note); }
-                            } else if let Some(part) = self.parts.get_mut(0) {
-                                part.note_off(note);
+                    midi_player::SeqEventData::NoteOff { note } => {
+                        let ci = ch as usize;
+                        // Drums own this off when the note-on routed there
+                        // (route-2) or a seq drum note is still active on the
+                        // channel — the bit survives an intermediate non-drum
+                        // note-on that re-routed seq_route (audit rhythm #14).
+                        // sf2_mode then decides WHICH drum_note_off fires.
+                        let drum_owned = self.seq_drum_active & (1 << ci) != 0
+                            || self.seq_route[ci] == 2;
+                        if drum_owned {
+                            // First off clears the bit; a second overlapping
+                            // off still reaches drums via seq_route==2 above.
+                            self.seq_drum_active &= !(1 << ci);
+                            let sf2 = self.drum_engine.sf2_mode;
+                            if sf2 { self.sampler.drum_note_off(note); }
+                        } else {
+                            match self.seq_route[ci] {
+                                0 => {
+                                    if self.parts.first().map(|p| p.note_mode != NOTE_MODE_POLY).unwrap_or(false) {
+                                        if !self.parts.is_empty() { self.route_note_off(0, note); }
+                                    } else if let Some(part) = self.parts.get_mut(0) {
+                                        part.note_off(note);
+                                    }
+                                }
+                                1 => self.sampler.seq_note_off(ch, note),
+                                _ => {},
                             }
                         }
-                        1 => self.sampler.seq_note_off(ch, note),
-                        _ => {
-                            if let midi_player::TrackInstrument::Drums = instr {
-                                let sf2 = self.drum_engine.sf2_mode;
-                                if sf2 { self.sampler.drum_note_off(note); }
-                            }
-                        },
-                    },
+                    }
                     midi_player::SeqEventData::ProgramChange { program } => {
                         // Follow file program changes when in SF2 mode
                         if let midi_player::TrackInstrument::Sf2 { .. } = instr {
