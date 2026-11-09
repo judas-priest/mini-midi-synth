@@ -382,16 +382,32 @@ impl AirwindowsMojo {
 pub struct AirwindowsADClip7 {
     env_l: f64, env_r: f64,
     refclip: f64,
+    // Cached gain/envelope coefficients — recomputed only when drive/sr
+    // change bit-exactly (per-sample exp/powf hoist, audit exp/powf)
+    input_gain: f64,
+    att: f64,
+    rel: f64,
+    last_drive: f32,
+    last_sr: f32,
 }
 impl AirwindowsADClip7 {
-    pub fn new() -> Self { Self { env_l: 0.0, env_r: 0.0, refclip: 1.0 } }
+    pub fn new() -> Self { Self { env_l: 0.0, env_r: 0.0, refclip: 1.0, input_gain: 0.0, att: 0.0, rel: 0.0, last_drive: f32::NAN, last_sr: f32::NAN } }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
         let overallscale = sr as f64 / 44100.0;
-        let input_gain = 10f64.powf(drive as f64 * 18.0 / 20.0);
+        // per-sample exp/powf hoist: coefficients depend only on drive/sr —
+        // cached, recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive || sr != self.last_sr {
+            self.last_drive = drive;
+            self.last_sr = sr;
+            self.input_gain = 10f64.powf(drive as f64 * 18.0 / 20.0);
+            self.att = 1.0 - (-1.0 / (0.0001 * overallscale * sr as f64)).exp();
+            self.rel = 1.0 - (-1.0 / (0.01 * overallscale * sr as f64)).exp();
+        }
+        let input_gain = self.input_gain;
         let softness = 0.618_033_988_749_895_f64 * (1.0 - drive as f64);
         let hardness = 1.0 - softness;
-        let att = 1.0 - (-1.0 / (0.0001 * overallscale * sr as f64)).exp();
-        let rel = 1.0 - (-1.0 / (0.01 * overallscale * sr as f64)).exp();
+        let att = self.att;
+        let rel = self.rel;
 
         let mut sl = in_l as f64 * input_gain;
         let mut sr = in_r as f64 * input_gain;
@@ -463,14 +479,26 @@ pub struct AirwindowsIronOxide5 {
     iir_al: f64, iir_bl: f64,
     iir_ar: f64, iir_br: f64,
     flip: bool,
+    // Cached input gain — recomputed only when drive/sr change bit-exactly
+    // (per-sample powf hoist, audit exp/powf)
+    input_gain: f64,
+    last_drive: f32,
+    last_sr: f32,
 }
 impl AirwindowsIronOxide5 {
     pub fn new() -> Self {
-        Self { iir_al: 0.0, iir_bl: 0.0, iir_ar: 0.0, iir_br: 0.0, flip: false }
+        Self { iir_al: 0.0, iir_bl: 0.0, iir_ar: 0.0, iir_br: 0.0, flip: false, input_gain: 0.0, last_drive: f32::NAN, last_sr: f32::NAN }
     }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
         let overallscale = sr as f64 / 44100.0;
-        let input_gain = 10f64.powf((drive as f64 * 36.0 - 18.0) / 20.0);
+        // per-sample powf hoist: depends only on drive/sr — cached,
+        // recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive || sr != self.last_sr {
+            self.last_drive = drive;
+            self.last_sr = sr;
+            self.input_gain = 10f64.powf((drive as f64 * 36.0 - 18.0) / 20.0);
+        }
+        let input_gain = self.input_gain;
         let iir_amount = 0.03 / overallscale;
 
         let mut sl = in_l as f64 * input_gain;
