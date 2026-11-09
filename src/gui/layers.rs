@@ -42,7 +42,7 @@ impl App {
         ui.add_space(theme::SP_MD); // отделить perf от split-ряда
 
         // ── Split row: toggle + point + view tabs ────────────────────────
-        let split_on = self.parts[ZONE_B].iter().any(|l| l.enabled);
+        let split_on = self.core_state_ui.parts[ZONE_B].iter().any(|l| l.enabled);
         ui.horizontal(|ui| {
             let split_clicked = if split_on {
                 // Split active: show as an on-toggle with explicit remove hint
@@ -58,25 +58,25 @@ impl App {
                 if split_on {
                     // Disable all Zone B parts, restore Zone A to full range
                     for i in ZONE_B {
-                        if self.parts[i].enabled {
-                            self.parts[i].enabled = false;
-                            let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
+                        if self.core_state_ui.parts[i].enabled {
+                            self.core_state_ui.parts[i].enabled = false;
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartEnabled { part: i, enabled: false });
                         }
                     }
                     for i in ZONE_A {
-                        if self.parts[i].enabled {
-                            self.parts[i].min_note = 0;
-                            self.parts[i].max_note = 127;
+                        if self.core_state_ui.parts[i].enabled {
+                            self.core_state_ui.parts[i].min_note = 0;
+                            self.core_state_ui.parts[i].max_note = 127;
                             self.send_part_range(i);
                         }
                     }
                     // Switch active part to Zone A if needed
-                    if self.active_part >= PARTS_PER_ZONE {
+                    if self.core_state_ui.active_part >= PARTS_PER_ZONE {
                         self.set_active_part(0);
                     }
                 } else {
                     // Enable the first free B slot — полный сброс + пуш (#40/#42)
-                    if let Some(i) = ZONE_B.into_iter().find(|&i| !self.parts[i].enabled) {
+                    if let Some(i) = ZONE_B.into_iter().find(|&i| !self.core_state_ui.parts[i].enabled) {
                         self.reset_and_push_part(i, true);
                     }
                     self.apply_split_ranges();
@@ -85,53 +85,53 @@ impl App {
 
             if split_on {
                 ui.label("Split point:");
-                let sp_name = note_name(self.split_point);
-                let sp_r = ui.add(egui::Slider::new(&mut self.split_point, 0..=127)
+                let sp_name = note_name(self.core_state_ui.split_point);
+                let sp_r = ui.add(egui::Slider::new(&mut self.core_state_ui.split_point, 0..=127)
                     .suffix(format!(" ({sp_name})")))
                     .on_hover_text("Keyboard split note (zone B starts here)");
                 if sp_r.changed() {
                     self.apply_split_ranges();
                 }
-                self.knob_feedback(&sp_r, "Split", note_name(self.split_point));
+                self.knob_feedback(&sp_r, "Split", note_name(self.core_state_ui.split_point));
             }
 
             // ── View tabs (Drums / MIDI Seq / FX Chain / Pads) ───────────
             ui.separator();
-            if ui.selectable_label(self.show_drums && !self.show_midi_seq, "Drums").on_hover_text("Drum sequencer").clicked() {
-                if self.show_drums && !self.show_midi_seq {
+            if ui.selectable_label(self.drum_seq_ui.show_drums && !self.midi_seq_ui.show_midi_seq, "Drums").on_hover_text("Drum sequencer").clicked() {
+                if self.drum_seq_ui.show_drums && !self.midi_seq_ui.show_midi_seq {
                     // повторный клик по активной вкладке = нейтральный вид
-                    self.show_drums = false; self.show_looper = false;
-                    self.show_midi_seq = false; self.show_fx_chain = false;
+                    self.drum_seq_ui.show_drums = false; self.looper_ui.show_looper = false;
+                    self.midi_seq_ui.show_midi_seq = false; self.core_state_ui.show_fx_chain = false;
                 } else {
-                    self.show_drums = true; self.show_looper = false;
-                    self.show_midi_seq = false; self.show_fx_chain = false;
-                    self.seq_target_atom.store(0, Ordering::Relaxed);
+                    self.drum_seq_ui.show_drums = true; self.looper_ui.show_looper = false;
+                    self.midi_seq_ui.show_midi_seq = false; self.core_state_ui.show_fx_chain = false;
+                    self.transport_ui.seq_target_atom.store(0, Ordering::Relaxed);
                 }
             }
-            if ui.selectable_label(self.show_midi_seq, "MIDI Seq").on_hover_text("MIDI file sequencer").clicked() {
-                if self.show_midi_seq {
+            if ui.selectable_label(self.midi_seq_ui.show_midi_seq, "MIDI Seq").on_hover_text("MIDI file sequencer").clicked() {
+                if self.midi_seq_ui.show_midi_seq {
                     // повторный клик по активной вкладке = нейтральный вид
-                    self.show_midi_seq = false; self.show_drums = false;
-                    self.show_looper = false; self.show_fx_chain = false;
+                    self.midi_seq_ui.show_midi_seq = false; self.drum_seq_ui.show_drums = false;
+                    self.looper_ui.show_looper = false; self.core_state_ui.show_fx_chain = false;
                 } else {
-                    self.show_midi_seq = true; self.show_drums = false;
-                    self.show_looper = false; self.show_fx_chain = false;
+                    self.midi_seq_ui.show_midi_seq = true; self.drum_seq_ui.show_drums = false;
+                    self.looper_ui.show_looper = false; self.core_state_ui.show_fx_chain = false;
                 }
             }
-            if ui.selectable_label(self.show_fx_chain, "FX Chain").on_hover_text("16-slot serial FX chain").clicked() {
-                if self.show_fx_chain {
+            if ui.selectable_label(self.core_state_ui.show_fx_chain, "FX Chain").on_hover_text("16-slot serial FX chain").clicked() {
+                if self.core_state_ui.show_fx_chain {
                     // повторный клик по активной вкладке = нейтральный вид
-                    self.show_fx_chain = false; self.show_drums = false;
-                    self.show_looper = false; self.show_midi_seq = false;
+                    self.core_state_ui.show_fx_chain = false; self.drum_seq_ui.show_drums = false;
+                    self.looper_ui.show_looper = false; self.midi_seq_ui.show_midi_seq = false;
                 } else {
-                    self.show_fx_chain = true; self.show_drums = false;
-                    self.show_looper = false; self.show_midi_seq = false;
+                    self.core_state_ui.show_fx_chain = true; self.drum_seq_ui.show_drums = false;
+                    self.looper_ui.show_looper = false; self.midi_seq_ui.show_midi_seq = false;
                 }
             }
             // NAV long-press opens this too, but NAV SysEx only arrives over
             // Bluetooth — USB users need a GUI path.
-            if ui.selectable_label(self.show_pad_perf, "Pads").on_hover_text("Pad Performances (assign performances to pads 36-51)").clicked() {
-                self.show_pad_perf = !self.show_pad_perf;
+            if ui.selectable_label(self.perf_ui.show_pad_perf, "Pads").on_hover_text("Pad Performances (assign performances to pads 36-51)").clicked() {
+                self.perf_ui.show_pad_perf = !self.perf_ui.show_pad_perf;
             }
         });
 
@@ -151,20 +151,20 @@ impl App {
             .max_height(max_h)
             .show(ui, |ui| {
             // ── Zone A ───────────────────────────────────────────────────
-            let split_active = self.parts[ZONE_B].iter().any(|p| p.enabled);
-            let (a_r, _) = zone_range_pair(self.split_point, split_active);
+            let split_active = self.core_state_ui.parts[ZONE_B].iter().any(|p| p.enabled);
+            let (a_r, _) = zone_range_pair(self.core_state_ui.split_point, split_active);
             let a_header = format!("◀ Left hand (A) — {}..={}", a_r[0], a_r[1]);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(a_header).weak().small());
             });
             for i in ZONE_A {
-                if !self.parts[i].enabled { continue; }
+                if !self.core_state_ui.parts[i].enabled { continue; }
                 ui.push_id(format!("part_row_{i}"), |ui| {
                     self.draw_part_row(ui, i, &mut row_rects);
                 });
             }
             ui.add_space(theme::SP_SM); // воздух над Add part (TECHDEBT #36)
-            let a_count = ZONE_A.filter(|&i| self.parts[i].enabled).count();
+            let a_count = ZONE_A.filter(|&i| self.core_state_ui.parts[i].enabled).count();
             if a_count < PARTS_PER_ZONE
                 && ui.small_button("+ Add part").on_hover_text("Add part to Zone A").clicked()
             {
@@ -175,18 +175,18 @@ impl App {
             if split_on {
                 ui.add_space(theme::SP_XS);
                 ui.horizontal(|ui| {
-                    let (_, b_r) = zone_range_pair(self.split_point, split_active);
+                    let (_, b_r) = zone_range_pair(self.core_state_ui.split_point, split_active);
                     ui.label(egui::RichText::new(format!(
                         "▶ Right hand (B) — {}..={}", b_r[0], b_r[1])).weak().small());
                 });
                 for i in ZONE_B {
-                    if !self.parts[i].enabled { continue; }
+                    if !self.core_state_ui.parts[i].enabled { continue; }
                     ui.push_id(format!("part_row_{i}"), |ui| {
                         self.draw_part_row(ui, i, &mut row_rects);
                     });
                 }
                 ui.add_space(theme::SP_SM); // воздух над Add part (TECHDEBT #36)
-                let b_count = ZONE_B.filter(|&i| self.parts[i].enabled).count();
+                let b_count = ZONE_B.filter(|&i| self.core_state_ui.parts[i].enabled).count();
                 if b_count < PARTS_PER_ZONE
                     && ui.small_button("+ Add part").on_hover_text("Add part to Zone B").clicked()
                 {
@@ -197,7 +197,7 @@ impl App {
             // #54: drag part row — hit-test + drop. РАЗМЕЩЕНИЕ: в САМОМ КОНЦЕ
             // ScrollArea-замыкания (после "+ Add part" зоны B) — return здесь
             // обрезал бы зону B и row_rects.
-            if let Some(src) = self.part_drag_src {
+            if let Some(src) = self.misc_ui.part_drag_src {
                 // Цель = строка под pointer (drag живёт на хендле — commit
                 // в его drag_stopped); здесь только расчёт цели + подсветка
                 let pointer = ui.ctx().pointer_interact_pos();
@@ -215,9 +215,9 @@ impl App {
                         }
                     }
                 }
-                self.part_drag_dst = new_dst;
+                self.misc_ui.part_drag_dst = new_dst;
                 // подсветка слота-цели в той же зоне
-                if let Some(dst) = self.part_drag_dst {
+                if let Some(dst) = self.misc_ui.part_drag_dst {
                     for (i, r) in &row_rects {
                         if *i == dst {
                             // 4-й аргумент StrokeKind ОБЯЗАТЕЛЕН в egui 0.31.1
@@ -231,7 +231,7 @@ impl App {
         });
 
         // ── Middle-click / × removal confirmation ────────────────────────
-        if let Some(p) = self.pending_remove_part {
+        if let Some(p) = self.misc_ui.pending_remove_part {
             let zone = if p < PARTS_PER_ZONE { "A" } else { "B" };
             let num = (p % PARTS_PER_ZONE) + 1;
             let dialog = egui::Modal::new(egui::Id::new("remove_part_dialog")).show(ui.ctx(), |ui| {
@@ -242,15 +242,15 @@ impl App {
                 ui.horizontal(|ui| {
                     if ui.button("Remove").clicked() {
                         self.remove_part(p);
-                        self.pending_remove_part = None;
+                        self.misc_ui.pending_remove_part = None;
                     }
                     if ui.button("Cancel").clicked() {
-                        self.pending_remove_part = None;
+                        self.misc_ui.pending_remove_part = None;
                     }
                 });
             });
             if dialog.should_close() {
-                self.pending_remove_part = None;
+                self.misc_ui.pending_remove_part = None;
             }
         }
     }
@@ -259,11 +259,11 @@ impl App {
     fn draw_perf_row(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Perf:");
-            ui.add(egui::TextEdit::singleline(&mut self.perf_name)
+            ui.add(egui::TextEdit::singleline(&mut self.perf_ui.perf_name)
                 .desired_width(110.0).hint_text("name"));
-            if ui.button("Save").on_hover_text("Save performance").clicked() && !self.perf_name.trim().is_empty() {
-                let parts: Vec<PartConfig> = self.parts.iter().enumerate().map(|(i, l)| {
-                    let patch_name = self.patches.get(l.patch_idx)
+            if ui.button("Save").on_hover_text("Save performance").clicked() && !self.perf_ui.perf_name.trim().is_empty() {
+                let parts: Vec<PartConfig> = self.core_state_ui.parts.iter().enumerate().map(|(i, l)| {
+                    let patch_name = self.core_state_ui.patches.get(l.patch_idx)
                         .map(|p| p.name.clone()).unwrap_or_default();
                     if patch_name.is_empty() {
                         // #49: пустое имя (unwrap_or_default) никогда не
@@ -273,7 +273,7 @@ impl App {
                         // поэтому здесь сообщение самодостаточное
                         log::warn!(
                             "perf save '{}': part {} patch_idx {} out of range — saved with empty patch_name",
-                            self.perf_name, i, l.patch_idx
+                            self.perf_ui.perf_name, i, l.patch_idx
                         );
                     }
                     PartConfig {
@@ -294,14 +294,14 @@ impl App {
                     }
                 }).collect();
                 match preset::save_performance(&Performance {
-                    name: self.perf_name.trim().to_string(),
+                    name: self.perf_ui.perf_name.trim().to_string(),
                     category: String::new(),
-                    split_point: Some(self.split_point),
+                    split_point: Some(self.core_state_ui.split_point),
                     parts,
                 }) {
                     Ok(_path) => { self.show_toast("Performance saved", ToastKind::Success);
-                                   self.perf_list = preset::list_performances();
-                                   self.perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
+                                   self.perf_ui.perf_list = preset::list_performances();
+                                   self.perf_ui.perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
                                    self.refresh_console_list(); }
                     Err(e)    => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
@@ -315,10 +315,10 @@ impl App {
             ui.separator();
             let mut load_perf: Option<Performance> = None;
             egui::ComboBox::from_id_salt("perf_load")
-                .selected_text(if self.perf_list.is_empty() { "No performances" } else { "Load..." })
+                .selected_text(if self.perf_ui.perf_list.is_empty() { "No performances" } else { "Load..." })
                 .width(120.0)
                 .show_ui(ui, |ui| {
-                    for (name, path) in &self.perf_list {
+                    for (name, path) in &self.perf_ui.perf_list {
                         if ui.selectable_label(false, name).clicked() {
                             if name == "(Init)" {
                                 load_perf = Some(preset::init_performance());
@@ -342,15 +342,15 @@ impl App {
             // #57: активный трек + кнопка менеджера — в строке перфа,
             // после выпадающего списка (юзер 2026-11-06)
             ui.separator();
-            let track_name = self.config.ui.active_folder
-                .and_then(|i| self.config.ui.perf_folders.get(i))
+            let track_name = self.core_state_ui.config.ui.active_folder
+                .and_then(|i| self.core_state_ui.config.ui.perf_folders.get(i))
                 .map(|f| f.name.as_str())
                 .unwrap_or("(all)");
             ui.label(egui::RichText::new(format!("Track: {track_name}")).weak());
             if ui.small_button("Tracks").on_hover_text(
                 "Track folders (setlists) — organize perfs per song").clicked()
             {
-                self.show_tracks_manager = true;
+                self.perf_ui.show_tracks_manager = true;
             }
             ui.separator();
         });
@@ -359,9 +359,9 @@ impl App {
     /// One row = all fields of a part (mockup_layers2.html).
     fn draw_part_row(&mut self, ui: &mut egui::Ui, i: usize,
         row_rects: &mut Vec<(usize, egui::Rect)>) {
-        let is_active = i == self.active_part
-            && !self.show_drums && !self.show_looper
-            && !self.show_midi_seq && !self.show_fx_chain;
+        let is_active = i == self.core_state_ui.active_part
+            && !self.drum_seq_ui.show_drums && !self.looper_ui.show_looper
+            && !self.midi_seq_ui.show_midi_seq && !self.core_state_ui.show_fx_chain;
         let zone = if i < PARTS_PER_ZONE { "A" } else { "B" };
         let num = (i % PARTS_PER_ZONE) + 1;
 
@@ -383,18 +383,18 @@ impl App {
                     gc + egui::vec2(dx, dy), 1.1, theme::TEXT_MUTED);
             }
             if grip.drag_started() {
-                self.part_drag_src = Some(i);
-                self.part_drag_dst = None;
+                self.misc_ui.part_drag_src = Some(i);
+                self.misc_ui.part_drag_dst = None;
             }
-            if grip.drag_stopped() && self.part_drag_src == Some(i) {
+            if grip.drag_stopped() && self.misc_ui.part_drag_src == Some(i) {
                 // drop на хендле: свап с последней подсвеченной целью
                 if let (Some(src), Some(dst)) =
-                    (self.part_drag_src, self.part_drag_dst)
+                    (self.misc_ui.part_drag_src, self.misc_ui.part_drag_dst)
                 {
                     if src != dst { self.swap_parts(src, dst); }
                 }
-                self.part_drag_src = None;
-                self.part_drag_dst = None;
+                self.misc_ui.part_drag_src = None;
+                self.misc_ui.part_drag_dst = None;
             }
             // Подсветка цели — в drop-детекте draw_part_rows (layers.rs)
             // по row_rects; ui.max_rect() здесь = остаток ScrollArea, НЕ строка
@@ -403,7 +403,7 @@ impl App {
             // активный парт — тинт фоном (selection), без egui-selection-синевы
             // и рамок (research: identity и selection — разные каналы).
             let label = format!("{zone}{num}");
-            let muted = self.parts[i].mute;
+            let muted = self.core_state_ui.parts[i].mute;
             let part_color = theme::PART_COLORS[i % theme::PART_COLORS.len()];
             let name_color = if muted { egui::Color32::GRAY } else { part_color };
             let mut label_text = egui::RichText::new(label).strong().color(name_color);
@@ -416,25 +416,25 @@ impl App {
                 .clicked()
             {
                 self.set_active_part(i);
-                self.show_drums = false; self.show_looper = false;
-                self.show_midi_seq = false; self.show_fx_chain = false;
-                self.seq_target_atom.store(1, Ordering::Relaxed);
+                self.drum_seq_ui.show_drums = false; self.looper_ui.show_looper = false;
+                self.midi_seq_ui.show_midi_seq = false; self.core_state_ui.show_fx_chain = false;
+                self.transport_ui.seq_target_atom.store(1, Ordering::Relaxed);
             }
 
             // Instrument select (кнопка открывает браузер; тоггл движка — в браузере)
-            let sf2 = self.parts[i].sf2_mode;
+            let sf2 = self.core_state_ui.parts[i].sf2_mode;
             if sf2 {
-                if self.sf2_keys_soundfont.is_some() {
+                if self.sf2_ui.sf2_keys_soundfont.is_some() {
                     use crate::synth::sampler::GM_PROGRAM_NAMES;
-                    let prog = self.parts[i].sf2_program;
+                    let prog = self.core_state_ui.parts[i].sf2_program;
                     let cur_name = GM_PROGRAM_NAMES.get(prog as usize).copied().unwrap_or("?");
                     if ui.add_sized([170.0, 22.0], egui::Button::new(cur_name))
                         .on_hover_text(format!("GM program {prog} — open instrument browser (search + categories)")).clicked()
                     {
-                        self.preset_search.clear();
-                        self.inst_browser_part = Some(i);
-                        self.inst_browser_scroll = true; // (#37) открытие центрирует выбор
-                    self.inst_browser_seeded = false; // курсор пересеется на текущий инструмент
+                        self.browser_ui.preset_search.clear();
+                        self.browser_ui.inst_browser_part = Some(i);
+                        self.browser_ui.inst_browser_scroll = true; // (#37) открытие центрирует выбор
+                    self.browser_ui.inst_browser_seeded = false; // курсор пересеется на текущий инструмент
                     }
                 } else {
                     ui.add_sized([170.0, 22.0], egui::Label::new(egui::RichText::new("---").weak()))
@@ -442,36 +442,36 @@ impl App {
                 }
             } else {
                 // DSP patch select: нужно только имя текущего патча.
-                // self.patches (immutable) + self.parts (mutable) не пересекаются.
-                let cur = self.patches.get(self.parts[i].patch_idx)
+                // self.core_state_ui.patches (immutable) + self.core_state_ui.parts (mutable) не пересекаются.
+                let cur = self.core_state_ui.patches.get(self.core_state_ui.parts[i].patch_idx)
                     .map(|p| p.name.clone())
                     .unwrap_or_else(|| "---".into());
                 if ui.add_sized([170.0, 22.0], egui::Button::new(&cur))
                     .on_hover_text("Open patch browser (search + categories)").clicked()
                 {
-                    self.preset_search.clear();
-                    self.inst_browser_part = Some(i);
-                    self.inst_browser_scroll = true; // (#37) открытие центрирует выбор
-                    self.inst_browser_seeded = false; // курсор пересеется на текущий инструмент
+                    self.browser_ui.preset_search.clear();
+                    self.browser_ui.inst_browser_part = Some(i);
+                    self.browser_ui.inst_browser_scroll = true; // (#37) открытие центрирует выбор
+                    self.browser_ui.inst_browser_seeded = false; // курсор пересеется на текущий инструмент
                 }
             }
 
             // Mute / Root — фиксированные ширины: колонки всех строк совпадают
-            let mut m = self.parts[i].mute;
+            let mut m = self.core_state_ui.parts[i].mute;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut m, "Mute")).on_hover_text("Mute this part").changed() {
                 self.push_undo_snapshot_for(i); // #31: снимок ДО изменения
-                self.parts[i].mute = m;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: m });
+                self.core_state_ui.parts[i].mute = m;
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartMute { part: i, mute: m });
                 self.persist_parts_state();
             }
             // Note mode: одна кнопка-цикл в стиле тумблера DSP/SF2 — клик
             // переключает Poly → Bass → Root → Poly, на кнопке текущий режим.
-            let (mode_label, mode_tip) = match self.parts[i].note_mode {
+            let (mode_label, mode_tip) = match self.core_state_ui.parts[i].note_mode {
                 crate::synth::NOTE_MODE_BASS => ("Bass", "Bass — only the lowest held note. Click: Root"),
                 crate::synth::NOTE_MODE_ROOT => ("Root", "Root — the chord's root note. Click: Poly"),
                 _ => ("Poly", "Poly — all notes. Click: Bass"),
             };
-            let next_mode = match self.parts[i].note_mode {
+            let next_mode = match self.core_state_ui.parts[i].note_mode {
                 crate::synth::NOTE_MODE_BASS => crate::synth::NOTE_MODE_ROOT,
                 crate::synth::NOTE_MODE_ROOT => crate::synth::NOTE_MODE_POLY,
                 _ => crate::synth::NOTE_MODE_BASS,
@@ -480,8 +480,8 @@ impl App {
                 .on_hover_text(mode_tip.to_string())
                 .clicked()
             {
-                self.parts[i].note_mode = next_mode;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode: next_mode });
+                self.core_state_ui.parts[i].note_mode = next_mode;
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartNoteMode { part: i, mode: next_mode });
                 self.persist_parts_state();
             }
             // Play Mode (Poly/Mono/Mono-ST/Latch/...): live-переключение в
@@ -489,7 +489,7 @@ impl App {
             // как Sus/PB/MW). Источник правды — edited_params (как в дереве
             // params.rs), undo-снапшот на смену; портаменто остаётся в дереве
             // (глубина звука, не live-свитч).
-            let mut pmode = self.parts[i].edited_params.get("play_mode").copied().unwrap_or(0.0) as usize;
+            let mut pmode = self.core_state_ui.parts[i].edited_params.get("play_mode").copied().unwrap_or(0.0) as usize;
             let pm_resp = egui::ComboBox::from_id_salt(format!("pm_row_{i}"))
                 .width(56.0)
                 .selected_text((*crate::gui::PLAY_MODE_NAMES.get(pmode).unwrap_or(&"Poly")).to_string())
@@ -497,37 +497,37 @@ impl App {
                     for (mi, name) in crate::gui::PLAY_MODE_NAMES.iter().enumerate() {
                         if ui.selectable_value(&mut pmode, mi, *name).changed() {
                             self.push_undo_snapshot_for(i);
-                            self.parts[i].edited_params.insert("play_mode".into(), pmode as f32);
+                            self.core_state_ui.parts[i].edited_params.insert("play_mode".into(), pmode as f32);
                             self.send_edited_params(i);
                         }
                     }
                 });
             pm_resp.response.on_hover_text(
                 "Play mode: Poly / Mono / Mono-ST / Latch / ... (portamento — в дереве параметров)");
-            let mut s = self.parts[i].sustain_enabled;
+            let mut s = self.core_state_ui.parts[i].sustain_enabled;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut s, "Sus")).on_hover_text(
                 "Sustain pedal affects this part").changed()
             {
-                self.parts[i].sustain_enabled = s;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: s });
+                self.core_state_ui.parts[i].sustain_enabled = s;
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSustain { part: i, on: s });
                 self.persist_parts_state();
             }
             // Единая семантика чекбоксов (юзер 2026-11-05): ГАЛКА = РЕАГИРУЕТ
             // (как Sus). Внутри — ignore-флаги (инверсия на границе GUI).
-            let mut pb = !self.parts[i].ignore_pb;
+            let mut pb = !self.core_state_ui.parts[i].ignore_pb;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut pb, "PB")).on_hover_text(
                 "Part responds to pitch bend (unchecked = ignore)").changed()
             {
-                self.parts[i].ignore_pb = !pb;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnorePb { part: i, on: !pb });
+                self.core_state_ui.parts[i].ignore_pb = !pb;
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartIgnorePb { part: i, on: !pb });
                 self.persist_parts_state();
             }
-            let mut mw = !self.parts[i].ignore_mw;
+            let mut mw = !self.core_state_ui.parts[i].ignore_mw;
             if ui.add_sized([52.0, 22.0], egui::Checkbox::new(&mut mw, "MW")).on_hover_text(
                 "Part responds to mod wheel (unchecked = ignore)").changed()
             {
-                self.parts[i].ignore_mw = !mw;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartIgnoreMw { part: i, on: !mw });
+                self.core_state_ui.parts[i].ignore_mw = !mw;
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartIgnoreMw { part: i, on: !mw });
                 self.persist_parts_state();
             }
 
@@ -537,7 +537,7 @@ impl App {
             // Pan — значение в hover, не на полосе: текст значения переменной
             // ширины вылезал из фикс-бокса и сдвигал хвост строки («криво»).
             ui.label("Pan:");
-            let mut pan = self.parts[i].pan;
+            let mut pan = self.core_state_ui.parts[i].pan;
             let pan_r = ui.add_sized([90.0, 22.0], egui::Slider::new(&mut pan, -1.0..=1.0).show_value(false))
                 .on_hover_text(format!("Pan: {pan:+.2} — double-click to reset"));
             // #31: снимок ДО изменения — один на drag (drag_started), до
@@ -548,8 +548,8 @@ impl App {
                 pan = 0.0;
             }
             if pan_r.changed() || pan_r.double_clicked() {
-                self.parts[i].pan = pan;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
+                self.core_state_ui.parts[i].pan = pan;
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
             }
             self.knob_feedback(&pan_r, "Pan", format!("{pan:+.2}"));
             // (#45) колесо над слайдером = шаг значения; глотаем smooth-дельту,
@@ -560,15 +560,15 @@ impl App {
                     self.push_undo_snapshot_for(i); // #31: до clamp'а
                     pan = (pan + dy * 0.0025).clamp(-1.0, 1.0);
                     ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
-                    self.parts[i].pan = pan;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
+                    self.core_state_ui.parts[i].pan = pan;
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartPan { part: i, pan });
                     self.knob_feedback(&pan_r, "Pan", format!("{pan:+.2}"));
                 }
             }
 
             // Tr
             ui.label("Tr:");
-            let mut tr = self.parts[i].transpose as i32;
+            let mut tr = self.core_state_ui.parts[i].transpose as i32;
             let tr_r = ui.add_sized([120.0, 22.0], egui::Slider::new(&mut tr, -24..=24).show_value(false))
                 .on_hover_text(format!("Transpose: {tr:+} st — double-click to reset"));
             // #31: оба пути слайдера — drag_started и до clamp'а у колеса,
@@ -579,8 +579,8 @@ impl App {
                 tr = 0;
             }
             if tr_r.changed() || tr_r.double_clicked() {
-                self.parts[i].transpose = tr as i8;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
+                self.core_state_ui.parts[i].transpose = tr as i8;
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
             }
             self.knob_feedback(&tr_r, "Tr", format!("{tr:+} st"));
             // (#45) колесо: ~1 полутон на ~20px прокрутки
@@ -590,34 +590,34 @@ impl App {
                     self.push_undo_snapshot_for(i); // #31: до clamp'а
                     tr = (tr + (dy * 0.05).round() as i32).clamp(-24, 24);
                     ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
-                    self.parts[i].transpose = tr as i8;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
+                    self.core_state_ui.parts[i].transpose = tr as i8;
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartTranspose { part: i, semitones: tr as i8 });
                     self.knob_feedback(&tr_r, "Tr", format!("{tr:+} st"));
                 }
             }
 
             // Vel
             ui.label("Vel:");
-            let mut vmin = self.parts[i].vel_min as i32;
-            let mut vmax = self.parts[i].vel_max as i32;
+            let mut vmin = self.core_state_ui.parts[i].vel_min as i32;
+            let mut vmax = self.core_state_ui.parts[i].vel_max as i32;
             let c1 = ui.add_sized([46.0, 22.0], egui::DragValue::new(&mut vmin).range(1..=127).speed(1)).changed();
             ui.label("-");
             let c2 = ui.add_sized([46.0, 22.0], egui::DragValue::new(&mut vmax).range(1..=127).speed(1)).changed();
             if c1 || c2 {
                 let vmin = (vmin as u8).max(1);
                 let vmax = (vmax as u8).max(vmin);
-                self.parts[i].vel_min = vmin;
-                self.parts[i].vel_max = vmax;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartVelRange { part: i, vel_min: vmin, vel_max: vmax });
+                self.core_state_ui.parts[i].vel_min = vmin;
+                self.core_state_ui.parts[i].vel_max = vmax;
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartVelRange { part: i, vel_min: vmin, vel_max: vmax });
             }
 
             // Volume
-            let mut vol = self.parts[i].volume;
+            let mut vol = self.core_state_ui.parts[i].volume;
             let vol_r = ui.add_sized([90.0, 22.0], egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
                 .on_hover_text(format!("Volume: {vol:.2} — double-click to reset"));
             if vol_r.double_clicked() { vol = 0.8; }
             if vol_r.changed() || vol_r.double_clicked() {
-                self.parts[i].volume = vol;
+                self.core_state_ui.parts[i].volume = vol;
                 self.send_part_volume(i);
             }
             self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
@@ -627,7 +627,7 @@ impl App {
                 if dy != 0.0 {
                     vol = (vol + dy * 0.0025).clamp(0.0, 1.0);
                     ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
-                    self.parts[i].volume = vol;
+                    self.core_state_ui.parts[i].volume = vol;
                     self.send_part_volume(i);
                     self.knob_feedback(&vol_r, "Vol", format!("{vol:.2}"));
                 }
@@ -636,7 +636,7 @@ impl App {
             // Remove (never for the first part of a zone)
             let is_zone_first = i.is_multiple_of(PARTS_PER_ZONE);
             if !is_zone_first && ui.small_button("×").on_hover_text("Remove this part").clicked() {
-                self.pending_remove_part = Some(i);
+                self.misc_ui.pending_remove_part = Some(i);
             }
         });
         // #54: rect строки для drag hit-test (после horizontal — включает всю строку)
@@ -645,38 +645,38 @@ impl App {
 
     fn add_part_to_zone(&mut self, zone_b: bool) {
         let range = if zone_b { ZONE_B } else { ZONE_A };
-        if let Some(i) = range.into_iter().find(|&i| !self.parts[i].enabled) {
+        if let Some(i) = range.into_iter().find(|&i| !self.core_state_ui.parts[i].enabled) {
             self.reset_and_push_part(i, true);
-            let split_on = self.parts[ZONE_B].iter().any(|p| p.enabled);
+            let split_on = self.core_state_ui.parts[ZONE_B].iter().any(|p| p.enabled);
             if split_on {
                 self.apply_split_ranges();
             } else {
                 // No split — new part gets full range
-                self.parts[i].min_note = 0;
-                self.parts[i].max_note = 127;
+                self.core_state_ui.parts[i].min_note = 0;
+                self.core_state_ui.parts[i].max_note = 127;
                 self.send_part_range(i);
             }
             self.set_active_part(i);
-            self.show_drums = false; self.show_midi_seq = false; self.show_fx_chain = false;
+            self.drum_seq_ui.show_drums = false; self.midi_seq_ui.show_midi_seq = false; self.core_state_ui.show_fx_chain = false;
         }
     }
 
     fn remove_part(&mut self, part: usize) {
-        self.parts[part].enabled = false;
-        self.parts[part].mute = false;
-        self.parts[part].pan = 0.0;
-        self.parts[part].transpose = 0;
-        self.parts[part].sf2_mode = false;
-        self.parts[part].note_mode = crate::synth::NOTE_MODE_POLY;
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled: false });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: false });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartPan { part, pan: 0.0 });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: 0 });
-        let _ = self.ctrl_tx.push(ControlEvent::SetPartNoteMode { part, mode: crate::synth::NOTE_MODE_POLY });
+        self.core_state_ui.parts[part].enabled = false;
+        self.core_state_ui.parts[part].mute = false;
+        self.core_state_ui.parts[part].pan = 0.0;
+        self.core_state_ui.parts[part].transpose = 0;
+        self.core_state_ui.parts[part].sf2_mode = false;
+        self.core_state_ui.parts[part].note_mode = crate::synth::NOTE_MODE_POLY;
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartEnabled { part, enabled: false });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: false });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartPan { part, pan: 0.0 });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartTranspose { part, semitones: 0 });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartNoteMode { part, mode: crate::synth::NOTE_MODE_POLY });
         self.set_active_part(if part >= PARTS_PER_ZONE { PARTS_PER_ZONE } else { 0 });
         // find first enabled in same zone
         let zone = if part >= PARTS_PER_ZONE { ZONE_B } else { ZONE_A };
-        if let Some(i) = zone.into_iter().find(|&i| self.parts[i].enabled) {
+        if let Some(i) = zone.into_iter().find(|&i| self.core_state_ui.parts[i].enabled) {
             self.set_active_part(i);
         }
         // #51: удаление последнего B-парта = сплит исчез; предикат внутри
@@ -696,19 +696,19 @@ impl App {
         // сплит резал зону A до sp-1 («Organ играет до C3» при выключенном
         // сплите; Reset и рестарт — те же грабли). Юзер-модель: нет B —
         // нет сплита.
-        let split_active = self.parts[ZONE_B].iter().any(|p| p.enabled);
-        let (a, b) = zone_range_pair(self.split_point, split_active);
+        let split_active = self.core_state_ui.parts[ZONE_B].iter().any(|p| p.enabled);
+        let (a, b) = zone_range_pair(self.core_state_ui.split_point, split_active);
         // Всем партам (вкл. выключенным): диапазон — свойство зоны; иначе
         // пере-включенный парт несёт stale-диапазон (0..127 по умолчанию) и
         // молчит на нотах своей зоны (#46-семейство)
         for i in ZONE_A {
-            self.parts[i].min_note = a[0];
-            self.parts[i].max_note = a[1];
+            self.core_state_ui.parts[i].min_note = a[0];
+            self.core_state_ui.parts[i].max_note = a[1];
             self.send_part_range(i);
         }
         for i in ZONE_B {
-            self.parts[i].min_note = b[0];
-            self.parts[i].max_note = b[1];
+            self.core_state_ui.parts[i].min_note = b[0];
+            self.core_state_ui.parts[i].max_note = b[1];
             self.send_part_range(i);
         }
     }

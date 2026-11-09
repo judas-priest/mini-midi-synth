@@ -4,14 +4,14 @@ use super::*;
 impl App {
     /// Instrument browser modal: search + category tree, applies to `inst_browser_part`.
     pub(crate) fn draw_instrument_browser_modal(&mut self, ctx: &egui::Context) {
-        let Some(part) = self.inst_browser_part else { return };
+        let Some(part) = self.browser_ui.inst_browser_part else { return };
         // #браузер-фидбек: браузер показывает ОБОИХ дерева (DSP + GM). is_sf2 —
         // ТЕКУЩИЙ движок парта: он задаёт только порядок секций (своя — первой)
         // и источник seed-курсора; переключение движка следует за выбором.
-        let is_sf2 = self.parts[part].sf2_mode;
+        let is_sf2 = self.core_state_ui.parts[part].sf2_mode;
         // Свежее состояние движка парта: после тоггла в том же кадре порядок
         // секций и seed следуют за НОВЫМ движком
-        let engine_now = self.parts[part].sf2_mode;
+        let engine_now = self.core_state_ui.parts[part].sf2_mode;
         // Зона/номер вместо LAYER_NAMES (8 имён): парты зоны B (8-15) давали «?»
         let layer_label = if part < PARTS_PER_ZONE {
             format!("A{}", part + 1)
@@ -41,15 +41,15 @@ impl App {
             d
         });
         if moved != 0 {
-            let new_idx = self.inst_browser_index as i32 + moved;
-            self.inst_browser_index = new_idx.max(0) as usize;
-            self.inst_browser_scroll = true; // (#37) скролл только по смене индекса
+            let new_idx = self.browser_ui.inst_browser_index as i32 + moved;
+            self.browser_ui.inst_browser_index = new_idx.max(0) as usize;
+            self.browser_ui.inst_browser_scroll = true; // (#37) скролл только по смене индекса
         }
-        if self.inst_browser_last_search != self.preset_search {
+        if self.browser_ui.inst_browser_last_search != self.browser_ui.preset_search {
             // Фильтр изменился — выделение на первый результат
-            self.inst_browser_index = 0;
-            self.inst_browser_last_search = self.preset_search.clone();
-            self.inst_browser_scroll = true; // (#37) сброс фильтра — к началу списка
+            self.browser_ui.inst_browser_index = 0;
+            self.browser_ui.inst_browser_last_search = self.browser_ui.preset_search.clone();
+            self.browser_ui.inst_browser_scroll = true; // (#37) сброс фильтра — к началу списка
         }
         let enter_pressed = ctx.input(|i| i.key_pressed(egui::Key::Enter));
 
@@ -74,7 +74,7 @@ impl App {
                 .max(360.0),
         ];
         let win_size = self
-            .config
+            .core_state_ui.config
             .ui
             .inst_browser_size
             .map(|[w, h]| {
@@ -97,34 +97,34 @@ impl App {
         .min_width(theme::BROWSER_MIN_W);
         // #34: restore the position saved in a previous session (within a
         // session egui remembers drags itself, keyed by the constant Id).
-        if let Some([x, y]) = self.config.ui.inst_browser_pos {
+        if let Some([x, y]) = self.core_state_ui.config.ui.inst_browser_pos {
             builder = builder.default_pos(egui::pos2(x, y));
         }
         let win = builder.show(|ui| {
             ui.label(egui::RichText::new(title).strong());
             // Тоггл движка DSP ↔ SF2 — живое переключение прямо в браузере
             ui.horizontal(|ui| {
-                let cur_sf2 = self.parts[part].sf2_mode;
+                let cur_sf2 = self.core_state_ui.parts[part].sf2_mode;
                 let (label, tip) = if cur_sf2 {
                     ("\u{27A1} DSP", "Switch this part to the DSP engine")
                 } else {
                     ("\u{27A1} SF2", "Switch this part to the SF2 (soundfont) engine")
                 };
                 if ui.button(label).on_hover_text(tip).clicked() {
-                    let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                    self.parts[part].sf2_mode = !cur_sf2;
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: !cur_sf2 });
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::AllNotesOff);
+                    self.core_state_ui.parts[part].sf2_mode = !cur_sf2;
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: !cur_sf2 });
                     if !cur_sf2 {
-                        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                            part, program: self.parts[part].sf2_program, bank: 0 });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                            part, program: self.core_state_ui.parts[part].sf2_program, bank: 0 });
                     }
-                    if part == 0 { self.config.sf2.layer_a_sf2 = !cur_sf2; }
-                    else if part == 1 { self.config.sf2.layer_b_sf2 = !cur_sf2; }
+                    if part == 0 { self.core_state_ui.config.sf2.layer_a_sf2 = !cur_sf2; }
+                    else if part == 1 { self.core_state_ui.config.sf2.layer_b_sf2 = !cur_sf2; }
                     self.persist_parts_state();
                     // Курсор — на первую строку новой текущей секции
-                    self.inst_browser_index = 0;
-                    self.inst_browser_seeded = true;
-                    self.inst_browser_scroll = true;
+                    self.browser_ui.inst_browser_index = 0;
+                    self.browser_ui.inst_browser_seeded = true;
+                    self.browser_ui.inst_browser_scroll = true;
                 }
                 ui.label(egui::RichText::new(if cur_sf2 {
                     "engine: SF2 (soundfont)"
@@ -135,7 +135,7 @@ impl App {
             ui.add_space(theme::SP_XS);
             ui.separator();
 
-            let query = self.preset_search.to_lowercase();
+            let query = self.browser_ui.preset_search.to_lowercase();
             let searching = !query.is_empty();
 
             // Две колонки (фидбек 2026-11-08: панель параметров DSP — справа):
@@ -155,13 +155,13 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         let w = ui.available_width();
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.preset_search)
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.browser_ui.preset_search)
                             .hint_text("\u{1F50D} Search...")
                             .desired_width((w - 30.0).max(60.0)));
-                        if !self.preset_search.is_empty()
+                        if !self.browser_ui.preset_search.is_empty()
                             && ui.small_button("\u{00D7}").clicked()
                         {
-                            self.preset_search.clear();
+                            self.browser_ui.preset_search.clear();
                             r.request_focus();
                         }
                     });
@@ -181,7 +181,7 @@ impl App {
                                     ui.add_space(theme::SP_XS);
                                 }
                             if section_sf2 {
-                                if self.sf2_keys_soundfont.is_some() {
+                                if self.sf2_ui.sf2_keys_soundfont.is_some() {
                                 // ── GM categories (перенос mod.rs:1141-1205: клик пишет
                                 //    picked_program, коллапс — toggled_cat) ──
                                 use crate::synth::sampler::GM_PROGRAM_NAMES;
@@ -193,7 +193,7 @@ impl App {
                                     "SF2 — GM-инструменты"
                                 };
                                 ui.strong(gm_hdr);
-                                let current_program = self.parts[part].sf2_program;
+                                let current_program = self.core_state_ui.parts[part].sf2_program;
                                 let gm_categories: &[(&str, usize, usize)] = &[
                                     ("Piano", 0, 8), ("Chromatic Perc", 8, 16),
                                     ("Organ", 16, 24), ("Guitar", 24, 32),
@@ -207,12 +207,12 @@ impl App {
                                 // Seed-курсор садится на текущий инструмент: если его
                                 // категория свёрнута — строка skipped и fallback
                                 // уводит курсор наверх. Раскрываем категорию.
-                                if !self.inst_browser_seeded && engine_now {
+                                if !self.browser_ui.inst_browser_seeded && engine_now {
                                     for &(cat_name, start, end) in gm_categories.iter() {
                                         if (current_program as usize) >= start
                                             && (current_program as usize) < end
                                         {
-                                            if self.collapsed_categories.remove(cat_name) {
+                                            if self.core_state_ui.collapsed_categories.remove(cat_name) {
                                                 self.save_collapsed_categories();
                                             }
                                             break;
@@ -230,7 +230,7 @@ impl App {
                                     };
                                     if searching && matches.is_empty() { continue; }
                                     let is_collapsed =
-                                        !searching && self.collapsed_categories.contains(cat_name);
+                                        !searching && self.core_state_ui.collapsed_categories.contains(cat_name);
                                     let arrow = if is_collapsed { "\u{25B6}" } else { "\u{2B07}" };
                                     if !searching {
                                         if ui.selectable_label(false, format!("{arrow} {cat_name}")).clicked() {
@@ -252,27 +252,27 @@ impl App {
                                             // движка (не selected-строка — она может быть
                                             // свёрнута/скрыта; фидбек 2026-11-02)
                                             // Seed — на ТЕКУЩЕМ инструменте парта
-                                            if !self.inst_browser_seeded && engine_now && selected {
-                                                self.inst_browser_index = flat.len() - 1;
-                                                self.inst_browser_seeded = true;
+                                            if !self.browser_ui.inst_browser_seeded && engine_now && selected {
+                                                self.browser_ui.inst_browser_index = flat.len() - 1;
+                                                self.browser_ui.inst_browser_seeded = true;
                                                 // Флаг мог быть съеден ранней строкой
                                                 // со «старым» индексом — перевзводим,
                                                 // чтобы ТЕКУЩИЙ курсор прокрутился
-                                                self.inst_browser_scroll = true;
+                                                self.browser_ui.inst_browser_scroll = true;
                                             }
-                                            let is_hi = self.inst_browser_index == flat.len() - 1;
+                                            let is_hi = self.browser_ui.inst_browser_index == flat.len() - 1;
                                             // Одна подсветка — курсор клавиатуры (#37-класс);
                                             // активный инструмент помечен точкой, не заливкой
                                             let mut row_text = egui::RichText::new(format!("  {}", name.chars().take(30).collect::<String>()));
                                             if selected { row_text = row_text.strong(); }
                                             let r = ui.selectable_label(is_hi, row_text)
                                                 .on_hover_text(name);
-                                            if is_hi && self.inst_browser_scroll {
+                                            if is_hi && self.browser_ui.inst_browser_scroll {
                                                 r.scroll_to_me(Some(egui::Align::Center));
-                                                self.inst_browser_scroll = false; // (#37) один раз
+                                                self.browser_ui.inst_browser_scroll = false; // (#37) один раз
                                             }
                                             if r.clicked() && !selected {
-                                                self.inst_browser_index = flat.len() - 1;
+                                                self.browser_ui.inst_browser_index = flat.len() - 1;
                                                 picked_program = Some(i as u8);
                                                 picked_switch_to_sf2 = Some(true);
                                             }
@@ -299,12 +299,12 @@ impl App {
                                     "DSP — патчи"
                                 };
                                 ui.strong(dsp_hdr);
-                                let current_preset_idx = self.parts[part].patch_idx;
+                                let current_preset_idx = self.core_state_ui.parts[part].patch_idx;
                                 // Seed на текущий патч: раскрываем его свёрнутую
                                 // категорию (иначе строка skipped, курсор — наверху)
-                                if !self.inst_browser_seeded && !engine_now {
-                                    if let Some(p) = self.patches.get(current_preset_idx) {
-                                        if self.collapsed_categories.remove(&p.category) {
+                                if !self.browser_ui.inst_browser_seeded && !engine_now {
+                                    if let Some(p) = self.core_state_ui.patches.get(current_preset_idx) {
+                                        if self.core_state_ui.collapsed_categories.remove(&p.category) {
                                             self.save_collapsed_categories();
                                         }
                                     }
@@ -312,7 +312,7 @@ impl App {
                                 let categories: Vec<(String, usize)> = {
                                     let mut cats = Vec::new();
                                     let mut last = String::new();
-                                    for (i, p) in self.patches.iter().enumerate() {
+                                    for (i, p) in self.core_state_ui.patches.iter().enumerate() {
                                         if p.category != last {
                                             cats.push((p.category.clone(), i));
                                             last = p.category.clone();
@@ -321,7 +321,7 @@ impl App {
                                     cats
                                 };
                                 let mut cat_idx = 0;
-                                for (i, patch) in self.patches.iter().enumerate() {
+                                for (i, patch) in self.core_state_ui.patches.iter().enumerate() {
                                     if cat_idx < categories.len() && categories[cat_idx].1 == i {
                                         cat_idx += 1;
                                     }
@@ -333,13 +333,13 @@ impl App {
                                     if !searching {
                                         if cat_idx > 0 && categories[cat_idx - 1].1 == i {
                                             let cat = &categories[cat_idx - 1].0;
-                                            let is_collapsed = self.collapsed_categories.contains(cat);
+                                            let is_collapsed = self.core_state_ui.collapsed_categories.contains(cat);
                                             let arrow = if is_collapsed { "\u{25B6}" } else { "\u{2B07}" };
                                             if ui.selectable_label(false, format!("{arrow} {cat}")).clicked() {
                                                 toggled_cat = Some(cat.clone());
                                             }
                                         }
-                                        if self.collapsed_categories.contains(&patch.category) {
+                                        if self.core_state_ui.collapsed_categories.contains(&patch.category) {
                                             continue;
                                         }
                                     }
@@ -352,24 +352,24 @@ impl App {
                                     // движка (не selected-строка — она может быть
                                     // свёрнута/скрыта; фидбек 2026-11-02)
                                     // Seed — на текущем патче парта
-                                    if !self.inst_browser_seeded && !engine_now && selected {
-                                        self.inst_browser_index = flat.len() - 1;
-                                        self.inst_browser_seeded = true;
+                                    if !self.browser_ui.inst_browser_seeded && !engine_now && selected {
+                                        self.browser_ui.inst_browser_index = flat.len() - 1;
+                                        self.browser_ui.inst_browser_seeded = true;
                                         // Перевзвод scroll — см. GM-ветку выше
-                                        self.inst_browser_scroll = true;
+                                        self.browser_ui.inst_browser_scroll = true;
                                     }
-                                    let is_hi = self.inst_browser_index == flat.len() - 1;
+                                    let is_hi = self.browser_ui.inst_browser_index == flat.len() - 1;
                                     // Одна подсветка — курсор; активный патч — точкой
                                     let mut row_text = egui::RichText::new(format!("  {}", patch.name.chars().take(30).collect::<String>()));
                                     if selected { row_text = row_text.strong(); }
                                     let r = ui.selectable_label(is_hi, row_text) // (#38)
                                         .on_hover_text(patch.name.clone());
-                                    if is_hi && self.inst_browser_scroll {
+                                    if is_hi && self.browser_ui.inst_browser_scroll {
                                         r.scroll_to_me(Some(egui::Align::Center));
-                                        self.inst_browser_scroll = false; // (#37) один раз
+                                        self.browser_ui.inst_browser_scroll = false; // (#37) один раз
                                     }
                                     if r.clicked() && !selected {
-                                        self.inst_browser_index = flat.len() - 1;
+                                        self.browser_ui.inst_browser_index = flat.len() - 1;
                                         picked_patch = Some(i);
                                         picked_switch_to_sf2 = Some(false);
                                     }
@@ -383,13 +383,13 @@ impl App {
                             // Fallback-курсор: seed не сработал (selected-строка
                             // свёрнута/скрыта) — первая строка секции текущего движка;
                             // scroll — чтобы курсор был виден и в следующем кадре
-                            if !self.inst_browser_seeded {
-                                self.inst_browser_index = match engine_now {
+                            if !self.browser_ui.inst_browser_seeded {
+                                self.browser_ui.inst_browser_index = match engine_now {
                                     true => first_gm_row.unwrap_or(0),
                                     false => first_dsp_row.unwrap_or(0),
                                 };
-                                self.inst_browser_seeded = true;
-                                self.inst_browser_scroll = true;
+                                self.browser_ui.inst_browser_seeded = true;
+                                self.browser_ui.inst_browser_scroll = true;
                             }
                             }
                         });
@@ -404,7 +404,7 @@ impl App {
                     egui::vec2(params_w, col_h),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                    if !self.parts[part].sf2_mode {
+                    if !self.core_state_ui.parts[part].sf2_mode {
                         ui.strong("Параметры пресета");
                         egui::ScrollArea::vertical()
                             .id_salt("browser_params_scroll")
@@ -429,22 +429,22 @@ impl App {
         // `Window::show` → Option<InnerResponse>; позиция = inner.response.rect.
         if let Some(inner) = &win {
             let min = inner.response.rect.min;
-            self.config.ui.inst_browser_pos = Some([min.x, min.y]);
+            self.core_state_ui.config.ui.inst_browser_pos = Some([min.x, min.y]);
             // Ресайз юзера запоминается (дефолт выше его перебивает только
             // после перезапуска egui-памяти — т.е. ни разу, пока config жив).
             let size = inner.response.rect.size();
-            if self.config.ui.inst_browser_size != Some([size.x, size.y]) {
-                self.config.ui.inst_browser_size = Some([size.x, size.y]);
+            if self.core_state_ui.config.ui.inst_browser_size != Some([size.x, size.y]) {
+                self.core_state_ui.config.ui.inst_browser_size = Some([size.x, size.y]);
             }
             self.mark_config_dirty();
         }
         // Зажим индекса: список мог пересобраться (фильтр/смена парта)
         let flat_len = flat.len();
-        if self.inst_browser_index >= flat_len {
-            self.inst_browser_index = flat_len.saturating_sub(1);
+        if self.browser_ui.inst_browser_index >= flat_len {
+            self.browser_ui.inst_browser_index = flat_len.saturating_sub(1);
         }
         if enter_pressed && flat_len > 0 {
-            let (_, idx, entry_sf2) = &flat[self.inst_browser_index.min(flat_len - 1)];
+            let (_, idx, entry_sf2) = &flat[self.browser_ui.inst_browser_index.min(flat_len - 1)];
             if *entry_sf2 {
                 picked_program = Some(*idx as u8);
                 picked_switch_to_sf2 = Some(true);
@@ -454,43 +454,43 @@ impl App {
             }
         }
         if let Some(cat) = toggled_cat {
-            if self.collapsed_categories.contains(&cat) {
-                self.collapsed_categories.remove(&cat);
+            if self.core_state_ui.collapsed_categories.contains(&cat) {
+                self.core_state_ui.collapsed_categories.remove(&cat);
             } else {
-                self.collapsed_categories.insert(cat);
+                self.core_state_ui.collapsed_categories.insert(cat);
             }
             self.save_collapsed_categories();
         }
         // Движок следует за выбранным звуком (#браузер-фидбек)
         if let Some(sf2) = picked_switch_to_sf2 {
-            if self.parts[part].sf2_mode != sf2 {
-                let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-                self.parts[part].sf2_mode = sf2;
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2 });
+            if self.core_state_ui.parts[part].sf2_mode != sf2 {
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::AllNotesOff);
+                self.core_state_ui.parts[part].sf2_mode = sf2;
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part, enabled: sf2 });
                 if sf2 {
-                    let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                        part, program: self.parts[part].sf2_program, bank: 0 });
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                        part, program: self.core_state_ui.parts[part].sf2_program, bank: 0 });
                 }
-                if part == 0 { self.config.sf2.layer_a_sf2 = sf2; }
-                else if part == 1 { self.config.sf2.layer_b_sf2 = sf2; }
+                if part == 0 { self.core_state_ui.config.sf2.layer_a_sf2 = sf2; }
+                else if part == 1 { self.core_state_ui.config.sf2.layer_b_sf2 = sf2; }
                 self.persist_parts_state();
             }
         }
         if let Some(prog) = picked_program {
-            self.parts[part].sf2_program = prog;
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+            self.core_state_ui.parts[part].sf2_program = prog;
+            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Program {
                 part, program: prog, bank: 0 });
             // Persist for parts 0/1 only (startup seeds). part >= 2: no persist —
             // прежний else затирал layer_b_program с любого парта (QW2).
-            if part == 0 { self.config.sf2.layer_a_program = prog; }
-            else if part == 1 { self.config.sf2.layer_b_program = prog; }
+            if part == 0 { self.core_state_ui.config.sf2.layer_a_program = prog; }
+            else if part == 1 { self.core_state_ui.config.sf2.layer_b_program = prog; }
             self.mark_config_dirty();
             // Применили и играем дальше — окно не закрываем (фидбек 2026-11-01)
         }
         if let Some(idx) = picked_patch {
             self.push_undo_snapshot_for(part); // #31: снимок ДО применения патча
-            let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
-            self.parts[part].patch_idx = idx;
+            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::AllNotesOff);
+            self.core_state_ui.parts[part].patch_idx = idx;
             self.load_edited_params(part);
             self.send_edited_params(part);
             self.snapshot_preset_and_mark_dirty();
@@ -500,7 +500,7 @@ impl App {
             close = true;
         }
         if close {
-            self.inst_browser_part = None;
+            self.browser_ui.inst_browser_part = None;
             // #34: позиция уже в config.ui — persisted вместе с остальным.
             self.save_global_to_config();
         }

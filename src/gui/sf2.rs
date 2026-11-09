@@ -56,7 +56,7 @@ pub(crate) fn sf2_dir() -> std::path::PathBuf {
 
 impl App {
     pub(crate) fn find_or_add_sf2(&mut self, sf2_path: &str) -> Option<usize> {
-        let idx = self.sf2_file_list.iter().position(|(_, p)| p.to_string_lossy() == sf2_path);
+        let idx = self.sf2_ui.sf2_file_list.iter().position(|(_, p)| p.to_string_lossy() == sf2_path);
         if let Some(idx) = idx {
             return Some(idx);
         }
@@ -66,8 +66,8 @@ impl App {
                 .and_then(|s| s.to_str())
                 .unwrap_or("?")
                 .to_string();
-            self.sf2_file_list.push((name, path));
-            Some(self.sf2_file_list.len() - 1)
+            self.sf2_ui.sf2_file_list.push((name, path));
+            Some(self.sf2_ui.sf2_file_list.len() - 1)
         } else {
             None
         }
@@ -88,14 +88,14 @@ impl App {
                 let name = headers[sid].get_name().to_string();
                 for k in lo.max(30)..=hi.min(55) {
                     let i = (k - 30) as usize;
-                    if !seen[i] { self.drum_kit_names[i] = name.clone(); seen[i] = true; }
+                    if !seen[i] { self.drum_seq_ui.drum_kit_names[i] = name.clone(); seen[i] = true; }
                 }
             }
         }
     }
 
     pub(crate) fn reset_kit_names(&mut self) {
-        for (i, n) in self.drum_kit_names.iter_mut().enumerate() {
+        for (i, n) in self.drum_seq_ui.drum_kit_names.iter_mut().enumerate() {
             let note = 30 + i as u8;
             *n = if (36..=51).contains(&note) {
                 crate::synth::drum::DRUM_NAMES[(note - 36) as usize].to_string()
@@ -119,13 +119,13 @@ impl App {
     }
 
     pub(crate) fn load_sf2_keys(&mut self, idx: usize) {
-        let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
+        let Some((name, path)) = self.sf2_ui.sf2_file_list.get(idx).cloned() else {
             self.show_toast("SF2 file not found", ToastKind::Error);
             return;
         };
         // Reuse existing drums soundfont if same file
-        let sf = if self.sf2_drums_loaded_name == name {
-            self.sf2_drums_soundfont.clone()
+        let sf = if self.sf2_ui.sf2_drums_loaded_name == name {
+            self.sf2_ui.sf2_drums_soundfont.clone()
         } else {
             None
         };
@@ -136,33 +136,33 @@ impl App {
                 None => return,
             },
         };
-        self.sf2_keys_soundfont = Some(sf.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
-        let _ = self.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
-        self.sf2_keys_loaded_name = name;
+        self.sf2_ui.sf2_keys_soundfont = Some(sf.clone());
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_ui.sf2_block_size });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
+        self.sf2_ui.sf2_keys_loaded_name = name;
         self.show_toast("Keys SF2 loaded", ToastKind::Success);
         // Apply per-part SF2 modes
         for i in 0..2 {
-            if self.parts[i].sf2_mode {
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                    part: i, program: self.parts[i].sf2_program, bank: 0,
+            if self.core_state_ui.parts[i].sf2_mode {
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                    part: i, program: self.core_state_ui.parts[i].sf2_program, bank: 0,
                 });
             }
         }
-        self.config.sf2.keys_file_path = Some(path.to_string_lossy().to_string());
-        self.config.sf2.file_path = self.config.sf2.keys_file_path.clone(); // compat
+        self.core_state_ui.config.sf2.keys_file_path = Some(path.to_string_lossy().to_string());
+        self.core_state_ui.config.sf2.file_path = self.core_state_ui.config.sf2.keys_file_path.clone(); // compat
         self.mark_config_dirty();
     }
 
     pub(crate) fn load_sf2_drums(&mut self, idx: usize) {
-        let Some((name, path)) = self.sf2_file_list.get(idx).cloned() else {
+        let Some((name, path)) = self.sf2_ui.sf2_file_list.get(idx).cloned() else {
             self.show_toast("SF2 file not found", ToastKind::Error);
             return;
         };
         // Reuse existing keys soundfont if same file
-        let sf = if self.sf2_keys_loaded_name == name {
-            self.sf2_keys_soundfont.clone()
+        let sf = if self.sf2_ui.sf2_keys_loaded_name == name {
+            self.sf2_ui.sf2_keys_soundfont.clone()
         } else {
             None
         };
@@ -173,66 +173,66 @@ impl App {
                 None => return,
             },
         };
-        self.sf2_drums_soundfont = Some(sf.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
-        let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
-        self.sf2_drums_loaded_name = name;
+        self.sf2_ui.sf2_drums_soundfont = Some(sf.clone());
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_ui.sf2_block_size });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
+        self.sf2_ui.sf2_drums_loaded_name = name;
         self.extract_kit_names(&sf);
         self.push_drum_choke_groups();
         self.show_toast("Drums SF2 loaded", ToastKind::Success);
-        if self.sf2_drums_enabled {
-            let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
+        if self.sf2_ui.sf2_drums_enabled {
+            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
         }
         // Load the per-kit remap table (identity if none saved for this kit).
-        if let Some(v) = self.config.sf2.drums_remaps.get(&self.drum_remap_key()) {
+        if let Some(v) = self.core_state_ui.config.sf2.drums_remaps.get(&self.drum_remap_key()) {
             // migrate legacy slot-encoded values (0..16) to kit notes (+36)
             let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
             let mut t = [0u8; 16];
             for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(36 + i as u8).clamp(30, 55); }
-            self.drum_remap = t;
+            self.drum_seq_ui.drum_remap = t;
         } else {
-            for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
+            for (i, v) in self.drum_seq_ui.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
         }
         self.push_drum_remap();
-        if let Some(v) = self.config.sf2.drums_vels.get(&self.drum_remap_key()) {
+        if let Some(v) = self.core_state_ui.config.sf2.drums_vels.get(&self.drum_remap_key()) {
             let mut t = [0u8; 16];
             for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
-            self.drum_pad_vel = t;
+            self.drum_seq_ui.drum_pad_vel = t;
         } else {
-            self.drum_pad_vel = [0u8; 16];
+            self.drum_seq_ui.drum_pad_vel = [0u8; 16];
         }
         self.push_drum_pad_vel();
-        self.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
+        self.core_state_ui.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
         self.mark_config_dirty();
     }
 
     pub(crate) fn unload_sf2_keys(&mut self) {
-        self.sf2_keys_soundfont = None;
-        self.sf2_keys_loaded_name.clear();
+        self.sf2_ui.sf2_keys_soundfont = None;
+        self.sf2_ui.sf2_keys_loaded_name.clear();
         for i in 0..2 {
-            self.parts[i].sf2_mode = false;
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: false });
+            self.core_state_ui.parts[i].sf2_mode = false;
+            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: false });
         }
-        let _ = self.ctrl_tx.push(ControlEvent::UnloadKeysSoundFont);
-        self.config.sf2.keys_file_path = None;
-        self.config.sf2.file_path = None;
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::UnloadKeysSoundFont);
+        self.core_state_ui.config.sf2.keys_file_path = None;
+        self.core_state_ui.config.sf2.file_path = None;
         self.mark_config_dirty();
     }
 
     pub(crate) fn unload_sf2_drums(&mut self) {
-        self.sf2_drums_soundfont = None;
-        self.sf2_drums_loaded_name.clear();
-        self.sf2_drums_enabled = false;
+        self.sf2_ui.sf2_drums_soundfont = None;
+        self.sf2_ui.sf2_drums_loaded_name.clear();
+        self.sf2_ui.sf2_drums_enabled = false;
         self.reset_kit_names();
         self.push_drum_choke_groups(); // back to GM choke layout
         // Internal kit: reset to identity remap.
-        for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
+        for (i, v) in self.drum_seq_ui.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
         self.push_drum_remap();
-        self.drum_pad_vel = [0u8; 16];
+        self.drum_seq_ui.drum_pad_vel = [0u8; 16];
         self.push_drum_pad_vel();
-        let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
-        let _ = self.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);
-        self.config.sf2.drums_file_path = None;
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);
+        self.core_state_ui.config.sf2.drums_file_path = None;
         self.mark_config_dirty();
     }
 }
