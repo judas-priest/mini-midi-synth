@@ -173,3 +173,56 @@ pub struct SettingsAudioUi {
     pub selected_midi_port: Option<String>,
     pub is_jack: bool,
 }
+
+/// Drum sequencer GUI state: patterns, kit save/load, pads/remap, chain.
+pub struct DrumSeqUi {
+    // Drum sequencer GUI state
+    pub show_drums: bool,
+    pub drum_patterns: [DrumPattern; 8],
+    pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
+    /// GUI-зеркало mute слотов (источник истины — GUI, как drum_params).
+    pub drum_slot_mutes_view: [bool; NUM_DRUM_SLOTS],
+    /// Drum note remap table: slot i plays mapped note drum_remap[i].
+    pub drum_remap: [u8; 16],
+    pub drum_pad_vel: [u8; 16],
+    /// Sound names per kit note (index = note - 30, range 30..=55); from the
+    /// loaded SF2 kit (fallback: GM names for 36..=51, empty elsewhere)
+    pub drum_kit_names: [String; 26],
+    pub show_drum_remap: bool,
+    /// Remap dialog for a single hardware pad (0..16), from drawn-pad click
+    pub remap_pad: Option<usize>,
+    pub drum_volume: f32,
+    pub drum_fixed_velocity: bool,
+    pub drum_bpm: f32,
+    pub drum_swing: f32,
+    pub drum_playing: bool,
+    pub drum_recording: bool,
+    pub drum_current_pattern: u8,
+    pub drum_step_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub drum_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub drum_rec_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Live pattern from the engine (#32 Phase 5): the ONLY source of truth
+    /// for drum_current_pattern — the grid, console view and LED would lie
+    /// after a chain switch otherwise.
+    pub drum_pattern_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Chain mode (GUI toggle; the engine holds the authoritative mask).
+    pub drum_chain_on: bool,
+    /// GUI mirror of the chain mask for marking the selector (lossy under
+    /// ring overflow like every GUI→engine push).
+    pub drum_chain_mask: u8,
+    pub drum_metronome: bool,
+    /// Previous sequencer step (downbeat-flash edge detection)
+    pub drum_prev_step: u8,
+    /// Instant of the last beat-1 transition (GUI flash)
+    pub drum_beat_flash: Option<std::time::Instant>,
+    pub pat_window: usize,    // first pattern idx visible on slots 1..=7
+    pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub drum_redo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub drum_clear_confirm: Option<std::time::Instant>,
+    /// Two-stage confirm for Pad Remap «Reset» (remap 1:1 + zero velocities)
+    pub pad_remap_reset_confirm: Option<std::time::Instant>,
+    // Drum kit save/load
+    pub drum_kit_name: String,
+    pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
+    pub drum_midi_import_path: String,
+}

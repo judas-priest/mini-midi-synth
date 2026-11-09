@@ -273,15 +273,15 @@ impl App {
 
         // Update shared atoms (ST1: один пулл вместо 17)
         let h = engine.handles();
-        self.drum_step_atom = h.drum_step_atom;
-        self.drum_play_atom = h.drum_play_atom;
-        self.drum_rec_atom = h.drum_rec_atom;
+        self.drum_seq_ui.drum_step_atom = h.drum_step_atom;
+        self.drum_seq_ui.drum_play_atom = h.drum_play_atom;
+        self.drum_seq_ui.drum_rec_atom = h.drum_rec_atom;
         // Fresh engine: chain state is live-only (not persisted).
-        self.drum_pattern_atom = h.drum_pattern_atom;
-        self.drum_chain_on = false;
-        self.drum_chain_mask = 0;
-        self.drum_undo_atom = h.drum_undo_atom;
-        self.drum_redo_atom = h.drum_redo_atom;
+        self.drum_seq_ui.drum_pattern_atom = h.drum_pattern_atom;
+        self.drum_seq_ui.drum_chain_on = false;
+        self.drum_seq_ui.drum_chain_mask = 0;
+        self.drum_seq_ui.drum_undo_atom = h.drum_undo_atom;
+        self.drum_seq_ui.drum_redo_atom = h.drum_redo_atom;
         self.looper_atoms = h.looper_atoms;
         self.looper_display = h.looper_display;
         self.transport_ui.seq_target_atom = h.seq_target_atom;
@@ -414,18 +414,18 @@ impl App {
                         program = Some(prog);
                     }
                     ParamFeedback::DrumStepRecorded { pattern, slot, step, velocity } => {
-                        if (pattern as usize) < self.drum_patterns.len() {
-                            self.drum_patterns[pattern as usize].steps[slot as usize][step as usize].velocity = velocity;
+                        if (pattern as usize) < self.drum_seq_ui.drum_patterns.len() {
+                            self.drum_seq_ui.drum_patterns[pattern as usize].steps[slot as usize][step as usize].velocity = velocity;
                         }
                     }
                     ParamFeedback::DrumPatternsSync { patterns } => {
                         // Engine-side undo/redo — the GUI mirror was stale
                         // (notes on screen, silence on playback)
-                        self.drum_patterns = *patterns;
+                        self.drum_seq_ui.drum_patterns = *patterns;
                     }
                     ParamFeedback::DrumCleared { pattern } => {
-                        if (pattern as usize) < self.drum_patterns.len() {
-                            self.drum_patterns[pattern as usize].steps =
+                        if (pattern as usize) < self.drum_seq_ui.drum_patterns.len() {
+                            self.drum_seq_ui.drum_patterns[pattern as usize].steps =
                                 [[Default::default(); 16]; 16];
                         }
                     }
@@ -443,9 +443,9 @@ impl App {
                             let held = press_time.elapsed();
                             if held < std::time::Duration::from_millis(400) {
                                 // Short press: toggle keys ↔ drums
-                                self.show_drums = !self.show_drums;
+                                self.drum_seq_ui.show_drums = !self.drum_seq_ui.show_drums;
                                 self.show_looper = false;
-                                if !self.show_drums {
+                                if !self.drum_seq_ui.show_drums {
                                     self.transport_ui.seq_target_atom.store(1, std::sync::atomic::Ordering::Relaxed);
                                 } else {
                                     self.transport_ui.seq_target_atom.store(0, std::sync::atomic::Ordering::Relaxed);

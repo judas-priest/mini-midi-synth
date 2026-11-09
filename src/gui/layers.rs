@@ -97,13 +97,13 @@ impl App {
 
             // ── View tabs (Drums / MIDI Seq / FX Chain / Pads) ───────────
             ui.separator();
-            if ui.selectable_label(self.show_drums && !self.midi_seq_ui.show_midi_seq, "Drums").on_hover_text("Drum sequencer").clicked() {
-                if self.show_drums && !self.midi_seq_ui.show_midi_seq {
+            if ui.selectable_label(self.drum_seq_ui.show_drums && !self.midi_seq_ui.show_midi_seq, "Drums").on_hover_text("Drum sequencer").clicked() {
+                if self.drum_seq_ui.show_drums && !self.midi_seq_ui.show_midi_seq {
                     // повторный клик по активной вкладке = нейтральный вид
-                    self.show_drums = false; self.show_looper = false;
+                    self.drum_seq_ui.show_drums = false; self.show_looper = false;
                     self.midi_seq_ui.show_midi_seq = false; self.show_fx_chain = false;
                 } else {
-                    self.show_drums = true; self.show_looper = false;
+                    self.drum_seq_ui.show_drums = true; self.show_looper = false;
                     self.midi_seq_ui.show_midi_seq = false; self.show_fx_chain = false;
                     self.transport_ui.seq_target_atom.store(0, Ordering::Relaxed);
                 }
@@ -111,20 +111,20 @@ impl App {
             if ui.selectable_label(self.midi_seq_ui.show_midi_seq, "MIDI Seq").on_hover_text("MIDI file sequencer").clicked() {
                 if self.midi_seq_ui.show_midi_seq {
                     // повторный клик по активной вкладке = нейтральный вид
-                    self.midi_seq_ui.show_midi_seq = false; self.show_drums = false;
+                    self.midi_seq_ui.show_midi_seq = false; self.drum_seq_ui.show_drums = false;
                     self.show_looper = false; self.show_fx_chain = false;
                 } else {
-                    self.midi_seq_ui.show_midi_seq = true; self.show_drums = false;
+                    self.midi_seq_ui.show_midi_seq = true; self.drum_seq_ui.show_drums = false;
                     self.show_looper = false; self.show_fx_chain = false;
                 }
             }
             if ui.selectable_label(self.show_fx_chain, "FX Chain").on_hover_text("16-slot serial FX chain").clicked() {
                 if self.show_fx_chain {
                     // повторный клик по активной вкладке = нейтральный вид
-                    self.show_fx_chain = false; self.show_drums = false;
+                    self.show_fx_chain = false; self.drum_seq_ui.show_drums = false;
                     self.show_looper = false; self.midi_seq_ui.show_midi_seq = false;
                 } else {
-                    self.show_fx_chain = true; self.show_drums = false;
+                    self.show_fx_chain = true; self.drum_seq_ui.show_drums = false;
                     self.show_looper = false; self.midi_seq_ui.show_midi_seq = false;
                 }
             }
@@ -360,7 +360,7 @@ impl App {
     fn draw_part_row(&mut self, ui: &mut egui::Ui, i: usize,
         row_rects: &mut Vec<(usize, egui::Rect)>) {
         let is_active = i == self.active_part
-            && !self.show_drums && !self.show_looper
+            && !self.drum_seq_ui.show_drums && !self.show_looper
             && !self.midi_seq_ui.show_midi_seq && !self.show_fx_chain;
         let zone = if i < PARTS_PER_ZONE { "A" } else { "B" };
         let num = (i % PARTS_PER_ZONE) + 1;
@@ -416,7 +416,7 @@ impl App {
                 .clicked()
             {
                 self.set_active_part(i);
-                self.show_drums = false; self.show_looper = false;
+                self.drum_seq_ui.show_drums = false; self.show_looper = false;
                 self.midi_seq_ui.show_midi_seq = false; self.show_fx_chain = false;
                 self.transport_ui.seq_target_atom.store(1, Ordering::Relaxed);
             }
@@ -657,7 +657,7 @@ impl App {
                 self.send_part_range(i);
             }
             self.set_active_part(i);
-            self.show_drums = false; self.midi_seq_ui.show_midi_seq = false; self.show_fx_chain = false;
+            self.drum_seq_ui.show_drums = false; self.midi_seq_ui.show_midi_seq = false; self.show_fx_chain = false;
         }
     }
 

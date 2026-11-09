@@ -88,14 +88,14 @@ impl App {
                 let name = headers[sid].get_name().to_string();
                 for k in lo.max(30)..=hi.min(55) {
                     let i = (k - 30) as usize;
-                    if !seen[i] { self.drum_kit_names[i] = name.clone(); seen[i] = true; }
+                    if !seen[i] { self.drum_seq_ui.drum_kit_names[i] = name.clone(); seen[i] = true; }
                 }
             }
         }
     }
 
     pub(crate) fn reset_kit_names(&mut self) {
-        for (i, n) in self.drum_kit_names.iter_mut().enumerate() {
+        for (i, n) in self.drum_seq_ui.drum_kit_names.iter_mut().enumerate() {
             let note = 30 + i as u8;
             *n = if (36..=51).contains(&note) {
                 crate::synth::drum::DRUM_NAMES[(note - 36) as usize].to_string()
@@ -189,17 +189,17 @@ impl App {
             let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
             let mut t = [0u8; 16];
             for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(36 + i as u8).clamp(30, 55); }
-            self.drum_remap = t;
+            self.drum_seq_ui.drum_remap = t;
         } else {
-            for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
+            for (i, v) in self.drum_seq_ui.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
         }
         self.push_drum_remap();
         if let Some(v) = self.config.sf2.drums_vels.get(&self.drum_remap_key()) {
             let mut t = [0u8; 16];
             for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
-            self.drum_pad_vel = t;
+            self.drum_seq_ui.drum_pad_vel = t;
         } else {
-            self.drum_pad_vel = [0u8; 16];
+            self.drum_seq_ui.drum_pad_vel = [0u8; 16];
         }
         self.push_drum_pad_vel();
         self.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
@@ -226,9 +226,9 @@ impl App {
         self.reset_kit_names();
         self.push_drum_choke_groups(); // back to GM choke layout
         // Internal kit: reset to identity remap.
-        for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
+        for (i, v) in self.drum_seq_ui.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
         self.push_drum_remap();
-        self.drum_pad_vel = [0u8; 16];
+        self.drum_seq_ui.drum_pad_vel = [0u8; 16];
         self.push_drum_pad_vel();
         let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
         let _ = self.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);

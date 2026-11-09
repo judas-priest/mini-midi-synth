@@ -146,10 +146,10 @@ impl App {
             // Pad color by the category of the sound it triggers (remap-aware)
             let pad_color = |note: u8| -> egui::Color32 {
                 let i = (note - 36) as usize;
-                let target = self.drum_remap[i] as usize;
+                let target = self.drum_seq_ui.drum_remap[i] as usize;
                 let kit_idx = target.wrapping_sub(30);
-                let name = if kit_idx < self.drum_kit_names.len() {
-                    self.drum_kit_names[kit_idx].to_lowercase()
+                let name = if kit_idx < self.drum_seq_ui.drum_kit_names.len() {
+                    self.drum_seq_ui.drum_kit_names[kit_idx].to_lowercase()
                 } else {
                     String::new()
                 };
@@ -209,8 +209,8 @@ impl App {
             }
 
             if let Some(p) = clicked_pad {
-                self.remap_pad = Some(p);
-                self.show_drum_remap = false;
+                self.drum_seq_ui.remap_pad = Some(p);
+                self.drum_seq_ui.show_drum_remap = false;
             }
         });
     }

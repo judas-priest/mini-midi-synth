@@ -341,49 +341,8 @@ pub struct App {
     /// Pickup indicators: param_key → knob position (for showing direction arrow)
     pub pickup_indicators: std::collections::BTreeMap<String, f32>,
 
-    // Drum sequencer GUI state
-    pub show_drums: bool,
-    pub drum_patterns: [DrumPattern; 8],
-    pub drum_params: [DrumSlotParams; NUM_DRUM_SLOTS],
-    /// GUI-зеркало mute слотов (источник истины — GUI, как drum_params).
-    pub drum_slot_mutes_view: [bool; NUM_DRUM_SLOTS],
-    /// Drum note remap table: slot i plays mapped note drum_remap[i].
-    pub drum_remap: [u8; 16],
-    pub drum_pad_vel: [u8; 16],
-    /// Sound names per kit note (index = note - 30, range 30..=55); from the
-    /// loaded SF2 kit (fallback: GM names for 36..=51, empty elsewhere)
-    pub drum_kit_names: [String; 26],
-    pub show_drum_remap: bool,
-    /// Remap dialog for a single hardware pad (0..16), from drawn-pad click
-    pub remap_pad: Option<usize>,
-    pub drum_volume: f32,
-    pub drum_fixed_velocity: bool,
-    pub drum_bpm: f32,
-    pub drum_swing: f32,
-    pub drum_playing: bool,
-    pub drum_recording: bool,
-    pub drum_current_pattern: u8,
-    pub drum_step_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
-    pub drum_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
-    pub drum_rec_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
-    /// Live pattern from the engine (#32 Phase 5): the ONLY source of truth
-    /// for drum_current_pattern — the grid, console view and LED would lie
-    /// after a chain switch otherwise.
-    pub drum_pattern_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
-    /// Chain mode (GUI toggle; the engine holds the authoritative mask).
-    pub drum_chain_on: bool,
-    /// GUI mirror of the chain mask for marking the selector (lossy under
-    /// ring overflow like every GUI→engine push).
-    pub drum_chain_mask: u8,
-    pub drum_metronome: bool,
-    /// Previous sequencer step (downbeat-flash edge detection)
-    pub drum_prev_step: u8,
-    /// Instant of the last beat-1 transition (GUI flash)
-    pub drum_beat_flash: Option<std::time::Instant>,
+    pub drum_seq_ui: DrumSeqUi,
     pub perf_ui: PerfUi,
-    pub pat_window: usize,    // first pattern idx visible on slots 1..=7
-    pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    pub drum_redo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub led_ui: LedUi,
     /// Drag-and-drop part swap (#54): исходный слот драга за хендл ⠿,
     /// живёт в пределах GUI-фрейма/драга (Some пока pointer down).
@@ -391,10 +350,6 @@ pub struct App {
     /// #54: цель драга (строка под pointer во время драга) — commit на
     /// drag_stopped хендла
     pub part_drag_dst: Option<usize>,
-    // Drum kit save/load
-    pub drum_kit_name: String,
-    pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
-    pub drum_midi_import_path: String,
     // Looper
     pub show_looper: bool,
     pub looper_atoms: std::sync::Arc<LooperAtoms>,
@@ -402,10 +357,7 @@ pub struct App {
     pub looper_bars: u8,
     pub looper_quantize: u8,
     pub looper_clear_confirm: Option<std::time::Instant>,
-    pub drum_clear_confirm: Option<std::time::Instant>,
     pub fx_reset_confirm: Option<std::time::Instant>,
-    /// Two-stage confirm for Pad Remap «Reset» (remap 1:1 + zero velocities)
-    pub pad_remap_reset_confirm: Option<std::time::Instant>,
     pub looper_layer_mute: [bool; 256],
     pub looper_solo_layer: Option<u8>,
     /// Looper record source: true = Mix (all sounding parts, default),
@@ -515,32 +467,42 @@ impl App {
                 gp
             },
             pickup_indicators: std::collections::BTreeMap::new(),
-            show_drums: false,
+            drum_seq_ui: DrumSeqUi {
+                show_drums: false,
+                drum_patterns: [crate::synth::drum::DrumPattern::default(); 8],
+                drum_params: [crate::synth::drum::DrumSlotParams::default(); NUM_DRUM_SLOTS],
+                drum_slot_mutes_view: [false; NUM_DRUM_SLOTS],
+                drum_remap: core::array::from_fn(|i| 36 + i as u8),
+                drum_pad_vel: [0u8; 16],
+                drum_kit_names: Default::default(), // filled by reset_kit_names() below
+                show_drum_remap: false,
+                remap_pad: None,
+                drum_volume: c.config.ui.drum_volume,
+                drum_fixed_velocity: c.config.ui.drum_fixed_velocity,
+                drum_bpm: 120.0,
+                drum_swing: 0.0,
+                drum_playing: false,
+                drum_recording: false,
+                drum_current_pattern: 0,
+                drum_step_atom: c.handles.drum_step_atom,
+                drum_play_atom: c.handles.drum_play_atom,
+                drum_rec_atom: c.handles.drum_rec_atom,
+                drum_pattern_atom: c.handles.drum_pattern_atom,
+                drum_chain_on: false,
+                drum_chain_mask: 0,
+                drum_metronome: c.config.ui.drum_metronome,
+                drum_prev_step: 0,
+                drum_beat_flash: None,
+                pat_window: 0,
+                drum_undo_atom: c.handles.drum_undo_atom,
+                drum_redo_atom: c.handles.drum_redo_atom,
+                drum_clear_confirm: None,
+                pad_remap_reset_confirm: None,
+                drum_kit_name: String::new(),
+                drum_kit_list: preset::list_drum_kits(),
+                drum_midi_import_path: String::new(),
+            },
             show_looper: false,
-            drum_patterns: [crate::synth::drum::DrumPattern::default(); 8],
-            drum_params: [crate::synth::drum::DrumSlotParams::default(); NUM_DRUM_SLOTS],
-            drum_slot_mutes_view: [false; NUM_DRUM_SLOTS],
-            drum_remap: core::array::from_fn(|i| 36 + i as u8),
-            drum_pad_vel: [0u8; 16],
-            drum_kit_names: Default::default(), // filled by reset_kit_names() below
-            show_drum_remap: false,
-            remap_pad: None,
-            drum_volume: c.config.ui.drum_volume,
-            drum_fixed_velocity: c.config.ui.drum_fixed_velocity,
-            drum_bpm: 120.0,
-            drum_swing: 0.0,
-            drum_playing: false,
-            drum_recording: false,
-            drum_current_pattern: 0,
-            drum_step_atom: c.handles.drum_step_atom,
-            drum_play_atom: c.handles.drum_play_atom,
-            drum_rec_atom: c.handles.drum_rec_atom,
-            drum_pattern_atom: c.handles.drum_pattern_atom,
-            drum_chain_on: false,
-            drum_chain_mask: 0,
-            drum_metronome: c.config.ui.drum_metronome,
-            drum_prev_step: 0,
-            drum_beat_flash: None,
             perf_ui: PerfUi {
                 perf_window: 1,
                 tracks_window: 0,
@@ -564,9 +526,6 @@ impl App {
                 },
                 pad_prev_state: [0u8; 16],
             },
-            pat_window: 0,
-            drum_undo_atom: c.handles.drum_undo_atom,
-            drum_redo_atom: c.handles.drum_redo_atom,
             led_ui: LedUi {
                 console: led_console::LedConsole::default(),
                 console_rx: Some(c.console_rx),
@@ -587,17 +546,12 @@ impl App {
             },
             part_drag_src: None,
             part_drag_dst: None,
-            drum_kit_name: String::new(),
-            drum_kit_list: preset::list_drum_kits(),
-            drum_midi_import_path: String::new(),
             looper_atoms: c.handles.looper_atoms,
             looper_display: c.handles.looper_display,
             looper_bars: 4,
             looper_quantize: 0,
             looper_clear_confirm: None,
-            drum_clear_confirm: None,
             fx_reset_confirm: None,
-            pad_remap_reset_confirm: None,
             looper_layer_mute: [false; 256],
             looper_solo_layer: None,
             looper_source_mix: true,
@@ -727,7 +681,7 @@ impl eframe::App for App {
             .any(|i| self.note_state[i as usize].load(Ordering::Relaxed) > 0);
         let looper_active = self.looper_atoms.state.load(Ordering::Relaxed) != 0;
         let midi_seq_active = self.midi_seq_ui.midi_seq_play_atom.load(Ordering::Relaxed) != 0;
-        if has_active_notes || self.drum_playing || looper_active || midi_seq_active {
+        if has_active_notes || self.drum_seq_ui.drum_playing || looper_active || midi_seq_active {
             ctx.request_repaint_after(Duration::from_millis(33));
         } else {
             // Полная тишина: интерфейс статичен; egui сам репейнтит на мышь/клаву.
@@ -842,19 +796,19 @@ impl eframe::App for App {
         }
 
         // Sync drum play/rec state from engine (for MIDI-triggered changes)
-        self.drum_playing = self.drum_play_atom.load(Ordering::Relaxed) != 0;
-        self.drum_recording = self.drum_rec_atom.load(Ordering::Relaxed) != 0;
+        self.drum_seq_ui.drum_playing = self.drum_seq_ui.drum_play_atom.load(Ordering::Relaxed) != 0;
+        self.drum_seq_ui.drum_recording = self.drum_seq_ui.drum_rec_atom.load(Ordering::Relaxed) != 0;
         // Pattern mirror (#32 Phase 5): the atom is the single source of
         // truth — a queued switch applies at the boundary, and chain switches
         // happen in the engine, so the GUI never assigns this field directly.
-        self.drum_current_pattern = self.drum_pattern_atom.load(Ordering::Relaxed);
+        self.drum_seq_ui.drum_current_pattern = self.drum_seq_ui.drum_pattern_atom.load(Ordering::Relaxed);
         // Beat-1 flash: the step atom shows the NEXT step, so step 0 has just
         // sounded when the atom transitions 0 -> 1 while playing.
-        let step_now = self.drum_step_atom.load(Ordering::Relaxed);
-        if self.drum_playing && self.drum_prev_step == 0 && step_now == 1 {
-            self.drum_beat_flash = Some(std::time::Instant::now());
+        let step_now = self.drum_seq_ui.drum_step_atom.load(Ordering::Relaxed);
+        if self.drum_seq_ui.drum_playing && self.drum_seq_ui.drum_prev_step == 0 && step_now == 1 {
+            self.drum_seq_ui.drum_beat_flash = Some(std::time::Instant::now());
         }
-        self.drum_prev_step = step_now;
+        self.drum_seq_ui.drum_prev_step = step_now;
 
         self.console_event_pump();
         self.led_companion_lifecycle();
@@ -1321,7 +1275,7 @@ impl eframe::App for App {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     self.draw_midi_seq(ui);
                 });
-            } else if self.show_drums {
+            } else if self.drum_seq_ui.show_drums {
                 if self.config.ui.dock_bottom_unit {
                     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                         self.draw_drum_kit_controls(ui);
@@ -1455,7 +1409,7 @@ impl App {
             self.refresh_console_list();
             match m {
                 led_console::Mode::Pattern => {
-                    self.follow_window(self.drum_current_pattern as usize, false);
+                    self.follow_window(self.drum_seq_ui.drum_current_pattern as usize, false);
                 }
                 led_console::Mode::Tracks => {
                     // Хвост #57: вход показывает страницу активной папки
@@ -1612,11 +1566,11 @@ impl App {
             let lstate = crate::synth::looper::LooperState::from_u8(
                 self.looper_atoms.state.load(Ordering::Relaxed));
             let (playing, recording) = (
-                self.drum_playing
+                self.drum_seq_ui.drum_playing
                     || matches!(lstate, crate::synth::looper::LooperState::Playing
                             | crate::synth::looper::LooperState::Overdubbing
                             | crate::synth::looper::LooperState::Recording),
-                self.drum_recording
+                self.drum_seq_ui.drum_recording
                     || matches!(lstate, crate::synth::looper::LooperState::Recording
                             | crate::synth::looper::LooperState::Overdubbing),
             );
@@ -1625,10 +1579,10 @@ impl App {
                 mutes[i] = part.mute;
             }
             let filled = self.console_active_list().len();
-            let undo_avail = self.drum_undo_atom.load(Ordering::Relaxed);
-            let redo_avail = self.drum_redo_atom.load(Ordering::Relaxed);
+            let undo_avail = self.drum_seq_ui.drum_undo_atom.load(Ordering::Relaxed);
+            let redo_avail = self.drum_seq_ui.drum_redo_atom.load(Ordering::Relaxed);
             let page_depth = match self.led_ui.console.mode() {
-                led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
+                led_console::Mode::Pattern => self.drum_seq_ui.pat_window.min(led_console::window_max_start(8)),
                 led_console::Mode::Mute => self.led_ui.mute_window / 7,
                 led_console::Mode::Tracks => self.perf_ui.tracks_window / 7,
                 // FolderPerfs: PAGE-глубина по перф-страницам — явное плечо
@@ -1642,11 +1596,11 @@ impl App {
                     self.config.ui.perf_folders.len(), self.perf_ui.tracks_window),
                 led_console::Mode::FolderPerfs => self.led_ui.console.top_colors(
                     self.active_perf_console(), self.perf_ui.folder_console_list.len(),
-                    self.drum_current_pattern as usize, &mutes,
-                    self.perf_ui.perf_window, self.pat_window, self.led_ui.mute_window),
+                    self.drum_seq_ui.drum_current_pattern as usize, &mutes,
+                    self.perf_ui.perf_window, self.drum_seq_ui.pat_window, self.led_ui.mute_window),
                 _ => self.led_ui.console.top_colors(self.active_perf_console(), filled,
-                                             self.drum_current_pattern as usize, &mutes,
-                                             self.perf_ui.perf_window, self.pat_window,
+                                             self.drum_seq_ui.drum_current_pattern as usize, &mutes,
+                                             self.perf_ui.perf_window, self.drum_seq_ui.pat_window,
                                              self.led_ui.mute_window),
             };
             let bottom = self.led_ui.console.bottom_colors(playing, recording, page_depth,
@@ -1714,11 +1668,11 @@ impl App {
             }
         }
         // Send drum and part volumes to engine
-        let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_volume });
-        let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_seq_ui.drum_volume });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_seq_ui.drum_fixed_velocity });
         let _ = self.ctrl_tx.push(ControlEvent::SetSustainRelease { seconds: self.sustain_release });
         let _ = self.ctrl_tx.push(ControlEvent::SetSf2ReleaseScale { scale: self.sf2_ui.sf2_release_scale });
-        let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_metronome });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_seq_ui.drum_metronome });
         // Per-engine loudness trims (Settings → Audio, persisted in config.audio)
         let _ = self.ctrl_tx.push(ControlEvent::SetDspTrim { db: self.config.audio.dsp_trim_db });
         let _ = self.ctrl_tx.push(ControlEvent::SetSf2Trim { db: self.config.audio.sf2_trim_db });
@@ -1730,12 +1684,12 @@ impl App {
                 let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
                 let mut t = [0u8; 16];
                 for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or((36 + i) as u8).clamp(30, 55); }
-                self.drum_remap = t;
+                self.drum_seq_ui.drum_remap = t;
             }
             if let Some(v) = self.config.sf2.drums_vels.get("internal") {
                 let mut t = [0u8; 16];
                 for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
-                self.drum_pad_vel = t;
+                self.drum_seq_ui.drum_pad_vel = t;
             }
         }
         self.push_drum_remap();
@@ -1809,11 +1763,11 @@ impl App {
         self.config.ui.fader_reverb = self.global_params.get("reverb_mix").copied().unwrap_or(0.0);
         self.config.ui.fader_delay = self.global_params.get("delay_mix").copied().unwrap_or(0.0);
         self.config.ui.pitch_bend_range = self.global_params.get("pitch_bend_range").copied().unwrap_or(2.0) as u8;
-        self.config.ui.drum_volume = self.drum_volume;
-        self.config.ui.drum_fixed_velocity = self.drum_fixed_velocity;
+        self.config.ui.drum_volume = self.drum_seq_ui.drum_volume;
+        self.config.ui.drum_fixed_velocity = self.drum_seq_ui.drum_fixed_velocity;
         self.config.ui.sustain_release = self.sustain_release;
         self.config.ui.sf2_release_scale = self.sf2_ui.sf2_release_scale;
-        self.config.ui.drum_metronome = self.drum_metronome;
+        self.config.ui.drum_metronome = self.drum_seq_ui.drum_metronome;
         if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
         self.config.ui.pad_perf_map = self.perf_ui.pad_perf_map.to_vec();
@@ -1854,7 +1808,7 @@ impl App {
                     let p = *p as usize;
                     if p < self.parts.len() && self.parts[p].enabled {
                         self.set_active_part(p);
-                        self.show_drums = false;
+                        self.drum_seq_ui.show_drums = false;
                         self.midi_seq_ui.show_midi_seq = false;
                         self.show_fx_chain = false;
                         self.transport_ui.seq_target_atom.store(2, Ordering::Relaxed);
@@ -1882,13 +1836,13 @@ impl App {
                     }
                 }
                 KeyAction::DrumTogglePlay => {
-                    self.drum_playing = !self.drum_playing;
-                    let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPlay { playing: self.drum_playing });
+                    self.drum_seq_ui.drum_playing = !self.drum_seq_ui.drum_playing;
+                    let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPlay { playing: self.drum_seq_ui.drum_playing });
                 }
                 KeyAction::ToggleDrumsSynth => {
-                    self.show_drums = !self.show_drums;
+                    self.drum_seq_ui.show_drums = !self.drum_seq_ui.show_drums;
                     self.show_looper = false;
-                    if !self.show_drums {
+                    if !self.drum_seq_ui.show_drums {
                         self.transport_ui.seq_target_atom.store(1, Ordering::Relaxed);
                     } else {
                         self.transport_ui.seq_target_atom.store(0, Ordering::Relaxed);
@@ -2213,7 +2167,7 @@ impl App {
     /// group 1 (mutual), crash/cymbal -> group 2, everything else 0.
     fn derive_choke_groups(&self) -> [u8; 26] {
         let mut t = [0u8; 26];
-        for (i, name) in self.drum_kit_names.iter().enumerate() {
+        for (i, name) in self.drum_seq_ui.drum_kit_names.iter().enumerate() {
             let n = name.to_lowercase();
             if n.contains("hat") || n.contains("hh") {
                 t[i] = 1;
@@ -2237,39 +2191,39 @@ impl App {
 
     /// Push the current remap table to the engine.
     fn push_drum_remap(&mut self) {
-        let _ = self.ctrl_tx.push(ControlEvent::DrumSetRemap { table: Box::new(self.drum_remap) });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetRemap { table: Box::new(self.drum_seq_ui.drum_remap) });
     }
 
     /// Persist the current remap table under the active kit key.
     /// Called from the remap panel in drums.rs.
     fn save_drum_remap(&mut self) {
         let key = self.drum_remap_key();
-        self.config.sf2.drums_remaps.insert(key, self.drum_remap.to_vec());
+        self.config.sf2.drums_remaps.insert(key, self.drum_seq_ui.drum_remap.to_vec());
         self.mark_config_dirty();
     }
 
     fn push_drum_pad_vel(&mut self) {
-        let _ = self.ctrl_tx.push(ControlEvent::DrumSetPadVel { table: Box::new(self.drum_pad_vel) });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetPadVel { table: Box::new(self.drum_seq_ui.drum_pad_vel) });
     }
 
     /// Wired up by the pad-vel panel in drums.rs.
     fn save_drum_pad_vel(&mut self) {
         let key = self.drum_remap_key();
-        self.config.sf2.drums_vels.insert(key, self.drum_pad_vel.to_vec());
+        self.config.sf2.drums_vels.insert(key, self.drum_seq_ui.drum_pad_vel.to_vec());
         self.mark_config_dirty();
     }
 
     /// Re-sends the drum kit, tempo and pattern selection to a fresh engine.
     pub(super) fn send_drum_state(&mut self) {
         let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
-            patterns: Box::new(self.drum_patterns),
-            params: Box::new(self.drum_params),
-            bpm: self.drum_bpm,
-            swing: self.drum_swing,
-            volume: self.drum_volume,
+            patterns: Box::new(self.drum_seq_ui.drum_patterns),
+            params: Box::new(self.drum_seq_ui.drum_params),
+            bpm: self.drum_seq_ui.drum_bpm,
+            swing: self.drum_seq_ui.drum_swing,
+            volume: self.drum_seq_ui.drum_volume,
         });
-        let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPattern { pattern: self.drum_current_pattern });
-        let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_fixed_velocity });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSeqPattern { pattern: self.drum_seq_ui.drum_current_pattern });
+        let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_seq_ui.drum_fixed_velocity });
         self.push_drum_remap();
         self.push_drum_pad_vel();
         let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: self.looper_bars });
@@ -2336,7 +2290,7 @@ impl App {
             }
             led_console::Action::SelectPattern(i) => {
                 // консоль шлёт УЖЕ window-local 0-based (slot-1 из tap())
-                let idx = self.pat_window + i;
+                let idx = self.drum_seq_ui.pat_window + i;
                 if idx < 8 {
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: idx as u8 });
                     self.follow_window(idx, false);
@@ -2385,7 +2339,7 @@ impl App {
                 self.follow_window(next, true);
             }
             led_console::Action::StepPattern(dir) => {
-                let next = (self.drum_current_pattern as i32 + dir).rem_euclid(8);
+                let next = (self.drum_seq_ui.drum_current_pattern as i32 + dir).rem_euclid(8);
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: next as u8 });
                 // follow снапится на границу страницы — degenerate window 7
                 // больше не возникает (#50-фикс)
@@ -2415,8 +2369,8 @@ impl App {
             {
                 self.perf_ui.perf_window = w;
             }
-        } else if let Some(w) = led_console::follow_start(idx, self.pat_window, 8) {
-            self.pat_window = w;
+        } else if let Some(w) = led_console::follow_start(idx, self.drum_seq_ui.pat_window, 8) {
+            self.drum_seq_ui.pat_window = w;
         }
     }
 
@@ -2429,7 +2383,7 @@ impl App {
             }
             led_console::Mode::Pattern => {
                 let max_w = led_console::window_max_start(8); // = 1
-                self.pat_window = (self.pat_window as i32 + delta).clamp(0, max_w as i32) as usize;
+                self.drum_seq_ui.pat_window = (self.drum_seq_ui.pat_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             led_console::Mode::Mute => {
                 let max_w = led_console::window_max_start(self.parts.len());
