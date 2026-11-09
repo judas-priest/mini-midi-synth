@@ -359,23 +359,35 @@ impl AirwindowsFracture {
 
 // ─── Mode 10: Mojo ──────────────────────────────────────────────────────────
 
-pub struct AirwindowsMojo;
+pub struct AirwindowsMojo {
+    // Cached gain — recomputed only when drive changes bit-exactly
+    // (per-sample powf hoist, audit exp/powf)
+    gain: f64,
+    last_drive: f32,
+}
 impl AirwindowsMojo {
-    pub fn new() -> Self { Self }
-    pub fn tick(&self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
-        let gain = 10f64.powf((drive as f64 * 24.0 - 12.0) / 20.0);
+    pub fn new() -> Self { Self { gain: 0.0, last_drive: f32::NAN } }
+    pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
+        // per-sample powf hoist: depends only on drive — cached, recomputed
+        // on exact param change (audit exp/powf)
+        if drive != self.last_drive {
+            self.last_drive = drive;
+            self.gain = 10f64.powf((drive as f64 * 24.0 - 12.0) / 20.0);
+        }
+        let gain = self.gain;
         let mut sl = in_l as f64 * gain;
         let mut sr = in_r as f64 * gain;
 
+        // per-sample powf: argument is signal-dependent (audit)
         let mojo_l = sl.abs().powf(0.25);
         if mojo_l > 0.0 { sl = (sl * mojo_l * std::f64::consts::PI * 0.5).sin() / mojo_l * 0.987654321; }
+        // per-sample powf: argument is signal-dependent (audit)
         let mojo_r = sr.abs().powf(0.25);
         if mojo_r > 0.0 { sr = (sr * mojo_r * std::f64::consts::PI * 0.5).sin() / mojo_r * 0.987654321; }
 
         (sl as f32, sr as f32)
     }
 }
-
 
 // ─── Mode 11: ADClip7 (simplified adaptive clipper) ─────────────────────────
 
@@ -1798,11 +1810,23 @@ impl AirwindowsCapacitor {
 pub struct AirwindowsFocus {
     fig_l: [f64; 9],
     fig_r: [f64; 9],
+    // Cached boost gain — recomputed only when drive/sr change bit-exactly
+    // (per-sample powf hoist, audit exp/powf)
+    boost: f64,
+    last_drive: f32,
+    last_sr: f32,
 }
 impl AirwindowsFocus {
-    pub fn new() -> Self { Self { fig_l: [0.0; 9], fig_r: [0.0; 9] } }
+    pub fn new() -> Self { Self { fig_l: [0.0; 9], fig_r: [0.0; 9], boost: 0.0, last_drive: f32::NAN, last_sr: f32::NAN } }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
-        let boost = 10f64.powf(drive as f64 * 12.0 / 20.0);
+        // per-sample powf hoist: depends only on drive/sr — cached,
+        // recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive || sr != self.last_sr {
+            self.last_drive = drive;
+            self.last_sr = sr;
+            self.boost = 10f64.powf(drive as f64 * 12.0 / 20.0);
+        }
+        let boost = self.boost;
         let freq = 3515.775 / sr as f64;
         let reso = 0.1f64; // fixed Q
         let k = (std::f64::consts::PI * freq).tan();
@@ -2144,6 +2168,11 @@ pub struct AirwindowsBitGlitter {
     ata_last_l: f64, ata_last_r: f64,
     ata_halfway_l: f64, ata_halfway_r: f64,
     last_out_l: f64, last_out_r: f64,
+    // Cached input gain — recomputed only when drive/sr change bit-exactly
+    // (per-sample powf hoist, audit exp/powf)
+    ingain: f64,
+    last_drive: f32,
+    last_sr: f32,
 }
 impl AirwindowsBitGlitter {
     pub fn new() -> Self {
@@ -2156,6 +2185,9 @@ impl AirwindowsBitGlitter {
             ata_last_l: 0.0, ata_last_r: 0.0,
             ata_halfway_l: 0.0, ata_halfway_r: 0.0,
             last_out_l: 0.0, last_out_r: 0.0,
+            ingain: 0.0,
+            last_drive: f32::NAN,
+            last_sr: f32::NAN,
         }
     }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
@@ -2167,7 +2199,14 @@ impl AirwindowsBitGlitter {
         let rate_b = 1.61803398875 / divvy;
         let rez_a = 0.0016666666666667f64;
         let rez_b = 0.0026666666666667f64;
-        let ingain = 10f64.powf((drive as f64 * 36.0 - 18.0) / 14.0);
+        // per-sample powf hoist: depends only on drive/sr — cached,
+        // recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive || sr != self.last_sr {
+            self.last_drive = drive;
+            self.last_sr = sr;
+            self.ingain = 10f64.powf((drive as f64 * 36.0 - 18.0) / 14.0);
+        }
+        let ingain = self.ingain;
         let wet = drive as f64;
 
         let dry_l = in_l;
