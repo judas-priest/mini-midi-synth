@@ -1872,7 +1872,7 @@ impl SynthEngine {
                 // displaced goes to the trash queue.
                 let displaced = self.sampler.load_keys_soundfont(soundfont.clone());
                 self.dispose_sf2(displaced);
-                self.sampler.set_pitch_bend_range(self.global_params.pitch_bend_range as u8);
+                // pitch_bend_range re-asserted inside load_keys_soundfont (#F5)
                 return Some(ControlEvent::LoadKeysSoundFont { soundfont });
             }
             ControlEvent::LoadDrumsSoundFont { soundfont } => {

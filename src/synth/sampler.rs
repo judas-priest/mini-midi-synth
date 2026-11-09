@@ -156,6 +156,11 @@ impl SubSynth {
     }
 
     /// Render and discard `count` samples to advance internal state.
+    ///
+    /// ВНИМАНИЕ (design-accepted, audit data #F4): рендер-и-дроп идёт на ОБЩЕМ
+    /// keys synth — note_on с sample_offset>0 отбрасывает до 50 ms звучания для
+    /// ВСЕХ одновременно звучащих SF2 частей + до 50 ms лишнего рендера на ноту.
+    /// Альтернатива (scratch-синт для прематча) — отдельная фича.
     fn skip_samples(&mut self, count: usize, block_size: usize) {
         let synth = match &mut self.synth {
             Some(s) => s,
@@ -300,6 +305,11 @@ impl SamplerEngine {
         self.apply_sustain();
         if let Some(synth) = &mut self.keys.synth {
             synth.set_release_time_scale(self.release_scale);
+            // F5: pb-range как часть контракта загрузки (коллеры дублировали —
+            // новый caller молча терял диапазон; audit data #F5). Источник тот
+            // же, что у прежних коллеров: self.pitch_bend_range, куда
+            // SetGlobalParam складывает значение из global_params.
+            synth.set_pitch_bend_range(self.pitch_bend_range as i32);
         }
         self.apply_master();
         displaced
@@ -361,11 +371,7 @@ impl SamplerEngine {
         let mut keys_displaced = Displaced::default();
         if let Some(sf) = self.keys.soundfont.clone() {
             keys_displaced = self.load_keys_soundfont(sf);
-            // load_keys_soundfont rebuilds the Synthesizer — fresh channels
-            // default to 2 st; re-assert the stored range (#53-хвост)
-            if let Some(synth) = &mut self.keys.synth {
-                synth.set_pitch_bend_range(self.pitch_bend_range as i32);
-            }
+            // pb-range re-asserted inside load_keys_soundfont (#F5)
         }
         let mut drums_displaced = Displaced::default();
         if let Some(sf) = self.drums.soundfont.clone() {
@@ -504,7 +510,9 @@ impl SamplerEngine {
     pub fn note_on(&mut self, part: usize, note: u8, velocity: u8) {
         let Some(ch) = self.part_channel_of(part) else { return; };
         self.keys.midi(ch as i32, 0x90, note as i32, velocity as i32);
-        // Skip initial samples to reduce perceived latency from slow SF2 attacks
+        // Skip initial samples to reduce perceived latency from slow SF2
+        // attacks (clamp 0-50 ms в set_sample_offset_ms). #F4: skip идёт на
+        // общем keys synth — см. skip_samples.
         if self.sample_offset > 0 {
             self.keys.skip_samples(self.sample_offset, self.block_size);
         }
