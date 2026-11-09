@@ -19,7 +19,7 @@ looper-sustain-capture).
 | 4 | rhythm-low-batch | DONE (PR #113, не смержен) | fix/rhythm-low-batch | #113 |
 | 8 | tick-block-extract | DONE (PR #114, не смержен) | refactor/tick-block-extract | #114 |
 | 10 | params-split | DONE (PR #115, не смержен) | refactor/params-split | #115 |
-| 9 | app-substructs | in_progress | refactor/app-substructs | — |
+| 9 | app-substructs | DONE (PR #116, не смержен) | refactor/app-substructs | #116 |
 | 5 | rt-allocations | pending | — | — |
 
 ## Журнал
@@ -53,3 +53,6 @@ looper-sustain-capture).
   (скрипт-проверка ревьюера), pin 87 маркеров; params.rs 1666→668. Отклонение
   по канону #8: pin tc_ks_ranges путь. Начат ПОСЛЕДНИЙ план 9 (App → 12
   сабструктов, compiler-driven).
+- 2026-11-09: план 9 ГОТОВ → PR #116 (не смержен). 169 полей → 13 сабструктов
+  (comm пусто), android exit 0, ~1500 ссылок переписано, lib.rs дифф пуст.
+  КОНВЕЙЕР ЗАВЕРШЁН: 11/11 PR открыты.
