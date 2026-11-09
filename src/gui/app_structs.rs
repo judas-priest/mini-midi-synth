@@ -52,3 +52,14 @@ pub struct AudioReconnectUi {
     pub engine_trash_rx: crate::trash::TrashRx,
     pub cb_trash_rx: crate::trash::TrashRx,
 }
+
+/// Pitch step sequencer.
+pub struct PitchSeqUi {
+    pub pitch_seq_step_atoms: Vec<std::sync::Arc<std::sync::atomic::AtomicU8>>,
+    pub pitch_seq_enabled: [bool; 2],
+    pub pitch_seq_steps: [[crate::synth::step_seq::PitchStep; 16]; 2],
+    pub pitch_seq_length: [u8; 2],
+    pub pitch_seq_rate: [u8; 2],
+    pub pitch_seq_scale: [u8; 2],
+    pub pitch_seq_swing: [f32; 2],
+}
