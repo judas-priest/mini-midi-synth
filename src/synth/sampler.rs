@@ -711,6 +711,7 @@ mod tests {
             events: Vec::new(),
             track_names: Vec::new(),
             track_channels: Vec::new(),
+            smpte_ticks_per_sec: None,
         });
         let _ = e.handle_control(ControlEvent::MidiSeqLoad { data });
         assert_eq!(e.sampler.seq_channel_program[3], 255,

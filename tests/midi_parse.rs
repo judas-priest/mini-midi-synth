@@ -144,3 +144,70 @@ fn console_notes_swallowed_and_mirrored() {
     let _ = mini_midi_synth::midi::parse_and_push(&[0x89, 0x3C, 0x7F], &tx, &note_state, &pad_state);
     assert_eq!(rx.recv().unwrap(), (60, false));
 }
+
+// ── SMPTE true-time rate (audit rhythm #15) ────────────────────
+
+/// Minimal SMF, format 0, SMPTE division 30 fps / 4 sub-frames
+/// (division bytes 0xE2 0x04: high byte is the negated fps).
+/// Track: tempo 500_000 (must be IGNORED in SMPTE), note-on at tick 240, EOT.
+fn smpte_smf() -> Vec<u8> {
+    let track: Vec<u8> = [
+        &[0x00u8][..], // delta 0
+        &[0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20][..], // tempo 500_000
+        &[0x81, 0x70][..], // delta 240 (varlen)
+        &[0x90, 0x3C, 0x40][..], // note-on ch0 note60 vel64
+        &[0x00, 0xFF, 0x2F, 0x00][..], // end of track
+    ].concat();
+    let header: Vec<u8> = [
+        b"MThd".as_slice(),
+        &[0x00, 0x00, 0x00, 0x06][..],
+        &[0x00, 0x01][..], // format 1
+        &[0x00, 0x01][..], // one track
+        &[0xE2, 0x04][..], // SMPTE 30fps x 4 sub
+    ].concat();
+    let mut raw = header;
+    raw.extend(b"MTrk");
+    raw.extend((track.len() as u32).to_be_bytes());
+    raw.extend(track);
+    raw
+}
+
+#[test]
+fn smpte_file_reports_ticks_per_second() {
+    let data = mini_midi_synth::synth::midi_player::parse_midi(&smpte_smf())
+        .expect("valid SMPTE file");
+    assert_eq!(data.smpte_ticks_per_sec, Some(120.0), "30fps x 4 sub = 120 ticks/sec");
+    assert_eq!(data.ticks_per_beat, 120);
+}
+
+#[test]
+fn smpte_event_sounds_at_true_time() {
+    use mini_midi_synth::synth::midi_player::{MidiPlayer, SeqEventData};
+
+    let data = Box::new(
+        mini_midi_synth::synth::midi_player::parse_midi(&smpte_smf())
+            .expect("valid SMPTE file"),
+    );
+    let mut player = MidiPlayer::new();
+    let _ = player.load(data);
+    player.playing = true;
+
+    // Note at tick 240 with 120 ticks/sec must sound at 2.0 s = 96000 samples,
+    // i.e. block 750 of 128 samples (±1 block). The embedded tempo event
+    // (500_000) must NOT retime this to 1.0 s.
+    let mut out = Vec::new();
+    let mut blocks = 0usize;
+    let mut fired_at = None;
+    for _ in 0..1500 {
+        player.process_block(128, 48000.0, &mut out);
+        blocks += 1;
+        if out.iter().any(|(_, d)| matches!(d, SeqEventData::NoteOn { .. })) {
+            fired_at = Some(blocks);
+            break;
+        }
+    }
+    let fired_at = fired_at.expect("note never fired");
+    let expected = 2.0 * 48000.0 / 128.0; // 750 blocks
+    assert!((fired_at as f64 - expected).abs() <= 1.0,
+        "note fired at block {fired_at}, expected ~{expected} (2.0 s at 120 ticks/sec)");
+}

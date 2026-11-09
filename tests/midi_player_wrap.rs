@@ -13,6 +13,7 @@ fn empty_data() -> Box<MidiSeqData> {
         events: Vec::new(),
         track_names: Vec::new(),
         track_channels: Vec::new(),
+        smpte_ticks_per_sec: None,
     })
 }
 
@@ -29,6 +30,7 @@ fn wrap_keeps_current_tempo() {
         }],
         track_names: Vec::new(),
         track_channels: Vec::new(),
+        smpte_ticks_per_sec: None,
     });
     let (_old_data, _old_tracks) = player.load(data);
     player.playing = true;
