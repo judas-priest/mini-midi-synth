@@ -15,8 +15,8 @@ looper-sustain-capture).
 | 2 | golden-hermeticity | DONE (PR #109, не смержен) | test/golden-hermeticity | #109 |
 | 3 | sf2-data-small-fixes | DONE (PR #110, не смержен) | fix/sf2-data-small | #110 |
 | 7 | per-sample-exp-powf | DONE (PR #111, не смержен) | perf/exp-powf-hoists | #111 |
-| 6 | gui-io-worker | in_progress | fix/gui-io-worker | — |
-| 4 | rhythm-low-batch | pending | — | — |
+| 6 | gui-io-worker | DONE (PR #112, не смержен) | fix/gui-io-worker | #112 |
+| 4 | rhythm-low-batch | in_progress | fix/rhythm-low-batch | — |
 | 8 | tick-block-extract | pending | — | — |
 | 10 | params-split | pending | — | — |
 | 9 | app-substructs | pending | — | — |
@@ -39,3 +39,6 @@ looper-sustain-capture).
 - 2026-11-09: план 7 ГОТОВ → PR #111 (не смержен). 19 коммитов, 24 сайта
   hoist'нуто (14 synth + 10 airwindows), кэш с NaN-сентинелом признан sound;
   1 LOW (ButterComp2) довжён. Начат план 6 (GUI I/O worker).
+- 2026-11-09: план 6 ГОТОВ → PR #112 (не смержен). Ревью APPROVE: worker
+  purity, guards, startup drums-очередь (sf2_pending_drums) подтверждены.
+  Начат план 4 (rhythm-LOW батч: #14-16,19-21).
