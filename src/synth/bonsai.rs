@@ -32,6 +32,12 @@ pub struct Bonsai {
     // DC blocker
     dc_x: (f32, f32),
     dc_y: (f32, f32),
+    // Cached tone LP + DC-blocker coefficients — recomputed only when the
+    // tone param changes bit-exactly or sr changes (per-sample exp hoist,
+    // audit exp/powf)
+    lp_coef: f32,
+    dc_coef: f32,
+    last_tone: f32,
 }
 
 impl Bonsai {
@@ -41,11 +47,16 @@ impl Bonsai {
             post_lp: (0.0, 0.0),
             dc_x: (0.0, 0.0),
             dc_y: (0.0, 0.0),
+            lp_coef: 0.0,
+            dc_coef: 0.0,
+            last_tone: f32::NAN,
         }
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        // invalidate cached coefficients (sr changed)
+        self.last_tone = f32::NAN;
     }
 
     /// Process stereo input.
@@ -80,13 +91,20 @@ impl Bonsai {
         let sr_s = sr_s * comp;
 
         // Tone filter: blend LP cutoff from 1kHz (dark) to 12kHz (bright)
-        let lp_freq = 1000.0 * (tone * 3.5).exp2(); // 1kHz..12kHz
-        let lp_coef = 1.0 - (-2.0 * PI * lp_freq / sr).exp();
+        // per-sample exp hoist: coefficients depend only on the tone param
+        // + sr — cached, recomputed on exact param change (audit exp/powf)
+        if tone != self.last_tone {
+            self.last_tone = tone;
+            let lp_freq = 1000.0 * (tone * 3.5).exp2(); // 1kHz..12kHz
+            self.lp_coef = 1.0 - (-2.0 * PI * lp_freq / sr).exp();
+            // DC blocker (6 Hz HP) — post-saturation to remove DC offset from asymmetric clipping
+            self.dc_coef = 1.0 - (-2.0 * PI * 6.0 / sr).exp();
+        }
+        let lp_coef = self.lp_coef;
         self.post_lp.0 += lp_coef * (sl - self.post_lp.0);
         self.post_lp.1 += lp_coef * (sr_s - self.post_lp.1);
 
-        // DC blocker (6 Hz HP) — post-saturation to remove DC offset from asymmetric clipping
-        let dc_coef = 1.0 - (-2.0 * PI * 6.0 / sr).exp();
+        let dc_coef = self.dc_coef;
         let (bl, br) = Self::dc_block(&mut self.dc_x, &mut self.dc_y, self.post_lp.0, self.post_lp.1, dc_coef);
 
         let dry = 1.0 - mix;
