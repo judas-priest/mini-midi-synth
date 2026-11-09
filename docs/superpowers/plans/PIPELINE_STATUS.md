@@ -16,8 +16,8 @@ looper-sustain-capture).
 | 3 | sf2-data-small-fixes | DONE (PR #110, не смержен) | fix/sf2-data-small | #110 |
 | 7 | per-sample-exp-powf | DONE (PR #111, не смержен) | perf/exp-powf-hoists | #111 |
 | 6 | gui-io-worker | DONE (PR #112, не смержен) | fix/gui-io-worker | #112 |
-| 4 | rhythm-low-batch | in_progress | fix/rhythm-low-batch | — |
-| 8 | tick-block-extract | pending | — | — |
+| 4 | rhythm-low-batch | DONE (PR #113, не смержен) | fix/rhythm-low-batch | #113 |
+| 8 | tick-block-extract | in_progress | refactor/tick-block-extract | — |
 | 10 | params-split | pending | — | — |
 | 9 | app-substructs | pending | — | — |
 | 5 | rt-allocations | pending | — | — |
@@ -42,3 +42,6 @@ looper-sustain-capture).
 - 2026-11-09: план 6 ГОТОВ → PR #112 (не смержен). Ревью APPROVE: worker
   purity, guards, startup drums-очередь (sf2_pending_drums) подтверждены.
   Начат план 4 (rhythm-LOW батч: #14-16,19-21).
+- 2026-11-09: план 4 ГОТОВ → PR #113 (не смержен). Ревью APPROVE; известное
+  ограничение зафиксировано (per-channel bitmask не различает ноты).
+  Начат план 8 (tick_block extract: characterization 3 пробела → verbatim move).
