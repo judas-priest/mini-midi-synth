@@ -16,6 +16,10 @@ pub struct Neuron {
     os_prev_l: f32,
     os_prev_r: f32,
     dc: DcBlocker,
+    // Cached makeup gain — recomputed only when the drive param changes
+    // bit-exactly or sr changes (per-sample exp hoist, audit exp/powf)
+    makeup: f32,
+    last_drive: f32,
 }
 
 impl Neuron {
@@ -28,11 +32,15 @@ impl Neuron {
             comb_pos: 0,
             os_prev_l: 0.0, os_prev_r: 0.0,
             dc: DcBlocker::new(),
+            makeup: 0.0,
+            last_drive: f32::NAN,
         }
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        // invalidate cached makeup gain (sr changed)
+        self.last_drive = f32::NAN;
         self.y_l = 0.0; self.y_r = 0.0;
         self.comb_buf_l = [0.0; 4096];
         self.comb_buf_r = [0.0; 4096];
@@ -120,7 +128,13 @@ impl Neuron {
         self.comb_pos = (self.comb_pos + 1) & 4095;
 
         // Makeup gain
-        let makeup = (-0.119 * drive).exp() + 1.0;
+        // per-sample exp hoist: depends only on the drive param + sr —
+        // cached, recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive {
+            self.last_drive = drive;
+            self.makeup = (-0.119 * drive).exp() + 1.0;
+        }
+        let makeup = self.makeup;
         let wet_l = comb_l * makeup * 0.5;
         let wet_r = comb_r * makeup * 0.5;
 
