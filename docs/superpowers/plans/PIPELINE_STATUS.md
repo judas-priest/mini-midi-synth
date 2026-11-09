@@ -13,8 +13,8 @@ looper-sustain-capture).
 | 11 | looper-sustain-capture | DONE (PR #107, не смержен) | fix/looper-sustain-capture | #107 |
 | 1 | scene-lfo-envelope | DONE (PR #108, не смержен) | fix/scene-lfo-envelope | #108 |
 | 2 | golden-hermeticity | DONE (PR #109, не смержен) | test/golden-hermeticity | #109 |
-| 3 | sf2-data-small-fixes | in_progress | fix/sf2-data-small | — |
-| 7 | per-sample-exp-powf | pending | — | — |
+| 3 | sf2-data-small-fixes | DONE (PR #110, не смержен) | fix/sf2-data-small | #110 |
+| 7 | per-sample-exp-powf | in_progress | perf/exp-powf-hoists | — |
 | 6 | gui-io-worker | pending | — | — |
 | 4 | rhythm-low-batch | pending | — | — |
 | 8 | tick-block-extract | pending | — | — |
@@ -33,3 +33,6 @@ looper-sustain-capture).
 - 2026-11-09: план 2 ГОТОВ → PR #109 (не смержен). Позитивный контроль RED
   доказал утечку; 884→282 строк, factory-хэши 1:1; fakehome-грязь → GREEN
   без реген. Начат план 3.
+- 2026-11-09: план 3 ГОТОВ → PR #110 (не смержен). Ревью APPROVE: все 6
+  фиксов верифицированы, гейты зелёные. Начат план 7 (exp/powf hoists,
+  бит-точные).
