@@ -156,6 +156,11 @@ impl SubSynth {
     }
 
     /// Render and discard `count` samples to advance internal state.
+    ///
+    /// ВНИМАНИЕ (design-accepted, audit data #F4): рендер-и-дроп идёт на ОБЩЕМ
+    /// keys synth — note_on с sample_offset>0 отбрасывает до 50 ms звучания для
+    /// ВСЕХ одновременно звучащих SF2 частей + до 50 ms лишнего рендера на ноту.
+    /// Альтернатива (scratch-синт для прематча) — отдельная фича.
     fn skip_samples(&mut self, count: usize, block_size: usize) {
         let synth = match &mut self.synth {
             Some(s) => s,
@@ -300,6 +305,11 @@ impl SamplerEngine {
         self.apply_sustain();
         if let Some(synth) = &mut self.keys.synth {
             synth.set_release_time_scale(self.release_scale);
+            // F5: pb-range как часть контракта загрузки (коллеры дублировали —
+            // новый caller молча терял диапазон; audit data #F5). Источник тот
+            // же, что у прежних коллеров: self.pitch_bend_range, куда
+            // SetGlobalParam складывает значение из global_params.
+            synth.set_pitch_bend_range(self.pitch_bend_range as i32);
         }
         self.apply_master();
         displaced
@@ -361,11 +371,7 @@ impl SamplerEngine {
         let mut keys_displaced = Displaced::default();
         if let Some(sf) = self.keys.soundfont.clone() {
             keys_displaced = self.load_keys_soundfont(sf);
-            // load_keys_soundfont rebuilds the Synthesizer — fresh channels
-            // default to 2 st; re-assert the stored range (#53-хвост)
-            if let Some(synth) = &mut self.keys.synth {
-                synth.set_pitch_bend_range(self.pitch_bend_range as i32);
-            }
+            // pb-range re-asserted inside load_keys_soundfont (#F5)
         }
         let mut drums_displaced = Displaced::default();
         if let Some(sf) = self.drums.soundfont.clone() {
@@ -400,6 +406,23 @@ impl SamplerEngine {
             if let Some(ch) = self.part_channel[part].take() {
                 if let Some(synth) = &mut self.keys.synth {
                     synth.note_off_all_channel(ch as i32, false);
+                }
+            }
+            // F2: сброс флага ДО retry-скана — иначе i==part удовлетворяет
+            // гварду и канал утечёт обратно в DSP-часть (review C1).
+            self.part_sf2[part] = enabled;
+            // F2: освободившийся канал отдаём ждущей SF2-части («16th stays
+            // DSP until a channel frees up» — но free никогда не
+            // ре-аллоцировал; audit data #F2). Индексный цикл, не iterator —
+            // иначе immutable borrow self.part_sf2 живёт через &mut self
+            // вызов (E0502). Pre-existing класс (не расширяем):
+            // alloc_channel игнорирует seq_channel_used — retry при живом
+            // MIDI-seq может дать 0xC0 на seq-канал; тот же риск у первой
+            // аллокации.
+            for i in 0..self.part_sf2.len() {
+                if self.part_sf2[i] && i != part && self.part_channel[i].is_none() {
+                    self.set_part_mode(i, true);
+                    break;
                 }
             }
         }
@@ -487,7 +510,9 @@ impl SamplerEngine {
     pub fn note_on(&mut self, part: usize, note: u8, velocity: u8) {
         let Some(ch) = self.part_channel_of(part) else { return; };
         self.keys.midi(ch as i32, 0x90, note as i32, velocity as i32);
-        // Skip initial samples to reduce perceived latency from slow SF2 attacks
+        // Skip initial samples to reduce perceived latency from slow SF2
+        // attacks (clamp 0-50 ms в set_sample_offset_ms). #F4: skip идёт на
+        // общем keys synth — см. skip_samples.
         if self.sample_offset > 0 {
             self.keys.skip_samples(self.sample_offset, self.block_size);
         }
@@ -717,6 +742,29 @@ mod tests {
             "load did not reset the seq program cache");
         assert!(!e.sampler.seq_channel_used[3],
             "load did not clear the seq used mask");
+    }
+
+    #[test]
+    fn freed_sf2_channel_retried_to_starving_part() {
+        let mut s = SamplerEngine::new(48000.0);
+        // 15 sf2-enabled parts claim all 15 melodic channels
+        for p in 0..15 {
+            s.set_part_program(p, 100 + p as u8, 0);
+            s.set_part_mode(p, true);
+        }
+        // 16th part wants SF2 but no channel is free — stays DSP
+        s.set_part_program(15, 42, 0);
+        s.set_part_mode(15, true);
+        assert!(s.part_channel[15].is_none(), "16th part must starve with all 15 channels taken");
+        // Part 0 disables — its channel must be handed to the starving 16th
+        s.set_part_mode(0, false);
+        assert_eq!(s.part_channel[15], Some(0), "freed channel not retried to starving part");
+        assert!(s.part_channel[0].is_none(), "disabled part must not keep its channel");
+        assert_eq!(s.part_program(15), 42, "starving part program cache changed on retry");
+        // Negative: with all 15 channels legitimately occupied, the
+        // re-enabled part starves again (no channel leaked/duplicated)
+        s.set_part_mode(0, true);
+        assert!(s.part_channel[0].is_none(), "channel leaked when none was free");
     }
 
     #[test]

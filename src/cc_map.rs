@@ -170,14 +170,25 @@ impl CcMap {
             }
             if (cc as usize) < 128 {
                 if let Some(static_key) = resolve_key(&raw_binding.param_key) {
-                    let scope = find_param_meta(static_key).map(|m| m.scope).unwrap_or(ParamScope::Patch);
+                    let meta = find_param_meta(static_key)
+                        .expect("resolve_key==Some влечёт meta==Some (один реестр)");
+                    let scope = meta.scope;
+                    // F13: min/max/logarithmic обновляются из registry SSOT
+                    // (сохранённые значения морозились на момент learn —
+                    // смена range в registry не доезжала; audit data #F13).
+                    let (min_val, max_val, logarithmic) =
+                        (meta.min, meta.max, meta.logarithmic);
                     map.bindings[cc as usize] = Some(CcBinding {
                         param_key: static_key,
-                        min_val: raw_binding.min_val,
-                        max_val: raw_binding.max_val,
-                        logarithmic: raw_binding.logarithmic,
+                        min_val,
+                        max_val,
+                        logarithmic,
                         scope,
                     });
+                } else {
+                    // F12: stale param_key (параметр удалён из registry) —
+                    // дефолтный бинд воскресал молча (audit data #F12).
+                    log::warn!("cc_map: stale param_key {:?} for CC{} — dropped", raw_binding.param_key, cc);
                 }
             }
         }
@@ -295,6 +306,43 @@ mod tests {
         let config = crate::config::Config { cc_map: Some(raw), ..Default::default() };
         let restored = CcMap::from_config(&config);
         assert!(restored.bindings[48].is_some(), "defaults must survive legacy config");
+    }
+
+    #[test]
+    fn from_config_refreshes_ranges_from_registry_and_drops_stale_keys() {
+        // F13: saved binding with a bogus/stale range on a valid key —
+        // from_config must return the registry (SSOT) range.
+        let mut raw = CcMapRaw {
+            bindings: Default::default(),
+            cleared: Vec::new(),
+        };
+        raw.bindings.insert(60, CcBindingRaw {
+            param_key: "filter_cutoff".to_string(),
+            min_val: 999.0,
+            max_val: 1000.0,
+            logarithmic: false, // registry says log=true, 20..20000
+            scope: ParamScope::Global, // registry says Patch
+        });
+        // F12: stale key (removed from registry) — binding dropped, default
+        // CC61 (unbound by default) stays default/None.
+        raw.bindings.insert(61, CcBindingRaw {
+            param_key: "removed_param_xyz".to_string(),
+            min_val: 0.0,
+            max_val: 1.0,
+            logarithmic: false,
+            scope: ParamScope::Patch,
+        });
+        let config = crate::config::Config { cc_map: Some(raw), ..Default::default() };
+        let map = CcMap::from_config(&config);
+        let meta = find_param_meta("filter_cutoff").unwrap();
+        let b = map.bindings[60].expect("valid-key binding lost");
+        assert_eq!(b.min_val, meta.min, "min not refreshed from registry");
+        assert_eq!(b.max_val, meta.max, "max not refreshed from registry");
+        assert_eq!(b.logarithmic, meta.logarithmic, "logarithmic not refreshed from registry");
+        assert_eq!(b.scope, meta.scope, "scope not taken from registry");
+        assert!(map.bindings[61].is_none(), "stale key resurrected a binding");
+        // valid default binding untouched
+        assert!(map.bindings[48].is_some());
     }
 
     #[test]
