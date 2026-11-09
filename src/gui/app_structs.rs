@@ -79,3 +79,20 @@ pub struct Sf2Ui {
     pub sf2_block_size: usize,
     pub sf2_sample_offset_ms: f32,
 }
+
+/// Instrument browser / patch search.
+pub struct BrowserUi {
+    // Patch search
+    pub preset_search: String,
+    /// Some(part) = instrument browser modal is open for this part
+    pub inst_browser_part: Option<usize>,
+    /// Keyboard nav (VS Code Quick Pick): highlighted row in the browser flat list
+    pub inst_browser_index: usize,
+    /// Курсор ещё не посажен на текущий инструмент парта (при открытии браузера)
+    pub inst_browser_seeded: bool,
+    /// Search text at last index reset — detects filter changes
+    pub inst_browser_last_search: String,
+    /// (#37) центрировать выделенную строку один раз (стрелки / открытие / сброс фильтра);
+    /// колесо мыши НЕ ставит флаг — список не прыгает при ручном скролле
+    pub inst_browser_scroll: bool,
+}

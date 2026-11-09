@@ -482,19 +482,7 @@ pub struct App {
     pub pitch_seq_ui: PitchSeqUi,
     // Toast notifications
     pub toasts: Vec<Toast>,
-    // Patch search
-    pub preset_search: String,
-    /// Some(part) = instrument browser modal is open for this part
-    pub inst_browser_part: Option<usize>,
-    /// Keyboard nav (VS Code Quick Pick): highlighted row in the browser flat list
-    pub inst_browser_index: usize,
-    /// Курсор ещё не посажен на текущий инструмент парта (при открытии браузера)
-    pub inst_browser_seeded: bool,
-    /// Search text at last index reset — detects filter changes
-    pub inst_browser_last_search: String,
-    /// (#37) центрировать выделенную строку один раз (стрелки / открытие / сброс фильтра);
-    /// колесо мыши НЕ ставит флаг — список не прыгает при ручном скролле
-    pub inst_browser_scroll: bool,
+    pub browser_ui: BrowserUi,
     // Oscilloscope
     pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
     /// Последний виденный write-индекс scope_buf: не изменился = тишина
@@ -708,12 +696,14 @@ impl App {
                 pitch_seq_scale: [0; 2],
                 pitch_seq_swing: [0.0; 2],
             },
-            preset_search: String::new(),
-            inst_browser_part: None,
-            inst_browser_index: 0,
-            inst_browser_seeded: false,
-            inst_browser_last_search: String::new(),
-            inst_browser_scroll: false,
+            browser_ui: BrowserUi {
+                preset_search: String::new(),
+                inst_browser_part: None,
+                inst_browser_index: 0,
+                inst_browser_seeded: false,
+                inst_browser_last_search: String::new(),
+                inst_browser_scroll: false,
+            },
             scope_buf: c.handles.scope_buf,
             last_scope_write: 0,
             split_point: c.config.ui.split_point.unwrap_or(60),

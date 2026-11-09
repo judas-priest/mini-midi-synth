@@ -431,10 +431,10 @@ impl App {
                     if ui.add_sized([170.0, 22.0], egui::Button::new(cur_name))
                         .on_hover_text(format!("GM program {prog} — open instrument browser (search + categories)")).clicked()
                     {
-                        self.preset_search.clear();
-                        self.inst_browser_part = Some(i);
-                        self.inst_browser_scroll = true; // (#37) открытие центрирует выбор
-                    self.inst_browser_seeded = false; // курсор пересеется на текущий инструмент
+                        self.browser_ui.preset_search.clear();
+                        self.browser_ui.inst_browser_part = Some(i);
+                        self.browser_ui.inst_browser_scroll = true; // (#37) открытие центрирует выбор
+                    self.browser_ui.inst_browser_seeded = false; // курсор пересеется на текущий инструмент
                     }
                 } else {
                     ui.add_sized([170.0, 22.0], egui::Label::new(egui::RichText::new("---").weak()))
@@ -449,10 +449,10 @@ impl App {
                 if ui.add_sized([170.0, 22.0], egui::Button::new(&cur))
                     .on_hover_text("Open patch browser (search + categories)").clicked()
                 {
-                    self.preset_search.clear();
-                    self.inst_browser_part = Some(i);
-                    self.inst_browser_scroll = true; // (#37) открытие центрирует выбор
-                    self.inst_browser_seeded = false; // курсор пересеется на текущий инструмент
+                    self.browser_ui.preset_search.clear();
+                    self.browser_ui.inst_browser_part = Some(i);
+                    self.browser_ui.inst_browser_scroll = true; // (#37) открытие центрирует выбор
+                    self.browser_ui.inst_browser_seeded = false; // курсор пересеется на текущий инструмент
                 }
             }
 
