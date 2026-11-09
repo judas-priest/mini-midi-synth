@@ -143,3 +143,13 @@ pub struct MidiSeqUi {
     /// Result of an async file picker (zenity/kdialog subprocess). None = no pending pick.
     pub midi_seq_file_pick: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 }
+
+/// Transport-level state: per-part undo/redo snapshots, SEQ routing atom.
+pub struct TransportUi {
+    // Undo/redo (#31): UNIFIED per-part snapshots — patch parameter editing
+    // AND live part actions (mute/pan/transpose/patch click) in one stack.
+    pub undo_stack: std::collections::VecDeque<PartUndoSnapshot>,
+    pub redo_stack: Vec<PartUndoSnapshot>,
+    /// 0 = SEQ buttons → drums, 1 = SEQ buttons → looper
+    pub seq_target_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+}

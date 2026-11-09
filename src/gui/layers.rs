@@ -105,7 +105,7 @@ impl App {
                 } else {
                     self.show_drums = true; self.show_looper = false;
                     self.midi_seq_ui.show_midi_seq = false; self.show_fx_chain = false;
-                    self.seq_target_atom.store(0, Ordering::Relaxed);
+                    self.transport_ui.seq_target_atom.store(0, Ordering::Relaxed);
                 }
             }
             if ui.selectable_label(self.midi_seq_ui.show_midi_seq, "MIDI Seq").on_hover_text("MIDI file sequencer").clicked() {
@@ -418,7 +418,7 @@ impl App {
                 self.set_active_part(i);
                 self.show_drums = false; self.show_looper = false;
                 self.midi_seq_ui.show_midi_seq = false; self.show_fx_chain = false;
-                self.seq_target_atom.store(1, Ordering::Relaxed);
+                self.transport_ui.seq_target_atom.store(1, Ordering::Relaxed);
             }
 
             // Instrument select (кнопка открывает браузер; тоггл движка — в браузере)

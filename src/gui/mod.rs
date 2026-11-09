@@ -430,8 +430,6 @@ pub struct App {
     /// Per-part looper replay mute (TECHDEBT #30/#34), indexed by part.
     /// Not persisted; re-pushed on audio reconnect (same as layer mutes).
     pub looper_part_mutes: [bool; 16],
-    /// 0 = SEQ buttons → drums, 1 = SEQ buttons → looper
-    pub seq_target_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub active_part_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
     // Keybindings
     pub keybinds: keybinds::Keybinds,
@@ -467,10 +465,7 @@ pub struct App {
     // FX Chain panel
     pub show_fx_chain: bool,
     pub midi_seq_ui: MidiSeqUi,
-    // Undo/redo (#31): UNIFIED per-part snapshots — patch parameter editing
-    // AND live part actions (mute/pan/transpose/patch click) in one stack.
-    pub undo_stack: std::collections::VecDeque<PartUndoSnapshot>,
-    pub redo_stack: Vec<PartUndoSnapshot>,
+    pub transport_ui: TransportUi,
     pub audio_reconnect_ui: AudioReconnectUi,
 }
 
@@ -620,7 +615,6 @@ impl App {
             looper_solo_layer: None,
             looper_source_mix: true,
             looper_part_mutes: [false; 16],
-            seq_target_atom: c.handles.seq_target_atom,
             active_part_atom: c.handles.active_part_atom,
             keybinds: keybinds::Keybinds::from_config(c.config.ui.keybinds.as_ref()),
             show_keybinds_window: false,
@@ -685,8 +679,11 @@ impl App {
                 midi_seq_pos_atom: c.handles.midi_seq_pos_atom,
                 midi_seq_file_pick: None,
             },
-            undo_stack: std::collections::VecDeque::new(),
-            redo_stack: Vec::new(),
+            transport_ui: TransportUi {
+                undo_stack: std::collections::VecDeque::new(),
+                redo_stack: Vec::new(),
+                seq_target_atom: c.handles.seq_target_atom,
+            },
             toasts: Vec::new(),
             audio_reconnect_ui: AudioReconnectUi {
                 audio_disconnected: c.audio_disconnected.clone(),
@@ -1406,10 +1403,10 @@ impl eframe::App for App {
                                 self.send_edited_params(part);
                             }
                             ui.separator();
-                            if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("\u{2B05}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
+                            if ui.add_enabled(!self.transport_ui.undo_stack.is_empty(), egui::Button::new("\u{2B05}").small()).on_hover_text("Undo (Ctrl+Z)").clicked() {
                                 self.undo();
                             }
-                            if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("\u{27A1}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+                            if ui.add_enabled(!self.transport_ui.redo_stack.is_empty(), egui::Button::new("\u{27A1}").small()).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
                                 self.redo();
                             }
                         });
@@ -1873,7 +1870,7 @@ impl App {
                         self.show_drums = false;
                         self.midi_seq_ui.show_midi_seq = false;
                         self.show_fx_chain = false;
-                        self.seq_target_atom.store(2, Ordering::Relaxed);
+                        self.transport_ui.seq_target_atom.store(2, Ordering::Relaxed);
                     }
                 }
                 KeyAction::LooperRecord => {
@@ -1905,9 +1902,9 @@ impl App {
                     self.show_drums = !self.show_drums;
                     self.show_looper = false;
                     if !self.show_drums {
-                        self.seq_target_atom.store(1, Ordering::Relaxed);
+                        self.transport_ui.seq_target_atom.store(1, Ordering::Relaxed);
                     } else {
-                        self.seq_target_atom.store(0, Ordering::Relaxed);
+                        self.transport_ui.seq_target_atom.store(0, Ordering::Relaxed);
                     }
                 }
                 KeyAction::PrevPreset => {
@@ -2049,24 +2046,24 @@ impl App {
     /// pad console act on parts that are not the active one (#31).
     pub(super) fn push_undo_snapshot_for(&mut self, part: usize) {
         let snap = PartUndoSnapshot::capture(part, &self.parts[part]);
-        part_undo_push(&mut self.undo_stack, &mut self.redo_stack, snap);
+        part_undo_push(&mut self.transport_ui.undo_stack, &mut self.transport_ui.redo_stack, snap);
     }
 
     fn undo(&mut self) {
         // The redo entry must hold the current state of the SAME part the
         // popped snapshot belongs to — the stack is shared across parts.
-        let Some(top_part) = self.undo_stack.back().map(|s| s.part) else { return };
+        let Some(top_part) = self.transport_ui.undo_stack.back().map(|s| s.part) else { return };
         let current = PartUndoSnapshot::capture(top_part, &self.parts[top_part]);
-        if let Some(snapshot) = part_undo_step(&mut self.undo_stack, &mut self.redo_stack, current) {
+        if let Some(snapshot) = part_undo_step(&mut self.transport_ui.undo_stack, &mut self.transport_ui.redo_stack, current) {
             self.restore_part_snapshot(snapshot);
             self.show_toast("Undo", ToastKind::Info);
         }
     }
 
     fn redo(&mut self) {
-        let Some(top_part) = self.redo_stack.last().map(|s| s.part) else { return };
+        let Some(top_part) = self.transport_ui.redo_stack.last().map(|s| s.part) else { return };
         let current = PartUndoSnapshot::capture(top_part, &self.parts[top_part]);
-        if let Some(snapshot) = part_redo_step(&mut self.undo_stack, &mut self.redo_stack, current) {
+        if let Some(snapshot) = part_redo_step(&mut self.transport_ui.undo_stack, &mut self.transport_ui.redo_stack, current) {
             self.restore_part_snapshot(snapshot);
             self.show_toast("Redo", ToastKind::Info);
         }

@@ -284,7 +284,7 @@ impl App {
         self.drum_redo_atom = h.drum_redo_atom;
         self.looper_atoms = h.looper_atoms;
         self.looper_display = h.looper_display;
-        self.seq_target_atom = h.seq_target_atom;
+        self.transport_ui.seq_target_atom = h.seq_target_atom;
         self.active_part_atom = h.active_part_atom;
         self.sustain_atom = h.sustain_atom;
         self.master_rec_state = h.master_rec_state_atom;
@@ -446,9 +446,9 @@ impl App {
                                 self.show_drums = !self.show_drums;
                                 self.show_looper = false;
                                 if !self.show_drums {
-                                    self.seq_target_atom.store(1, std::sync::atomic::Ordering::Relaxed);
+                                    self.transport_ui.seq_target_atom.store(1, std::sync::atomic::Ordering::Relaxed);
                                 } else {
-                                    self.seq_target_atom.store(0, std::sync::atomic::Ordering::Relaxed);
+                                    self.transport_ui.seq_target_atom.store(0, std::sync::atomic::Ordering::Relaxed);
                                 }
                             } else {
                                 // Long press: toggle pad performance panel
