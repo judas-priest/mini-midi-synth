@@ -29,6 +29,16 @@ pub struct Reverb2 {
     /// LFO phases for per-line modulation (0..1).
     lfo_phases: [f32; 8],
     sample_rate: f32,
+    // Cached damping LP coefficient — recomputed only when the damping param
+    // changes bit-exactly or sr changes (per-sample exp hoist, audit exp/powf)
+    damp_coeff: f32,
+    damp_last: f32,
+    // Cached per-line feedback coefficients — recomputed only when the
+    // decay/size params change bit-exactly or sr changes (per-sample exp
+    // hoist, audit exp/powf)
+    fb_coeffs: [f32; 8],
+    fb_last_decay: f32,
+    fb_last_size: f32,
 }
 
 impl Reverb2 {
@@ -55,11 +65,20 @@ impl Reverb2 {
             lp_state: [0.0; 8],
             lfo_phases: [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875],
             sample_rate: sr,
+            damp_coeff: 0.0,
+            damp_last: f32::NAN,
+            fb_coeffs: [0.0; 8],
+            fb_last_decay: f32::NAN,
+            fb_last_size: f32::NAN,
         }
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        // invalidate cached coefficients (sr changed)
+        self.damp_last = f32::NAN;
+        self.fb_last_decay = f32::NAN;
+        self.fb_last_size = f32::NAN;
         let scale = sr / 44100.0;
         for (i, &base) in BASE_DELAYS.iter().enumerate() {
             self.delay_len[i] = ((base as f32 * scale) as usize).clamp(1, MAX_DELAY - 1);
@@ -125,9 +144,34 @@ impl Reverb2 {
 
         // Map parameters
         let decay_s = 0.1 + decay * 19.9;                     // 0.1..20.0 seconds
-        let damp_cutoff = 500.0 + damping * 19500.0;           // 500Hz..20kHz
-        let damp_coeff = 1.0 - (-2.0 * PI * damp_cutoff / sr).exp();
+        // per-sample exp hoist: damping coefficient depends only on the
+        // damping param + sr — cached, recomputed on exact param change
+        // (audit exp/powf)
+        if damping != self.damp_last {
+            self.damp_last = damping;
+            let damp_cutoff = 500.0 + damping * 19500.0;       // 500Hz..20kHz
+            self.damp_coeff = 1.0 - (-2.0 * PI * damp_cutoff / sr).exp();
+        }
+        let damp_coeff = self.damp_coeff;
         let size_scale = 0.5 + size * 1.5;                     // 0.5..2.0x
+
+        // per-sample exp hoist: per-line feedback coefficients depend only on
+        // decay/size params + sr — cached, recomputed on exact param change
+        // (audit exp/powf)
+        if decay != self.fb_last_decay || size != self.fb_last_size {
+            self.fb_last_decay = decay;
+            self.fb_last_size = size;
+            for (i, &base) in BASE_DELAYS.iter().enumerate() {
+                // Scaled delay length for this line
+                let base_sr_scaled = base as f32 * (sr / 44100.0);
+                let scaled_delay = (base_sr_scaled * size_scale).clamp(1.0, (MAX_DELAY - 2) as f32);
+
+                // Compute feedback coefficient from T60 formula:
+                // fb = exp(-7 * delay_time / decay_time)  (≈ -60dB at decay_time)
+                let delay_time_s = scaled_delay / sr;
+                self.fb_coeffs[i] = (-7.0 * delay_time_s / decay_s).exp();
+            }
+        }
 
         // Mono input sum fed equally into all 8 delay lines
         let input = (in_l + in_r) * 0.5;
@@ -140,10 +184,7 @@ impl Reverb2 {
             let scaled_delay = (base_sr_scaled * size_scale).clamp(1.0, (MAX_DELAY - 2) as f32);
             let delay_samples = scaled_delay as usize;
 
-            // Compute feedback coefficient from T60 formula:
-            // fb = exp(-7 * delay_time / decay_time)  (≈ -60dB at decay_time)
-            let delay_time_s = scaled_delay / sr;
-            let fb = (-7.0 * delay_time_s / decay_s).exp();
+            let fb = self.fb_coeffs[i];
 
             // Read from delay line
             let read_pos = (self.write_pos[i] + MAX_DELAY - delay_samples) % MAX_DELAY;

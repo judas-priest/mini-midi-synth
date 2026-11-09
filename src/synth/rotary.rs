@@ -23,6 +23,9 @@ pub struct RotarySpeaker {
     rotor_write: usize,
     // 1-pole crossover (LP for rotor, HP = input - LP for horn)
     xover_state: f32,
+    // Crossover LP coefficient (~800 Hz), SR-independent — cached, recomputed
+    // in new()/set_sample_rate (per-sample exp hoist, audit exp/powf)
+    xover_coef: f32,
 }
 
 impl RotarySpeaker {
@@ -38,6 +41,7 @@ impl RotarySpeaker {
             horn_write: 0,
             rotor_write: 0,
             xover_state: 0.0,
+            xover_coef: 1.0 - (-std::f32::consts::TAU * 800.0 / sr).exp(),
         }
     }
 
@@ -48,6 +52,7 @@ impl RotarySpeaker {
         self.horn_write = 0;
         self.rotor_write = 0;
         self.xover_state = 0.0;
+        self.xover_coef = 1.0 - (-std::f32::consts::TAU * 800.0 / sr).exp();
     }
 
     /// Process stereo input.
@@ -77,8 +82,7 @@ impl RotarySpeaker {
         let rotor_lfo = (self.rotor_phase * std::f32::consts::TAU).sin();
 
         // Crossover at ~800 Hz (one-pole LP)
-        let xover_coef = 1.0 - (-std::f32::consts::TAU * 800.0 / sr).exp();
-        self.xover_state += xover_coef * (mono - self.xover_state);
+        self.xover_state += self.xover_coef * (mono - self.xover_state);
         let bass = self.xover_state;
         let treble = mono - bass;
 

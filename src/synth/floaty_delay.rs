@@ -24,6 +24,10 @@ pub struct FloatyDelay {
     /// 1-pole LP state for damping filter (right feedback path)
     damp_r: f32,
     sample_rate: f32,
+    // Cached damping LP coefficient — recomputed only when the damp param
+    // changes bit-exactly or sr changes (per-sample exp hoist, audit exp/powf)
+    damp_coeff: f32,
+    damp_last: f32,
 }
 
 impl FloatyDelay {
@@ -37,11 +41,15 @@ impl FloatyDelay {
             damp_l: 0.0,
             damp_r: 0.0,
             sample_rate: sr,
+            damp_coeff: 0.0,
+            damp_last: f32::NAN,
         }
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        // invalidate cached damping coefficient (sr changed)
+        self.damp_last = f32::NAN;
         self.buf_l.fill(0.0);
         self.buf_r.fill(0.0);
         self.write_pos = 0;
@@ -90,8 +98,14 @@ impl FloatyDelay {
         let lfo_rate_hz = 0.1 + rate * 2.9;               // 0.1..3.0 Hz
 
         // Damping LP coefficient: cutoff 200Hz..8kHz
-        let damp_cutoff = 200.0 + damp * 7800.0;
-        let damp_coeff = 1.0 - (-2.0 * PI * damp_cutoff / sr).exp();
+        // per-sample exp hoist: depends only on the damp param + sr —
+        // cached, recomputed on exact param change (audit exp/powf)
+        if damp != self.damp_last {
+            self.damp_last = damp;
+            let damp_cutoff = 200.0 + damp * 7800.0;
+            self.damp_coeff = 1.0 - (-2.0 * PI * damp_cutoff / sr).exp();
+        }
+        let damp_coeff = self.damp_coeff;
 
         // LFO: sine modulation on delay read position
         let lfo_l = (2.0 * PI * self.lfo_phase_l).sin();

@@ -65,17 +65,33 @@ pub struct AirwindowsToVinyl4 {
     bass_lp_l: f32, bass_lp_r: f32,
     hf_lp_l: f32, hf_lp_r: f32,
     sample_rate: f32,
+    // Cached LP coefficients — recomputed only when the drive param changes
+    // bit-exactly or sr changes (per-sample exp hoist, audit exp/powf)
+    bass_coeff: f32,
+    hf_coeff: f32,
+    last_drive: f32,
 }
 impl AirwindowsToVinyl4 {
     pub fn new(sample_rate: f32) -> Self {
-        Self { bass_lp_l: 0.0, bass_lp_r: 0.0, hf_lp_l: 0.0, hf_lp_r: 0.0, sample_rate }
+        Self { bass_lp_l: 0.0, bass_lp_r: 0.0, hf_lp_l: 0.0, hf_lp_r: 0.0, sample_rate, bass_coeff: 0.0, hf_coeff: 0.0, last_drive: f32::NAN }
     }
-    pub fn set_sample_rate(&mut self, sr: f32) { self.sample_rate = sr; }
+    pub fn set_sample_rate(&mut self, sr: f32) {
+        self.sample_rate = sr;
+        // invalidate cached coefficients (sr changed)
+        self.last_drive = f32::NAN;
+    }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
         let sr = self.sample_rate;
-        let bass_coeff = (-2.0 * std::f32::consts::PI * 35.0 / sr).exp();
-        let hf_base = 5000.0 + drive * 2000.0;
-        let hf_coeff = (-2.0 * std::f32::consts::PI * hf_base / sr).exp();
+        // per-sample exp hoist: coefficients depend only on the drive param
+        // + sr — cached, recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive {
+            self.last_drive = drive;
+            self.bass_coeff = (-2.0 * std::f32::consts::PI * 35.0 / sr).exp();
+            let hf_base = 5000.0 + drive * 2000.0;
+            self.hf_coeff = (-2.0 * std::f32::consts::PI * hf_base / sr).exp();
+        }
+        let bass_coeff = self.bass_coeff;
+        let hf_coeff = self.hf_coeff;
         self.bass_lp_l = self.bass_lp_l * bass_coeff + in_l * (1.0 - bass_coeff);
         self.bass_lp_r = self.bass_lp_r * bass_coeff + in_r * (1.0 - bass_coeff);
         self.hf_lp_l = self.hf_lp_l * hf_coeff + in_l * (1.0 - hf_coeff);
@@ -108,16 +124,27 @@ impl AirwindowsAtmosphere {
 pub struct AirwindowsPressure5 {
     env_l: f32, env_r: f32,
     sample_rate: f32,
+    // Cached envelope follower coefficients, SR-independent — recomputed in
+    // new()/set_sample_rate (per-sample exp hoist, audit exp/powf)
+    att: f32,
+    rel: f32,
 }
 impl AirwindowsPressure5 {
     pub fn new(sample_rate: f32) -> Self {
-        Self { env_l: 0.0, env_r: 0.0, sample_rate }
+        Self {
+            env_l: 0.0, env_r: 0.0, sample_rate,
+            att: (-1.0 / (0.00045 * sample_rate)).exp(),
+            rel: (-1.0 / (0.00227 * sample_rate)).exp(),
+        }
     }
-    pub fn set_sample_rate(&mut self, sr: f32) { self.sample_rate = sr; }
+    pub fn set_sample_rate(&mut self, sr: f32) {
+        self.sample_rate = sr;
+        self.att = (-1.0 / (0.00045 * sr)).exp();
+        self.rel = (-1.0 / (0.00227 * sr)).exp();
+    }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
-        let sr = self.sample_rate;
-        let att = (-1.0 / (0.00045 * sr)).exp();
-        let rel = (-1.0 / (0.00227 * sr)).exp();
+        let att = self.att;
+        let rel = self.rel;
         let level_l = in_l.abs();
         let level_r = in_r.abs();
         self.env_l = if level_l > self.env_l { att * self.env_l + (1.0 - att) * level_l }
@@ -332,16 +359,29 @@ impl AirwindowsFracture {
 
 // ─── Mode 10: Mojo ──────────────────────────────────────────────────────────
 
-pub struct AirwindowsMojo;
+pub struct AirwindowsMojo {
+    // Cached gain — recomputed only when drive changes bit-exactly
+    // (per-sample powf hoist, audit exp/powf)
+    gain: f64,
+    last_drive: f32,
+}
 impl AirwindowsMojo {
-    pub fn new() -> Self { Self }
-    pub fn tick(&self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
-        let gain = 10f64.powf((drive as f64 * 24.0 - 12.0) / 20.0);
+    pub fn new() -> Self { Self { gain: 0.0, last_drive: f32::NAN } }
+    pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
+        // per-sample powf hoist: depends only on drive — cached, recomputed
+        // on exact param change (audit exp/powf)
+        if drive != self.last_drive {
+            self.last_drive = drive;
+            self.gain = 10f64.powf((drive as f64 * 24.0 - 12.0) / 20.0);
+        }
+        let gain = self.gain;
         let mut sl = in_l as f64 * gain;
         let mut sr = in_r as f64 * gain;
 
+        // per-sample powf: argument is signal-dependent (audit)
         let mojo_l = sl.abs().powf(0.25);
         if mojo_l > 0.0 { sl = (sl * mojo_l * std::f64::consts::PI * 0.5).sin() / mojo_l * 0.987654321; }
+        // per-sample powf: argument is signal-dependent (audit)
         let mojo_r = sr.abs().powf(0.25);
         if mojo_r > 0.0 { sr = (sr * mojo_r * std::f64::consts::PI * 0.5).sin() / mojo_r * 0.987654321; }
 
@@ -349,22 +389,37 @@ impl AirwindowsMojo {
     }
 }
 
-
 // ─── Mode 11: ADClip7 (simplified adaptive clipper) ─────────────────────────
 
 pub struct AirwindowsADClip7 {
     env_l: f64, env_r: f64,
     refclip: f64,
+    // Cached gain/envelope coefficients — recomputed only when drive/sr
+    // change bit-exactly (per-sample exp/powf hoist, audit exp/powf)
+    input_gain: f64,
+    att: f64,
+    rel: f64,
+    last_drive: f32,
+    last_sr: f32,
 }
 impl AirwindowsADClip7 {
-    pub fn new() -> Self { Self { env_l: 0.0, env_r: 0.0, refclip: 1.0 } }
+    pub fn new() -> Self { Self { env_l: 0.0, env_r: 0.0, refclip: 1.0, input_gain: 0.0, att: 0.0, rel: 0.0, last_drive: f32::NAN, last_sr: f32::NAN } }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
         let overallscale = sr as f64 / 44100.0;
-        let input_gain = 10f64.powf(drive as f64 * 18.0 / 20.0);
+        // per-sample exp/powf hoist: coefficients depend only on drive/sr —
+        // cached, recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive || sr != self.last_sr {
+            self.last_drive = drive;
+            self.last_sr = sr;
+            self.input_gain = 10f64.powf(drive as f64 * 18.0 / 20.0);
+            self.att = 1.0 - (-1.0 / (0.0001 * overallscale * sr as f64)).exp();
+            self.rel = 1.0 - (-1.0 / (0.01 * overallscale * sr as f64)).exp();
+        }
+        let input_gain = self.input_gain;
         let softness = 0.618_033_988_749_895_f64 * (1.0 - drive as f64);
         let hardness = 1.0 - softness;
-        let att = 1.0 - (-1.0 / (0.0001 * overallscale * sr as f64)).exp();
-        let rel = 1.0 - (-1.0 / (0.01 * overallscale * sr as f64)).exp();
+        let att = self.att;
+        let rel = self.rel;
 
         let mut sl = in_l as f64 * input_gain;
         let mut sr = in_r as f64 * input_gain;
@@ -436,14 +491,26 @@ pub struct AirwindowsIronOxide5 {
     iir_al: f64, iir_bl: f64,
     iir_ar: f64, iir_br: f64,
     flip: bool,
+    // Cached input gain — recomputed only when drive/sr change bit-exactly
+    // (per-sample powf hoist, audit exp/powf)
+    input_gain: f64,
+    last_drive: f32,
+    last_sr: f32,
 }
 impl AirwindowsIronOxide5 {
     pub fn new() -> Self {
-        Self { iir_al: 0.0, iir_bl: 0.0, iir_ar: 0.0, iir_br: 0.0, flip: false }
+        Self { iir_al: 0.0, iir_bl: 0.0, iir_ar: 0.0, iir_br: 0.0, flip: false, input_gain: 0.0, last_drive: f32::NAN, last_sr: f32::NAN }
     }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
         let overallscale = sr as f64 / 44100.0;
-        let input_gain = 10f64.powf((drive as f64 * 36.0 - 18.0) / 20.0);
+        // per-sample powf hoist: depends only on drive/sr — cached,
+        // recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive || sr != self.last_sr {
+            self.last_drive = drive;
+            self.last_sr = sr;
+            self.input_gain = 10f64.powf((drive as f64 * 36.0 - 18.0) / 20.0);
+        }
+        let input_gain = self.input_gain;
         let iir_amount = 0.03 / overallscale;
 
         let mut sl = in_l as f64 * input_gain;
@@ -823,6 +890,10 @@ pub struct AirwindowsButterComp2 {
     ctrl_a_pos_r: f64, ctrl_a_neg_r: f64,
     ctrl_b_pos_r: f64, ctrl_b_neg_r: f64,
     flip: bool,
+    // Cached input gain — recomputed only when drive changes bit-exactly
+    // (per-sample powf hoist, audit exp/powf)
+    input_gain: f64,
+    last_drive: f32,
 }
 impl AirwindowsButterComp2 {
     pub fn new() -> Self {
@@ -835,11 +906,19 @@ impl AirwindowsButterComp2 {
             ctrl_a_pos_r: 1.0, ctrl_a_neg_r: 1.0,
             ctrl_b_pos_r: 1.0, ctrl_b_neg_r: 1.0,
             flip: false,
+            input_gain: 0.0,
+            last_drive: f32::NAN,
         }
     }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
         let overallscale = sr as f64 / 44100.0;
-        let input_gain = 10f64.powf(drive as f64 * 14.0 / 20.0);
+        // per-sample powf hoist: depends only on drive — cached, recomputed
+        // on exact param change (audit exp/powf)
+        if drive != self.last_drive {
+            self.last_drive = drive;
+            self.input_gain = 10f64.powf(drive as f64 * 14.0 / 20.0);
+        }
+        let input_gain = self.input_gain;
         let comp_factor = 0.012 * (drive as f64 / 135.0);
         let mut output_gain = input_gain;
         output_gain = (output_gain - 1.0) / 1.5 + 1.0;
@@ -1743,11 +1822,23 @@ impl AirwindowsCapacitor {
 pub struct AirwindowsFocus {
     fig_l: [f64; 9],
     fig_r: [f64; 9],
+    // Cached boost gain — recomputed only when drive/sr change bit-exactly
+    // (per-sample powf hoist, audit exp/powf)
+    boost: f64,
+    last_drive: f32,
+    last_sr: f32,
 }
 impl AirwindowsFocus {
-    pub fn new() -> Self { Self { fig_l: [0.0; 9], fig_r: [0.0; 9] } }
+    pub fn new() -> Self { Self { fig_l: [0.0; 9], fig_r: [0.0; 9], boost: 0.0, last_drive: f32::NAN, last_sr: f32::NAN } }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
-        let boost = 10f64.powf(drive as f64 * 12.0 / 20.0);
+        // per-sample powf hoist: depends only on drive/sr — cached,
+        // recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive || sr != self.last_sr {
+            self.last_drive = drive;
+            self.last_sr = sr;
+            self.boost = 10f64.powf(drive as f64 * 12.0 / 20.0);
+        }
+        let boost = self.boost;
         let freq = 3515.775 / sr as f64;
         let reso = 0.1f64; // fixed Q
         let k = (std::f64::consts::PI * freq).tan();
@@ -2089,6 +2180,11 @@ pub struct AirwindowsBitGlitter {
     ata_last_l: f64, ata_last_r: f64,
     ata_halfway_l: f64, ata_halfway_r: f64,
     last_out_l: f64, last_out_r: f64,
+    // Cached input gain — recomputed only when drive/sr change bit-exactly
+    // (per-sample powf hoist, audit exp/powf)
+    ingain: f64,
+    last_drive: f32,
+    last_sr: f32,
 }
 impl AirwindowsBitGlitter {
     pub fn new() -> Self {
@@ -2101,6 +2197,9 @@ impl AirwindowsBitGlitter {
             ata_last_l: 0.0, ata_last_r: 0.0,
             ata_halfway_l: 0.0, ata_halfway_r: 0.0,
             last_out_l: 0.0, last_out_r: 0.0,
+            ingain: 0.0,
+            last_drive: f32::NAN,
+            last_sr: f32::NAN,
         }
     }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32, sr: f32) -> (f32, f32) {
@@ -2112,7 +2211,14 @@ impl AirwindowsBitGlitter {
         let rate_b = 1.61803398875 / divvy;
         let rez_a = 0.0016666666666667f64;
         let rez_b = 0.0026666666666667f64;
-        let ingain = 10f64.powf((drive as f64 * 36.0 - 18.0) / 14.0);
+        // per-sample powf hoist: depends only on drive/sr — cached,
+        // recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive || sr != self.last_sr {
+            self.last_drive = drive;
+            self.last_sr = sr;
+            self.ingain = 10f64.powf((drive as f64 * 36.0 - 18.0) / 14.0);
+        }
+        let ingain = self.ingain;
         let wet = drive as f64;
 
         let dry_l = in_l;
@@ -2295,6 +2401,8 @@ impl AirwindowsDeRez2 {
         }
 
         // uLaw decode
+        // per-sample powf: argument is signal-dependent (audit); exact LUT
+        // is a separate optimization task (1:1 port, approximations forbidden)
         let decl = if sl > 0.0 { (256f64.powf(sl.abs()) - 1.0) / 255.0 }
                    else { -(256f64.powf(sl.abs()) - 1.0) / 255.0 };
         let decr = if sr > 0.0 { (256f64.powf(sr.abs()) - 1.0) / 255.0 }

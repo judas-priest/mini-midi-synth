@@ -12,6 +12,10 @@ pub struct Bitcrusher {
     aa_state_l: f32,
     aa_state_r: f32,
     noise_state: u32,
+    // Cached quantization level count — recomputed only when bits change
+    // bit-exactly or sr changes (per-sample powf hoist, audit exp/powf)
+    levels: f32,
+    levels_last_bits: f32,
 }
 
 impl Bitcrusher {
@@ -22,11 +26,15 @@ impl Bitcrusher {
             bits: 16.0, downsample: 48000.0, mix: 0.0,
             aa_state_l: 0.0, aa_state_r: 0.0,
             noise_state: 0xDEADBEEF,
+            levels: 0.0,
+            levels_last_bits: f32::NAN,
         }
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        // invalidate cached levels (sr changed)
+        self.levels_last_bits = f32::NAN;
         self.held_l = 0.0;
         self.held_r = 0.0;
         self.counter = 0.0;
@@ -56,7 +64,13 @@ impl Bitcrusher {
         if self.counter >= 1.0 {
             self.counter -= 1.0;
             // Bit depth reduction with triangular PDF dithering
-            let levels = 2.0_f32.powf(self.bits);
+            // per-sample powf hoist: depends only on the bits param —
+            // cached, recomputed on exact param change (audit exp/powf)
+            if self.bits != self.levels_last_bits {
+                self.levels_last_bits = self.bits;
+                self.levels = 2.0_f32.powf(self.bits);
+            }
+            let levels = self.levels;
             // Triangular dither: sum of two uniform random values
             let dither_l = (self.next_noise() + self.next_noise()) * 0.5 / levels;
             let dither_r = (self.next_noise() + self.next_noise()) * 0.5 / levels;

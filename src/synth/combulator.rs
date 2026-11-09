@@ -77,6 +77,16 @@ impl CombFilter {
 pub struct Combulator {
     combs: [CombFilter; 3],
     sample_rate: f32,
+    // Cached tone LP coefficient and comb pitch factors — recomputed only
+    // when tone/offset params change bit-exactly or sr changes (per-sample
+    // exp/powf hoist, audit exp/powf)
+    lp_coeff: f32,
+    freq2: f32,
+    freq3: f32,
+    last_freq: f32,
+    last_tone: f32,
+    last_offset2: f32,
+    last_offset3: f32,
 }
 
 impl Combulator {
@@ -84,11 +94,20 @@ impl Combulator {
         Self {
             combs: [CombFilter::new(), CombFilter::new(), CombFilter::new()],
             sample_rate: sr,
+            lp_coeff: 0.0,
+            freq2: 0.0,
+            freq3: 0.0,
+            last_freq: f32::NAN,
+            last_tone: f32::NAN,
+            last_offset2: f32::NAN,
+            last_offset3: f32::NAN,
         }
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        // invalidate cached coefficients (sr changed)
+        self.last_tone = f32::NAN;
         for c in self.combs.iter_mut() {
             c.reset();
         }
@@ -122,14 +141,28 @@ impl Combulator {
         let fb = (feedback * 0.95).clamp(0.0, 0.95);
 
         // Tone: LP cutoff 200Hz..20kHz mapped from tone parameter
-        let lp_cutoff = 200.0 + tone * 19800.0;
-        let lp_coeff = 1.0 - (-2.0 * PI * lp_cutoff / sr).exp();
+        // per-sample exp/powf hoist: lp_coeff and comb pitch factors depend
+        // only on freq/tone/offset params + sr — cached, recomputed on exact
+        // param change (audit exp/powf)
+        if tone != self.last_tone || offset2 != self.last_offset2
+            || offset3 != self.last_offset3 || freq != self.last_freq {
+            self.last_tone = tone;
+            self.last_offset2 = offset2;
+            self.last_offset3 = offset3;
+            self.last_freq = freq;
+            let lp_cutoff = 200.0 + tone * 19800.0;
+            self.lp_coeff = 1.0 - (-2.0 * PI * lp_cutoff / sr).exp();
 
-        // Compute frequencies for each comb filter via semitone offsets
-        // f2 = f1 * 2^(offset2/12), f3 = f1 * 2^(offset3/12)
+            // Compute frequencies for each comb filter via semitone offsets
+            // f2 = f1 * 2^(offset2/12), f3 = f1 * 2^(offset3/12)
+            let freq1 = freq.clamp(20.0, 2000.0);
+            self.freq2 = freq1 * 2.0_f32.powf(offset2 / 12.0);
+            self.freq3 = freq1 * 2.0_f32.powf(offset3 / 12.0);
+        }
+        let lp_coeff = self.lp_coeff;
+        let freq2 = self.freq2;
+        let freq3 = self.freq3;
         let freq1 = freq.clamp(20.0, 2000.0);
-        let freq2 = freq1 * 2.0_f32.powf(offset2 / 12.0);
-        let freq3 = freq1 * 2.0_f32.powf(offset3 / 12.0);
 
         // Use mono input sum for all three combs
         let mono_in = (in_l + in_r) * 0.5;

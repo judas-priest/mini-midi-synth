@@ -32,6 +32,11 @@ pub struct Exciter {
     // Cached 1-pole HP coefficient
     hp_coeff: f32,    // a = exp(-2*pi*f/fs), y = a*y_prev + a*(x - x_prev)
     last_freq: f32,
+    // Presence shelf LP coefficient — cached, recomputed only when the freq
+    // param changes bit-exactly or sr changes (per-sample exp/powf hoist,
+    // audit exp/powf)
+    pres_coeff: f32,
+    pres_last_freq: f32,
 }
 
 impl Exciter {
@@ -46,6 +51,8 @@ impl Exciter {
             ps_r_x1: 0.0, ps_r_y1: 0.0,
             hp_coeff: 0.0,
             last_freq: -1.0,
+            pres_coeff: 0.0,
+            pres_last_freq: f32::NAN,
         };
         s.update_coeffs(0.5);
         s
@@ -59,6 +66,8 @@ impl Exciter {
         self.hp2_r_x1 = 0.0; self.hp2_r_y1 = 0.0;
         self.ps_l_x1 = 0.0; self.ps_l_y1 = 0.0;
         self.ps_r_x1 = 0.0; self.ps_r_y1 = 0.0;
+        // invalidate cached presence coefficient (sr changed)
+        self.pres_last_freq = f32::NAN;
         let f = self.last_freq;
         self.last_freq = -1.0;
         self.update_coeffs(f);
@@ -166,8 +175,15 @@ impl Exciter {
 
         // 4. Presence boost — gentle shelf around the exciter frequency.
         //    LP coeff shifted one octave below exciter freq.
-        let pres_cutoff = 1000.0 * (8.0_f32).powf(freq.clamp(0.0, 1.0)) * 0.5;
-        let pres_coeff = 1.0 - (-2.0 * std::f32::consts::PI * pres_cutoff / self.sample_rate).exp();
+        // per-sample powf/exp hoist: coefficient depends only on the freq
+        // param + sr — cached, recomputed on exact param change
+        // (audit exp/powf)
+        if freq != self.pres_last_freq {
+            self.pres_last_freq = freq;
+            let pres_cutoff = 1000.0 * (8.0_f32).powf(freq.clamp(0.0, 1.0)) * 0.5;
+            self.pres_coeff = 1.0 - (-2.0 * std::f32::consts::PI * pres_cutoff / self.sample_rate).exp();
+        }
+        let pres_coeff = self.pres_coeff;
         // HP component = x - LP(x) = the "presence" region
         let pres_shelf_l = in_l - self.presence_l(in_l, pres_coeff);
         let pres_shelf_r = in_r - self.presence_r(in_r, pres_coeff);

@@ -22,6 +22,10 @@ pub struct Treemonster {
     /// Ring modulator oscillator phase (0..1).
     osc_phase: f32,
     sample_rate: f32,
+    // Cached pitch-shift factor — recomputed only when the shift param
+    // changes bit-exactly or sr changes (per-sample powf hoist, audit exp/powf)
+    shift_factor: f32,
+    last_shift: f32,
 }
 
 impl Treemonster {
@@ -33,11 +37,15 @@ impl Treemonster {
             freq_smooth: 440.0, // default to A4 until pitch is detected
             osc_phase: 0.0,
             sample_rate: sr,
+            shift_factor: 0.0,
+            last_shift: f32::NAN,
         }
     }
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        // invalidate cached shift factor (sr changed)
+        self.last_shift = f32::NAN;
         self.last_zc_sample = 0;
         self.sample_count = 0;
         self.prev_sample = 0.0;
@@ -94,8 +102,14 @@ impl Treemonster {
         // --- Ring modulator oscillator ---
 
         // Apply pitch shift: f_osc = f_smooth * 2^(shift/12)
+        // per-sample powf hoist: factor depends only on the shift param —
+        // cached, recomputed on exact param change (audit exp/powf)
         let shift_clamped = shift.clamp(-24.0, 24.0);
-        let osc_freq = self.freq_smooth * 2.0_f32.powf(shift_clamped / 12.0);
+        if shift_clamped != self.last_shift {
+            self.last_shift = shift_clamped;
+            self.shift_factor = 2.0_f32.powf(shift_clamped / 12.0);
+        }
+        let osc_freq = self.freq_smooth * self.shift_factor;
 
         // Generate sine at detected (and shifted) pitch
         let sine = (2.0 * PI * self.osc_phase).sin();
