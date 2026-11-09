@@ -16,6 +16,9 @@ pub struct BbdEnsemble {
     phases: [f32; 3],
     // BBD input LP filter state (separate from per-tap output filters)
     input_lp: f32,
+    // BBD input LP coefficient (~8 kHz), SR-independent — cached, recomputed
+    // in set_sample_rate (per-sample exp hoist, audit exp/powf)
+    bbd_coef: f32,
     // BBD LP filter states (per tap, per channel)
     lp_l: [f32; 3],
     lp_r: [f32; 3],
@@ -36,6 +39,7 @@ impl BbdEnsemble {
             write: 0,
             phases: [0.0, 0.33, 0.67],
             input_lp: 0.0,
+            bbd_coef: 1.0 - (-2.0 * std::f32::consts::PI * 8000.0 / sr).exp(),
             lp_l: [0.0; 3],
             lp_r: [0.0; 3],
         }
@@ -47,6 +51,7 @@ impl BbdEnsemble {
         self.buf.fill(0.0);
         self.write = 0;
         self.input_lp = 0.0;
+        self.bbd_coef = 1.0 - (-2.0 * std::f32::consts::PI * 8000.0 / sr).exp();
         self.lp_l = [0.0; 3];
         self.lp_r = [0.0; 3];
     }
@@ -56,8 +61,7 @@ impl BbdEnsemble {
     /// `rate` (0..1): LFO rate scaling (0.5 = normal, 1.0 = fast).
     pub fn tick(&mut self, input: f32, depth: f32, rate: f32, mix: f32) -> (f32, f32) {
         // BBD input LP filter (~8 kHz cutoff), SR-independent
-        let bbd_coef = 1.0 - (-2.0 * std::f32::consts::PI * 8000.0 / self.sample_rate).exp();
-        let filtered = self.input_lp + bbd_coef * (input - self.input_lp);
+        let filtered = self.input_lp + self.bbd_coef * (input - self.input_lp);
         self.input_lp = filtered;
 
         self.buf[self.write] = filtered;
