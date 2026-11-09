@@ -1089,7 +1089,7 @@ impl eframe::App for App {
                                  stream errors. A lost NoteOff is a stuck note; non-zero here means \
                                  something is wrong. «sustain-ovf» = looper note-offs written at \
                                  key-release because the sustain-capture pending list was full \
-                                 (loop gate shorter than the pedal-held length).",
+                                 (>16 notes held under one pedal press — long chordal passages).",
                             );
                         }
                     }
