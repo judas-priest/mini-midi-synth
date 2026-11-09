@@ -15,7 +15,7 @@ static DEFAULT_PARAMS: LazyLock<BTreeMap<String, f32>> = LazyLock::new(|| PatchP
 
 impl App {
     pub(super) fn draw_pad_perf_window(&mut self, ctx: &egui::Context) {
-        let mut open = self.show_pad_perf;
+        let mut open = self.perf_ui.show_pad_perf;
         // Same layout as keyboard pads: 2 rows x 8 columns
         // Top (cyan):  E1(40) F1(41) F#1(42) G1(43)  C2(48) C#2(49) D2(50) D#2(51)
         // Bot (pink):  C1(36) C#1(37) D1(38) D#1(39) G#1(44) A1(45) A#1(46) B1(47)
@@ -46,7 +46,7 @@ impl App {
                             let idx = (note - 36) as usize;
                             let vel = self.pad_state[note as usize].load(std::sync::atomic::Ordering::Relaxed);
                             let pressed = vel > 0;
-                            let has_perf = self.pad_perf_map[idx].is_some();
+                            let has_perf = self.perf_ui.pad_perf_map[idx].is_some();
 
                             let (rect, response) = ui.allocate_exact_size(
                                 egui::vec2(pad_w, pad_h), egui::Sense::click(),
@@ -77,7 +77,7 @@ impl App {
 
                             // Performance name inside (чёрный на светлом пэде:
                             // белый был 3.14:1 на бирюзовом при 11px — аудит п.5)
-                            let full_name = self.pad_perf_map[idx].clone();
+                            let full_name = self.perf_ui.pad_perf_map[idx].clone();
                             if let Some(ref name) = full_name {
                                 let display: String = name.chars().take(10).collect();
                                 painter.text(
@@ -101,18 +101,18 @@ impl App {
                             }
                             // Right click: clear
                             if response.secondary_clicked() {
-                                self.pad_perf_map[idx] = None;
+                                self.perf_ui.pad_perf_map[idx] = None;
                             }
 
                             egui::popup_below_widget(ui, popup_id, &response, egui::PopupCloseBehavior::CloseOnClick, |ui| {
                                 ui.set_min_width(140.0);
-                                if ui.selectable_label(self.pad_perf_map[idx].is_none(), "--- (clear)").clicked() {
-                                    self.pad_perf_map[idx] = None;
+                                if ui.selectable_label(self.perf_ui.pad_perf_map[idx].is_none(), "--- (clear)").clicked() {
+                                    self.perf_ui.pad_perf_map[idx] = None;
                                 }
-                                for (name, _) in &self.perf_list {
-                                    let active = self.pad_perf_map[idx].as_deref() == Some(name.as_str());
+                                for (name, _) in &self.perf_ui.perf_list {
+                                    let active = self.perf_ui.pad_perf_map[idx].as_deref() == Some(name.as_str());
                                     if ui.selectable_label(active, name).clicked() {
-                                        self.pad_perf_map[idx] = Some(name.clone());
+                                        self.perf_ui.pad_perf_map[idx] = Some(name.clone());
                                     }
                                 }
                             });
@@ -123,11 +123,11 @@ impl App {
 
                 ui.add_space(theme::SP_XS);
             });
-        if self.show_pad_perf && !open {
+        if self.perf_ui.show_pad_perf && !open {
             // Window closing (✕ или Esc — один путь через shell) — save pad map
             self.save_global_to_config();
         }
-        self.show_pad_perf = open;
+        self.perf_ui.show_pad_perf = open;
     }
 
     pub(super) fn draw_help(&mut self, ctx: &egui::Context) {
@@ -452,7 +452,7 @@ impl App {
                                 }
                             } else {
                                 // Long press: toggle pad performance panel
-                                self.show_pad_perf = !self.show_pad_perf;
+                                self.perf_ui.show_pad_perf = !self.perf_ui.show_pad_perf;
                             }
                         }
                     }

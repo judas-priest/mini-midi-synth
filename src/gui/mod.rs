@@ -395,15 +395,7 @@ pub struct App {
     pub drum_prev_step: u8,
     /// Instant of the last beat-1 transition (GUI flash)
     pub drum_beat_flash: Option<std::time::Instant>,
-    pub perf_window: usize,   // first perf_list idx visible on slots 1..=7
-    /// First folder idx visible on Tracks-mode slots 1..=7 (#57).
-    pub tracks_window: usize,
-    /// Keyboard-selected folder in the Tracks manager (#35); None = nothing
-    /// selected yet (Enter is a no-op until arrows moved once).
-    pub tracks_sel: Option<usize>,
-    /// Last-frame focus of the rename TextEdit in the Tracks manager —
-    /// conservative nav guard (set during draw, read next frame in update()).
-    pub tracks_rename_focus: bool,
+    pub perf_ui: PerfUi,
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub drum_redo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -414,8 +406,6 @@ pub struct App {
     /// #54: цель драга (строка под pointer во время драга) — commit на
     /// drag_stopped хендла
     pub part_drag_dst: Option<usize>,
-    /// Track Folders: armed delete confirmation (auto-disarm) — #57 UX.
-    pub tracks_del_armed: Option<std::time::Instant>,
     // Drum kit save/load
     pub drum_kit_name: String,
     pub drum_kit_list: Vec<(String, std::path::PathBuf)>,
@@ -449,22 +439,6 @@ pub struct App {
     pub keybind_capturing: Option<keybinds::KeyAction>,
     pub keybinds_reset_confirm: Option<std::time::Instant>,
     pub unbind_confirm: Option<(keybinds::KeyAction, std::time::Instant)>,
-    // Performance save/load
-    pub perf_name: String,
-    pub perf_list: Vec<(String, std::path::PathBuf)>,
-    /// Консольный список перфов (#57): активная папка (алиасы, tombstone =
-    /// None-path) или плоский perf_list. Все консольные сайты читают кэш.
-    pub console_list: Vec<(String, Option<std::path::PathBuf>)>,
-    /// Алиасы активной папки (FolderPerfs). HOME-синий ряд = console_list
-    /// (ВСЕГДА полный список перфов, независимо от трека — юзер 2026-11-08);
-    /// папка-фильтрация живёт ТОЛЬКО в этом списке.
-    pub folder_console_list: Vec<(String, Option<std::path::PathBuf>)>,
-    // Pad performance map: 16 pads (notes 36-51) → performance names
-    pub show_pad_perf: bool,
-    /// Track folders manager modal (#57).
-    pub show_tracks_manager: bool,
-    pub pad_perf_map: [Option<String>; 16],
-    pub pad_prev_state: [u8; 16],
     pub last_config_save: std::time::Instant,
     /// (F3) конфиг изменился в памяти и ждёт записи на диск (flush_config).
     pub config_dirty: bool,
@@ -595,10 +569,29 @@ impl App {
             drum_metronome: c.config.ui.drum_metronome,
             drum_prev_step: 0,
             drum_beat_flash: None,
-            perf_window: 1,
-            tracks_window: 0,
-            tracks_sel: None,
-            tracks_rename_focus: false,
+            perf_ui: PerfUi {
+                perf_window: 1,
+                tracks_window: 0,
+                tracks_sel: None,
+                tracks_rename_focus: false,
+                tracks_del_armed: None,
+                perf_name: String::new(),
+                perf_list: {
+                    let mut perf_list = preset::list_performances();
+                    perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
+                    perf_list
+                },
+                // #57: пересчитывается первым кадром (guard в update())
+                console_list: Vec::new(),
+                folder_console_list: Vec::new(),
+                show_pad_perf: false,
+                show_tracks_manager: false,
+                pad_perf_map: {
+                    let saved = &c.config.ui.pad_perf_map;
+                    std::array::from_fn(|i| saved.get(i).cloned().flatten())
+                },
+                pad_prev_state: [0u8; 16],
+            },
             pat_window: 0,
             drum_undo_atom: c.handles.drum_undo_atom,
             drum_redo_atom: c.handles.drum_redo_atom,
@@ -622,7 +615,6 @@ impl App {
             },
             part_drag_src: None,
             part_drag_dst: None,
-            tracks_del_armed: None,
             drum_kit_name: String::new(),
             drum_kit_list: preset::list_drum_kits(),
             drum_midi_import_path: String::new(),
@@ -645,22 +637,6 @@ impl App {
             keybind_capturing: None,
             keybinds_reset_confirm: None,
             unbind_confirm: None,
-            perf_name: String::new(),
-            perf_list: {
-                let mut perf_list = preset::list_performances();
-                perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
-                perf_list
-            },
-            // #57: пересчитывается первым кадром (guard в update())
-            console_list: Vec::new(),
-            folder_console_list: Vec::new(),
-            show_pad_perf: false,
-            show_tracks_manager: false,
-            pad_perf_map: {
-                let saved = &c.config.ui.pad_perf_map;
-                std::array::from_fn(|i| saved.get(i).cloned().flatten())
-            },
-            pad_prev_state: [0u8; 16],
             last_config_save: std::time::Instant::now(),
             config_dirty: false,
             dsp_load: 0.0,
@@ -827,14 +803,14 @@ impl eframe::App for App {
         self.audio_reconnect_ui.cb_trash_rx.drain();
 
         // Pad performance switching (only when pad perf panel is open)
-        if self.show_pad_perf {
+        if self.perf_ui.show_pad_perf {
             for i in 0..16u8 {
                 let note = 36 + i;
                 let vel = self.pad_state[note as usize].load(Ordering::Relaxed);
-                let prev = self.pad_prev_state[i as usize];
+                let prev = self.perf_ui.pad_prev_state[i as usize];
                 if vel > 0 && prev == 0 {
                     // New pad press — switch performance if mapped
-                    if let Some(ref name) = self.pad_perf_map[i as usize] {
+                    if let Some(ref name) = self.perf_ui.pad_perf_map[i as usize] {
                         let name = name.clone();
                         let _ = self.ctrl_tx.push(ControlEvent::AllNotesOff);
                         if self.load_performance_by_name(&name) {
@@ -844,7 +820,7 @@ impl eframe::App for App {
                         }
                     }
                 }
-                self.pad_prev_state[i as usize] = vel;
+                self.perf_ui.pad_prev_state[i as usize] = vel;
             }
         }
 
@@ -1229,7 +1205,7 @@ impl eframe::App for App {
         });
 
         // Pad perf indicator (above keyboard)
-        if self.show_pad_perf {
+        if self.perf_ui.show_pad_perf {
             egui::TopBottomPanel::bottom("pad_perf_bar").show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.colored_label(egui::Color32::YELLOW, "PAD PERF: tap a pad to switch performance");
@@ -1281,7 +1257,7 @@ impl eframe::App for App {
             self.draw_help(ctx);
         }
         // Pad performance map window
-        if self.show_pad_perf {
+        if self.perf_ui.show_pad_perf {
             self.draw_pad_perf_window(ctx);
         }
         // Keybindings window
@@ -1291,7 +1267,7 @@ impl eframe::App for App {
 
         // #35: Tracks-менеджер — стрелки/Enter, если окно открыто и rename
         // НЕ в фокусе (канон браузера: ввод до окна)
-        if self.show_tracks_manager && !self.tracks_rename_focus {
+        if self.perf_ui.show_tracks_manager && !self.perf_ui.tracks_rename_focus {
             let folders = self.config.ui.perf_folders.len();
             if folders > 0 {
                 let moved = ctx.input(|i| {
@@ -1301,19 +1277,19 @@ impl eframe::App for App {
                     d
                 });
                 if moved != 0 {
-                    let cur = self.tracks_sel
+                    let cur = self.perf_ui.tracks_sel
                         .unwrap_or(self.config.ui.active_folder
                             .unwrap_or(0))
                         .min(folders - 1) as i32;
-                    self.tracks_sel = Some((cur + moved).clamp(0, folders as i32 - 1) as usize);
+                    self.perf_ui.tracks_sel = Some((cur + moved).clamp(0, folders as i32 - 1) as usize);
                 }
                 if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    if let Some(sel) = self.tracks_sel {
+                    if let Some(sel) = self.perf_ui.tracks_sel {
                         if sel < self.config.ui.perf_folders.len() {
                             self.config.ui.active_folder = Some(sel);
                             self.mark_config_dirty();
                             self.refresh_console_list();
-                            self.perf_window = 0;
+                            self.perf_ui.perf_window = 0;
                         }
                     }
                 }
@@ -1508,7 +1484,7 @@ impl App {
                 led_console::Mode::Tracks => {
                     // Хвост #57: вход показывает страницу активной папки
                     // (page_start сам clamp'ит при 0 папок → 0)
-                    self.tracks_window = led_console::page_start(
+                    self.perf_ui.tracks_window = led_console::page_start(
                         self.config.ui.active_folder.unwrap_or(0),
                         self.config.ui.perf_folders.len());
                     // Подсказка входа (#57 UX): как рулить с пэдов
@@ -1678,23 +1654,23 @@ impl App {
             let page_depth = match self.led_ui.console.mode() {
                 led_console::Mode::Pattern => self.pat_window.min(led_console::window_max_start(8)),
                 led_console::Mode::Mute => self.led_ui.mute_window / 7,
-                led_console::Mode::Tracks => self.tracks_window / 7,
+                led_console::Mode::Tracks => self.perf_ui.tracks_window / 7,
                 // FolderPerfs: PAGE-глубина по перф-страницам — явное плечо
                 // (то же, что `_`; самодокументация)
-                led_console::Mode::FolderPerfs => self.perf_window / 7,
-                _ => self.perf_window / 7,
+                led_console::Mode::FolderPerfs => self.perf_ui.perf_window / 7,
+                _ => self.perf_ui.perf_window / 7,
             };
             let top = match self.led_ui.console.mode() {
                 led_console::Mode::Tracks => self.led_ui.console.folder_colors(
                     self.config.ui.active_folder,
-                    self.config.ui.perf_folders.len(), self.tracks_window),
+                    self.config.ui.perf_folders.len(), self.perf_ui.tracks_window),
                 led_console::Mode::FolderPerfs => self.led_ui.console.top_colors(
-                    self.active_perf_console(), self.folder_console_list.len(),
+                    self.active_perf_console(), self.perf_ui.folder_console_list.len(),
                     self.drum_current_pattern as usize, &mutes,
-                    self.perf_window, self.pat_window, self.led_ui.mute_window),
+                    self.perf_ui.perf_window, self.pat_window, self.led_ui.mute_window),
                 _ => self.led_ui.console.top_colors(self.active_perf_console(), filled,
                                              self.drum_current_pattern as usize, &mutes,
-                                             self.perf_window, self.pat_window,
+                                             self.perf_ui.perf_window, self.pat_window,
                                              self.led_ui.mute_window),
             };
             let bottom = self.led_ui.console.bottom_colors(playing, recording, page_depth,
@@ -1864,7 +1840,7 @@ impl App {
         self.config.ui.drum_metronome = self.drum_metronome;
         if let Some(l) = self.parts.first() { self.config.ui.layer_a_volume = l.volume; }
         if let Some(l) = self.parts.get(1) { self.config.ui.layer_b_volume = l.volume; }
-        self.config.ui.pad_perf_map = self.pad_perf_map.to_vec();
+        self.config.ui.pad_perf_map = self.perf_ui.pad_perf_map.to_vec();
         self.config.ui.split_point = Some(self.split_point);
         self.config.ui.keybinds = Some(self.keybinds.to_config());
         self.mark_config_dirty();
@@ -1965,7 +1941,7 @@ impl App {
                     }
                 }
                 KeyAction::TogglePadPerf => {
-                    self.show_pad_perf = !self.show_pad_perf;
+                    self.perf_ui.show_pad_perf = !self.perf_ui.show_pad_perf;
                 }
             }
         }
@@ -2354,7 +2330,7 @@ impl App {
     fn execute_console_action(&mut self, action: led_console::Action) {
         match action {
             led_console::Action::LoadPerf(i) => {
-                let idx = self.perf_window + i - 1; // slot -> real index
+                let idx = self.perf_ui.perf_window + i - 1; // slot -> real index
                 let list = self.console_active_list().clone();
                 match list.get(idx) {
                     Some((name, Some(_))) => {
@@ -2374,12 +2350,12 @@ impl App {
             led_console::Action::TrackSelect(i) => {
                 // Тап папки в TRACKS: папка становится активной, консоль
                 // входит в её перфы (Mode::FolderPerfs ставит led_console::tap)
-                let idx = self.tracks_window + i;
+                let idx = self.perf_ui.tracks_window + i;
                 if idx < self.config.ui.perf_folders.len() {
                     self.config.ui.active_folder = Some(idx);
                     self.mark_config_dirty();
                     self.refresh_console_list();
-                    self.perf_window = 0; // TC8: перф-страница с начала
+                    self.perf_ui.perf_window = 0; // TC8: перф-страница с начала
                 }
             }
             led_console::Action::SelectPattern(i) => {
@@ -2459,9 +2435,9 @@ impl App {
         if is_perf {
             let n = self.console_active_list().len();
             if let Some(w) =
-                led_console::follow_start(idx, self.perf_window, n)
+                led_console::follow_start(idx, self.perf_ui.perf_window, n)
             {
-                self.perf_window = w;
+                self.perf_ui.perf_window = w;
             }
         } else if let Some(w) = led_console::follow_start(idx, self.pat_window, 8) {
             self.pat_window = w;
@@ -2472,8 +2448,8 @@ impl App {
     fn page_window(&mut self, delta: i32) {
         match self.led_ui.console.mode() {
             led_console::Mode::Home => {
-                let max_w = led_console::window_max_start(self.console_list.len());
-                self.perf_window = (self.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
+                let max_w = led_console::window_max_start(self.perf_ui.console_list.len());
+                self.perf_ui.perf_window = (self.perf_ui.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             led_console::Mode::Pattern => {
                 let max_w = led_console::window_max_start(8); // = 1
@@ -2486,12 +2462,12 @@ impl App {
             led_console::Mode::Tracks => {
                 let max_w = led_console::window_max_start(
                     self.config.ui.perf_folders.len());
-                self.tracks_window =
-                    (self.tracks_window as i32 + delta).clamp(0, max_w as i32) as usize;
+                self.perf_ui.tracks_window =
+                    (self.perf_ui.tracks_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             led_console::Mode::FolderPerfs => {
-                let max_w = led_console::window_max_start(self.folder_console_list.len());
-                self.perf_window = (self.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
+                let max_w = led_console::window_max_start(self.perf_ui.folder_console_list.len());
+                self.perf_ui.perf_window = (self.perf_ui.perf_window as i32 + delta).clamp(0, max_w as i32) as usize;
             }
             _ => {}
         }
@@ -2519,16 +2495,16 @@ impl App {
     fn refresh_console_list(&mut self) {
         // HOME-ряд = ПОЛНЫЙ список перфов ВСЕГДА (юзер 2026-11-08: трек не
         // фильтрует синее меню; фильтр — только FolderPerfs из TRACKS).
-        self.console_list = self.perf_list.iter()
+        self.perf_ui.console_list = self.perf_ui.perf_list.iter()
             .map(|(n, p)| (n.clone(), Some(p.clone())))
             .collect();
         let folder = self.config.ui.active_folder
             .and_then(|i| self.config.ui.perf_folders.get(i));
-        self.folder_console_list = match folder {
-            Some(f) => crate::config::resolve_folder_entries(&self.perf_list, Some(f)),
+        self.perf_ui.folder_console_list = match folder {
+            Some(f) => crate::config::resolve_folder_entries(&self.perf_ui.perf_list, Some(f)),
             None => Vec::new(),
         };
-        for (name, path) in &self.folder_console_list {
+        for (name, path) in &self.perf_ui.folder_console_list {
             if path.is_none() {
                 log::warn!("[console] папка-трек: перф '{name}' не найден (tombstone)");
             }
@@ -2539,16 +2515,16 @@ impl App {
     /// папки, остальное (HOME) = полный список перфов.
     fn console_active_list(&self) -> &Vec<(String, Option<std::path::PathBuf>)> {
         if self.led_ui.console.mode() == led_console::Mode::FolderPerfs {
-            &self.folder_console_list
+            &self.perf_ui.folder_console_list
         } else {
-            &self.console_list
+            &self.perf_ui.console_list
         }
     }
 
     /// Index of the current performance in console_list (None if unknown;
     /// tombstone-active → None — корректно).
     fn active_perf_console(&self) -> Option<usize> {
-        self.console_active_list().iter().position(|(n, _)| n == &self.perf_name)
+        self.console_active_list().iter().position(|(n, _)| n == &self.perf_ui.perf_name)
     }
 
     fn save_collapsed_categories(&mut self) {

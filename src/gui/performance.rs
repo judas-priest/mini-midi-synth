@@ -8,7 +8,7 @@ impl App {
         let perf = if name == "(Init)" {
             preset::init_performance()
         } else {
-            let path = self.perf_list.iter()
+            let path = self.perf_ui.perf_list.iter()
                 .find(|(n, _)| n == name)
                 .map(|(_, p)| p.clone());
             let Some(path) = path else { return false; };
@@ -41,7 +41,7 @@ impl App {
                 .filter(|&v| v > 0)
                 .unwrap_or(60)
         });
-        self.perf_name = perf.name.clone();
+        self.perf_ui.perf_name = perf.name.clone();
         // Запомнить перф — восстановится при старте (юзер-репорт 2026-10-31)
         self.config.ui.last_performance = Some(perf.name.clone());
         self.snapshot_preset_and_mark_dirty();

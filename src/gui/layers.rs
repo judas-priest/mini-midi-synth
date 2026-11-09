@@ -130,8 +130,8 @@ impl App {
             }
             // NAV long-press opens this too, but NAV SysEx only arrives over
             // Bluetooth — USB users need a GUI path.
-            if ui.selectable_label(self.show_pad_perf, "Pads").on_hover_text("Pad Performances (assign performances to pads 36-51)").clicked() {
-                self.show_pad_perf = !self.show_pad_perf;
+            if ui.selectable_label(self.perf_ui.show_pad_perf, "Pads").on_hover_text("Pad Performances (assign performances to pads 36-51)").clicked() {
+                self.perf_ui.show_pad_perf = !self.perf_ui.show_pad_perf;
             }
         });
 
@@ -259,9 +259,9 @@ impl App {
     fn draw_perf_row(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Perf:");
-            ui.add(egui::TextEdit::singleline(&mut self.perf_name)
+            ui.add(egui::TextEdit::singleline(&mut self.perf_ui.perf_name)
                 .desired_width(110.0).hint_text("name"));
-            if ui.button("Save").on_hover_text("Save performance").clicked() && !self.perf_name.trim().is_empty() {
+            if ui.button("Save").on_hover_text("Save performance").clicked() && !self.perf_ui.perf_name.trim().is_empty() {
                 let parts: Vec<PartConfig> = self.parts.iter().enumerate().map(|(i, l)| {
                     let patch_name = self.patches.get(l.patch_idx)
                         .map(|p| p.name.clone()).unwrap_or_default();
@@ -273,7 +273,7 @@ impl App {
                         // поэтому здесь сообщение самодостаточное
                         log::warn!(
                             "perf save '{}': part {} patch_idx {} out of range — saved with empty patch_name",
-                            self.perf_name, i, l.patch_idx
+                            self.perf_ui.perf_name, i, l.patch_idx
                         );
                     }
                     PartConfig {
@@ -294,14 +294,14 @@ impl App {
                     }
                 }).collect();
                 match preset::save_performance(&Performance {
-                    name: self.perf_name.trim().to_string(),
+                    name: self.perf_ui.perf_name.trim().to_string(),
                     category: String::new(),
                     split_point: Some(self.split_point),
                     parts,
                 }) {
                     Ok(_path) => { self.show_toast("Performance saved", ToastKind::Success);
-                                   self.perf_list = preset::list_performances();
-                                   self.perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
+                                   self.perf_ui.perf_list = preset::list_performances();
+                                   self.perf_ui.perf_list.insert(0, ("(Init)".into(), std::path::PathBuf::new()));
                                    self.refresh_console_list(); }
                     Err(e)    => { self.show_toast(format!("Error: {e}"), ToastKind::Error); }
                 }
@@ -315,10 +315,10 @@ impl App {
             ui.separator();
             let mut load_perf: Option<Performance> = None;
             egui::ComboBox::from_id_salt("perf_load")
-                .selected_text(if self.perf_list.is_empty() { "No performances" } else { "Load..." })
+                .selected_text(if self.perf_ui.perf_list.is_empty() { "No performances" } else { "Load..." })
                 .width(120.0)
                 .show_ui(ui, |ui| {
-                    for (name, path) in &self.perf_list {
+                    for (name, path) in &self.perf_ui.perf_list {
                         if ui.selectable_label(false, name).clicked() {
                             if name == "(Init)" {
                                 load_perf = Some(preset::init_performance());
@@ -350,7 +350,7 @@ impl App {
             if ui.small_button("Tracks").on_hover_text(
                 "Track folders (setlists) — organize perfs per song").clicked()
             {
-                self.show_tracks_manager = true;
+                self.perf_ui.show_tracks_manager = true;
             }
             ui.separator();
         });

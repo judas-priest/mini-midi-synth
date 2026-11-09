@@ -21,9 +21,9 @@ impl App {
             AddPerf(usize, String),
             New,
         }
-        if !self.show_tracks_manager {
+        if !self.perf_ui.show_tracks_manager {
             // Guard-флаг не должен залипать после закрытия окна.
-            self.tracks_rename_focus = false;
+            self.perf_ui.tracks_rename_focus = false;
             return;
         }
         let mut open = true;
@@ -31,7 +31,7 @@ impl App {
         // #35: фокус rename-TextEdit прошлого кадра — консервативный nav-guard
         // для update() (draw идёт после update, флаг на кадр позже).
         let mut rename_focus = false;
-        let cur_perf = self.perf_name.clone();
+        let cur_perf = self.perf_ui.perf_name.clone();
         let win = modal::ModalWindow::new(
             ctx, "tracks_manager", "Track Folders (Setlists)", &mut open, 520.0)
             .fixed_width(520.0);
@@ -40,9 +40,9 @@ impl App {
                 "Setlists are ordered lists of aliases — the original perf is edited in one place.")
                 .weak());
             let perf_names: Vec<String> =
-                self.perf_list.iter().map(|(n, _)| n.clone()).collect();
+                self.perf_ui.perf_list.iter().map(|(n, _)| n.clone()).collect();
             let sel = self.config.ui.active_folder;
-            let armed = self.tracks_del_armed;
+            let armed = self.perf_ui.tracks_del_armed;
 
             // ── Left pane: Setlists ──
             ui.columns(2, |cols| {
@@ -61,13 +61,13 @@ impl App {
                 for fi in 0..self.config.ui.perf_folders.len() {
                     let name = self.config.ui.perf_folders[fi].name.clone();
                     let active = sel == Some(fi);
-                    let sel_here = self.tracks_sel == Some(fi);
+                    let sel_here = self.perf_ui.tracks_sel == Some(fi);
                     cols[0].horizontal(|ui| {
                         if ui.selectable_label(sel_here || active, &name)
                             .on_hover_text(if active { "Active — click to select for editing" } else { "Click/Enter to set active" }).clicked()
                         {
                             ops.push(Op::SetActive(fi));
-                            self.tracks_sel = Some(fi);
+                            self.perf_ui.tracks_sel = Some(fi);
                         }
                         if active {
                             ui.label(egui::RichText::new("ACTIVE")
@@ -115,7 +115,7 @@ impl App {
                             {
                                 ops.push(Op::DelFolder(fi));
                             }
-                            self.tracks_del_armed = armed_now;
+                            self.perf_ui.tracks_del_armed = armed_now;
                         });
                     });
                     // ── Alias rows: label … reorder ↑↓ … × (right edge) ──
@@ -177,18 +177,18 @@ impl App {
         });
         // Прошлый кадр для nav-гейта в update(): фокус живёт, пока TextEdit
         // активен — дребезга нет (канон консервативного guard'а).
-        self.tracks_rename_focus = rename_focus;
+        self.perf_ui.tracks_rename_focus = rename_focus;
         // Close propagation: Done/Esc/✕ set *win_open=false — propagate to
         // the flag (was dropped in the UX rewrite — Done did nothing)
         if !open {
-            self.show_tracks_manager = false;
+            self.perf_ui.show_tracks_manager = false;
         }
         for op in ops {
             match op {
                 Op::SetActive(fi) => {
                     if fi < self.config.ui.perf_folders.len() {
                         self.config.ui.active_folder = Some(fi);
-                        self.perf_window = 0;
+                        self.perf_ui.perf_window = 0;
                         self.mark_config_dirty();
                         self.refresh_console_list();
                     }
@@ -203,8 +203,8 @@ impl App {
                         if self.config.ui.active_folder == Some(fi) {
                             self.config.ui.active_folder = Some(fi - 1);
                         }
-                        if self.tracks_sel == Some(fi) {
-                            self.tracks_sel = Some(fi - 1);
+                        if self.perf_ui.tracks_sel == Some(fi) {
+                            self.perf_ui.tracks_sel = Some(fi - 1);
                         }
                         self.mark_config_dirty();
                         self.refresh_console_list();
@@ -216,8 +216,8 @@ impl App {
                         if self.config.ui.active_folder == Some(fi) {
                             self.config.ui.active_folder = Some(fi + 1);
                         }
-                        if self.tracks_sel == Some(fi) {
-                            self.tracks_sel = Some(fi + 1);
+                        if self.perf_ui.tracks_sel == Some(fi) {
+                            self.perf_ui.tracks_sel = Some(fi + 1);
                         }
                         self.mark_config_dirty();
                         self.refresh_console_list();
@@ -232,9 +232,9 @@ impl App {
                             _ => {}
                         }
                         // sel за пределами после удаления — clamp (канон tracks_window)
-                        if let Some(s) = self.tracks_sel {
+                        if let Some(s) = self.perf_ui.tracks_sel {
                             if s >= self.config.ui.perf_folders.len() {
-                                self.tracks_sel =
+                                self.perf_ui.tracks_sel =
                                     self.config.ui.perf_folders.len().checked_sub(1);
                             }
                         }
