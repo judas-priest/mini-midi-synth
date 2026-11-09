@@ -244,10 +244,10 @@ impl App {
         );
     }
 
-    /// Полный редактор параметров для КОНКРЕТНОГО парта (главный экран — обёртка
-    /// `draw_params_editable`, браузер — `draw_params_editable_for(ui, part)`).
-    /// undo-снимки идут в `part`, не в active_part (правки из браузера другого
-    /// активного парта пишутся в правильный undo).
+    /// Полный редактор параметров для КОНКРЕТНОГО парта (браузер — единственный
+    /// вызов; секции ниже — `draw_sec_*` методы). undo-снимки идут в `part`,
+    /// не в active_part (правки из браузера другого активного парта пишутся
+    /// в правильный undo).
     pub(super) fn draw_params_editable_for(&mut self, ui: &mut egui::Ui, part: usize) {
         let patch_idx = self.parts[part].patch_idx;
         let preset_name = self
@@ -271,6 +271,65 @@ impl App {
         ui.add_space(theme::SP_SM);
 
         // Oscillator section
+        changed |= self.draw_sec_osc(ui, part);
+        ui.add_space(theme::SP_SM);
+
+        // Filter section
+        changed |= self.draw_sec_filter(ui, part);
+        ui.add_space(theme::SP_SM);
+
+        // Envelopes section
+        changed |= self.draw_sec_env(ui, part);
+        ui.add_space(theme::SP_SM);
+
+        // Dynamics section
+        changed |= self.draw_sec_dynamics(ui, part);
+        ui.add_space(theme::SP_SM);
+
+        // LFO section
+        changed |= self.draw_sec_lfo(ui, part);
+        ui.add_space(theme::SP_SM);
+
+        // Mod Matrix section
+        changed |= self.draw_sec_matrix(ui, part);
+        ui.add_space(theme::SP_SM);
+
+        // Voice section (Play Mode + Portamento + Unison)
+        changed |= self.draw_sec_voice(ui, part);
+        ui.add_space(theme::SP_SM);
+
+        // Arpeggiator section
+        changed |= self.draw_sec_arp(ui, part);
+        ui.add_space(theme::SP_SM);
+
+        // Effects section
+        changed |= self.draw_sec_effects(ui, part);
+        ui.add_space(theme::SP_SM);
+
+        if changed {
+            self.parts[part].params_dirty = true;
+            self.send_edited_params(part);
+        }
+
+        ui.add_space(theme::SP_MD);
+        ui.horizontal(|ui| {
+            if self.parts[part].params_dirty {
+                ui.colored_label(egui::Color32::YELLOW, "Modified");
+                ui.separator();
+            }
+            if ui.button("Save as new preset...").clicked() {
+                self.save_as_user_preset();
+            }
+            if self.parts[part].params_dirty && ui.button("Reset").clicked() {
+                self.load_edited_params(part);
+                self.send_edited_params(part);
+            }
+        });
+    }
+
+    /// Verbatim frame section (osc) extracted from draw_params_editable_for.
+    fn draw_sec_osc(&mut self, ui: &mut egui::Ui, part: usize) -> bool {
+        let mut changed = false;
         egui::Frame::default()
             .fill(theme::BG_SECTION)
             .corner_radius(4.0)
@@ -814,9 +873,12 @@ impl App {
         changed |= self.param_slider(ui, "osc_ws_drive", "Drive", 0.0, 1.0, false);
         changed |= self.param_slider(ui, "osc_ws_mix", "Mix", 0.0, 1.0, false);
         }); // end Oscillator frame
-        ui.add_space(theme::SP_SM);
+        changed
+    }
 
-        // Filter section
+    /// Verbatim frame section (filter) extracted from draw_params_editable_for.
+    fn draw_sec_filter(&mut self, ui: &mut egui::Ui, part: usize) -> bool {
+        let mut changed = false;
         egui::Frame::default()
             .fill(theme::BG_SECTION)
             .corner_radius(4.0)
@@ -970,9 +1032,12 @@ impl App {
             }
         }
         }); // end Filter frame
-        ui.add_space(theme::SP_SM);
+        changed
+    }
 
-        // Envelopes section
+    /// Verbatim frame section (env) extracted from draw_params_editable_for.
+    fn draw_sec_env(&mut self, ui: &mut egui::Ui, part: usize) -> bool {
+        let mut changed = false;
         egui::Frame::default()
             .fill(theme::BG_SECTION)
             .corner_radius(4.0)
@@ -1014,9 +1079,12 @@ impl App {
             changed |= env_shape_combo(ui, part, "Rel:", "filter_env_release_shape", "fenv_rel_shape", &mut self.parts[part].edited_params);
         });
         }); // end Envelopes frame
-        ui.add_space(theme::SP_SM);
+        changed
+    }
 
-        // Dynamics section
+    /// Verbatim frame section (dynamics) extracted from draw_params_editable_for.
+    fn draw_sec_dynamics(&mut self, ui: &mut egui::Ui, part: usize) -> bool {
+        let mut changed = false;
         egui::Frame::default()
             .fill(theme::BG_SECTION)
             .corner_radius(4.0)
@@ -1044,9 +1112,12 @@ impl App {
         });
         changed |= self.param_slider(ui, "vel_to_filter", "Vel->Filter", 0.0, 1.0, false);
         }); // end Dynamics frame
-        ui.add_space(theme::SP_SM);
+        changed
+    }
 
-        // LFO section
+    /// Verbatim frame section (lfo) extracted from draw_params_editable_for.
+    fn draw_sec_lfo(&mut self, ui: &mut egui::Ui, part: usize) -> bool {
+        let mut changed = false;
         egui::Frame::default()
             .fill(theme::BG_SECTION)
             .corner_radius(4.0)
@@ -1224,9 +1295,12 @@ impl App {
             });
         }
         }); // end LFO frame
-        ui.add_space(theme::SP_SM);
+        changed
+    }
 
-        // Mod Matrix section
+    /// Verbatim frame section (matrix) extracted from draw_params_editable_for.
+    fn draw_sec_matrix(&mut self, ui: &mut egui::Ui, part: usize) -> bool {
+        let mut changed = false;
         egui::Frame::default()
             .fill(theme::BG_SECTION)
             .corner_radius(4.0)
@@ -1300,9 +1374,12 @@ impl App {
             }
         }
         }); // end Mod Matrix frame
-        ui.add_space(theme::SP_SM);
+        changed
+    }
 
-        // Voice section (Play Mode + Portamento + Unison)
+    /// Verbatim frame section (voice) extracted from draw_params_editable_for.
+    fn draw_sec_voice(&mut self, ui: &mut egui::Ui, part: usize) -> bool {
+        let mut changed = false;
         egui::Frame::default()
             .fill(theme::BG_SECTION)
             .corner_radius(4.0)
@@ -1383,9 +1460,12 @@ impl App {
         changed |= self.param_slider_ex(ui, "unison_detune", "Detune", 0.0, 50.0, false, " ct");
         changed |= self.param_slider(ui, "unison_spread", "Spread", 0.0, 1.0, false);
         }); // end Voice frame
-        ui.add_space(theme::SP_SM);
+        changed
+    }
 
-        // Arpeggiator section
+    /// Verbatim frame section (arp) extracted from draw_params_editable_for.
+    fn draw_sec_arp(&mut self, ui: &mut egui::Ui, part: usize) -> bool {
+        let mut changed = false;
         egui::Frame::default()
             .fill(theme::BG_SECTION)
             .corner_radius(4.0)
@@ -1467,9 +1547,12 @@ impl App {
             changed |= self.param_slider(ui, "arp_gate", "Gate", 0.1, 1.0, false);
         }
         }); // end Arpeggiator frame
-        ui.add_space(theme::SP_SM);
+        changed
+    }
 
-        // Effects section
+    /// Verbatim frame section (effects) extracted from draw_params_editable_for.
+    fn draw_sec_effects(&mut self, ui: &mut egui::Ui, part: usize) -> bool {
+        let mut changed = false;
         egui::Frame::default()
             .fill(theme::BG_SECTION)
             .corner_radius(4.0)
@@ -1640,27 +1723,192 @@ impl App {
                 });
         });
         }); // end Effects frame
-        ui.add_space(theme::SP_SM);
-
-        if changed {
-            self.parts[part].params_dirty = true;
-            self.send_edited_params(part);
-        }
-
-        ui.add_space(theme::SP_MD);
-        ui.horizontal(|ui| {
-            if self.parts[part].params_dirty {
-                ui.colored_label(egui::Color32::YELLOW, "Modified");
-                ui.separator();
-            }
-            if ui.button("Save as new preset...").clicked() {
-                self.save_as_user_preset();
-            }
-            if self.parts[part].params_dirty && ui.button("Reset").clicked() {
-                self.load_edited_params(part);
-                self.send_edited_params(part);
-            }
-        });
+        changed
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tests_support::*;
+
+    /// Layout-equivalence lock: the ordered sequence of `ui.strong` headers and
+    /// ComboBox `id_salt` strings across the params editor, extracted from the
+    /// source of the section fns in parent call order. Any reorder/renumber of
+    /// UI elements fails this test (goldens are blind to params rendering).
+    /// ui.label sub-headers are deliberately NOT pinned (plan: strong/id_salt only).
+    #[test]
+    fn params_sections_pin() {
+        let found = section_markers();
+        let expected: Vec<String> = [
+            "strong:{preset_name} ({layer_label})",
+            "strong:Oscillator 1",
+            "salt:osc_type_{part}",
+            "strong:Drawbars",
+            "strong:Drum Synth",
+            "strong:Bass Guitar",
+            "salt:bass_style_{part}",
+            "salt:bass_pickup_{part}",
+            "strong:Bowed String",
+            "salt:body_type_{part}",
+            "strong:Brass",
+            "salt:bell_type_{part}",
+            "strong:Accordion",
+            "salt:accordion_reg_{part}",
+            "strong:Saxophone",
+            "salt:sax_type_{part}",
+            "strong:Electric Piano",
+            "salt:epiano_type_{part}",
+            "strong:Alias (8-bit)",
+            "salt:alias_wave_{part}",
+            "strong:Window Oscillator",
+            "salt:window_type_{part}",
+            "strong:Twist (Plaits)",
+            "salt:twist_eng_{part}",
+            "strong:Phase Distortion",
+            "salt:pd_shape_{part}",
+            "strong:Wavefolder",
+            "salt:fold_source_{part}",
+            "strong:Modal Resonator",
+            "salt:modal_material_{part}",
+            "salt:sync_shape_{part}",
+            "strong:Oscillator 2",
+            "salt:osc2_type_{part}",
+            "strong:Oscillator 3",
+            "salt:osc3_type_{part}",
+            "strong:Osc Shaper",
+            "salt:osc_ws_mode_{part}",
+            "strong:Filter 1",
+            "salt:filter_type_{part}",
+            "salt:formant_voice_{part}",
+            "salt:formant_vowel_{part}",
+            "salt:filter_routing_{part}",
+            "strong:Filter 2",
+            "salt:filter2_type_{part}",
+            "strong:Inter-Filter Shaper",
+            "salt:inter_ws_mode_{part}",
+            "strong:Amp Envelope",
+            "strong:Filter Envelope",
+            "strong:Dynamics",
+            "salt:vel_curve_{part}",
+            "strong:LFO",
+            "salt:lfo_wf_{part}",
+            "strong:LFO 2",
+            "salt:lfo2_wf_{part}",
+            "strong:LFO 3 (Mod Matrix)",
+            "salt:lfo3_wf_{part}",
+            "strong:LFO 4 (Mod Matrix)",
+            "salt:lfo4_wf_{part}",
+            "strong:Scene LFO 1",
+            "salt:slfo1_wf_{part}",
+            "strong:Scene LFO 2",
+            "salt:slfo2_wf_{part}",
+            "strong:Mod Matrix",
+            "salt:mod_src_{part}_{slot_idx}",
+            "salt:mod_dst_{part}_{slot_idx}",
+            "strong:Play Mode",
+            "salt:play_mode_{part}",
+            "salt:sustain_mode_{part}",
+            "strong:Portamento",
+            "salt:porta_mode_{part}",
+            "strong:Unison",
+            "strong:Arpeggiator",
+            "salt:arp_mode_{part}",
+            "salt:arp_rate_{part}",
+            "strong:Effects",
+            "strong:Ring Modulator",
+            "salt:rm_shape_{part}",
+            "strong:Freq Shifter",
+            "strong:Tape Saturation",
+            "strong:Neuron Distortion",
+            "strong:Delay",
+            "strong:Reverb",
+            "salt:reverb_type_{part}",
+            "strong:Wave Shaper",
+            "salt:ws_mode_{part}",
+            "strong:Airwindows",
+            "salt:aw_mode_{part}",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(found.len(), expected.len(), "marker count changed");
+        for (i, (f, e)) in found.iter().zip(expected.iter()).enumerate() {
+            assert_eq!(f, e, "layout marker #{i} changed");
+        }
+    }
+}
+
+/// Support code for the `params_sections_pin` source-parse test.
+#[cfg(test)]
+mod tests_support {
+    /// Sections in the exact order `draw_params_editable_for` draws them:
+    /// the head fn (preset strong-header) first, then the 9 frame sections.
+    /// (file, fn_name) — file paths updated when sections move (phase B);
+    /// semantics of the pin itself never change.
+    pub(super) const SECTION_FNS: &[(&str, &str)] = &[
+        ("params.rs", "draw_params_editable_for"),
+        ("params.rs", "draw_sec_osc"),
+        ("params.rs", "draw_sec_filter"),
+        ("params.rs", "draw_sec_env"),
+        ("params.rs", "draw_sec_dynamics"),
+        ("params.rs", "draw_sec_lfo"),
+        ("params.rs", "draw_sec_matrix"),
+        ("params.rs", "draw_sec_voice"),
+        ("params.rs", "draw_sec_arp"),
+        ("params.rs", "draw_sec_effects"),
+    ];
+
+    /// First string literal in `rest`, e.g. `format!("x_{part}"))` → `x_{part}`.
+    fn first_string_literal(rest: &str) -> String {
+        let start = rest.find('"').expect("string literal after marker keyword");
+        let rest = &rest[start + 1..];
+        let end = rest.find('"').expect("closing quote");
+        rest[..end].to_string()
+    }
+
+    /// Extract the ordered `ui.strong(...)` / `from_id_salt(...)` string
+    /// literals from one fn body (mechanical layout fingerprint).
+    fn extract_markers(src: &str, fn_name: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut in_fn = false;
+        for line in src.lines() {
+            if !in_fn {
+                let t = line.trim_start();
+                if line.starts_with("    ")
+                    && (t.starts_with(&format!("fn {fn_name}("))
+                        || t.starts_with(&format!("pub(super) fn {fn_name}(")))
+                {
+                    in_fn = true;
+                }
+                continue;
+            }
+            // fn body: ends at the impl-level closing brace (indent 4).
+            if line == "    }" {
+                break;
+            }
+            let t = line.trim();
+            if let Some(rest) = t.strip_prefix("ui.strong(") {
+                out.push(format!("strong:{}", first_string_literal(rest)));
+            } else if let Some(pos) = t.find("from_id_salt(") {
+                let rest = &t[pos + "from_id_salt(".len()..];
+                out.push(format!("salt:{}", first_string_literal(rest)));
+            }
+        }
+        assert!(in_fn, "fn {fn_name} not found in source");
+        out
+    }
+
+    pub(super) fn section_markers() -> Vec<String> {
+        let params_rs = include_str!("params.rs");
+        let mut found = Vec::new();
+        for (file, fn_name) in SECTION_FNS {
+            let src = match *file {
+                "params.rs" => params_rs,
+                other => panic!("unknown pin source file: {other}"),
+            };
+            found.extend(extract_markers(src, fn_name));
+        }
+        found
+    }
 }
