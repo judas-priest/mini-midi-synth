@@ -18,8 +18,8 @@ looper-sustain-capture).
 | 6 | gui-io-worker | DONE (PR #112, не смержен) | fix/gui-io-worker | #112 |
 | 4 | rhythm-low-batch | DONE (PR #113, не смержен) | fix/rhythm-low-batch | #113 |
 | 8 | tick-block-extract | DONE (PR #114, не смержен) | refactor/tick-block-extract | #114 |
-| 10 | params-split | in_progress | refactor/params-split | — |
-| 9 | app-substructs | pending | — | — |
+| 10 | params-split | DONE (PR #115, не смержен) | refactor/params-split | #115 |
+| 9 | app-substructs | in_progress | refactor/app-substructs | — |
 | 5 | rt-allocations | pending | — | — |
 
 ## Журнал
@@ -49,3 +49,7 @@ looper-sustain-capture).
   дельта (step → параметр); characterization tc15-18; tick_block 546→414.
   Начат план 10 (params.rs split: фаза A секции-методы + pin-гвард, фаза B
   перенос в params_*.rs).
+- 2026-11-09: план 10 ГОТОВ → PR #115 (не смержен). 9 секций байт-идентичны
+  (скрипт-проверка ревьюера), pin 87 маркеров; params.rs 1666→668. Отклонение
+  по канону #8: pin tc_ks_ranges путь. Начат ПОСЛЕДНИЙ план 9 (App → 12
+  сабструктов, compiler-driven).
