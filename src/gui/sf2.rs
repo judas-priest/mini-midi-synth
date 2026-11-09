@@ -137,21 +137,21 @@ impl App {
             },
         };
         self.sf2_ui.sf2_keys_soundfont = Some(sf.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_ui.sf2_block_size });
-        let _ = self.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_ui.sf2_block_size });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
         self.sf2_ui.sf2_keys_loaded_name = name;
         self.show_toast("Keys SF2 loaded", ToastKind::Success);
         // Apply per-part SF2 modes
         for i in 0..2 {
-            if self.parts[i].sf2_mode {
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                    part: i, program: self.parts[i].sf2_program, bank: 0,
+            if self.core_state_ui.parts[i].sf2_mode {
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                    part: i, program: self.core_state_ui.parts[i].sf2_program, bank: 0,
                 });
             }
         }
-        self.config.sf2.keys_file_path = Some(path.to_string_lossy().to_string());
-        self.config.sf2.file_path = self.config.sf2.keys_file_path.clone(); // compat
+        self.core_state_ui.config.sf2.keys_file_path = Some(path.to_string_lossy().to_string());
+        self.core_state_ui.config.sf2.file_path = self.core_state_ui.config.sf2.keys_file_path.clone(); // compat
         self.mark_config_dirty();
     }
 
@@ -174,17 +174,17 @@ impl App {
             },
         };
         self.sf2_ui.sf2_drums_soundfont = Some(sf.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_ui.sf2_block_size });
-        let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_ui.sf2_block_size });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
         self.sf2_ui.sf2_drums_loaded_name = name;
         self.extract_kit_names(&sf);
         self.push_drum_choke_groups();
         self.show_toast("Drums SF2 loaded", ToastKind::Success);
         if self.sf2_ui.sf2_drums_enabled {
-            let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
+            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
         }
         // Load the per-kit remap table (identity if none saved for this kit).
-        if let Some(v) = self.config.sf2.drums_remaps.get(&self.drum_remap_key()) {
+        if let Some(v) = self.core_state_ui.config.sf2.drums_remaps.get(&self.drum_remap_key()) {
             // migrate legacy slot-encoded values (0..16) to kit notes (+36)
             let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
             let mut t = [0u8; 16];
@@ -194,7 +194,7 @@ impl App {
             for (i, v) in self.drum_seq_ui.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
         }
         self.push_drum_remap();
-        if let Some(v) = self.config.sf2.drums_vels.get(&self.drum_remap_key()) {
+        if let Some(v) = self.core_state_ui.config.sf2.drums_vels.get(&self.drum_remap_key()) {
             let mut t = [0u8; 16];
             for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
             self.drum_seq_ui.drum_pad_vel = t;
@@ -202,7 +202,7 @@ impl App {
             self.drum_seq_ui.drum_pad_vel = [0u8; 16];
         }
         self.push_drum_pad_vel();
-        self.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
+        self.core_state_ui.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
         self.mark_config_dirty();
     }
 
@@ -210,12 +210,12 @@ impl App {
         self.sf2_ui.sf2_keys_soundfont = None;
         self.sf2_ui.sf2_keys_loaded_name.clear();
         for i in 0..2 {
-            self.parts[i].sf2_mode = false;
-            let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: false });
+            self.core_state_ui.parts[i].sf2_mode = false;
+            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: false });
         }
-        let _ = self.ctrl_tx.push(ControlEvent::UnloadKeysSoundFont);
-        self.config.sf2.keys_file_path = None;
-        self.config.sf2.file_path = None;
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::UnloadKeysSoundFont);
+        self.core_state_ui.config.sf2.keys_file_path = None;
+        self.core_state_ui.config.sf2.file_path = None;
         self.mark_config_dirty();
     }
 
@@ -230,9 +230,9 @@ impl App {
         self.push_drum_remap();
         self.drum_seq_ui.drum_pad_vel = [0u8; 16];
         self.push_drum_pad_vel();
-        let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
-        let _ = self.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);
-        self.config.sf2.drums_file_path = None;
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: false });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::UnloadDrumsSoundFont);
+        self.core_state_ui.config.sf2.drums_file_path = None;
         self.mark_config_dirty();
     }
 }

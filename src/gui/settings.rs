@@ -44,7 +44,7 @@ impl App {
                     ui.horizontal(|ui| {
                         for &note in row_notes {
                             let idx = (note - 36) as usize;
-                            let vel = self.pad_state[note as usize].load(std::sync::atomic::Ordering::Relaxed);
+                            let vel = self.core_state_ui.pad_state[note as usize].load(std::sync::atomic::Ordering::Relaxed);
                             let pressed = vel > 0;
                             let has_perf = self.perf_ui.pad_perf_map[idx].is_some();
 
@@ -131,7 +131,7 @@ impl App {
     }
 
     pub(super) fn draw_help(&mut self, ctx: &egui::Context) {
-        let mut open = self.show_help;
+        let mut open = self.misc_ui.show_help;
         // Обёртка modal::ModalWindow: Esc-стек, константный Id окна.
         // footer_done(false): окно закрывается Esc/✕. Заголовок окна = название
         // карты; дубль-heading внутри убран.
@@ -150,7 +150,7 @@ impl App {
                     .striped(true)
                     .show(ui, |ui| {
                         ui.strong("Control"); ui.strong("CC"); ui.strong("Parameter"); ui.end_row();
-                        for (cc, binding) in self.cc_map.bindings.iter().enumerate().filter_map(|(i, b)| b.map(|b| (i as u8, b))) {
+                        for (cc, binding) in self.core_state_ui.cc_map.bindings.iter().enumerate().filter_map(|(i, b)| b.map(|b| (i as u8, b))) {
                             if binding.scope == crate::cc_map::ParamScope::Patch {
                                 let ctrl = crate::cc_map::cc_to_control_name(cc);
                                 let label = crate::cc_map::find_param_meta(binding.param_key)
@@ -173,7 +173,7 @@ impl App {
                         // F1 is the sustain pedal: CC64 is never bound as a
                         // parameter, so list it explicitly.
                         ui.label("F1 (CC64)"); ui.label(""); ui.label("Sustain (hold notes)"); ui.end_row();
-                        for (cc, binding) in self.cc_map.bindings.iter().enumerate().filter_map(|(i, b)| b.map(|b| (i as u8, b))) {
+                        for (cc, binding) in self.core_state_ui.cc_map.bindings.iter().enumerate().filter_map(|(i, b)| b.map(|b| (i as u8, b))) {
                             if binding.scope == crate::cc_map::ParamScope::Global {
                                 let ctrl = crate::cc_map::cc_to_control_name(cc);
                                 let label = crate::cc_map::find_param_meta(binding.param_key)
@@ -189,7 +189,7 @@ impl App {
                 ui.label("move the knob past the current value to start controlling.");
             });
         });
-        self.show_help = open;
+        self.misc_ui.show_help = open;
     }
 
     /// Recreate audio engine + stream after device disconnect.
@@ -203,9 +203,9 @@ impl App {
         let looper_snap: Vec<crate::synth::looper::LooperEventSnapshot>;
         let looper_len_ticks: u32;
         // Snapshot ticks are sample counts in the OLD engine's rate; the new
-        // device may run at a different one (self.sample_rate is only updated
+        // device may run at a different one (self.core_state_ui.sample_rate is only updated
         // to the new actual rate further down).
-        let looper_old_sr: u32 = self.sample_rate;
+        let looper_old_sr: u32 = self.core_state_ui.sample_rate;
         {
             let mut snap = Vec::new();
             let mut len_ticks = 0u32;
@@ -239,13 +239,13 @@ impl App {
             let hosts = crate::audio::available_hosts();
             let idx = hosts
                 .iter()
-                .position(|(_, n)| n.eq_ignore_ascii_case(&self.config.audio.backend))
+                .position(|(_, n)| n.eq_ignore_ascii_case(&self.core_state_ui.config.audio.backend))
                 .unwrap_or(0);
             hosts.get(idx).map(|(id, _)| *id).unwrap_or_else(|| cpal::default_host().id())
         };
         #[cfg(target_os = "android")]
         let host_id = cpal::default_host().id();
-        let sr = self.sample_rate;
+        let sr = self.core_state_ui.sample_rate;
 
         // New ring buffers
         let (midi_tx, midi_rx) = rtrb::RingBuffer::<synth::MidiEvent>::new(256);
@@ -266,10 +266,10 @@ impl App {
 
         // New synth engine
         let mut engine = synth::SynthEngine::new(sr as f32);
-        engine.set_patches(self.patches.clone());
+        engine.set_patches(self.core_state_ui.patches.clone());
         engine.set_feedback_tx(feedback_tx);
         engine.set_trash_tx(engine_trash_tx);
-        engine.set_program_change_atom(self._program_change_atom.clone());
+        engine.set_program_change_atom(self.core_state_ui._program_change_atom.clone());
 
         // Update shared atoms (ST1: один пулл вместо 17)
         let h = engine.handles();
@@ -285,12 +285,12 @@ impl App {
         self.looper_ui.looper_atoms = h.looper_atoms;
         self.looper_ui.looper_display = h.looper_display;
         self.transport_ui.seq_target_atom = h.seq_target_atom;
-        self.active_part_atom = h.active_part_atom;
-        self.sustain_atom = h.sustain_atom;
+        self.core_state_ui.active_part_atom = h.active_part_atom;
+        self.core_state_ui.sustain_atom = h.sustain_atom;
         self.looper_ui.master_rec_state = h.master_rec_state_atom;
         self.looper_ui.master_rec_cycle = h.master_rec_cycle_atom;
         self.pitch_seq_ui.pitch_seq_step_atoms = h.pitch_seq_step_atoms;
-        self.scope_buf = h.scope_buf;
+        self.core_state_ui.scope_buf = h.scope_buf;
         self.midi_seq_ui.midi_seq_play_atom = h.midi_seq_play_atom;
         self.midi_seq_ui.midi_seq_pos_atom = h.midi_seq_pos_atom;
 
@@ -298,7 +298,7 @@ impl App {
         let audio_config = crate::audio::AudioConfig {
             host_id,
             sample_rate: sr,
-            buffer_size: self.config.audio.buffer_size,
+            buffer_size: self.core_state_ui.config.audio.buffer_size,
         };
         let amidi_port = crate::AMIDI_PORT.get().cloned()
             .unwrap_or_else(|| std::sync::Arc::new(crate::amidi::AmidiPort::new()));
@@ -316,8 +316,8 @@ impl App {
             ctrl_rx,
             crate::audio::AudioShared {
                 amidi_port,
-                note_state: self.note_state.clone(),
-                pad_state: self.pad_state.clone(),
+                note_state: self.core_state_ui.note_state.clone(),
+                pad_state: self.core_state_ui.pad_state.clone(),
                 paused: audio_paused,
                 trash: cb_trash_tx,
             },
@@ -328,9 +328,9 @@ impl App {
         // Update GUI state
         self.audio_reconnect_ui.audio_disconnected = audio_backend.disconnected.clone();
         self.audio_reconnect_ui._audio_handle = Some(audio_backend);
-        self.ctrl_tx = crate::metrics::CountingProducer::new(ctrl_tx);
-        self.feedback_rx = Some(feedback_rx);
-        self.sample_rate = actual_sr;
+        self.core_state_ui.ctrl_tx = crate::metrics::CountingProducer::new(ctrl_tx);
+        self.core_state_ui.feedback_rx = Some(feedback_rx);
+        self.core_state_ui.sample_rate = actual_sr;
 
         // Re-send the entire GUI state, not just the patches. Sending only
         // patches left the fresh engine without global params, soundfonts,
@@ -357,7 +357,7 @@ impl App {
                 }
                 len_ticks = rescale(len_ticks);
             }
-            match self.ctrl_tx.push(crate::synth::ControlEvent::LooperRestore {
+            match self.core_state_ui.ctrl_tx.push(crate::synth::ControlEvent::LooperRestore {
                 events: events.into_boxed_slice(),
                 loop_length_ticks: len_ticks,
             }) {
@@ -372,22 +372,22 @@ impl App {
         // preserved 1:1 by the restore.
         for (layer, &mute) in self.looper_ui.looper_layer_mute.iter().enumerate() {
             if mute {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: layer as u8, mute });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: layer as u8, mute });
             }
         }
         if let Some(layer) = self.looper_ui.looper_solo_layer {
-            let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: Some(layer) });
+            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: Some(layer) });
         }
         for (part, &mute) in self.looper_ui.looper_part_mutes.iter().enumerate() {
             if mute {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperSetPartMute { part: part as u8, mute });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetPartMute { part: part as u8, mute });
             }
         }
         // Record source is live transport state (engine defaults to Mix); the
         // GUI's choice survives the reconnect — re-push it (same pattern as
         // the layer mutes above).
         if !self.looper_ui.looper_source_mix {
-            let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: false });
+            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetSource { mix: false });
         }
 
         log::info!("[reconnect] Audio restarted: {actual_sr}Hz");
@@ -399,14 +399,14 @@ impl App {
         let mut learned_cc: Option<(u8, &'static str)> = None;
         let mut program: Option<u8> = None;
 
-        if let Some(rx) = &mut self.feedback_rx {
+        if let Some(rx) = &mut self.core_state_ui.feedback_rx {
             while let Ok(fb) = rx.pop() {
                 match fb {
                     ParamFeedback::ParamChanged { key, value } => {
                         param_changes.push((key, value));
                     }
                     ParamFeedback::CcReceived { cc } => {
-                        if let Some(target) = self.midi_learn_target.take() {
+                        if let Some(target) = self.core_state_ui.midi_learn_target.take() {
                             learned_cc = Some((cc, target));
                         }
                     }
@@ -430,10 +430,10 @@ impl App {
                         }
                     }
                     ParamFeedback::PickupPending { key, cc_position } => {
-                        self.pickup_indicators.insert(key.to_string(), cc_position);
+                        self.core_state_ui.pickup_indicators.insert(key.to_string(), cc_position);
                     }
                     ParamFeedback::PickupDone { key } => {
-                        self.pickup_indicators.remove(key);
+                        self.core_state_ui.pickup_indicators.remove(key);
                     }
                     ParamFeedback::NavigatePress => {
                         self.led_ui.nav_press_time = Some(std::time::Instant::now());
@@ -463,11 +463,11 @@ impl App {
         for (key, value) in param_changes {
             if crate::cc_map::is_global_param(key) {
                 // Global params (volume, tone) — don't put in patch
-                self.global_params.insert(key.to_string(), value);
-                self.global_dirty = true;
+                self.core_state_ui.global_params.insert(key.to_string(), value);
+                self.core_state_ui.global_dirty = true;
             } else {
                 // Patch params — update all parts
-                for layer_state in &mut self.parts {
+                for layer_state in &mut self.core_state_ui.parts {
                     layer_state.edited_params.insert(key.to_string(), value);
                     layer_state.params_dirty = true;
                 }
@@ -480,7 +480,7 @@ impl App {
         let learned_cc = learned_cc.filter(|&(cc, _)| cc != 64);
         if let Some((cc, target)) = learned_cc {
             if let Some(meta) = crate::cc_map::find_param_meta(target) {
-                self.cc_map.bindings[cc as usize] = Some(crate::cc_map::CcBinding {
+                self.core_state_ui.cc_map.bindings[cc as usize] = Some(crate::cc_map::CcBinding {
                     param_key: meta.key,
                     min_val: meta.min,
                     max_val: meta.max,
@@ -492,17 +492,17 @@ impl App {
         }
 
         if let Some(prog) = program {
-            if self.patches.get(prog as usize).is_some() {
-                self.parts[0].patch_idx = prog as usize;
+            if self.core_state_ui.patches.get(prog as usize).is_some() {
+                self.core_state_ui.parts[0].patch_idx = prog as usize;
                 self.load_edited_params(0);
             }
         }
     }
 
     pub(super) fn save_cc_map(&mut self) {
-        self.config.cc_map = Some(crate::cc_map::CcMapRaw::from_cc_map(&self.cc_map));
+        self.core_state_ui.config.cc_map = Some(crate::cc_map::CcMapRaw::from_cc_map(&self.core_state_ui.cc_map));
         self.mark_config_dirty();
-        let _ = self.ctrl_tx.push(ControlEvent::SetCcMap { map: Box::new(self.cc_map) });
+        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetCcMap { map: Box::new(self.core_state_ui.cc_map) });
     }
 
     pub(super) fn param_slider(&mut self, ui: &mut egui::Ui, key: &str, label: &str, min: f32, max: f32, logarithmic: bool) -> bool {
@@ -511,13 +511,13 @@ impl App {
 
     #[allow(clippy::too_many_arguments)]
     pub(super) fn param_slider_ex(&mut self, ui: &mut egui::Ui, key: &str, label: &str, min: f32, max: f32, logarithmic: bool, suffix: &str) -> bool {
-        let part = self.active_part;
-        let mut val = self.parts[part].edited_params.get(key).copied().unwrap_or(min);
+        let part = self.core_state_ui.active_part;
+        let mut val = self.core_state_ui.parts[part].edited_params.get(key).copied().unwrap_or(min);
 
         // Build label with CC number and pickup indicator
-        let cc_info = self.cc_map.bindings.iter().enumerate()
+        let cc_info = self.core_state_ui.cc_map.bindings.iter().enumerate()
             .find_map(|(cc, b)| b.filter(|b| b.param_key == key).map(|_| cc));
-        let pickup = self.pickup_indicators.get(key).copied();
+        let pickup = self.core_state_ui.pickup_indicators.get(key).copied();
         let display_label = match (cc_info, pickup) {
             (Some(cc), Some(knob_pos)) => {
                 let arrow = if knob_pos < val { "\u{2B07}" } else { "\u{2B06}" }; // ↓ or ↑
@@ -545,13 +545,13 @@ impl App {
             }
             if ui.button("MIDI Learn").clicked() {
                 if let Some(static_key) = crate::cc_map::resolve_key(key) {
-                    self.midi_learn_target = Some(static_key);
+                    self.core_state_ui.midi_learn_target = Some(static_key);
                 }
                 ui.close_menu();
             }
             if let Some(cc) = cc_info {
                 if ui.button("Clear MIDI").clicked() {
-                    self.cc_map.bindings[cc] = None;
+                    self.core_state_ui.cc_map.bindings[cc] = None;
                     self.save_cc_map();
                     ui.close_menu();
                 }
@@ -560,20 +560,20 @@ impl App {
         if resp.double_clicked() {
             if let Some(&default_val) = DEFAULT_PARAMS.get(key) {
                 self.push_undo_snapshot();
-                self.parts[part].edited_params.insert(key.into(), default_val);
+                self.core_state_ui.parts[part].edited_params.insert(key.into(), default_val);
                 return true;
             }
         }
         if resp.changed() {
-            self.parts[part].edited_params.insert(key.into(), val);
+            self.core_state_ui.parts[part].edited_params.insert(key.into(), val);
             return true;
         }
         false
     }
 
     pub(super) fn save_as_user_preset(&mut self) {
-        let part = self.active_part;
-        let base_name = self.patches.get(self.parts[part].patch_idx)
+        let part = self.core_state_ui.active_part;
+        let base_name = self.core_state_ui.patches.get(self.core_state_ui.parts[part].patch_idx)
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "Custom".to_string());
 
@@ -581,7 +581,7 @@ impl App {
         let new_patch = Patch {
             name: new_name.clone(),
             category: "User".to_string(),
-            params: self.parts[part].edited_params.clone(),
+            params: self.core_state_ui.parts[part].edited_params.clone(),
             wavetable_file: None,
             wavetable_data: None,
             wavetable_frames: 0,
@@ -591,14 +591,14 @@ impl App {
         if let Ok(_path) = preset::save_patch(&new_patch) {
             self.show_toast("Preset saved", ToastKind::Success);
             // Replace existing preset with same name, or append
-            if let Some(idx) = self.patches.iter().position(|p| p.name == new_patch.name) {
-                self.patches[idx] = new_patch;
-                self.parts[part].patch_idx = idx;
+            if let Some(idx) = self.core_state_ui.patches.iter().position(|p| p.name == new_patch.name) {
+                self.core_state_ui.patches[idx] = new_patch;
+                self.core_state_ui.parts[part].patch_idx = idx;
             } else {
-                self.patches.push(new_patch);
-                self.parts[part].patch_idx = self.patches.len() - 1;
+                self.core_state_ui.patches.push(new_patch);
+                self.core_state_ui.parts[part].patch_idx = self.core_state_ui.patches.len() - 1;
             }
-            self.parts[part].params_dirty = false;
+            self.core_state_ui.parts[part].params_dirty = false;
             self.snapshot_preset_and_mark_dirty();
         }
     }
@@ -616,7 +616,7 @@ impl App {
                 if self.settings_audio_ui.is_jack {
                     ui.colored_label(
                         theme::TEXT_MUTED,
-                        format!("JACK server: {}Hz", self.sample_rate),
+                        format!("JACK server: {}Hz", self.core_state_ui.sample_rate),
                     );
                     ui.add_space(theme::SP_SM);
                 }
@@ -679,28 +679,28 @@ impl App {
                 let pending_backend = self
                     .settings_audio_ui.available_hosts
                     .get(self.settings_audio_ui.selected_host_idx)
-                    .map(|(_, name)| self.config.audio.backend != *name)
+                    .map(|(_, name)| self.core_state_ui.config.audio.backend != *name)
                     .unwrap_or(false);
                 #[cfg(target_os = "android")]
                 let pending_backend = false; // нет выбора backend на android
                 let pending = pending_backend
-                    || self.settings_audio_ui.selected_sample_rate != self.config.audio.sample_rate
-                    || self.settings_audio_ui.selected_buffer_size != self.config.audio.buffer_size;
+                    || self.settings_audio_ui.selected_sample_rate != self.core_state_ui.config.audio.sample_rate
+                    || self.settings_audio_ui.selected_buffer_size != self.core_state_ui.config.audio.buffer_size;
                 if pending {
                     ui.colored_label(theme::TEXT_WARN, "Restart required to apply audio changes.");
                 }
                 if ui.button("Save Audio Settings").clicked() {
                     #[cfg(not(target_os = "android"))]
                     if let Some((_, host_name)) = self.settings_audio_ui.available_hosts.get(self.settings_audio_ui.selected_host_idx) {
-                        self.config.audio.backend = host_name.to_string();
-                        self.config.audio.sample_rate = self.settings_audio_ui.selected_sample_rate;
-                        self.config.audio.buffer_size = self.settings_audio_ui.selected_buffer_size;
+                        self.core_state_ui.config.audio.backend = host_name.to_string();
+                        self.core_state_ui.config.audio.sample_rate = self.settings_audio_ui.selected_sample_rate;
+                        self.core_state_ui.config.audio.buffer_size = self.settings_audio_ui.selected_buffer_size;
                         self.snapshot_preset_and_mark_dirty();
                     }
                     #[cfg(target_os = "android")]
                     {
-                        self.config.audio.sample_rate = self.settings_audio_ui.selected_sample_rate;
-                        self.config.audio.buffer_size = self.settings_audio_ui.selected_buffer_size;
+                        self.core_state_ui.config.audio.sample_rate = self.settings_audio_ui.selected_sample_rate;
+                        self.core_state_ui.config.audio.buffer_size = self.settings_audio_ui.selected_buffer_size;
                         self.snapshot_preset_and_mark_dirty();
                     }
                 }
@@ -735,21 +735,21 @@ impl App {
                     .spacing([12.0, 6.0])
                     .show(ui, |ui| {
                         ui.label("DSP trim:");
-                        let mut dsp_db = self.config.audio.dsp_trim_db;
+                        let mut dsp_db = self.core_state_ui.config.audio.dsp_trim_db;
                         if ui.add(egui::Slider::new(&mut dsp_db, -12.0..=12.0)
                             .step_by(0.5).suffix(" dB")).changed() {
-                            self.config.audio.dsp_trim_db = dsp_db;
-                            let _ = self.ctrl_tx.push(ControlEvent::SetDspTrim { db: dsp_db });
+                            self.core_state_ui.config.audio.dsp_trim_db = dsp_db;
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetDspTrim { db: dsp_db });
                             self.snapshot_preset_and_mark_dirty();
                         }
                         ui.end_row();
 
                         ui.label("SF2 trim:");
-                        let mut sf2_db = self.config.audio.sf2_trim_db;
+                        let mut sf2_db = self.core_state_ui.config.audio.sf2_trim_db;
                         if ui.add(egui::Slider::new(&mut sf2_db, -12.0..=12.0)
                             .step_by(0.5).suffix(" dB")).changed() {
-                            self.config.audio.sf2_trim_db = sf2_db;
-                            let _ = self.ctrl_tx.push(ControlEvent::SetSf2Trim { db: sf2_db });
+                            self.core_state_ui.config.audio.sf2_trim_db = sf2_db;
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetSf2Trim { db: sf2_db });
                             self.snapshot_preset_and_mark_dirty();
                         }
                         ui.end_row();
@@ -890,18 +890,18 @@ impl App {
                         let mut drums = self.sf2_ui.sf2_drums_enabled;
                         if ui.checkbox(&mut drums, "SF2 Drums").changed() {
                             self.sf2_ui.sf2_drums_enabled = drums;
-                            let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: drums });
-                            self.config.sf2.drums_sf2 = drums;
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: drums });
+                            self.core_state_ui.config.sf2.drums_sf2 = drums;
                             self.mark_config_dirty();
                         }
                     });
                 }
 
-                if ui.checkbox(&mut self.config.ui.led_companion, "LED companion (bank-2 pads)").changed() {
+                if ui.checkbox(&mut self.core_state_ui.config.ui.led_companion, "LED companion (bank-2 pads)").changed() {
                     self.mark_config_dirty();
                 }
 
-                if ui.checkbox(&mut self.config.ui.show_telemetry, "Show telemetry (drops/errs, JACK, dsp load)").changed() {
+                if ui.checkbox(&mut self.core_state_ui.config.ui.show_telemetry, "Show telemetry (drops/errs, JACK, dsp load)").changed() {
                     self.mark_config_dirty();
                 }
 
@@ -914,14 +914,14 @@ impl App {
                             .selected_text(format!("{bs} samples"))
                             .show_ui(ui, |ui| {
                                 for &s in &[8, 16, 32, 64] {
-                                    let ms = s as f32 / self.sample_rate as f32 * 1000.0;
+                                    let ms = s as f32 / self.core_state_ui.sample_rate as f32 * 1000.0;
                                     ui.selectable_value(&mut bs, s, format!("{s} ({ms:.2}ms)"));
                                 }
                             });
                         if bs != old {
                             self.sf2_ui.sf2_block_size = bs;
-                            let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: bs });
-                            self.config.sf2.block_size = bs;
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: bs });
+                            self.core_state_ui.config.sf2.block_size = bs;
                             self.mark_config_dirty();
                         }
                     });
@@ -932,9 +932,9 @@ impl App {
                             .suffix(" ms")
                             .fixed_decimals(1));
                         if self.sf2_ui.sf2_sample_offset_ms != old {
-                            let _ = self.ctrl_tx.push(ControlEvent::SetSf2SampleOffset { ms: self.sf2_ui.sf2_sample_offset_ms });
-                            self.config.sf2.sample_offset_ms = self.sf2_ui.sf2_sample_offset_ms;
-                            self.global_dirty = true;
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetSf2SampleOffset { ms: self.sf2_ui.sf2_sample_offset_ms });
+                            self.core_state_ui.config.sf2.sample_offset_ms = self.sf2_ui.sf2_sample_offset_ms;
+                            self.core_state_ui.global_dirty = true;
                         }
                     });
                 }
@@ -951,11 +951,11 @@ impl App {
     pub(super) fn apply_midi(&mut self) {
         if let Some(port_name) = &self.settings_audio_ui.selected_midi_port {
             let port_name = port_name.clone();
-            if let Some(reconnect) = &mut self.on_midi_reconnect {
+            if let Some(reconnect) = &mut self.core_state_ui.on_midi_reconnect {
                 match reconnect(&port_name) {
                     Ok(()) => {
                         self.settings_audio_ui.midi_connected_port = Some(port_name.clone());
-                        self.config.midi.port_name = Some(port_name.clone());
+                        self.core_state_ui.config.midi.port_name = Some(port_name.clone());
                         self.show_toast(format!("MIDI: {port_name}"), ToastKind::Success);
                         self.snapshot_preset_and_mark_dirty();
                     }
@@ -964,7 +964,7 @@ impl App {
             }
         } else {
             self.settings_audio_ui.midi_connected_port = None;
-            self.config.midi.port_name = None;
+            self.core_state_ui.config.midi.port_name = None;
             self.show_toast("MIDI disconnected", ToastKind::Info);
             self.snapshot_preset_and_mark_dirty();
         }

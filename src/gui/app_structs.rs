@@ -251,3 +251,86 @@ pub struct LooperUi {
     /// Current capture cycle (1-based)
     pub master_rec_cycle: std::sync::Arc<std::sync::atomic::AtomicU8>,
 }
+
+/// Core engine/config state shared by all subsystems.
+pub struct CoreStateUi {
+    pub patches: Vec<Patch>,
+    pub note_state: NoteState,
+    pub pad_state: midi::PadState,
+    pub ctrl_tx: crate::metrics::CountingProducer<ControlEvent>,
+    pub sample_rate: u32,
+
+    pub config: Config,
+
+    /// Layer states
+    pub parts: Vec<PartState>,
+    /// Currently edited part (0 = A, 1 = B)
+    pub active_part: usize,
+
+    pub on_midi_reconnect: Option<super::MidiReconnectFn>,
+
+    /// Collapsed patch categories
+    pub collapsed_categories: HashSet<String>,
+
+    /// Feedback from audio thread
+    pub feedback_rx: Option<rtrb::Consumer<ParamFeedback>>,
+    /// CC mapping
+    pub cc_map: CcMap,
+    /// MIDI Learn target parameter key
+    pub midi_learn_target: Option<&'static str>,
+    /// Program change atom for patch feedback
+    pub _program_change_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Sustain pedal state (CC64) from engine — pedal/fader/GUI toggle
+    pub sustain_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Static pedal-up release duration (None = off, patch release)
+    pub sustain_release: Option<f32>,
+    /// Global params display values (effects, volume, lfo rate)
+    pub global_params: std::collections::BTreeMap<String, f32>,
+    /// Pickup indicators: param_key → knob position (for showing direction arrow)
+    pub pickup_indicators: std::collections::BTreeMap<String, f32>,
+    pub active_part_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    // Keybindings
+    pub keybinds: keybinds::Keybinds,
+    pub show_keybinds_window: bool,
+    pub keybind_capturing: Option<keybinds::KeyAction>,
+    pub keybinds_reset_confirm: Option<std::time::Instant>,
+    pub unbind_confirm: Option<(keybinds::KeyAction, std::time::Instant)>,
+    pub last_config_save: std::time::Instant,
+    /// (F3) конфиг изменился в памяти и ждёт записи на диск (flush_config).
+    pub config_dirty: bool,
+    /// Smoothed DSP load percentage shown in the header.
+    pub dsp_load: f32,
+    /// Decaying peak-hold of DSP load, shown next to `dsp_load`.
+    pub dsp_peak: f32,
+    pub global_dirty: bool,
+    /// (#39/#44) «Что сейчас крутят»: имя шкалы + отформатированное значение +
+    /// момент последнего тика — индикатор в правом углу топ-бара, авто-скрытие
+    /// через 2 с после последнего изменения (fade 300 мс; практика OSD HUD).
+    pub active_knob: Option<(String, String, std::time::Instant)>,
+    // Toast notifications
+    pub toasts: Vec<Toast>,
+    // Oscilloscope
+    pub scope_buf: std::sync::Arc<crate::synth::ScopeBuffer>,
+    /// Последний виденный write-индекс scope_buf: не изменился = тишина
+    /// (аудио-гейт не пушит) — рисование осциллографа пропускается.
+    pub last_scope_write: usize,
+    // Split mode
+    pub split_point: u8,   // MIDI note where right zone starts (default 60 = C4)
+    // FX Chain panel
+    pub show_fx_chain: bool,
+}
+
+/// Misc residue: dialogs, drag state, confirms not tied to a subsystem.
+pub struct MiscUi {
+    /// Part pending removal (middle-click on tab, confirmation dialog)
+    pub pending_remove_part: Option<usize>,
+    /// Show help dialog
+    pub show_help: bool,
+    /// Drag-and-drop part swap (#54): исходный слот драга за хендл ⠿,
+    /// живёт в пределах GUI-фрейма/драга (Some пока pointer down).
+    pub part_drag_src: Option<usize>,
+    /// #54: цель драга (строка под pointer во время драга) — commit на
+    /// drag_stopped хендла
+    pub part_drag_dst: Option<usize>,
+    pub fx_reset_confirm: Option<std::time::Instant>,
+}

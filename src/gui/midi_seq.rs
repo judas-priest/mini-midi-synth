@@ -28,7 +28,7 @@ impl App {
             let play_lbl = if self.midi_seq_ui.midi_seq_playing { "⏹ Stop" } else { "▶ Play" };
             if ui.button(play_lbl).clicked() {
                 self.midi_seq_ui.midi_seq_playing = !self.midi_seq_ui.midi_seq_playing;
-                let _ = self.ctrl_tx.push(ControlEvent::MidiSeqPlay { playing: self.midi_seq_ui.midi_seq_playing });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::MidiSeqPlay { playing: self.midi_seq_ui.midi_seq_playing });
             }
 
             // Loop toggle
@@ -43,7 +43,7 @@ impl App {
             }
             if ui.button(loop_text).clicked() {
                 self.midi_seq_ui.midi_seq_looping = !self.midi_seq_ui.midi_seq_looping;
-                let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetLooping {
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::MidiSeqSetLooping {
                     looping: self.midi_seq_ui.midi_seq_looping,
                 });
             }
@@ -54,11 +54,11 @@ impl App {
             let mut bpm_on = self.midi_seq_ui.midi_seq_bpm.is_some();
             if ui.checkbox(&mut bpm_on, "Override BPM").changed() {
                 self.midi_seq_ui.midi_seq_bpm = if bpm_on { Some(120.0) } else { None };
-                let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetBpm { bpm: self.midi_seq_ui.midi_seq_bpm });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::MidiSeqSetBpm { bpm: self.midi_seq_ui.midi_seq_bpm });
             }
             if let Some(ref mut bpm) = self.midi_seq_ui.midi_seq_bpm {
                 if ui.add(egui::DragValue::new(bpm).range(20.0..=300.0).speed(0.5)).changed() {
-                    let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetBpm { bpm: Some(*bpm) });
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::MidiSeqSetBpm { bpm: Some(*bpm) });
                 }
             } else {
                 ui.label(egui::RichText::new("(file tempo)").weak().italics());
@@ -262,13 +262,13 @@ impl App {
 
                     // Send changes to audio thread
                     for (idx, instr) in instr_changes {
-                        let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetTrackInstrument {
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::MidiSeqSetTrackInstrument {
                             track_idx: idx,
                             instrument: instr,
                         });
                     }
                     for (idx, muted) in mute_changes {
-                        let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetTrackMute {
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::MidiSeqSetTrackMute {
                             track_idx: idx,
                             muted,
                         });
@@ -312,7 +312,7 @@ impl App {
                         .collect();
                     self.show_toast(format!("MIDI loaded: {n} tracks, {ticks} ticks"), ToastKind::Success);
                     let _ = self
-                        .ctrl_tx
+                        .core_state_ui.ctrl_tx
                         .push(ControlEvent::MidiSeqLoad { data: Box::new(data) });
                 }
             },

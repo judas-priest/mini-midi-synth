@@ -5,30 +5,30 @@ use crate::synth::fx_chain::{FxChain, FxSlot, FxSlotType, FX_SLOTS};
 
 impl App {
     pub(super) fn draw_fx_chain(&mut self, ui: &mut egui::Ui) {
-        let part = self.active_part;
+        let part = self.core_state_ui.active_part;
 
         ui.horizontal(|ui| {
             ui.strong("FX Chain");
             ui.label("— 16 slots, serial processing");
             ui.separator();
-            if super::confirm::confirm_button(ui, "Reset FX", &mut self.fx_reset_confirm, true, "Reset FX chain to defaults") {
+            if super::confirm::confirm_button(ui, "Reset FX", &mut self.misc_ui.fx_reset_confirm, true, "Reset FX chain to defaults") {
                 let chain = FxChain { active: true, ..FxChain::default() };
-                flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
+                flush_fx_chain(&chain, part, &mut self.core_state_ui.parts[part].edited_params);
                 self.send_edited_params(part);
             }
             if ui.small_button("From preset").on_hover_text("Import FX from current preset").clicked() {
                 let chain = FxChain::from_legacy_preset_active(
-                    &self.parts[part].edited_params
+                    &self.core_state_ui.parts[part].edited_params
                 );
-                flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
+                flush_fx_chain(&chain, part, &mut self.core_state_ui.parts[part].edited_params);
                 self.send_edited_params(part);
             }
         });
         ui.add_space(theme::SP_SM);
 
         // Read current chain
-        let mut chain = if self.parts[part].edited_params.contains_key("fx0_type") {
-            FxChain::from_map(&self.parts[part].edited_params)
+        let mut chain = if self.core_state_ui.parts[part].edited_params.contains_key("fx0_type") {
+            FxChain::from_map(&self.core_state_ui.parts[part].edited_params)
         } else {
             FxChain { active: true, ..FxChain::default() }
         };
@@ -70,7 +70,7 @@ impl App {
 
         if changed {
             chain.active = true;
-            flush_fx_chain(&chain, part, &mut self.parts[part].edited_params);
+            flush_fx_chain(&chain, part, &mut self.core_state_ui.parts[part].edited_params);
             self.send_edited_params(part);
         }
     }

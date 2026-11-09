@@ -7,7 +7,7 @@ use super::theme;
 impl App {
     /// Обёртка для главного экрана: макро-панель активного парта.
     pub(super) fn draw_macros(&mut self, ui: &mut egui::Ui) {
-        self.draw_macros_for(ui, self.active_part);
+        self.draw_macros_for(ui, self.core_state_ui.active_part);
     }
 
     /// Macro panel for a SPECIFIC part (browser edits a non-active part).
@@ -34,8 +34,8 @@ impl App {
             .spacing([8.0, 4.0])
             .show(ui, |ui| {
                 for i in 0..8 {
-                    let val = self.parts[part].macro_vals[i];
-                    let name = self.parts[part].macro_names.get(i)
+                    let val = self.core_state_ui.parts[part].macro_vals[i];
+                    let name = self.core_state_ui.parts[part].macro_names.get(i)
                         .cloned()
                         .unwrap_or_else(|| format!("Macro {}", i + 1));
 
@@ -49,7 +49,7 @@ impl App {
                                 .hint_text(format!("Macro {}", i + 1))
                         );
                         if resp.changed() {
-                            if let Some(n) = self.parts[part].macro_names.get_mut(i) {
+                            if let Some(n) = self.core_state_ui.parts[part].macro_names.get_mut(i) {
                                 *n = name_edit.clone();
                             }
                             // Persist name into edited_params as a special float key
@@ -69,13 +69,13 @@ impl App {
                             self.push_undo_snapshot_for(part);
                         }
                         if resp.changed() {
-                            self.parts[part].macro_vals[i] = v;
+                            self.core_state_ui.parts[part].macro_vals[i] = v;
                             // Update edited_params so it's saved in patch
-                            self.parts[part].edited_params.insert(
+                            self.core_state_ui.parts[part].edited_params.insert(
                                 format!("macro_{i}"), v
                             );
                             // Send to audio engine immediately (real-time)
-                            let _ = self.ctrl_tx.push(ControlEvent::SetMacro {
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetMacro {
                                 part, index: i, value: v,
                             });
                         }
@@ -95,7 +95,7 @@ impl App {
     fn draw_xy_pad(&mut self, ui: &mut egui::Ui, part: usize) {
         let macro_labels: Vec<String> = (0..8)
             .map(|i| {
-                self.parts[part].macro_names.get(i)
+                self.core_state_ui.parts[part].macro_names.get(i)
                     .cloned()
                     .unwrap_or_else(|| format!("Macro {}", i + 1))
             })
@@ -108,12 +108,12 @@ impl App {
 
             ui.label("X:");
             egui::ComboBox::from_id_salt(format!("xy_x_{part}"))
-                .selected_text(macro_labels[self.parts[part].xy_macro_x].as_str())
+                .selected_text(macro_labels[self.core_state_ui.parts[part].xy_macro_x].as_str())
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     for (i, label) in macro_labels.iter().enumerate() {
                         ui.selectable_value(
-                            &mut self.parts[part].xy_macro_x,
+                            &mut self.core_state_ui.parts[part].xy_macro_x,
                             i,
                             label,
                         );
@@ -123,12 +123,12 @@ impl App {
             ui.add_space(theme::SP_MD);
             ui.label("Y:");
             egui::ComboBox::from_id_salt(format!("xy_y_{part}"))
-                .selected_text(macro_labels[self.parts[part].xy_macro_y].as_str())
+                .selected_text(macro_labels[self.core_state_ui.parts[part].xy_macro_y].as_str())
                 .width(90.0)
                 .show_ui(ui, |ui| {
                     for (i, label) in macro_labels.iter().enumerate() {
                         ui.selectable_value(
-                            &mut self.parts[part].xy_macro_y,
+                            &mut self.core_state_ui.parts[part].xy_macro_y,
                             i,
                             label,
                         );
@@ -138,8 +138,8 @@ impl App {
 
         ui.add_space(theme::SP_SM);
 
-        let xi = self.parts[part].xy_macro_x;
-        let yi = self.parts[part].xy_macro_y;
+        let xi = self.core_state_ui.parts[part].xy_macro_x;
+        let yi = self.core_state_ui.parts[part].xy_macro_y;
         if xi == yi {
             ui.colored_label(egui::Color32::YELLOW, egui::RichText::new("X and Y use the same macro").small());
         }
@@ -183,8 +183,8 @@ impl App {
         }
 
         // Current position
-        let x_val = self.parts[part].macro_vals[xi];
-        let y_val = self.parts[part].macro_vals[yi];
+        let x_val = self.core_state_ui.parts[part].macro_vals[xi];
+        let y_val = self.core_state_ui.parts[part].macro_vals[yi];
         let x_frac = x_val;
         let y_frac = 1.0 - y_val; // inverted so top = 1
         let dot_pos = egui::pos2(
@@ -240,16 +240,16 @@ impl App {
                     let new_y = 1.0 - ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
 
                     // Update X macro
-                    self.parts[part].macro_vals[xi] = new_x;
-                    self.parts[part].edited_params.insert(format!("macro_{xi}"), new_x);
-                    let _ = self.ctrl_tx.push(ControlEvent::SetMacro {
+                    self.core_state_ui.parts[part].macro_vals[xi] = new_x;
+                    self.core_state_ui.parts[part].edited_params.insert(format!("macro_{xi}"), new_x);
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetMacro {
                         part, index: xi, value: new_x,
                     });
 
                     // Update Y macro
-                    self.parts[part].macro_vals[yi] = new_y;
-                    self.parts[part].edited_params.insert(format!("macro_{yi}"), new_y);
-                    let _ = self.ctrl_tx.push(ControlEvent::SetMacro {
+                    self.core_state_ui.parts[part].macro_vals[yi] = new_y;
+                    self.core_state_ui.parts[part].edited_params.insert(format!("macro_{yi}"), new_y);
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SetMacro {
                         part, index: yi, value: new_y,
                     });
                 }

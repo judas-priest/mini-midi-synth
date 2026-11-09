@@ -41,7 +41,7 @@ impl App {
                 .weak());
             let perf_names: Vec<String> =
                 self.perf_ui.perf_list.iter().map(|(n, _)| n.clone()).collect();
-            let sel = self.config.ui.active_folder;
+            let sel = self.core_state_ui.config.ui.active_folder;
             let armed = self.perf_ui.tracks_del_armed;
 
             // ── Left pane: Setlists ──
@@ -53,13 +53,13 @@ impl App {
                         ops.push(Op::New);
                     }
                 });
-                if self.config.ui.perf_folders.is_empty() {
+                if self.core_state_ui.config.ui.perf_folders.is_empty() {
                     cols[0].add_space(theme::SP_MD);
                     cols[0].label(egui::RichText::new("No setlists yet.").weak());
                     cols[0].label(egui::RichText::new("Click + New to create one.").weak());
                 }
-                for fi in 0..self.config.ui.perf_folders.len() {
-                    let name = self.config.ui.perf_folders[fi].name.clone();
+                for fi in 0..self.core_state_ui.config.ui.perf_folders.len() {
+                    let name = self.core_state_ui.config.ui.perf_folders[fi].name.clone();
                     let active = sel == Some(fi);
                     let sel_here = self.perf_ui.tracks_sel == Some(fi);
                     cols[0].horizontal(|ui| {
@@ -79,14 +79,14 @@ impl App {
                 cols[1].horizontal(|ui| {
                     ui.label(egui::RichText::new(match sel {
                         Some(fi) => format!(
-                            "Contents: {}", self.config.ui.perf_folders[fi].name),
+                            "Contents: {}", self.core_state_ui.config.ui.perf_folders[fi].name),
                         None => "Contents".to_string(),
                     }).strong());
                 });
             });
 
             match sel {
-                Some(fi) if fi < self.config.ui.perf_folders.len() => {
+                Some(fi) if fi < self.core_state_ui.config.ui.perf_folders.len() => {
                     // ── Toolbar (non-destructive left, destructive right) ──
                     ui.horizontal(|ui| {
                         if ui.small_button("+ Current Perf").clicked() {
@@ -119,13 +119,13 @@ impl App {
                         });
                     });
                     // ── Alias rows: label … reorder ↑↓ … × (right edge) ──
-                    if self.config.ui.perf_folders[fi].perfs.is_empty() {
+                    if self.core_state_ui.config.ui.perf_folders[fi].perfs.is_empty() {
                         ui.add_space(theme::SP_SM);
                         ui.label(egui::RichText::new(
                             "Empty setlist — add performances above.").weak());
                     }
-                    for pi in (0..self.config.ui.perf_folders[fi].perfs.len()).rev() {
-                        let pname = self.config.ui.perf_folders[fi].perfs[pi].clone();
+                    for pi in (0..self.core_state_ui.config.ui.perf_folders[fi].perfs.len()).rev() {
+                        let pname = self.core_state_ui.config.ui.perf_folders[fi].perfs[pi].clone();
                         ui.horizontal(|ui| {
                             ui.label(format!("  {}", pname));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -135,7 +135,7 @@ impl App {
                                 {
                                     ops.push(Op::DelPerf(fi, pi));
                                 }
-                                if pi + 1 < self.config.ui.perf_folders[fi].perfs.len()
+                                if pi + 1 < self.core_state_ui.config.ui.perf_folders[fi].perfs.len()
                                     && ui.small_button("\u{2B07}").clicked()
                                 {
                                     ops.push(Op::MoveAliasDown(fi, pi));
@@ -151,7 +151,7 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label("Rename:");
                         let mut renamed =
-                            self.config.ui.perf_folders[fi].name.clone();
+                            self.core_state_ui.config.ui.perf_folders[fi].name.clone();
                         let resp = ui.add(egui::TextEdit::singleline(&mut renamed)
                             .desired_width(160.0)
                             .hint_text("Enter to apply"));
@@ -162,7 +162,7 @@ impl App {
                             && ui.input(|i| i.key_pressed(egui::Key::Enter))
                             && !renamed.trim().is_empty()
                             && renamed.trim()
-                                != self.config.ui.perf_folders[fi].name.as_str()
+                                != self.core_state_ui.config.ui.perf_folders[fi].name.as_str()
                         {
                             ops.push(Op::Rename(fi, renamed.trim().to_string()));
                         }
@@ -186,22 +186,22 @@ impl App {
         for op in ops {
             match op {
                 Op::SetActive(fi) => {
-                    if fi < self.config.ui.perf_folders.len() {
-                        self.config.ui.active_folder = Some(fi);
+                    if fi < self.core_state_ui.config.ui.perf_folders.len() {
+                        self.core_state_ui.config.ui.active_folder = Some(fi);
                         self.perf_ui.perf_window = 0;
                         self.mark_config_dirty();
                         self.refresh_console_list();
                     }
                 }
                 Op::Rename(fi, nm) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) { f.name = nm; }
+                    if let Some(f) = self.core_state_ui.config.ui.perf_folders.get_mut(fi) { f.name = nm; }
                     self.mark_config_dirty();
                 }
                 Op::MoveUp(fi) => {
-                    if fi > 0 && fi < self.config.ui.perf_folders.len() {
-                        self.config.ui.perf_folders.swap(fi - 1, fi);
-                        if self.config.ui.active_folder == Some(fi) {
-                            self.config.ui.active_folder = Some(fi - 1);
+                    if fi > 0 && fi < self.core_state_ui.config.ui.perf_folders.len() {
+                        self.core_state_ui.config.ui.perf_folders.swap(fi - 1, fi);
+                        if self.core_state_ui.config.ui.active_folder == Some(fi) {
+                            self.core_state_ui.config.ui.active_folder = Some(fi - 1);
                         }
                         if self.perf_ui.tracks_sel == Some(fi) {
                             self.perf_ui.tracks_sel = Some(fi - 1);
@@ -211,10 +211,10 @@ impl App {
                     }
                 }
                 Op::MoveDown(fi) => {
-                    if fi + 1 < self.config.ui.perf_folders.len() {
-                        self.config.ui.perf_folders.swap(fi, fi + 1);
-                        if self.config.ui.active_folder == Some(fi) {
-                            self.config.ui.active_folder = Some(fi + 1);
+                    if fi + 1 < self.core_state_ui.config.ui.perf_folders.len() {
+                        self.core_state_ui.config.ui.perf_folders.swap(fi, fi + 1);
+                        if self.core_state_ui.config.ui.active_folder == Some(fi) {
+                            self.core_state_ui.config.ui.active_folder = Some(fi + 1);
                         }
                         if self.perf_ui.tracks_sel == Some(fi) {
                             self.perf_ui.tracks_sel = Some(fi + 1);
@@ -224,18 +224,18 @@ impl App {
                     }
                 }
                 Op::DelFolder(fi) => {
-                    if fi < self.config.ui.perf_folders.len() {
-                        self.config.ui.perf_folders.remove(fi);
-                        match self.config.ui.active_folder {
-                            Some(a) if a == fi => self.config.ui.active_folder = None,
-                            Some(a) if a > fi => self.config.ui.active_folder = Some(a - 1),
+                    if fi < self.core_state_ui.config.ui.perf_folders.len() {
+                        self.core_state_ui.config.ui.perf_folders.remove(fi);
+                        match self.core_state_ui.config.ui.active_folder {
+                            Some(a) if a == fi => self.core_state_ui.config.ui.active_folder = None,
+                            Some(a) if a > fi => self.core_state_ui.config.ui.active_folder = Some(a - 1),
                             _ => {}
                         }
                         // sel за пределами после удаления — clamp (канон tracks_window)
                         if let Some(s) = self.perf_ui.tracks_sel {
-                            if s >= self.config.ui.perf_folders.len() {
+                            if s >= self.core_state_ui.config.ui.perf_folders.len() {
                                 self.perf_ui.tracks_sel =
-                                    self.config.ui.perf_folders.len().checked_sub(1);
+                                    self.core_state_ui.config.ui.perf_folders.len().checked_sub(1);
                             }
                         }
                         self.mark_config_dirty();
@@ -243,7 +243,7 @@ impl App {
                     }
                 }
                 Op::MoveAliasUp(fi, pi) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                    if let Some(f) = self.core_state_ui.config.ui.perf_folders.get_mut(fi) {
                         if pi > 0 && pi < f.perfs.len() {
                             f.perfs.swap(pi - 1, pi);
                             self.mark_config_dirty();
@@ -251,7 +251,7 @@ impl App {
                     }
                 }
                 Op::MoveAliasDown(fi, pi) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                    if let Some(f) = self.core_state_ui.config.ui.perf_folders.get_mut(fi) {
                         if pi + 1 < f.perfs.len() {
                             f.perfs.swap(pi, pi + 1);
                             self.mark_config_dirty();
@@ -259,29 +259,29 @@ impl App {
                     }
                 }
                 Op::DelPerf(fi, pi) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                    if let Some(f) = self.core_state_ui.config.ui.perf_folders.get_mut(fi) {
                         if pi < f.perfs.len() { f.perfs.remove(pi); }
                     }
                     self.mark_config_dirty();
                     self.refresh_console_list();
                 }
                 Op::AddCur(fi) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                    if let Some(f) = self.core_state_ui.config.ui.perf_folders.get_mut(fi) {
                         f.perfs.push(cur_perf.clone());
                     }
                     self.mark_config_dirty();
                     self.refresh_console_list();
                 }
                 Op::AddPerf(fi, n) => {
-                    if let Some(f) = self.config.ui.perf_folders.get_mut(fi) {
+                    if let Some(f) = self.core_state_ui.config.ui.perf_folders.get_mut(fi) {
                         f.perfs.push(n);
                     }
                     self.mark_config_dirty();
                     self.refresh_console_list();
                 }
                 Op::New => {
-                    let n = self.config.ui.perf_folders.len() + 1;
-                    self.config.ui.perf_folders.push(crate::config::PerfFolder {
+                    let n = self.core_state_ui.config.ui.perf_folders.len() + 1;
+                    self.core_state_ui.config.ui.perf_folders.push(crate::config::PerfFolder {
                         name: format!("Track {n}"),
                         perfs: Vec::new(),
                     });

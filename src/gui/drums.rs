@@ -33,7 +33,7 @@ impl App {
             let any_playing = self.drum_seq_ui.drum_playing || looper_active;
             let play_label = if any_playing { "\u{23F9} Stop" } else { "\u{25B6} Play" };
             if ui.button(play_label).on_hover_text("Master: drums + looper together").clicked() {
-                let _ = self.ctrl_tx.push(ControlEvent::MasterPlay);
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::MasterPlay);
             }
             let rec = self.drum_seq_ui.drum_recording
                 || matches!(lstate,
@@ -44,14 +44,14 @@ impl App {
             if ui.button(egui::RichText::new(rec_label).color(rec_color))
                 .on_hover_text("Master record: drums \u{27A1} grid, notes \u{27A1} looper (loop = 1 pattern cycle)").clicked()
             {
-                let _ = self.ctrl_tx.push(ControlEvent::MasterRecord);
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::MasterRecord);
             }
             // Overdub (слой поверх готовой петли): старт/закрытие на границе
             let ovr_enabled = lstate == crate::synth::looper::LooperState::Playing;
             if ui.add_enabled(ovr_enabled, egui::Button::new("Layer"))
                 .on_hover_text("Layer: overdub over the loop — starts at the boundary, press again to close").clicked()
             {
-                let _ = self.ctrl_tx.push(ControlEvent::MasterOverdub);
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::MasterOverdub);
             }
 
             // Downbeat flash indicator (lights ~150 ms after beat 1)
@@ -67,21 +67,21 @@ impl App {
             );
 
             if ui.button("Undo").on_hover_text("Undo last sequencer edit").clicked() {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqUndo);
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSeqUndo);
             }
             if super::confirm::confirm_button(ui, "Clear", &mut self.drum_seq_ui.drum_clear_confirm, true, "Clear all steps") {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqClear);
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSeqClear);
             }
 
             ui.separator();
             ui.label("BPM:");
             if ui.add(egui::DragValue::new(&mut self.drum_seq_ui.drum_bpm).range(40.0..=300.0).speed(0.5)).changed() {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_seq_ui.drum_bpm });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSeqBpm { bpm: self.drum_seq_ui.drum_bpm });
             }
             // Паттерн мутации поля — как drum_bpm выше (capture &mut self).
             // Персист обязателен: старый чекбокс звал save_global_to_config().
             if ui.checkbox(&mut self.drum_seq_ui.drum_metronome, "Metro").on_hover_text("Metronome click on beats").changed() {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_seq_ui.drum_metronome });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetMetronome { on: self.drum_seq_ui.drum_metronome });
                 self.save_global_to_config();
             }
 
@@ -99,7 +99,7 @@ impl App {
                 .on_hover_text("Chain: marked patterns play in order, one per bar")
                 .changed()
             {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqChain { on: self.drum_seq_ui.drum_chain_on });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSeqChain { on: self.drum_seq_ui.drum_chain_on });
                 self.drum_seq_ui.drum_chain_mask = if self.drum_seq_ui.drum_chain_on {
                     1 << self.drum_seq_ui.drum_current_pattern
                 } else {
@@ -118,9 +118,9 @@ impl App {
                 if resp.clicked() {
                     if self.drum_seq_ui.drum_chain_on {
                         self.drum_seq_ui.drum_chain_mask ^= 1 << p;
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumSeqChainToggle { pattern: p });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSeqChainToggle { pattern: p });
                     } else if !selected {
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumSeqQueuePattern { pattern: p });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSeqQueuePattern { pattern: p });
                     }
                 }
             }
@@ -150,7 +150,7 @@ impl App {
                     let pat = &mut self.drum_seq_ui.drum_patterns[pat_idx];
                     pat.beats_per_bar = bpb;
                     pat.length = bpb * 4;
-                    let _ = self.ctrl_tx.push(ControlEvent::DrumSeqTimeSig { beats_per_bar: bpb });
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSeqTimeSig { beats_per_bar: bpb });
                 }
             }
             ui.separator();
@@ -158,7 +158,7 @@ impl App {
             ui.label("Steps:");
             if ui.add(egui::DragValue::new(&mut length).range(1..=16).speed(0.2)).changed() {
                 self.drum_seq_ui.drum_patterns[pat_idx].length = length as u8;
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqLength { length: length as u8 });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSeqLength { length: length as u8 });
             }
         });
 
@@ -250,7 +250,7 @@ impl App {
                     if response.clicked() {
                         let new_vel = if vel > 0 { 0 } else { 100u8 };
                         self.drum_seq_ui.drum_patterns[pat_idx].steps[slot][step].velocity = new_vel;
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetStep {
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetStep {
                             slot: slot as u8, step: step as u8, velocity: new_vel,
                         });
                     }
@@ -263,7 +263,7 @@ impl App {
                         let new_val = (current - dy * 2.0).clamp(1.0, 127.0) as u8;
                         if new_val != vel {
                             self.drum_seq_ui.drum_patterns[pat_idx].steps[slot][step].velocity = new_val;
-                            let _ = self.ctrl_tx.push(ControlEvent::DrumSetStep {
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetStep {
                                 slot: slot as u8, step: step as u8, velocity: new_val,
                             });
                         }
@@ -272,7 +272,7 @@ impl App {
                     // Right-click: delete
                     if response.secondary_clicked() {
                         self.drum_seq_ui.drum_patterns[pat_idx].steps[slot][step].velocity = 0;
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetStep {
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetStep {
                             slot: slot as u8, step: step as u8, velocity: 0,
                         });
                     }
@@ -303,7 +303,7 @@ impl App {
                         .changed()
                     {
                         self.drum_seq_ui.drum_slot_mutes_view[slot] = sm;
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetMute { slot: slot as u8, mute: sm });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetMute { slot: slot as u8, mute: sm });
                     }
                     let mut level = self.drum_seq_ui.drum_params[slot].level;
                     let mut tune = self.drum_seq_ui.drum_params[slot].tune;
@@ -314,7 +314,7 @@ impl App {
                         .on_hover_text(format!("Level: {level:.2}"));
                     if lvl_r.changed() {
                         self.drum_seq_ui.drum_params[slot].level = level;
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
                     }
                     self.knob_feedback(&lvl_r, "L", format!("{level:.2}"));
                     // (#45) колесо над слайдером = шаг значения; глотаем smooth-дельту,
@@ -325,7 +325,7 @@ impl App {
                             level = (level + dy * 0.0025).clamp(0.0, 1.0);
                             ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
                             self.drum_seq_ui.drum_params[slot].level = level;
-                            let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Level(level) });
                             self.knob_feedback(&lvl_r, "L", format!("{level:.2}"));
                         }
                     }
@@ -333,7 +333,7 @@ impl App {
                         .on_hover_text(format!("Tune: {tune:+.1} st"));
                     if tune_r.changed() {
                         self.drum_seq_ui.drum_params[slot].tune = tune;
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
                     }
                     self.knob_feedback(&tune_r, "T", format!("{tune:+.1} st"));
                     // (#45) колесо: ~0.05 st/px (см. L)
@@ -343,7 +343,7 @@ impl App {
                             tune = (tune + dy * 0.05).clamp(-24.0, 24.0);
                             ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
                             self.drum_seq_ui.drum_params[slot].tune = tune;
-                            let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Tune(tune) });
                             self.knob_feedback(&tune_r, "T", format!("{tune:+.1} st"));
                         }
                     }
@@ -351,7 +351,7 @@ impl App {
                         .on_hover_text(format!("Decay: {decay:.2} s{dsp_hint}"));
                     if dec_r.changed() {
                         self.drum_seq_ui.drum_params[slot].decay = decay;
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
                     }
                     self.knob_feedback(&dec_r, "D", format!("{decay:.2} s"));
                     // (#45) колесо: ~0.01 s/px (см. L); add_enabled-гейт оставлен:
@@ -362,7 +362,7 @@ impl App {
                             decay = (decay + dy * 0.01).clamp(0.1, 4.0);
                             ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
                             self.drum_seq_ui.drum_params[slot].decay = decay;
-                            let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Decay(decay) });
                             self.knob_feedback(&dec_r, "D", format!("{decay:.2} s"));
                         }
                     }
@@ -371,7 +371,7 @@ impl App {
                         .on_hover_text(format!("Pan: {pan:+.2}{dsp_hint}"));
                     if pan_r.changed() {
                         self.drum_seq_ui.drum_params[slot].pan = pan;
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
                     }
                     self.knob_feedback(&pan_r, "P", format!("{pan:+.2}"));
                     // (#45) колесо: см. L
@@ -381,7 +381,7 @@ impl App {
                             pan = (pan + dy * 0.0025).clamp(-1.0, 1.0);
                             ui.ctx().input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
                             self.drum_seq_ui.drum_params[slot].pan = pan;
-                            let _ = self.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
+                            let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetParam { slot: slot as u8, param: DrumParam::Pan(pan) });
                             self.knob_feedback(&pan_r, "P", format!("{pan:+.2}"));
                         }
                     }
@@ -400,20 +400,20 @@ impl App {
             // Swing + Vol
             ui.label("Swing:");
             if ui.add(egui::Slider::new(&mut self.drum_seq_ui.drum_swing, 0.0..=0.66).fixed_decimals(2)).on_hover_text("Swing amount").changed() {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSeqSwing { swing: self.drum_seq_ui.drum_swing });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSeqSwing { swing: self.drum_seq_ui.drum_swing });
             }
 
             ui.separator();
             ui.label("Vol:");
             if ui.add(egui::Slider::new(&mut self.drum_seq_ui.drum_volume, 0.0..=2.0).fixed_decimals(2)).on_hover_text("Master drum volume").changed() {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_seq_ui.drum_volume });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetVolume { volume: self.drum_seq_ui.drum_volume });
             }
 
             ui.separator();
             if ui.checkbox(&mut self.drum_seq_ui.drum_fixed_velocity, "V127")
                 .on_hover_text("Fixed velocity: every hit triggers at max (127). For controllers without velocity.").changed()
             {
-                let _ = self.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_seq_ui.drum_fixed_velocity });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumSetFixedVelocity { fixed: self.drum_seq_ui.drum_fixed_velocity });
                 self.save_global_to_config();
             }
         });
@@ -476,7 +476,7 @@ impl App {
                         self.drum_seq_ui.drum_swing = kit.swing;
                         self.drum_seq_ui.drum_volume = kit.volume;
                         self.show_toast(format!("Kit loaded: {}", kit.name), ToastKind::Success);
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumLoadKit {
                             patterns: Box::new(patterns),
                             params: Box::new(params),
                             bpm: kit.bpm,
@@ -507,7 +507,7 @@ impl App {
                             "Imported {} bar(s) @ {:.0} BPM",
                             patterns_vec.len().min(8), bpm,
                         ), ToastKind::Success);
-                        let _ = self.ctrl_tx.push(ControlEvent::DrumLoadKit {
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::DrumLoadKit {
                             patterns: Box::new(patterns),
                             params: Box::new(self.drum_seq_ui.drum_params),
                             bpm,
@@ -681,7 +681,7 @@ impl App {
 
     pub(super) fn draw_pitch_sequencer(&mut self, ui: &mut egui::Ui) {
         use crate::synth::step_seq::{StepRate, ScaleType};
-        let part = self.active_part;
+        let part = self.core_state_ui.active_part;
         if part >= 2 { return; }
 
         let enabled = self.pitch_seq_ui.pitch_seq_enabled[part];
@@ -694,7 +694,7 @@ impl App {
                     let mut en = enabled;
                     if ui.checkbox(&mut en, "Enable").changed() {
                         self.pitch_seq_ui.pitch_seq_enabled[part] = en;
-                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetEnabled { part, enabled: en });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SeqSetEnabled { part, enabled: en });
                     }
 
                     ui.separator();
@@ -710,7 +710,7 @@ impl App {
                                 let r = StepRate::from_index(i);
                                 if ui.selectable_label(i == self.pitch_seq_ui.pitch_seq_rate[part], r.name()).clicked() {
                                     self.pitch_seq_ui.pitch_seq_rate[part] = i;
-                                    let _ = self.ctrl_tx.push(ControlEvent::SeqSetRate { part, rate: i });
+                                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SeqSetRate { part, rate: i });
                                 }
                             }
                         });
@@ -725,7 +725,7 @@ impl App {
                                 let s = ScaleType::from_index(i);
                                 if ui.selectable_label(i == self.pitch_seq_ui.pitch_seq_scale[part], s.name()).clicked() {
                                     self.pitch_seq_ui.pitch_seq_scale[part] = i;
-                                    let _ = self.ctrl_tx.push(ControlEvent::SeqSetScale { part, scale: i });
+                                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SeqSetScale { part, scale: i });
                                 }
                             }
                         });
@@ -736,7 +736,7 @@ impl App {
                     let len_resp = ui.add(egui::DragValue::new(&mut len).range(1..=16).speed(0.1));
                     if len_resp.changed() {
                         self.pitch_seq_ui.pitch_seq_length[part] = len as u8;
-                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetLength { part, length: len as u8 });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SeqSetLength { part, length: len as u8 });
                     }
 
                     // Swing
@@ -744,7 +744,7 @@ impl App {
                     let mut sw = self.pitch_seq_ui.pitch_seq_swing[part];
                     if ui.add(egui::DragValue::new(&mut sw).range(0.0..=0.66).speed(0.005).fixed_decimals(2)).changed() {
                         self.pitch_seq_ui.pitch_seq_swing[part] = sw;
-                        let _ = self.ctrl_tx.push(ControlEvent::SeqSetSwing { part, swing: sw });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SeqSetSwing { part, swing: sw });
                     }
                 });
 
@@ -882,7 +882,7 @@ impl App {
                                 let pitch = pitch.clamp(-24, 24);
                                 self.pitch_seq_ui.pitch_seq_steps[part][step_idx].pitch = pitch;
                                 let step = &self.pitch_seq_ui.pitch_seq_steps[part][step_idx];
-                                let _ = self.ctrl_tx.push(ControlEvent::SeqSetStep {
+                                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SeqSetStep {
                                     part, step: step_idx as u8,
                                     pitch, gate: step.gate, velocity: step.velocity,
                                 });
@@ -891,7 +891,7 @@ impl App {
                                 let gate = !self.pitch_seq_ui.pitch_seq_steps[part][step_idx].gate;
                                 self.pitch_seq_ui.pitch_seq_steps[part][step_idx].gate = gate;
                                 let step = &self.pitch_seq_ui.pitch_seq_steps[part][step_idx];
-                                let _ = self.ctrl_tx.push(ControlEvent::SeqSetStep {
+                                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::SeqSetStep {
                                     part, step: step_idx as u8,
                                     pitch: step.pitch, gate, velocity: step.velocity,
                                 });
@@ -932,7 +932,7 @@ impl App {
             if ui.add_enabled(layer_count > 1 && event_count > 0, egui::Button::new("Undo"))
                 .on_hover_text(format!("Undo last looper layer (L{layer_count})")).clicked()
             {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperUndo);
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperUndo);
             }
 
             if super::confirm::confirm_button(
@@ -942,7 +942,7 @@ impl App {
                 event_count > 0 || state != LooperState::Idle,
                 "Clear the whole looper (destructive)",
             ) {
-                let _ = self.ctrl_tx.push(ControlEvent::LooperClear);
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperClear);
             }
 
             ui.separator();
@@ -996,12 +996,12 @@ impl App {
             if ui.add_enabled(capturing, egui::Button::new("+1 bar"))
                 .on_hover_text("Add a bar to the loop (recording continues)").clicked()
             {
-                let _ = self.ctrl_tx.push(ControlEvent::CaptureCycleAdd);
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::CaptureCycleAdd);
             }
             if ui.add_enabled(capturing, egui::Button::new("−1 bar"))
                 .on_hover_text("Remove the last bar (write cursor rewinds — replay it)").clicked()
             {
-                let _ = self.ctrl_tx.push(ControlEvent::CaptureCycleRemove);
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::CaptureCycleRemove);
             }
         });
 
@@ -1012,7 +1012,7 @@ impl App {
             for &b in &[1u8, 2, 4, 8] {
                 if ui.selectable_label(self.looper_ui.looper_bars == b, format!("{b}")).clicked() {
                     self.looper_ui.looper_bars = b;
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetBars { bars: b });
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetBars { bars: b });
                 }
             }
             // Честная длина петли: после квантованного захвата = цикл паттерна
@@ -1028,7 +1028,7 @@ impl App {
                 let idx = idx as u8;
                 if ui.selectable_label(self.looper_ui.looper_quantize == idx, label).clicked() {
                     self.looper_ui.looper_quantize = idx;
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: idx });
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetQuantize { quantize: idx });
                 }
             }
             ui.separator();
@@ -1036,10 +1036,10 @@ impl App {
             // Source toggle (TECHDEBT #33/#2 partial): Mix records every
             // sounding enabled part (default); Part records only the active
             // part. Live transport state — not persisted (like seq_target).
-            let ap = self.active_part;
+            let ap = self.core_state_ui.active_part;
             let zone = if ap < super::PARTS_PER_ZONE { "A" } else { "B" };
             let num = (ap % super::PARTS_PER_ZONE) + 1;
-            let part_name = self.patches.get(self.parts[ap].patch_idx)
+            let part_name = self.core_state_ui.patches.get(self.core_state_ui.parts[ap].patch_idx)
                 .map(|p| p.name.as_str()).unwrap_or("---");
             let is_recording = matches!(state, LooperState::Recording | LooperState::Overdubbing);
             ui.label(egui::RichText::new("Source").weak().small());
@@ -1050,7 +1050,7 @@ impl App {
                 && !self.looper_ui.looper_source_mix
             {
                 self.looper_ui.looper_source_mix = true;
-                let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: true });
+                let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetSource { mix: true });
             }
             if self.looper_ui.looper_source_mix {
                 // Collapsed: a single "Part" switch to leave Mix mode.
@@ -1059,7 +1059,7 @@ impl App {
                     .clicked()
                 {
                     self.looper_ui.looper_source_mix = false;
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetSource { mix: false });
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetSource { mix: false });
                 }
             } else {
                 // Part source: records the active part (red "Rec" prefix while
@@ -1071,11 +1071,11 @@ impl App {
                     .selected_text(egui::RichText::new(&selected).color(rec_text_color))
                     .width(160.0)
                     .show_ui(ui, |ui| {
-                        for i in 0..self.parts.len() {
-                            if !self.parts[i].enabled { continue; }
+                        for i in 0..self.core_state_ui.parts.len() {
+                            if !self.core_state_ui.parts[i].enabled { continue; }
                             let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
                             let n = (i % super::PARTS_PER_ZONE) + 1;
-                            let pname = self.patches.get(self.parts[i].patch_idx)
+                            let pname = self.core_state_ui.patches.get(self.core_state_ui.parts[i].patch_idx)
                                 .map(|p| p.name.as_str()).unwrap_or("---");
                             let label = format!("{z}{n}: {pname}");
                             if ui.selectable_label(i == ap, egui::RichText::new(label).color(part_colors[i % 8])).clicked() {
@@ -1088,12 +1088,12 @@ impl App {
 
         // --- Part mutes: filter looper replay per part (TECHDEBT #30/#34),
         // same "M" button pattern as the layer mutes below ---
-        let any_part_enabled = self.parts.iter().any(|p| p.enabled);
+        let any_part_enabled = self.core_state_ui.parts.iter().any(|p| p.enabled);
         if any_part_enabled {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("Mute parts").weak().small());
-                for i in 0..self.parts.len().min(self.looper_ui.looper_part_mutes.len()) {
-                    if !self.parts[i].enabled { continue; }
+                for i in 0..self.core_state_ui.parts.len().min(self.looper_ui.looper_part_mutes.len()) {
+                    if !self.core_state_ui.parts[i].enabled { continue; }
                     let muted = self.looper_ui.looper_part_mutes[i];
                     let color = if muted { egui::Color32::RED } else { part_colors[i % 8] };
                     let z = if i < super::PARTS_PER_ZONE { "A" } else { "B" };
@@ -1107,7 +1107,7 @@ impl App {
                         .clicked()
                     {
                         self.looper_ui.looper_part_mutes[i] = !muted;
-                        let _ = self.ctrl_tx.push(ControlEvent::LooperSetPartMute { part: i as u8, mute: !muted });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetPartMute { part: i as u8, mute: !muted });
                     }
                 }
             });
@@ -1170,7 +1170,7 @@ impl App {
                     if pid == 254 { return "Drums".to_string(); }
                     let z = if (pid as usize) < super::PARTS_PER_ZONE { "A" } else { "B" };
                     let n = (pid as usize % super::PARTS_PER_ZONE) + 1;
-                    let pname = self.patches.get(self.parts[pid as usize].patch_idx)
+                    let pname = self.core_state_ui.patches.get(self.core_state_ui.parts[pid as usize].patch_idx)
                         .map(|p| p.name.as_str()).unwrap_or("---");
                     if full_name {
                         format!("{z}{n}:{pname}")
@@ -1196,10 +1196,10 @@ impl App {
                 if ui.button(s_text).on_hover_text("Solo layer").clicked() {
                     if soloed {
                         self.looper_ui.looper_solo_layer = None;
-                        let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: None });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: None });
                     } else {
                         self.looper_ui.looper_solo_layer = Some(*layer_id);
-                        let _ = self.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: Some(*layer_id) });
+                        let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetSolo { layer: Some(*layer_id) });
                     }
                 }
 
@@ -1210,7 +1210,7 @@ impl App {
                 if ui.button(m_text).on_hover_text("Mute layer").clicked() {
                     let new_mute = !muted;
                     self.looper_ui.looper_layer_mute[*layer_id as usize] = new_mute;
-                    let _ = self.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: *layer_id, mute: new_mute });
+                    let _ = self.core_state_ui.ctrl_tx.push(ControlEvent::LooperSetLayerMute { layer: *layer_id, mute: new_mute });
                 }
 
                 // Current layer indicator
