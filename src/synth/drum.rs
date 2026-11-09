@@ -1314,6 +1314,14 @@ impl DrumEngine {
     /// Returns (left, right) audio and any sequencer triggers for SF2 routing.
     pub fn tick(&mut self) -> ((f32, f32), DrumTriggers) {
         let empty_triggers = DrumTriggers { triggers: [(0, 0); NUM_DRUM_SLOTS], count: 0 };
+        // Report current sequencer state even when the engine is disabled:
+        // DrumSeqPlay toggles sequencer.playing regardless, and the GUI
+        // indicators must not freeze on the last enabled-frame values.
+        // (The post-tick store below still runs on the enabled path — moving
+        // it here would lag the step atom by one block and break beat-flash.)
+        self.step_atom.store(self.sequencer.current_step, Ordering::Relaxed);
+        self.play_atom.store(self.sequencer.playing as u8, Ordering::Relaxed);
+        self.rec_atom.store(self.sequencer.recording as u8, Ordering::Relaxed);
         if !self.enabled { return ((0.0, 0.0), empty_triggers); }
 
         // Process sequencer
