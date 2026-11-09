@@ -65,17 +65,33 @@ pub struct AirwindowsToVinyl4 {
     bass_lp_l: f32, bass_lp_r: f32,
     hf_lp_l: f32, hf_lp_r: f32,
     sample_rate: f32,
+    // Cached LP coefficients — recomputed only when the drive param changes
+    // bit-exactly or sr changes (per-sample exp hoist, audit exp/powf)
+    bass_coeff: f32,
+    hf_coeff: f32,
+    last_drive: f32,
 }
 impl AirwindowsToVinyl4 {
     pub fn new(sample_rate: f32) -> Self {
-        Self { bass_lp_l: 0.0, bass_lp_r: 0.0, hf_lp_l: 0.0, hf_lp_r: 0.0, sample_rate }
+        Self { bass_lp_l: 0.0, bass_lp_r: 0.0, hf_lp_l: 0.0, hf_lp_r: 0.0, sample_rate, bass_coeff: 0.0, hf_coeff: 0.0, last_drive: f32::NAN }
     }
-    pub fn set_sample_rate(&mut self, sr: f32) { self.sample_rate = sr; }
+    pub fn set_sample_rate(&mut self, sr: f32) {
+        self.sample_rate = sr;
+        // invalidate cached coefficients (sr changed)
+        self.last_drive = f32::NAN;
+    }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
         let sr = self.sample_rate;
-        let bass_coeff = (-2.0 * std::f32::consts::PI * 35.0 / sr).exp();
-        let hf_base = 5000.0 + drive * 2000.0;
-        let hf_coeff = (-2.0 * std::f32::consts::PI * hf_base / sr).exp();
+        // per-sample exp hoist: coefficients depend only on the drive param
+        // + sr — cached, recomputed on exact param change (audit exp/powf)
+        if drive != self.last_drive {
+            self.last_drive = drive;
+            self.bass_coeff = (-2.0 * std::f32::consts::PI * 35.0 / sr).exp();
+            let hf_base = 5000.0 + drive * 2000.0;
+            self.hf_coeff = (-2.0 * std::f32::consts::PI * hf_base / sr).exp();
+        }
+        let bass_coeff = self.bass_coeff;
+        let hf_coeff = self.hf_coeff;
         self.bass_lp_l = self.bass_lp_l * bass_coeff + in_l * (1.0 - bass_coeff);
         self.bass_lp_r = self.bass_lp_r * bass_coeff + in_r * (1.0 - bass_coeff);
         self.hf_lp_l = self.hf_lp_l * hf_coeff + in_l * (1.0 - hf_coeff);
@@ -108,16 +124,27 @@ impl AirwindowsAtmosphere {
 pub struct AirwindowsPressure5 {
     env_l: f32, env_r: f32,
     sample_rate: f32,
+    // Cached envelope follower coefficients, SR-independent — recomputed in
+    // new()/set_sample_rate (per-sample exp hoist, audit exp/powf)
+    att: f32,
+    rel: f32,
 }
 impl AirwindowsPressure5 {
     pub fn new(sample_rate: f32) -> Self {
-        Self { env_l: 0.0, env_r: 0.0, sample_rate }
+        Self {
+            env_l: 0.0, env_r: 0.0, sample_rate,
+            att: (-1.0 / (0.00045 * sample_rate)).exp(),
+            rel: (-1.0 / (0.00227 * sample_rate)).exp(),
+        }
     }
-    pub fn set_sample_rate(&mut self, sr: f32) { self.sample_rate = sr; }
+    pub fn set_sample_rate(&mut self, sr: f32) {
+        self.sample_rate = sr;
+        self.att = (-1.0 / (0.00045 * sr)).exp();
+        self.rel = (-1.0 / (0.00227 * sr)).exp();
+    }
     pub fn tick(&mut self, in_l: f32, in_r: f32, drive: f32) -> (f32, f32) {
-        let sr = self.sample_rate;
-        let att = (-1.0 / (0.00045 * sr)).exp();
-        let rel = (-1.0 / (0.00227 * sr)).exp();
+        let att = self.att;
+        let rel = self.rel;
         let level_l = in_l.abs();
         let level_r = in_r.abs();
         self.env_l = if level_l > self.env_l { att * self.env_l + (1.0 - att) * level_l }
