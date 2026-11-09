@@ -1,6 +1,11 @@
 //! GUI interface using egui/eframe.
 
 mod params;
+mod params_osc;
+mod params_filter;
+mod params_env;
+mod params_lfo;
+mod params_matrix;
 mod drums;
 
 /// Parts per split zone (A: 0..N, B: N..2N)
