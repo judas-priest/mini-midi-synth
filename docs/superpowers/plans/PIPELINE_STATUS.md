@@ -17,8 +17,8 @@ looper-sustain-capture).
 | 7 | per-sample-exp-powf | DONE (PR #111, не смержен) | perf/exp-powf-hoists | #111 |
 | 6 | gui-io-worker | DONE (PR #112, не смержен) | fix/gui-io-worker | #112 |
 | 4 | rhythm-low-batch | DONE (PR #113, не смержен) | fix/rhythm-low-batch | #113 |
-| 8 | tick-block-extract | in_progress | refactor/tick-block-extract | — |
-| 10 | params-split | pending | — | — |
+| 8 | tick-block-extract | DONE (PR #114, не смержен) | refactor/tick-block-extract | #114 |
+| 10 | params-split | in_progress | refactor/params-split | — |
 | 9 | app-substructs | pending | — | — |
 | 5 | rt-allocations | pending | — | — |
 
@@ -45,3 +45,7 @@ looper-sustain-capture).
 - 2026-11-09: план 4 ГОТОВ → PR #113 (не смержен). Ревью APPROVE; известное
   ограничение зафиксировано (per-channel bitmask не различает ноты).
   Начат план 8 (tick_block extract: characterization 3 пробела → verbatim move).
+- 2026-11-09: план 8 ГОТОВ → PR #114 (не смержен). Verbatim-дифф: ровно один
+  дельта (step → параметр); characterization tc15-18; tick_block 546→414.
+  Начат план 10 (params.rs split: фаза A секции-методы + pin-гвард, фаза B
+  перенос в params_*.rs).
