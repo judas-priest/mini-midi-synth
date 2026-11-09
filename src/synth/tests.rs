@@ -1877,12 +1877,13 @@ fn tc_xorshift32_canon_sequence() {
 // ks_brightness/ks_feedback используются ДВУМЯ движками с РАЗНЫми
 // диапазонами: KarplusStrong (Brightness 0.05..1.0 / Feedback 0.9..0.9999)
 // и PianoModel (Brightness (Strike) 0.0..1.0 / Sustain 0.0..1.0).
-// Это НЕ дрейф — пин фиксирует осознанные значения (GUI params.rs).
+// Это НЕ дрейф — пин фиксирует осознанные значения (GUI params_osc.rs).
 
 #[test]
 fn tc_ks_ranges_intentionally_diverged() {
-    // Маркеры источников (grep params.rs): обе пары присутствуют и различны.
-    let src = include_str!("../gui/params.rs");
+    // Маркеры источников (grep params_osc.rs): обе пары присутствуют и различны.
+    // (путь обновлён при params-split — осцилляторные секции переехали из params.rs)
+    let src = include_str!("../gui/params_osc.rs");
     let ks = "self.param_slider(ui, \"ks_brightness\", \"Brightness\", 0.05, 1.0, false)";
     let ks_fb = "self.param_slider(ui, \"ks_feedback\", \"Feedback\", 0.9, 0.9999, false)";
     let pm = "self.param_slider(ui, \"ks_brightness\", \"Brightness (Strike)\", 0.0, 1.0, false)";
