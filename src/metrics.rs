@@ -14,6 +14,9 @@ pub struct Metrics {
     pub midi_dropped: AtomicU64,
     /// Control events the GUI could not enqueue.
     pub ctrl_dropped: AtomicU64,
+    /// Looper sustain capture: deferred note-offs that had to be written
+    /// immediately because the fixed pending array was full.
+    pub looper_pending_overflow: AtomicU64,
     /// Audio callbacks that reported an error (xrun, device error).
     pub stream_errors: AtomicU32,
     /// Longest callback duration seen since the last read, in microseconds.
@@ -34,6 +37,7 @@ impl Metrics {
         Self {
             midi_dropped: AtomicU64::new(0),
             ctrl_dropped: AtomicU64::new(0),
+            looper_pending_overflow: AtomicU64::new(0),
             stream_errors: AtomicU32::new(0),
             worst_callback_us: AtomicU32::new(0),
             callback_us_sum: AtomicU64::new(0),
@@ -45,6 +49,11 @@ impl Metrics {
     #[inline]
     pub fn note_midi_drop(&self) {
         self.midi_dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn note_looper_pending_overflow(&self) {
+        self.looper_pending_overflow.fetch_add(1, Ordering::Relaxed);
     }
 
     #[inline]
@@ -95,6 +104,11 @@ impl Metrics {
 
     pub fn stream_error_count(&self) -> u32 {
         self.stream_errors.load(Ordering::Relaxed)
+    }
+
+    /// Deferred looper note-offs written immediately (pending array was full).
+    pub fn looper_pending_overflow_count(&self) -> u64 {
+        self.looper_pending_overflow.load(Ordering::Relaxed)
     }
 }
 

@@ -1077,16 +1077,19 @@ impl eframe::App for App {
 
                         let dropped = crate::metrics::METRICS.total_dropped();
                         let errors = crate::metrics::METRICS.stream_error_count();
-                        if dropped > 0 || errors > 0 {
+                        let sustain_ovf = crate::metrics::METRICS.looper_pending_overflow_count();
+                        if dropped > 0 || errors > 0 || sustain_ovf > 0 {
                             ui.separator();
                             ui.colored_label(
                                 theme::TEXT_WARN,
-                                format!("drops {dropped} | errs {errors}"),
+                                format!("drops {dropped} | errs {errors} | sustain-ovf {sustain_ovf}"),
                             )
                             .on_hover_text(
                                 "MIDI and control events that never reached the engine, and audio \
                                  stream errors. A lost NoteOff is a stuck note; non-zero here means \
-                                 something is wrong.",
+                                 something is wrong. «sustain-ovf» = looper note-offs written at \
+                                 key-release because the sustain-capture pending list was full \
+                                 (>16 notes held under one pedal press — long chordal passages).",
                             );
                         }
                     }
