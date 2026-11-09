@@ -14,8 +14,8 @@ looper-sustain-capture).
 | 1 | scene-lfo-envelope | DONE (PR #108, не смержен) | fix/scene-lfo-envelope | #108 |
 | 2 | golden-hermeticity | DONE (PR #109, не смержен) | test/golden-hermeticity | #109 |
 | 3 | sf2-data-small-fixes | DONE (PR #110, не смержен) | fix/sf2-data-small | #110 |
-| 7 | per-sample-exp-powf | in_progress | perf/exp-powf-hoists | — |
-| 6 | gui-io-worker | pending | — | — |
+| 7 | per-sample-exp-powf | DONE (PR #111, не смержен) | perf/exp-powf-hoists | #111 |
+| 6 | gui-io-worker | in_progress | fix/gui-io-worker | — |
 | 4 | rhythm-low-batch | pending | — | — |
 | 8 | tick-block-extract | pending | — | — |
 | 10 | params-split | pending | — | — |
@@ -36,3 +36,6 @@ looper-sustain-capture).
 - 2026-11-09: план 3 ГОТОВ → PR #110 (не смержен). Ревью APPROVE: все 6
   фиксов верифицированы, гейты зелёные. Начат план 7 (exp/powf hoists,
   бит-точные).
+- 2026-11-09: план 7 ГОТОВ → PR #111 (не смержен). 19 коммитов, 24 сайта
+  hoist'нуто (14 synth + 10 airwindows), кэш с NaN-сентинелом признан sound;
+  1 LOW (ButterComp2) довжён. Начат план 6 (GUI I/O worker).
