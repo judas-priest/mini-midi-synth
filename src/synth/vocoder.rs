@@ -118,6 +118,12 @@ pub struct Vocoder {
     bands: [VocoderBand; NUM_BANDS],
     /// Centre frequencies for each band (Hz)
     centre_freqs: [f32; NUM_BANDS],
+    // Cached envelope-follower coefficients — recomputed only when the
+    // env_follow param changes bit-exactly or sr changes (per-sample exp
+    // hoist, audit exp/powf)
+    follow_coeff: f32,
+    att: f32,
+    follow_last: f32,
 }
 
 impl Vocoder {
@@ -126,6 +132,9 @@ impl Vocoder {
             sample_rate: sr,
             bands: std::array::from_fn(|_| VocoderBand::default()),
             centre_freqs: [0.0; NUM_BANDS],
+            follow_coeff: 0.0,
+            att: 0.0,
+            follow_last: f32::NAN,
         };
         v.compute_band_freqs();
         v.recompute_coefficients();
@@ -134,6 +143,8 @@ impl Vocoder {
 
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sample_rate = sr;
+        // invalidate cached follower coefficients (sr changed)
+        self.follow_last = f32::NAN;
         self.recompute_coefficients();
     }
 
@@ -176,9 +187,17 @@ impl Vocoder {
 
         // Envelope follower time constant: 10ms..200ms
         let follow_ms = 10.0 + env_follow * 190.0;
-        let follow_coeff = (-1.0 / (follow_ms * 0.001 * sr)).exp();
-        // Precompute attack coefficient (1/4 of follow time) — same for all bands
-        let att = (-1.0 / (follow_ms * 0.001 * sr * 0.25)).exp();
+        // per-sample exp hoist: coefficients depend only on the env_follow
+        // param + sr — cached, recomputed on exact param change
+        // (audit exp/powf)
+        if env_follow != self.follow_last {
+            self.follow_last = env_follow;
+            self.follow_coeff = (-1.0 / (follow_ms * 0.001 * sr)).exp();
+            // Precompute attack coefficient (1/4 of follow time) — same for all bands
+            self.att = (-1.0 / (follow_ms * 0.001 * sr * 0.25)).exp();
+        }
+        let follow_coeff = self.follow_coeff;
+        let att = self.att;
 
         // Process each band
         let mut band_env = [0.0_f32; NUM_BANDS];
