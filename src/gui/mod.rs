@@ -405,6 +405,11 @@ pub struct App {
     /// conservative nav guard (set during draw, read next frame in update()).
     pub tracks_rename_focus: bool,
     pub pat_window: usize,    // first pattern idx visible on slots 1..=7
+    /// Pattern whose LED-window move waits for the engine's confirmed atom
+    /// (audit rhythm #20): a dropped DrumSeqPattern push would otherwise leave
+    /// the window pointing at a pattern that never became active. Set by the
+    /// optimistic console actions, fired+cleared by the atom resync below.
+    pub pending_window_pattern: Option<u8>,
     pub mute_window: usize,   // first part idx visible on MUTE slots 1..=7
     pub drum_undo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub drum_redo_atom: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -669,6 +674,7 @@ impl App {
             tracks_sel: None,
             tracks_rename_focus: false,
             pat_window: 0,
+            pending_window_pattern: None,
             mute_window: 0,
             drum_undo_atom: c.handles.drum_undo_atom,
             drum_redo_atom: c.handles.drum_redo_atom,
@@ -954,6 +960,16 @@ impl eframe::App for App {
         // truth — a queued switch applies at the boundary, and chain switches
         // happen in the engine, so the GUI never assigns this field directly.
         self.drum_current_pattern = self.drum_pattern_atom.load(Ordering::Relaxed);
+        // LED-window follows the CONFIRMED pattern (audit rhythm #20): the
+        // optimistic console actions only arm `pending_window_pattern`; the
+        // window moves here, once the engine atom confirms the switch (a
+        // dropped push leaves the window untouched). follow_start is
+        // idempotent — a pattern already inside the window is a no-op.
+        let atom_pattern = self.drum_current_pattern;
+        if self.pending_window_pattern == Some(atom_pattern) {
+            self.follow_window(atom_pattern as usize, false);
+            self.pending_window_pattern = None;
+        }
         // Beat-1 flash: the step atom shows the NEXT step, so step 0 has just
         // sounded when the atom transitions 0 -> 1 while playing.
         let step_now = self.drum_step_atom.load(Ordering::Relaxed);
@@ -2445,7 +2461,9 @@ impl App {
                 let idx = self.pat_window + i;
                 if idx < 8 {
                     let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: idx as u8 });
-                    self.follow_window(idx, false);
+                    // No optimistic window move: wait for the confirmed atom
+                    // (audit rhythm #20) so a dropped push cannot desync.
+                    self.pending_window_pattern = Some(idx as u8);
                 }
             }
             led_console::Action::ToggleMute(i) => {
@@ -2494,8 +2512,9 @@ impl App {
                 let next = (self.drum_current_pattern as i32 + dir).rem_euclid(8);
                 let _ = self.ctrl_tx.push(crate::synth::ControlEvent::DrumSeqPattern { pattern: next as u8 });
                 // follow снапится на границу страницы — degenerate window 7
-                // больше не возникает (#50-фикс)
-                self.follow_window(next as usize, false);
+                // больше не возникает (#50-фикс). Сам follow — по
+                // подтверждённому атому (audit rhythm #20), не оптимистично.
+                self.pending_window_pattern = Some(next as u8);
             }
             led_console::Action::PageBack => {
                 // ЧИСТОЕ листание: follow после paging притягивал окно к
