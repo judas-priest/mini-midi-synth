@@ -19,9 +19,24 @@ impl Keybinds {
     pub fn from_config(binds: Option<&HashMap<String, String>>) -> Self {
         let mut k = Self::defaults();
         if let Some(map) = binds {
+            // F14: unknown key/action strings were silently dropped —
+            // distinguish what exactly is invalid (audit data #F14).
             k.binds = map.iter()
                 .filter_map(|(key_str, action_str)| {
-                    Some((key_from_str(key_str)?, KeyAction::from_str(action_str)?))
+                    let key = match key_from_str(key_str) {
+                        Some(k) => k,
+                        None => {
+                            log::warn!("keybinds: unknown key {key_str:?} — entry dropped");
+                            return None;
+                        }
+                    };
+                    match KeyAction::from_str(action_str) {
+                        Some(a) => Some((key, a)),
+                        None => {
+                            log::warn!("keybinds: unknown action {action_str:?} — entry dropped");
+                            None
+                        }
+                    }
                 })
                 .collect();
         }
@@ -51,8 +66,18 @@ impl Keybinds {
     }
 
     pub fn to_config(&self) -> HashMap<String, String> {
+        // F15: a key outside KEY_TABLE used to persist as "?" — which
+        // key_from_str could never parse back, silently losing the bind on
+        // reload. Skip + warn (detect_key_press is KEY_TABLE-limited, so this
+        // guards the pub API binds_mut; audit data #F15).
         self.binds.iter()
-            .map(|(key, action)| (key_to_str(*key).to_string(), action.to_config_string()))
+            .filter_map(|(key, action)| {
+                let Some(key_str) = key_to_str(*key) else {
+                    log::warn!("keybinds: key for {action:?} outside KEY_TABLE — not persisted");
+                    return None;
+                };
+                Some((key_str.to_string(), action.to_config_string()))
+            })
             .collect()
     }
 
@@ -120,8 +145,10 @@ const KEY_TABLE: &[(egui::Key, &str)] = &[
     (egui::Key::OpenBracket, "["), (egui::Key::CloseBracket, "]"),
 ];
 
-pub fn key_to_str(key: egui::Key) -> &'static str {
-    KEY_TABLE.iter().find(|(k, _)| *k == key).map(|(_, s)| *s).unwrap_or("?")
+/// `None` for keys outside KEY_TABLE (F15: caller decides — "?" is fine for
+/// display, persistence must skip the entry).
+pub fn key_to_str(key: egui::Key) -> Option<&'static str> {
+    KEY_TABLE.iter().find(|(k, _)| *k == key).map(|(_, s)| *s)
 }
 
 pub fn key_from_str(s: &str) -> Option<egui::Key> {
@@ -133,4 +160,28 @@ pub fn detect_key_press(ctx: &egui::Context) -> Option<egui::Key> {
     ctx.input(|i| {
         KEY_TABLE.iter().map(|&(key, _)| key).find(|&key| i.key_pressed(key))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_config_skips_keys_outside_key_table() {
+        let mut k = Keybinds::defaults();
+        // Comma exists in egui 0.31 but is not in KEY_TABLE — reachable only
+        // through the pub API binds_mut (detect_key_press is table-limited).
+        k.binds_mut().push((egui::Key::Comma, KeyAction::LooperUndo));
+        let map = k.to_config();
+        assert!(!map.contains_key("?"), "\"?\" round-trip poison persisted");
+        assert_eq!(map.len(), Keybinds::defaults().binds.len(),
+            "out-of-table bind must be skipped entirely (no ghost entry)");
+        // valid binds survive
+        assert_eq!(map.get("F1").map(String::as_str), Some("SwitchPart(0)"));
+        assert_eq!(map.get("Space").map(String::as_str), Some("LooperTogglePlay"));
+        // F15 positive: a table key still round-trips
+        assert_eq!(key_from_str("F1"), Some(egui::Key::F1));
+        assert_eq!(key_to_str(egui::Key::F1), Some("F1"));
+        assert_eq!(key_to_str(egui::Key::Comma), None);
+    }
 }

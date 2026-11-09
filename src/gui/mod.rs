@@ -927,7 +927,7 @@ impl eframe::App for App {
                         if let Some(victim) = stolen {
                             self.show_toast(
                                 format!("{}: key was reassigned from {}",
-                                    keybinds::key_to_str(key), victim),
+                                    keybinds::key_to_str(key).unwrap_or("?"), victim),
                                 ToastKind::Info,
                             );
                         }
@@ -2062,7 +2062,7 @@ impl App {
                     for action in KeyAction::all() {
                         ui.label(action.label());
                         let key_label = self.keybinds.key_for_action(&action)
-                            .map(key_to_str)
+                            .map(|k| key_to_str(k).unwrap_or("?"))
                             .unwrap_or("---");
                         let is_capturing = self.keybind_capturing.as_ref() == Some(&action);
                         let btn_text = if is_capturing { "Press key..." } else { key_label };
