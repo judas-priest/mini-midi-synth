@@ -72,6 +72,10 @@ impl BbdEnsemble {
         let mut out_l = 0.0_f32;
         let mut out_r = 0.0_f32;
 
+        // BBD output LP per tap (~8 kHz), SR-independent — hoist из
+        // per-sample цикла (константный аргумент, audit exp/powf #bbd)
+        let bbd_out = 1.0 - (-2.0 * std::f32::consts::PI * 8000.0 / sr).exp();
+
         for (i, &(center_ms, depth_ms, lfo_hz)) in TAPS.iter().enumerate() {
             self.phases[i] += lfo_hz * rate_scale / sr;
             if self.phases[i] >= 1.0 { self.phases[i] -= 1.0; }
@@ -86,8 +90,6 @@ impl BbdEnsemble {
             let wet_l = buf_read_linear(&self.buf, self.write, delay_l);
             let wet_r = buf_read_linear(&self.buf, self.write, delay_r);
 
-            // BBD output LP per tap (~8 kHz), SR-independent
-            let bbd_out = 1.0 - (-2.0 * std::f32::consts::PI * 8000.0 / sr).exp();
             let wl = self.lp_l[i] + bbd_out * (wet_l - self.lp_l[i]);
             self.lp_l[i] = wl;
             let wr = self.lp_r[i] + bbd_out * (wet_r - self.lp_r[i]);
