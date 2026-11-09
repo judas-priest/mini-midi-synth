@@ -20,43 +20,43 @@ pub struct MidiSeqTrackGui {
 impl App {
     pub(super) fn draw_midi_seq(&mut self, ui: &mut egui::Ui) {
         // Sync play state from audio thread
-        let atom_playing = self.midi_seq_play_atom.load(Ordering::Relaxed) != 0;
-        self.midi_seq_playing = atom_playing;
+        let atom_playing = self.midi_seq_ui.midi_seq_play_atom.load(Ordering::Relaxed) != 0;
+        self.midi_seq_ui.midi_seq_playing = atom_playing;
 
         // ── Transport ──────────────────────────────────────────────────────
         ui.horizontal(|ui| {
-            let play_lbl = if self.midi_seq_playing { "⏹ Stop" } else { "▶ Play" };
+            let play_lbl = if self.midi_seq_ui.midi_seq_playing { "⏹ Stop" } else { "▶ Play" };
             if ui.button(play_lbl).clicked() {
-                self.midi_seq_playing = !self.midi_seq_playing;
-                let _ = self.ctrl_tx.push(ControlEvent::MidiSeqPlay { playing: self.midi_seq_playing });
+                self.midi_seq_ui.midi_seq_playing = !self.midi_seq_ui.midi_seq_playing;
+                let _ = self.ctrl_tx.push(ControlEvent::MidiSeqPlay { playing: self.midi_seq_ui.midi_seq_playing });
             }
 
             // Loop toggle
-            let loop_col = if self.midi_seq_looping {
+            let loop_col = if self.midi_seq_ui.midi_seq_looping {
                 theme::MIDI_SEQ_LOOP_ON
             } else {
                 theme::MIDI_SEQ_LOOP_OFF
             };
             let mut loop_text = egui::RichText::new("↻ Loop").color(loop_col);
-            if self.midi_seq_looping {
+            if self.midi_seq_ui.midi_seq_looping {
                 loop_text = loop_text.underline(); // неколоровый признак (WCAG 1.4.1)
             }
             if ui.button(loop_text).clicked() {
-                self.midi_seq_looping = !self.midi_seq_looping;
+                self.midi_seq_ui.midi_seq_looping = !self.midi_seq_ui.midi_seq_looping;
                 let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetLooping {
-                    looping: self.midi_seq_looping,
+                    looping: self.midi_seq_ui.midi_seq_looping,
                 });
             }
 
             ui.separator();
 
             // BPM override
-            let mut bpm_on = self.midi_seq_bpm.is_some();
+            let mut bpm_on = self.midi_seq_ui.midi_seq_bpm.is_some();
             if ui.checkbox(&mut bpm_on, "Override BPM").changed() {
-                self.midi_seq_bpm = if bpm_on { Some(120.0) } else { None };
-                let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetBpm { bpm: self.midi_seq_bpm });
+                self.midi_seq_ui.midi_seq_bpm = if bpm_on { Some(120.0) } else { None };
+                let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetBpm { bpm: self.midi_seq_ui.midi_seq_bpm });
             }
-            if let Some(ref mut bpm) = self.midi_seq_bpm {
+            if let Some(ref mut bpm) = self.midi_seq_ui.midi_seq_bpm {
                 if ui.add(egui::DragValue::new(bpm).range(20.0..=300.0).speed(0.5)).changed() {
                     let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetBpm { bpm: Some(*bpm) });
                 }
@@ -67,7 +67,7 @@ impl App {
             ui.separator();
 
             // Playback progress bar
-            let pos = self.midi_seq_pos_atom.load(Ordering::Relaxed);
+            let pos = self.midi_seq_ui.midi_seq_pos_atom.load(Ordering::Relaxed);
             let frac = pos as f32 / 1000.0;
             ui.add(egui::ProgressBar::new(frac).desired_width(160.0).show_percentage());
         });
@@ -76,25 +76,25 @@ impl App {
 
         // ── File load ──────────────────────────────────────────────────────
         // Poll the async file picker result (zenity runs in a background thread)
-        let picked = self.midi_seq_file_pick.as_ref().and_then(|slot| {
+        let picked = self.midi_seq_ui.midi_seq_file_pick.as_ref().and_then(|slot| {
             slot.lock().ok().and_then(|g| g.clone())
         });
         if let Some(path) = picked {
-            self.midi_seq_file_pick = None;
-            self.midi_seq_path = path;
+            self.midi_seq_ui.midi_seq_file_pick = None;
+            self.midi_seq_ui.midi_seq_path = path;
             self.do_load_midi();
         }
 
         ui.horizontal(|ui| {
             ui.label("MIDI file:");
-            let te = egui::TextEdit::singleline(&mut self.midi_seq_path)
+            let te = egui::TextEdit::singleline(&mut self.midi_seq_ui.midi_seq_path)
                 .desired_width(300.0)
                 .hint_text("/path/to/file.mid");
             let resp = ui.add(te);
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
             // File picker button — spawns zenity/kdialog in a background thread
-            let picking = self.midi_seq_file_pick.is_some();
+            let picking = self.midi_seq_ui.midi_seq_file_pick.is_some();
             let btn = ui.add_enabled(!picking, egui::Button::new("…"))
                 .on_hover_text("Browse for .mid file");
             if btn.clicked() {
@@ -106,7 +106,7 @@ impl App {
                         *g = result;
                     }
                 });
-                self.midi_seq_file_pick = Some(slot);
+                self.midi_seq_ui.midi_seq_file_pick = Some(slot);
             }
             if picking {
                 ui.spinner();
@@ -121,7 +121,7 @@ impl App {
         ui.separator();
         ui.add_space(theme::SP_SM);
 
-        if self.midi_seq_tracks.is_empty() {
+        if self.midi_seq_ui.midi_seq_tracks.is_empty() {
             ui.label(
                 egui::RichText::new(
                     "No MIDI file loaded.\n\
@@ -155,7 +155,7 @@ impl App {
                     let mut instr_changes: Vec<(usize, TrackInstrument)> = Vec::new();
                     let mut mute_changes: Vec<(usize, bool)> = Vec::new();
 
-                    for (i, track) in self.midi_seq_tracks.iter_mut().enumerate() {
+                    for (i, track) in self.midi_seq_ui.midi_seq_tracks.iter_mut().enumerate() {
                         // Track index
                         ui.label(egui::RichText::new(format!("{}", i + 1)).monospace().weak());
 
@@ -277,9 +277,9 @@ impl App {
         });
     }
 
-    /// Load the MIDI file at `self.midi_seq_path` and send it to the engine.
+    /// Load the MIDI file at `self.midi_seq_ui.midi_seq_path` and send it to the engine.
     pub(super) fn do_load_midi(&mut self) {
-        let path = self.midi_seq_path.trim().to_string();
+        let path = self.midi_seq_ui.midi_seq_path.trim().to_string();
         if path.is_empty() {
             return;
         }
@@ -295,7 +295,7 @@ impl App {
                     let n = data.track_names.len();
                     let ticks = data.total_ticks;
                     // Build GUI track list (instrument defaults: ch9 → Drums, else DspLayer0)
-                    self.midi_seq_tracks = data
+                    self.midi_seq_ui.midi_seq_tracks = data
                         .track_names
                         .iter()
                         .zip(data.track_channels.iter())

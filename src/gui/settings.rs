@@ -291,8 +291,8 @@ impl App {
         self.master_rec_cycle = h.master_rec_cycle_atom;
         self.pitch_seq_ui.pitch_seq_step_atoms = h.pitch_seq_step_atoms;
         self.scope_buf = h.scope_buf;
-        self.midi_seq_play_atom = h.midi_seq_play_atom;
-        self.midi_seq_pos_atom = h.midi_seq_pos_atom;
+        self.midi_seq_ui.midi_seq_play_atom = h.midi_seq_play_atom;
+        self.midi_seq_ui.midi_seq_pos_atom = h.midi_seq_pos_atom;
 
         // New audio stream
         let audio_config = crate::audio::AudioConfig {

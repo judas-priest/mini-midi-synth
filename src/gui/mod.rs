@@ -466,17 +466,7 @@ pub struct App {
     pub split_point: u8,   // MIDI note where right zone starts (default 60 = C4)
     // FX Chain panel
     pub show_fx_chain: bool,
-    // MIDI file sequencer
-    pub show_midi_seq: bool,
-    pub midi_seq_path: String,
-    pub midi_seq_tracks: Vec<midi_seq::MidiSeqTrackGui>,
-    pub midi_seq_playing: bool,
-    pub midi_seq_looping: bool,
-    pub midi_seq_bpm: Option<f32>,
-    pub midi_seq_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
-    pub midi_seq_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU32>,
-    /// Result of an async file picker (zenity/kdialog subprocess). None = no pending pick.
-    pub midi_seq_file_pick: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+    pub midi_seq_ui: MidiSeqUi,
     // Undo/redo (#31): UNIFIED per-part snapshots — patch parameter editing
     // AND live part actions (mute/pan/transpose/patch click) in one stack.
     pub undo_stack: std::collections::VecDeque<PartUndoSnapshot>,
@@ -684,15 +674,17 @@ impl App {
             last_scope_write: 0,
             split_point: c.config.ui.split_point.unwrap_or(60),
             show_fx_chain: false,
-            show_midi_seq: false,
-            midi_seq_path: String::new(),
-            midi_seq_tracks: Vec::new(),
-            midi_seq_playing: false,
-            midi_seq_looping: true,
-            midi_seq_bpm: None,
-            midi_seq_play_atom: c.handles.midi_seq_play_atom,
-            midi_seq_pos_atom: c.handles.midi_seq_pos_atom,
-            midi_seq_file_pick: None,
+            midi_seq_ui: MidiSeqUi {
+                show_midi_seq: false,
+                midi_seq_path: String::new(),
+                midi_seq_tracks: Vec::new(),
+                midi_seq_playing: false,
+                midi_seq_looping: true,
+                midi_seq_bpm: None,
+                midi_seq_play_atom: c.handles.midi_seq_play_atom,
+                midi_seq_pos_atom: c.handles.midi_seq_pos_atom,
+                midi_seq_file_pick: None,
+            },
             undo_stack: std::collections::VecDeque::new(),
             redo_stack: Vec::new(),
             toasts: Vec::new(),
@@ -750,7 +742,7 @@ impl eframe::App for App {
         let has_active_notes = (0..128u8)
             .any(|i| self.note_state[i as usize].load(Ordering::Relaxed) > 0);
         let looper_active = self.looper_atoms.state.load(Ordering::Relaxed) != 0;
-        let midi_seq_active = self.midi_seq_play_atom.load(Ordering::Relaxed) != 0;
+        let midi_seq_active = self.midi_seq_ui.midi_seq_play_atom.load(Ordering::Relaxed) != 0;
         if has_active_notes || self.drum_playing || looper_active || midi_seq_active {
             ctx.request_repaint_after(Duration::from_millis(33));
         } else {
@@ -1341,7 +1333,7 @@ impl eframe::App for App {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     self.draw_fx_chain(ui);
                 });
-            } else if self.show_midi_seq {
+            } else if self.midi_seq_ui.show_midi_seq {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     self.draw_midi_seq(ui);
                 });
@@ -1879,7 +1871,7 @@ impl App {
                     if p < self.parts.len() && self.parts[p].enabled {
                         self.set_active_part(p);
                         self.show_drums = false;
-                        self.show_midi_seq = false;
+                        self.midi_seq_ui.show_midi_seq = false;
                         self.show_fx_chain = false;
                         self.seq_target_atom.store(2, Ordering::Relaxed);
                     }

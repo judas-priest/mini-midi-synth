@@ -128,3 +128,18 @@ pub struct PerfUi {
     pub pad_perf_map: [Option<String>; 16],
     pub pad_prev_state: [u8; 16],
 }
+
+/// MIDI file sequencer.
+pub struct MidiSeqUi {
+    // MIDI file sequencer
+    pub show_midi_seq: bool,
+    pub midi_seq_path: String,
+    pub midi_seq_tracks: Vec<midi_seq::MidiSeqTrackGui>,
+    pub midi_seq_playing: bool,
+    pub midi_seq_looping: bool,
+    pub midi_seq_bpm: Option<f32>,
+    pub midi_seq_play_atom: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    pub midi_seq_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    /// Result of an async file picker (zenity/kdialog subprocess). None = no pending pick.
+    pub midi_seq_file_pick: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+}
