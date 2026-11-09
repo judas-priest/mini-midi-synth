@@ -565,6 +565,12 @@ pub struct App {
     pub midi_seq_pos_atom: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// Result of an async file picker (zenity/kdialog subprocess). None = no pending pick.
     pub midi_seq_file_pick: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+    /// One-shot MIDI parse worker (techdebt GUI I/O): fs::read + parse_midi
+    /// off the GUI thread. None = idle. Polled unconditionally in update().
+    pub midi_worker_rx: Option<midi_seq::MidiWorkerRx>,
+    /// True while a MIDI parse is on a worker thread: re-enter guard for
+    /// Load button / file pick.
+    pub midi_loading: bool,
     // Undo/redo (#31): UNIFIED per-part snapshots — patch parameter editing
     // AND live part actions (mute/pan/transpose/patch click) in one stack.
     pub undo_stack: std::collections::VecDeque<PartUndoSnapshot>,
@@ -791,6 +797,8 @@ impl App {
             midi_seq_play_atom: c.handles.midi_seq_play_atom,
             midi_seq_pos_atom: c.handles.midi_seq_pos_atom,
             midi_seq_file_pick: None,
+            midi_worker_rx: None,
+            midi_loading: false,
             undo_stack: std::collections::VecDeque::new(),
             redo_stack: Vec::new(),
             toasts: Vec::new(),
@@ -928,9 +936,29 @@ impl eframe::App for App {
             }
         }
 
-        // Keep the UI responsive while worker loads are in flight (Task 2
-        // extends this to midi_loading).
-        if self.sf2_loading {
+        // MIDI worker poll — same top-level placement as the SF2 poll: the
+        // MIDI Seq panel may be closed while a parse is in flight.
+        if let Some(rx) = self.midi_worker_rx.take() {
+            match rx.try_recv() {
+                Ok((_path, res)) => {
+                    self.midi_loading = false;
+                    match res {
+                        Ok(data) => self.apply_midi_result(data),
+                        Err(e) => self.show_toast(e, ToastKind::Error),
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    self.midi_worker_rx = Some(rx);
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.midi_loading = false;
+                    self.show_toast("MIDI loader thread died".to_string(), ToastKind::Error);
+                }
+            }
+        }
+
+        // Keep the UI responsive while worker loads are in flight.
+        if self.sf2_loading || self.midi_loading {
             ctx.request_repaint_after(Duration::from_millis(33));
         }
 

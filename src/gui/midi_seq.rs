@@ -17,6 +17,10 @@ pub struct MidiSeqTrackGui {
     pub muted: bool,
 }
 
+/// Receiver held by App while a MIDI file parse is on the worker thread
+/// (techdebt GUI I/O): path + parse result, error texts preserved verbatim.
+pub(crate) type MidiWorkerRx = std::sync::mpsc::Receiver<(String, Result<Box<crate::synth::midi_player::MidiSeqData>, String>)>;
+
 impl App {
     pub(super) fn draw_midi_seq(&mut self, ui: &mut egui::Ui) {
         // Sync play state from audio thread
@@ -114,6 +118,10 @@ impl App {
 
             if ui.button("Load").clicked() || enter {
                 self.do_load_midi();
+            }
+            // Parse in flight (re-enters are ignored by the guard).
+            if self.midi_loading {
+                ui.spinner();
             }
         });
 
@@ -277,46 +285,59 @@ impl App {
         });
     }
 
-    /// Load the MIDI file at `self.midi_seq_path` and send it to the engine.
+    /// Load the MIDI file at `self.midi_seq_path`: spawn a one-shot worker
+    /// thread (fs::read + parse of a large file used to freeze the GUI) and
+    /// poll the result in update(). Empty path stays a silent no-op.
     pub(super) fn do_load_midi(&mut self) {
         let path = self.midi_seq_path.trim().to_string();
         if path.is_empty() {
             return;
         }
-        match std::fs::read(&path) {
-            Err(e) => {
-                self.show_toast(format!("Error reading file: {e}"), ToastKind::Error);
-            }
-            Ok(bytes) => match crate::synth::midi_player::parse_midi(&bytes) {
-                Err(e) => {
-                    self.show_toast(format!("Error parsing MIDI: {e}"), ToastKind::Error);
-                }
-                Ok(data) => {
-                    let n = data.track_names.len();
-                    let ticks = data.total_ticks;
-                    // Build GUI track list (instrument defaults: ch9 → Drums, else DspLayer0)
-                    self.midi_seq_tracks = data
-                        .track_names
-                        .iter()
-                        .zip(data.track_channels.iter())
-                        .map(|(name, &ch)| MidiSeqTrackGui {
-                            name: name.clone(),
-                            channel: ch,
-                            instrument: if ch == 9 {
-                                TrackInstrument::Drums
-                            } else {
-                                TrackInstrument::DspLayer0
-                            },
-                            muted: false,
-                        })
-                        .collect();
-                    self.show_toast(format!("MIDI loaded: {n} tracks, {ticks} ticks"), ToastKind::Success);
-                    let _ = self
-                        .ctrl_tx
-                        .push(ControlEvent::MidiSeqLoad { data: Box::new(data) });
-                }
-            },
+        // Re-enter guard (Load button / file pick while a parse is in flight):
+        // a second spawn would overwrite midi_worker_rx and lose the result.
+        if self.midi_loading {
+            return;
         }
+        self.midi_loading = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // Error texts match the former synchronous path verbatim.
+            let res = std::fs::read(&path)
+                .map_err(|e| format!("Error reading file: {e}"))
+                .and_then(|b| crate::synth::midi_player::parse_midi(&b)
+                    .map_err(|e| format!("Error parsing MIDI: {e}"))
+                    .map(Box::new));
+            let _ = tx.send((path, res));
+        });
+        self.midi_worker_rx = Some(rx);
+    }
+
+    /// Apply a parsed MIDI file (ex-Ok-branch of the former synchronous
+    /// do_load_midi). Kept free of egui calls except show_toast for future
+    /// testability.
+    pub(super) fn apply_midi_result(&mut self, data: Box<crate::synth::midi_player::MidiSeqData>) {
+        let n = data.track_names.len();
+        let ticks = data.total_ticks;
+        // Build GUI track list (instrument defaults: ch9 → Drums, else DspLayer0)
+        self.midi_seq_tracks = data
+            .track_names
+            .iter()
+            .zip(data.track_channels.iter())
+            .map(|(name, &ch)| MidiSeqTrackGui {
+                name: name.clone(),
+                channel: ch,
+                instrument: if ch == 9 {
+                    TrackInstrument::Drums
+                } else {
+                    TrackInstrument::DspLayer0
+                },
+                muted: false,
+            })
+            .collect();
+        self.show_toast(format!("MIDI loaded: {n} tracks, {ticks} ticks"), ToastKind::Success);
+        let _ = self
+            .ctrl_tx
+            .push(ControlEvent::MidiSeqLoad { data });
     }
 }
 
