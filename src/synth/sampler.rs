@@ -402,6 +402,23 @@ impl SamplerEngine {
                     synth.note_off_all_channel(ch as i32, false);
                 }
             }
+            // F2: сброс флага ДО retry-скана — иначе i==part удовлетворяет
+            // гварду и канал утечёт обратно в DSP-часть (review C1).
+            self.part_sf2[part] = enabled;
+            // F2: освободившийся канал отдаём ждущей SF2-части («16th stays
+            // DSP until a channel frees up» — но free никогда не
+            // ре-аллоцировал; audit data #F2). Индексный цикл, не iterator —
+            // иначе immutable borrow self.part_sf2 живёт через &mut self
+            // вызов (E0502). Pre-existing класс (не расширяем):
+            // alloc_channel игнорирует seq_channel_used — retry при живом
+            // MIDI-seq может дать 0xC0 на seq-канал; тот же риск у первой
+            // аллокации.
+            for i in 0..self.part_sf2.len() {
+                if self.part_sf2[i] && i != part && self.part_channel[i].is_none() {
+                    self.set_part_mode(i, true);
+                    break;
+                }
+            }
         }
         self.part_sf2[part] = enabled;
     }
@@ -717,6 +734,29 @@ mod tests {
             "load did not reset the seq program cache");
         assert!(!e.sampler.seq_channel_used[3],
             "load did not clear the seq used mask");
+    }
+
+    #[test]
+    fn freed_sf2_channel_retried_to_starving_part() {
+        let mut s = SamplerEngine::new(48000.0);
+        // 15 sf2-enabled parts claim all 15 melodic channels
+        for p in 0..15 {
+            s.set_part_program(p, 100 + p as u8, 0);
+            s.set_part_mode(p, true);
+        }
+        // 16th part wants SF2 but no channel is free — stays DSP
+        s.set_part_program(15, 42, 0);
+        s.set_part_mode(15, true);
+        assert!(s.part_channel[15].is_none(), "16th part must starve with all 15 channels taken");
+        // Part 0 disables — its channel must be handed to the starving 16th
+        s.set_part_mode(0, false);
+        assert_eq!(s.part_channel[15], Some(0), "freed channel not retried to starving part");
+        assert!(s.part_channel[0].is_none(), "disabled part must not keep its channel");
+        assert_eq!(s.part_program(15), 42, "starving part program cache changed on retry");
+        // Negative: with all 15 channels legitimately occupied, the
+        // re-enabled part starves again (no channel leaked/duplicated)
+        s.set_part_mode(0, true);
+        assert!(s.part_channel[0].is_none(), "channel leaked when none was free");
     }
 
     #[test]
