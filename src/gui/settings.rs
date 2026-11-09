@@ -812,7 +812,13 @@ impl App {
                                 }
                             }
                         });
-                    if ui.button("Load").clicked() {
+                    // While a worker parse is in flight the button shows
+                    // Loading... and ignores clicks — including the "(none)"
+                    // unload branch: unloading now would be overwritten by
+                    // the late-apply of the in-flight result.
+                    let loading = self.sf2_loading;
+                    let label = if loading { "Loading..." } else { "Load" };
+                    if !loading && ui.button(label).clicked() {
                         if let Some(idx) = self.sf2_keys_selected {
                             self.load_sf2_keys(idx);
                         } else {
@@ -842,7 +848,10 @@ impl App {
                                 }
                             }
                         });
-                    if ui.button("Load").clicked() {
+                    // Same loading guard as Keys (shared sf2_loading).
+                    let loading = self.sf2_loading;
+                    let label = if loading { "Loading..." } else { "Load" };
+                    if !loading && ui.button(label).clicked() {
                         if let Some(idx) = self.sf2_drums_selected {
                             self.load_sf2_drums(idx);
                         } else {

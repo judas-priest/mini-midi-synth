@@ -54,6 +54,35 @@ pub(crate) fn sf2_dir() -> std::path::PathBuf {
     crate::config::app_data_dir().join("sf2")
 }
 
+/// Which slot an SF2 worker-thread parse result belongs to (techdebt GUI I/O).
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Sf2WorkerKind {
+    Keys,
+    Drums,
+}
+
+/// Channel payload of the SF2 worker thread: slot kind, file name (for the
+/// UI/config), parse result with the open/parse distinction preserved.
+pub(crate) type Sf2WorkerMsg = (Sf2WorkerKind, String, Result<std::sync::Arc<rustysynth::SoundFont>, String>);
+/// Receiver held by App while an SF2 load is in flight.
+pub(crate) type Sf2WorkerRx = std::sync::mpsc::Receiver<Sf2WorkerMsg>;
+
+/// Parse an SF2 file with no App state touched — runs on a one-shot worker
+/// thread (File::open + rustysynth parse of tens of MB used to freeze the GUI).
+/// Errors keep the open/parse distinction for diagnostics.
+fn parse_sf2_file(path: &std::path::Path) -> Result<std::sync::Arc<rustysynth::SoundFont>, String> {
+    match std::fs::File::open(path) {
+        Ok(mut file) => {
+            use std::io::BufReader;
+            let mut reader = BufReader::new(&mut file);
+            rustysynth::SoundFont::new(&mut reader)
+                .map(std::sync::Arc::new)
+                .map_err(|e| format!("parse: {e}"))
+        }
+        Err(e) => Err(format!("open: {e}")),
+    }
+}
+
 impl App {
     pub(crate) fn find_or_add_sf2(&mut self, sf2_path: &str) -> Option<usize> {
         let idx = self.sf2_file_list.iter().position(|(_, p)| p.to_string_lossy() == sf2_path);
@@ -103,18 +132,67 @@ impl App {
         }
     }
 
-    /// Parse an SF2 file and return the Arc<SoundFont>, or set sf2_status on error.
-    fn parse_sf2(&mut self, path: &std::path::Path) -> Option<std::sync::Arc<rustysynth::SoundFont>> {
-        match std::fs::File::open(path) {
-            Ok(mut file) => {
-                use std::io::BufReader;
-                let mut reader = BufReader::new(&mut file);
-                match rustysynth::SoundFont::new(&mut reader) {
-                    Ok(sf) => Some(std::sync::Arc::new(sf)),
-                    Err(e) => { self.show_toast(format!("SF2 parse error: {e}"), ToastKind::Error); None }
+    /// Apply a parsed SF2 to its slot (ex-post-parse body of the former
+    /// synchronous load_sf2_keys/load_sf2_drums). Kept free of egui calls
+    /// except show_toast for future testability. The config path is resolved
+    /// from the scan list by name (the worker channel carries only the name).
+    pub(crate) fn apply_sf2_result(&mut self, kind: Sf2WorkerKind, name: String, sf: std::sync::Arc<rustysynth::SoundFont>) {
+        let path_str = self.sf2_file_list.iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, p)| p.to_string_lossy().to_string());
+        match kind {
+            Sf2WorkerKind::Keys => {
+                self.sf2_keys_soundfont = Some(sf.clone());
+                let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
+                let _ = self.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
+                self.sf2_keys_loaded_name = name;
+                self.show_toast("Keys SF2 loaded", ToastKind::Success);
+                // Apply per-part SF2 modes
+                for i in 0..2 {
+                    if self.parts[i].sf2_mode {
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
+                        let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
+                            part: i, program: self.parts[i].sf2_program, bank: 0,
+                        });
+                    }
                 }
+                self.config.sf2.keys_file_path = path_str;
+                self.config.sf2.file_path = self.config.sf2.keys_file_path.clone(); // compat
+                self.mark_config_dirty();
             }
-            Err(e) => { self.show_toast(format!("SF2 open error: {e}"), ToastKind::Error); None }
+            Sf2WorkerKind::Drums => {
+                self.sf2_drums_soundfont = Some(sf.clone());
+                let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
+                let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
+                self.sf2_drums_loaded_name = name;
+                self.extract_kit_names(&sf);
+                self.push_drum_choke_groups();
+                self.show_toast("Drums SF2 loaded", ToastKind::Success);
+                if self.sf2_drums_enabled {
+                    let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
+                }
+                // Load the per-kit remap table (identity if none saved for this kit).
+                if let Some(v) = self.config.sf2.drums_remaps.get(&self.drum_remap_key()) {
+                    // migrate legacy slot-encoded values (0..16) to kit notes (+36)
+                    let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
+                    let mut t = [0u8; 16];
+                    for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(36 + i as u8).clamp(30, 55); }
+                    self.drum_remap = t;
+                } else {
+                    for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
+                }
+                self.push_drum_remap();
+                if let Some(v) = self.config.sf2.drums_vels.get(&self.drum_remap_key()) {
+                    let mut t = [0u8; 16];
+                    for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
+                    self.drum_pad_vel = t;
+                } else {
+                    self.drum_pad_vel = [0u8; 16];
+                }
+                self.push_drum_pad_vel();
+                self.config.sf2.drums_file_path = path_str;
+                self.mark_config_dirty();
+            }
         }
     }
 
@@ -123,36 +201,26 @@ impl App {
             self.show_toast("SF2 file not found", ToastKind::Error);
             return;
         };
-        // Reuse existing drums soundfont if same file
-        let sf = if self.sf2_drums_loaded_name == name {
-            self.sf2_drums_soundfont.clone()
-        } else {
-            None
-        };
-        let sf = match sf {
-            Some(s) => s,
-            None => match self.parse_sf2(&path) {
-                Some(s) => s,
-                None => return,
-            },
-        };
-        self.sf2_keys_soundfont = Some(sf.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
-        let _ = self.ctrl_tx.push(ControlEvent::LoadKeysSoundFont { soundfont: sf });
-        self.sf2_keys_loaded_name = name;
-        self.show_toast("Keys SF2 loaded", ToastKind::Success);
-        // Apply per-part SF2 modes
-        for i in 0..2 {
-            if self.parts[i].sf2_mode {
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Mode { part: i, enabled: true });
-                let _ = self.ctrl_tx.push(ControlEvent::SetPartSf2Program {
-                    part: i, program: self.parts[i].sf2_program, bank: 0,
-                });
+        // Reuse existing drums soundfont if same file — cache short-circuit
+        // BEFORE the guard/spawn: the Arc clone is instant, no worker needed.
+        if self.sf2_drums_loaded_name == name {
+            if let Some(sf) = self.sf2_drums_soundfont.clone() {
+                self.apply_sf2_result(Sf2WorkerKind::Keys, name, sf);
+                return;
             }
         }
-        self.config.sf2.keys_file_path = Some(path.to_string_lossy().to_string());
-        self.config.sf2.file_path = self.config.sf2.keys_file_path.clone(); // compat
-        self.mark_config_dirty();
+        // Shared guard across keys/drums: a second in-flight spawn would
+        // overwrite sf2_worker_rx and the first result would be lost.
+        if self.sf2_loading {
+            return;
+        }
+        self.sf2_loading = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let res = parse_sf2_file(&path);
+            let _ = tx.send((Sf2WorkerKind::Keys, name.clone(), res));
+        });
+        self.sf2_worker_rx = Some(rx);
     }
 
     pub(crate) fn load_sf2_drums(&mut self, idx: usize) {
@@ -160,50 +228,25 @@ impl App {
             self.show_toast("SF2 file not found", ToastKind::Error);
             return;
         };
-        // Reuse existing keys soundfont if same file
-        let sf = if self.sf2_keys_loaded_name == name {
-            self.sf2_keys_soundfont.clone()
-        } else {
-            None
-        };
-        let sf = match sf {
-            Some(s) => s,
-            None => match self.parse_sf2(&path) {
-                Some(s) => s,
-                None => return,
-            },
-        };
-        self.sf2_drums_soundfont = Some(sf.clone());
-        let _ = self.ctrl_tx.push(ControlEvent::SetSf2BlockSize { size: self.sf2_block_size });
-        let _ = self.ctrl_tx.push(ControlEvent::LoadDrumsSoundFont { soundfont: sf.clone() });
-        self.sf2_drums_loaded_name = name;
-        self.extract_kit_names(&sf);
-        self.push_drum_choke_groups();
-        self.show_toast("Drums SF2 loaded", ToastKind::Success);
-        if self.sf2_drums_enabled {
-            let _ = self.ctrl_tx.push(ControlEvent::SetDrumsSf2Mode { enabled: true });
+        // Reuse existing keys soundfont if same file — cache short-circuit
+        // BEFORE the guard/spawn (mirrors the keys cache above).
+        if self.sf2_keys_loaded_name == name {
+            if let Some(sf) = self.sf2_keys_soundfont.clone() {
+                self.apply_sf2_result(Sf2WorkerKind::Drums, name, sf);
+                return;
+            }
         }
-        // Load the per-kit remap table (identity if none saved for this kit).
-        if let Some(v) = self.config.sf2.drums_remaps.get(&self.drum_remap_key()) {
-            // migrate legacy slot-encoded values (0..16) to kit notes (+36)
-            let v: Vec<u8> = v.iter().map(|&x| if x < 16 { x + 36 } else { x }).collect();
-            let mut t = [0u8; 16];
-            for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(36 + i as u8).clamp(30, 55); }
-            self.drum_remap = t;
-        } else {
-            for (i, v) in self.drum_remap.iter_mut().enumerate() { *v = (36 + i) as u8; }
+        // Shared guard across keys/drums (see load_sf2_keys).
+        if self.sf2_loading {
+            return;
         }
-        self.push_drum_remap();
-        if let Some(v) = self.config.sf2.drums_vels.get(&self.drum_remap_key()) {
-            let mut t = [0u8; 16];
-            for (i, s) in t.iter_mut().enumerate() { *s = v.get(i).copied().unwrap_or(0).min(127); }
-            self.drum_pad_vel = t;
-        } else {
-            self.drum_pad_vel = [0u8; 16];
-        }
-        self.push_drum_pad_vel();
-        self.config.sf2.drums_file_path = Some(path.to_string_lossy().to_string());
-        self.mark_config_dirty();
+        self.sf2_loading = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let res = parse_sf2_file(&path);
+            let _ = tx.send((Sf2WorkerKind::Drums, name.clone(), res));
+        });
+        self.sf2_worker_rx = Some(rx);
     }
 
     pub(crate) fn unload_sf2_keys(&mut self) {
