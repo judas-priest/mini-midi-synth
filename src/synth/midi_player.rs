@@ -35,6 +35,11 @@ pub struct MidiSeqData {
     pub track_names: Vec<String>,
     /// First MIDI channel used by each track (0-indexed).
     pub track_channels: Vec<u8>,
+    /// SMPTE timing: absolute ticks-per-second (fps × sub-frames). Some only
+    /// for SMPTE-division files; events then play at true wall-clock time and
+    /// tempo events are ignored. The user BPM override is likewise a no-op on
+    /// such files — SMPTE timecode is real time by definition.
+    pub smpte_ticks_per_sec: Option<f32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -134,15 +139,19 @@ impl MidiPlayer {
         }).collect();
         let old_tracks = std::mem::replace(&mut self.tracks, tracks);
         let old_data = self.data.replace(data);
+        // Fresh file: default tempo until its first TempoChange — otherwise
+        // the new file would inherit the previous file's tempo.
+        self.us_per_beat = 500_000;
         self.reset_position();
         (old_data, old_tracks)
     }
 
-    /// Seek to the beginning and reset file tempo.
+    /// Seek to the beginning. Keeps the current tempo: resetting it here would
+    /// play the first block after a loop wrap at 120 BPM before the file's
+    /// TempoChange event re-applies (audit rhythm #16).
     pub fn reset_position(&mut self) {
         self.tick_pos = 0.0;
         self.event_idx = 0;
-        self.us_per_beat = 500_000;
         self.position_atom.store(0, Ordering::Relaxed);
     }
 
@@ -183,16 +192,21 @@ impl MidiPlayer {
         let tpb = data.ticks_per_beat as f64;
         let total = data.total_ticks as f64;
 
-        // Effective us-per-beat
-        let us = if let Some(bpm) = self.bpm_override {
-            60_000_000.0 / (bpm as f64).max(1.0)
+        // Ticks to advance this block. SMPTE files advance by wall-clock
+        // samples at a fixed fps*sub rate; the BPM override (and embedded
+        // tempo) does not apply to real-time timecode.
+        let new_tick = if let Some(tps) = data.smpte_ticks_per_sec {
+            self.tick_pos + n_samples as f64 * (tps as f64 / sample_rate as f64)
         } else {
-            self.us_per_beat as f64
+            // Effective us-per-beat
+            let us = if let Some(bpm) = self.bpm_override {
+                60_000_000.0 / (bpm as f64).max(1.0)
+            } else {
+                self.us_per_beat as f64
+            };
+            let ticks_per_sample = tpb * 1_000_000.0 / (us * sample_rate as f64);
+            self.tick_pos + n_samples as f64 * ticks_per_sample
         };
-
-        // Ticks to advance this block
-        let ticks_per_sample = tpb * 1_000_000.0 / (us * sample_rate as f64);
-        let new_tick = self.tick_pos + n_samples as f64 * ticks_per_sample;
 
         // Fire all events whose tick falls within [tick_pos, new_tick)
         while self.event_idx < data.events.len() {
@@ -251,12 +265,14 @@ pub fn parse_midi(raw: &[u8]) -> Result<MidiSeqData, String> {
     crate::midi::check_smf_header(raw).map_err(|e| e.to_string())?;
     let smf = Smf::parse(raw).map_err(|e| format!("MIDI parse error: {e}"))?;
 
-    let ticks_per_beat = match smf.header.timing {
-        midly::Timing::Metrical(t) => t.as_int() as u64,
+    let (ticks_per_beat, smpte_ticks_per_sec) = match smf.header.timing {
+        midly::Timing::Metrical(t) => (t.as_int() as u64, None),
         midly::Timing::Timecode(fps, sub) => {
-            // Approximate: frames-per-second × sub-frames = ticks-per-second
-            // Treat as if BPM=60 → us_per_beat=1_000_000 → ticks_per_beat=fps*sub
-            (fps.as_f32() * sub as f32) as u64
+            // SMPTE: fps × sub-frames = absolute ticks-per-second.
+            // Tempo events carry no meaning here and are dropped below;
+            // playback advances by wall-clock samples, not by us_per_beat.
+            let tps = fps.as_f32() * sub as f32;
+            (tps as u64, Some(tps))
         }
     };
 
@@ -300,11 +316,15 @@ pub fn parse_midi(raw: &[u8]) -> Result<MidiSeqData, String> {
 
                 TrackEventKind::Meta(meta) => match meta {
                     midly::MetaMessage::Tempo(t) => {
-                        all_events.push(MidiSeqEvent {
-                            tick: abs_tick,
-                            channel: 0,
-                            data: SeqEventData::TempoChange { us_per_beat: t.as_int() },
-                        });
+                        // SMPTE files play at true fps*sub time — tempo events
+                        // are meaningless there and would only mislead.
+                        if smpte_ticks_per_sec.is_none() {
+                            all_events.push(MidiSeqEvent {
+                                tick: abs_tick,
+                                channel: 0,
+                                data: SeqEventData::TempoChange { us_per_beat: t.as_int() },
+                            });
+                        }
                     }
                     midly::MetaMessage::TrackName(n) => {
                         let s = String::from_utf8_lossy(n).trim().to_string();
@@ -339,5 +359,6 @@ pub fn parse_midi(raw: &[u8]) -> Result<MidiSeqData, String> {
         events: all_events,
         track_names,
         track_channels,
+        smpte_ticks_per_sec,
     })
 }

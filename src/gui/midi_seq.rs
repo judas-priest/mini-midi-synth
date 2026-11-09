@@ -151,9 +151,13 @@ impl App {
                     ui.label(egui::RichText::new("Program").strong());
                     ui.end_row();
 
-                    // Collect changes to send after the loop (avoids borrow issues)
-                    let mut instr_changes: Vec<(usize, TrackInstrument)> = Vec::new();
-                    let mut mute_changes: Vec<(usize, bool)> = Vec::new();
+                    // Collect changes to send after the loop (avoids borrow issues).
+                    // Each entry carries the PRE-change mirror value so a dropped
+                    // push can revert the optimistic edit (audit rhythm #19): the
+                    // engine only applies what reached the ring, so the mirror
+                    // must go back to the value the engine still holds.
+                    let mut instr_changes: Vec<(usize, TrackInstrument, TrackInstrument)> = Vec::new();
+                    let mut mute_changes: Vec<(usize, bool, bool)> = Vec::new();
 
                     for (i, track) in self.midi_seq_tracks.iter_mut().enumerate() {
                         // Track index
@@ -173,8 +177,12 @@ impl App {
                             .on_hover_text(if track.muted { "Unmute" } else { "Mute" })
                             .clicked()
                         {
+                            let prev_muted = track.muted;
                             track.muted = !track.muted;
-                            mute_changes.push((i, track.muted));
+                            // Deposit prev; revert only on push Err below —
+                            // never re-flip here (two toggles in a frame would
+                            // corrupt the prev value).
+                            mute_changes.push((i, track.muted, prev_muted));
                         }
 
                         // Channel label
@@ -227,7 +235,7 @@ impl App {
                                 });
                         }
                         if track.instrument != prev_instr {
-                            instr_changes.push((i, track.instrument));
+                            instr_changes.push((i, track.instrument, prev_instr));
                         }
 
                         // SF2 program picker (only visible when instrument == SF2)
@@ -251,7 +259,7 @@ impl App {
                                         });
                                 });
                             if *program != prev_prog {
-                                instr_changes.push((i, track.instrument));
+                                instr_changes.push((i, track.instrument, TrackInstrument::Sf2 { program: prev_prog }));
                             }
                         } else {
                             ui.label("");
@@ -260,18 +268,37 @@ impl App {
                         ui.end_row();
                     }
 
-                    // Send changes to audio thread
-                    for (idx, instr) in instr_changes {
-                        let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetTrackInstrument {
-                            track_idx: idx,
-                            instrument: instr,
-                        });
+                    // Send changes to audio thread. On push Err (full ring)
+                    // the optimistic mirror edit is reverted: the engine never
+                    // saw the event, so the GUI row would disagree forever
+                    // (the mirror is rebuilt only on file load).
+                    for (idx, instr, prev_instr) in instr_changes {
+                        if self
+                            .ctrl_tx
+                            .push(ControlEvent::MidiSeqSetTrackInstrument {
+                                track_idx: idx,
+                                instrument: instr,
+                            })
+                            .is_err()
+                        {
+                            if let Some(track) = self.midi_seq_tracks.get_mut(idx) {
+                                track.instrument = prev_instr;
+                            }
+                        }
                     }
-                    for (idx, muted) in mute_changes {
-                        let _ = self.ctrl_tx.push(ControlEvent::MidiSeqSetTrackMute {
-                            track_idx: idx,
-                            muted,
-                        });
+                    for (idx, muted, prev_muted) in mute_changes {
+                        if self
+                            .ctrl_tx
+                            .push(ControlEvent::MidiSeqSetTrackMute {
+                                track_idx: idx,
+                                muted,
+                            })
+                            .is_err()
+                        {
+                            if let Some(track) = self.midi_seq_tracks.get_mut(idx) {
+                                track.muted = prev_muted;
+                            }
+                        }
                     }
                 });
         });

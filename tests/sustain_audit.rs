@@ -868,6 +868,7 @@ fn empty_seq_data() -> Box<mini_midi_synth::synth::midi_player::MidiSeqData> {
         events: Vec::new(),
         track_names: Vec::new(),
         track_channels: Vec::new(),
+        smpte_ticks_per_sec: None,
     })
 }
 
