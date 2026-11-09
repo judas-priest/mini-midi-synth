@@ -999,8 +999,16 @@ impl Part {
             }
         }
 
-        // Scene LFOs — always tick regardless of note state, never retrigger
+        // Scene LFOs — always tick regardless of note state; Envelope
+        // автозапускается из idle (см. if ниже), иначе не ретригается
         let slfo1_wf = LfoWaveform::from_param(self.params.slfo1_waveform);
+        // Envelope на scene LFO: нет note-on ретрига — запускаем AD-цикл
+        // из idle один раз (дальше stage 3 циклит сам; audit QW3-review).
+        // Смена волны на другую и обратно к Envelope НЕ перезапускает — цикл
+        // продолжается с текущей фазы (mid-cycle continuation, by design).
+        if slfo1_wf == LfoWaveform::Envelope && self.scene_lfos[0].env_idle() {
+            self.scene_lfos[0].env_retrigger();
+        }
         self.scene_lfos[0].set_bpm(inputs.seq_bpm);
         self.scene_lfos[0].tempo_sync = self.params.slfo1_tempo_sync > 0.5;
         self.scene_lfos[0].unipolar  = self.params.slfo1_unipolar  > 0.5;
@@ -1014,6 +1022,13 @@ impl Part {
         } else { 0.0 };
 
         let slfo2_wf = LfoWaveform::from_param(self.params.slfo2_waveform);
+        // Envelope на scene LFO: нет note-on ретрига — запускаем AD-цикл
+        // из idle один раз (дальше stage 3 циклит сам; audit QW3-review).
+        // Смена волны на другую и обратно к Envelope НЕ перезапускает — цикл
+        // продолжается с текущей фазы (mid-cycle continuation, by design).
+        if slfo2_wf == LfoWaveform::Envelope && self.scene_lfos[1].env_idle() {
+            self.scene_lfos[1].env_retrigger();
+        }
         self.scene_lfos[1].set_bpm(inputs.seq_bpm);
         self.scene_lfos[1].tempo_sync = self.params.slfo2_tempo_sync > 0.5;
         self.scene_lfos[1].unipolar  = self.params.slfo2_unipolar  > 0.5;
