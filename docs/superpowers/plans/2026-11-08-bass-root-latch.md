@@ -102,11 +102,43 @@ tests/) обновляются под latch-семантику — это ОСО
 
 ### Task 1: RootOff enum + characterization (RED)
 
-**Files:** Modify `src/synth/events.rs` (рядом с RootDecision 74-81);
-`src/synth/tests.rs` (4 re-key теста :635/:679/:754/:813 → latch-инверсия,
-review I2) и `tests/root_only.rs` (:29 комментарий).
+**Files:** Create tests in `src/synth/tests.rs` (рядом с 4 re-key тестами
+:635/:679/:754/:813 — их НЕ трогать в Task 1, они документируют текущее
+re-key поведение; инверсия = Task 2 Step 4).
 
-- [ ] Step 1: enum:
+- [ ] Step 1: characterization-тесты — STATE-BASED ассерты через ТЕКУЩИЙ API
+  (root_on возвращает RootDecision, root_off Option<u8>, поля root_active/
+  root_held pub(super) — синт-тесты видят; НИКАКОГО нового API в Task 1):
+  * `bass_latch_survives_partial_release` (TC1): mode=BASS; root_on(60/64/67);
+    root_off(64) → None (сейчас Some(64) — RED здесь: latch ждёт None);
+    root_active == Some(60) (сейчас Some(64) — второй RED-ассерт);
+    root_off(60) → None... (RED: сейчас Some(60)); root_off(67) → None;
+    root_active == None (GREEN уже).
+  * `root_mode_latch_and_redetect` (TC2): mode=ROOT; on 60/64/67 →
+    Sound C; off 60 → None + root_active == Some(C-таргет) (RED: сейчас
+    re-key); полный отпуск → root_active == None; новое on 64/67/71 →
+    detect({64,67,71}) → корень E (Sound) — GREEN (это root_on, не меняется).
+  * `async_growth_rekey_preserved` (TC3): on 67 → Sound G; on 60 →
+    Sound { release: Some(67), note: C }; on 64 → Suppress (target C
+    unchanged). GREEN до фикса — регресс-замок (root_on не меняется).
+  * `mode_switch_resets_latch` (TC6): SetPartNoteMode mid-hold (mod.rs:1534-1544
+    чистит root_held+root_active) → root_off → None, root_active None.
+    Ассерт ТОЛЬКО на сброс трекинга (review M6): тишина НЕ гарантируется —
+    synthesized root (target≠raw) звучит до drain/pedal-up, ПРЕ-СУЩЕСТВУЮЩИЙ
+    hang, Out of scope.
+  * `bass_full_release_silence` (review gap): полный отпуск в gated DSP →
+    нет активных голосов (is_releasing допустим) — явный silence-ассерт.
+  * `gated_mseg_releases_on_full_release` (review I1): MSEG-патч в
+    Bass-режиме: аккорд → полный отпуск → mseg1/2 released (доступ по
+    факт. именам полей state).
+- [ ] Step 2: `cargo test` → TC1/TC2 RED (сейчас off ре-key'ит: root_active
+  меняется), замки/негативы GREEN. Зафиксировать список RED.
+- [ ] Step 3: коммит `test: bass/root latch characterization (red = target latch semantics)`.
+
+### Task 2: реализация — root_off tri-state + route_note_off
+
+**Files:** Modify `src/synth/events.rs` (рядом с RootDecision 74-81 — НОВЫЙ
+enum):
 ```rust
 /// Note-off side решения note-mode гейта (TECHDEBT #24-семейство, latch-
 /// семантика аранжерных басов, юзер-решение 2026-11-08): отпускание части
@@ -120,41 +152,14 @@ pub(crate) enum RootOff {
     Release { note: u8 },
 }
 ```
-- [ ] Step 2: characterization-тесты (по месту существующих; harness —
-  прямые вызовы part.root_on/root_off + счётчик голосов part.voices, как в
-  соседних тестах):
-  * `bass_latch_survives_partial_release` (TC1): root_on(60); root_on(64);
-    root_on(67); root_off(64) → Latch; active == Some(60) (поле pub(super),
-    тесты в synth-крейте видят); root_off(60) → Latch; root_off(67) →
-    Release { note: 60 }; root_active == None.
-  * `root_mode_latch_and_redetect` (TC2): mode=ROOT; on 60/64/67 →
-    Sound C; off 60 → Latch; все off → Release; on 64/67/71 → detect({64,67,71})
-    → корень E (Sound note=E-октава от 64).
-  * `async_growth_rekey_preserved` (TC3): on 67 → Sound G; on 60 →
-    Sound { release: Some(67), note: C }; on 64 → Suppress (target C
-    unchanged). GREEN до фикса — регресс-замок.
-  * `mode_switch_resets_latch` (TC6): SetPartNoteMode mid-hold (mod.rs:1534-1544
-    чистит root_held+root_active) → root_off → Pass. Ассерт ТОЛЬКО на сброс
-    трекинга (review M6): тишина НЕ гарантируется — synthesized root
-    (target≠raw) продолжает звучать до drain/pedal-up, это ПРЕ-СУЩЕСТВУЮЩИЙ
-    hang, Out of scope.
-  * `bass_full_release_silence` (review gap): полный отпуск в gated DSP →
-    нет активных голосов (is_releasing допустим) — явный silence-ассерт.
-  * `gated_mseg_releases_on_full_release` (review I1): MSEG-патч (osc с
-    mseg-состоянием) в Bass-режиме: аккорд → полный отпуск → mseg1/2
-    released (поля state — сверить доступ по факт. именам).
-- [ ] Step 3: `cargo test` → TC1/TC2 RED (сейчас off → Some(следующий)),
-  TC3/замки GREEN. Зафиксировать список RED.
-- [ ] Step 4: коммит `test: bass/root latch characterization (red = target latch semantics)`.
-
-### Task 2: реализация — root_off tri-state + route_note_off
-
-**Files:** Modify `src/synth/part.rs:646-673 (root_off)`,
+Modify `src/synth/part.rs:646-673 (root_off)`,
 `src/synth/mod.rs:548-610 (route_note_off)`, `src/synth/mod.rs:157-159`
 (экспорт RootOff), `src/synth/tests.rs` (инверсия 4 re-key тестов,
 см. Task 1 список), `tests/root_only.rs` (:29 комментарий).
 
-- [ ] Step 1: part.rs root_off — тело заменить целиком:
+- [ ] Step 1: part.rs root_off — тело заменить целиком (сигнатура → RootOff;
+  тесты из Task 1, писавшие state-ассерты, остаются валидными — они
+  проверяют root_active, теперь офиц. путь возвращает tri-state):
 ```rust
     /// Note-mode gate, note-off side (latch-семантика, юзер-решение
     /// 2026-11-08): отпускания НИКОГДА не пере-детектят корень — он звучит
