@@ -100,7 +100,7 @@ tests/) обновляются под latch-семантику — это ОСО
 
 ---
 
-### Task 1: RootOff enum + characterization (RED)
+### Task 1: characterization (state-based, RED — enum в Task 2)
 
 **Files:** Create tests in `src/synth/tests.rs` (рядом с 4 re-key тестами
 :635/:679/:754/:813 — их НЕ трогать в Task 1, они документируют текущее
@@ -110,10 +110,11 @@ re-key поведение; инверсия = Task 2 Step 4).
   (root_on возвращает RootDecision, root_off Option<u8>, поля root_active/
   root_held pub(super) — синт-тесты видят; НИКАКОГО нового API в Task 1):
   * `bass_latch_survives_partial_release` (TC1): mode=BASS; root_on(60/64/67);
-    root_off(64) → None (сейчас Some(64) — RED здесь: latch ждёт None);
-    root_active == Some(60) (сейчас Some(64) — второй RED-ассерт);
-    root_off(60) → None... (RED: сейчас Some(60)); root_off(67) → None;
-    root_active == None (GREEN уже).
+    root_off(64) → None + root_active == Some(60) — УЖЕ GREEN (unchanged
+    target → текущий root_off возвращает None, review F1); RED — на off(60)
+    (release КОРНЯ первым, юзер-сценарий): latch ждёт None + root_active
+    == Some(60), сейчас возвращает Some(67) и ре-кейит);
+    root_off(67) → None + root_active == None (GREEN уже).
   * `root_mode_latch_and_redetect` (TC2): mode=ROOT; on 60/64/67 →
     Sound C; off 60 → None + root_active == Some(C-таргет) (RED: сейчас
     re-key); полный отпуск → root_active == None; новое on 64/67/71 →
@@ -168,6 +169,11 @@ Modify `src/synth/part.rs:646-673 (root_off)`,
     pub(super) fn root_off(&mut self, raw: u8) -> RootOff {
         self.root_held[raw as usize] = false;
         if self.note_mode == NOTE_MODE_POLY { return RootOff::Pass; }
+        // play_mode 3 (arp): on-сторона bypass'ится (606), off-сторона раньше
+        // ре-детектилась — теперь тоже Pass (review F3: live/looper offs
+        // в arp-комбо не должны подавляться latch'ем; arp gate-offs идут
+        // мимо route_note_off и не задеты).
+        if self.params.play_mode as u8 == 3 { return RootOff::Pass; }
         if self.root_held.iter().any(|&h| h) { return RootOff::Latch; }
         // Все клавиши отпущены: off голоса последнего корня и сброс.
         match self.root_active.take() {
@@ -207,6 +213,10 @@ Modify `src/synth/part.rs:646-673 (root_off)`,
                         if v.active && v.src_note == note { v.note_off(); }
                     }
                     part.sustained_notes[note as usize] = false;
+                    part.update_held_range(); // бывший хвост parts.note_off
+                                              // (part.rs:584): lowest/highest_held
+                                              // для key-track модуляций (review F2;
+                                              // visibility private → pub(super))
                     // MSEG-релиз: чек из parts.note_off (part.rs:580-583) —
                     // прежний gated off звуал note_off, который делал этот
                     // чек; без него MSEG-патч дронит после полного релиза
@@ -263,7 +273,9 @@ Modify `src/synth/part.rs:646-673 (root_off)`,
   корень.
 
 ## Out of scope
-- Полифония и play_mode 3 (arp) — bypass как сейчас.
+- Полифония — bypass как сейчас. play_mode 3 (arp): on-side bypass;
+  off-side теперь тоже Pass (review F3 — раньше ре-детектил, расхождение
+  on/off устранено).
 - «Корень = первая нажатая» (вариант 2 юзера) — не выбран.
 - SF2 mono-stack (POLY last-note) — не задет.
 - Подача корня в looper-record (replay получает offs по отпусканиям — latch
