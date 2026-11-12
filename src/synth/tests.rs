@@ -632,16 +632,26 @@ fn root_only_rekeys_to_new_lowest() {
 }
 
 #[test]
-fn root_only_release_of_root_rekeys_next_lowest() {
+fn root_only_release_of_root_latches_root_until_full_release() {
+    // Latch semantics (user decision 2026-11-08): releasing the ROOT first
+    // does NOT re-key to the next-lowest key — the original root keeps
+    // sounding until every key is up.
     let mut e = bass_engine();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
     for _ in 0..100 { e.tick(); }
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
     for _ in 0..100 { e.tick(); }
-    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 64),
-        "next-lowest key did not re-key after root release");
-    assert_eq!(e.parts[0].root_active, Some(64));
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 60),
+        "latched root did not survive its own key-up while 64 is held");
+    assert_eq!(e.parts[0].root_active, Some(60), "partial release must not re-key to 64");
+    assert_eq!(sounding(&e.parts[0]), 1, "latch release must not pile up the re-keyed voice");
+    // Full release: the latched root is released, latch resets.
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 64 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().all(|v| !v.active || v.is_releasing()),
+        "full release must silence the latched root");
+    assert_eq!(e.parts[0].root_active, None, "full release must clear the latch");
 }
 
 #[test]
@@ -676,10 +686,11 @@ fn root_only_out_of_range_key_does_not_join_held_mask() {
 // ── Root mode (chord-root detection, note_mode = 2) ────────────
 
 #[test]
-fn root_mode_follows_chord_root_and_rekeys_back() {
+fn root_mode_follows_chord_root_and_latches_on_release() {
     // TC1: C(48)+E(52) = {0,4} — некордово, фолбэк на нижнюю → звучит C.
-    // +A(45): {9,0,4} = Am → корень A, прежний C отпускается (re-key).
-    // Снять A → остался C → рё-key на C.
+    // +A(45): {9,0,4} = Am → корень A, прежний C отпускается (re-key по
+    // НАЖАТИЮ — дозревание сохранено). Снять A (корень) → LATCH: A звучит
+    // дальше, ре-кей назад на C запрещён (юзер-решение 2026-11-08).
     let mut e = root_engine();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 48, velocity: 100 });
     for _ in 0..100 { e.tick(); }
@@ -698,11 +709,20 @@ fn root_mode_follows_chord_root_and_rekeys_back() {
     assert!(e.parts[0].voices.iter().any(|v| v.active && v.is_releasing() && v.src_note == 48),
         "old root C was not released on re-key");
 
-    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 45 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 45 }); // E still held → latch
     for _ in 0..100 { e.tick(); }
-    assert_eq!(e.parts[0].root_active, Some(48), "did not re-key back to C");
-    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 48),
-        "C did not re-sound after A release");
+    assert_eq!(e.parts[0].root_active, Some(45), "root release latched away the root");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 45),
+        "latched root A did not keep sounding after its key-up");
+    assert_eq!(sounding(&e.parts[0]), 1, "latch release must not re-key back to C");
+
+    // Full release: the latched root goes off, latch resets.
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 52 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 48 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().all(|v| !v.active || v.is_releasing()),
+        "full release must silence the latched root");
+    assert_eq!(e.parts[0].root_active, None, "full release must clear the latch");
 }
 
 #[test]
@@ -751,10 +771,11 @@ fn root_mode_nonchord_set_falls_back_to_bass() {
 }
 
 #[test]
-fn root_mode_rekeys_on_chord_member_release_even_under_synthesized_root() {
+fn root_mode_member_release_latches_synthesized_root() {
     // Корень может не совпадать ни с одной зажатой клавишей (Root-режим,
-    // синтезированный таргет): снятие члена аккорда обязано пересчитать корень.
-    // held {1,4,9} → A, target 0; снять 1 → {4,9} некордово → фолбэк 4.
+    // синтезированный таргет). Latch-семантика (юзер-решение 2026-11-08):
+    // снятие члена аккорда НЕ пересчитывает корень — held {1,4,9} → A,
+    // target 0; снять 1 → синтезированный 0 живёт, пока {4,9} зажаты.
     let mut e = root_engine();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 1, velocity: 100 });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 9, velocity: 100 });
@@ -763,18 +784,25 @@ fn root_mode_rekeys_on_chord_member_release_even_under_synthesized_root() {
     assert_eq!(e.parts[0].root_active, Some(0));
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 1 });
     for _ in 0..100 { e.tick(); }
-    assert_eq!(e.parts[0].root_active, Some(4), "stale synthesized root after member release");
-    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 4),
-        "re-keyed root 4 did not sound");
-    assert_eq!(sounding(&e.parts[0]), 1, "old synthesized root piled up with the new one");
+    assert_eq!(e.parts[0].root_active, Some(0),
+        "member release must not re-key the synthesized root (latch)");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 0),
+        "synthesized root 0 did not survive the member release");
+    assert_eq!(sounding(&e.parts[0]), 1,
+        "member release must not sound the re-keyed fallback root");
+    // Full release: synthesized root released even though no key matches it.
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 9 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 4 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().all(|v| !v.active || v.is_releasing()),
+        "full release must silence the synthesized root");
+    assert_eq!(e.parts[0].root_active, None, "full release must clear the latch");
 }
 
-// ── Bass/Root latch characterization (RED = target latch semantics) ──
-// Target (user decision 2026-11-08): releasing part of a chord NEVER re-keys
-// the sounding root — it sounds until every key is up (arranger-bass canon).
-// These tests use the CURRENT API (root_on → RootDecision, root_off →
-// Option<u8>, root_active/root_held); the two latch tests are RED today
-// because root_off still re-detects on releases. Inverted in Task 2.
+// ── Bass/Root latch (user decision 2026-11-08) ─────────────────
+// Releasing part of a chord NEVER re-keys the sounding root — it sounds
+// until every key is up (arranger-bass canon). root_off → RootOff
+// tri-state; root_active/root_held stay the observable tracking state.
 
 fn latch_part(mode: u8) -> Part {
     let mut p = Part::new(48_000.0);
@@ -791,14 +819,15 @@ fn bass_latch_survives_partial_release() {
         "root C must sound");
     assert!(matches!(p.root_on(64), RootDecision::Suppress), "chord member 64 must be suppressed");
     assert!(matches!(p.root_on(67), RootDecision::Suppress), "chord member 67 must be suppressed");
-    // Non-root member release: off swallowed, latch unchanged (already green).
-    assert_eq!(p.root_off(64), None, "member off must not re-key");
+    // Non-root member release: off swallowed, latch unchanged.
+    assert!(matches!(p.root_off(64), RootOff::Latch), "member off must be latched, not re-keyed");
     assert_eq!(p.root_active, Some(60), "member release lost the latch");
-    // RED today: root_off re-detects {67} and re-keys to G.
-    assert_eq!(p.root_off(60), None, "root off with held members must not re-key (latch)");
+    // Root released first (user scenario): latch keeps C — no re-key to G.
+    assert!(matches!(p.root_off(60), RootOff::Latch), "root off with held members must not re-key (latch)");
     assert_eq!(p.root_active, Some(60), "latch must keep the original root until full release");
-    // Full release: latch resets (green in both worlds).
-    assert_eq!(p.root_off(67), None);
+    // Full release: off the last root voice + latch reset.
+    assert!(matches!(p.root_off(67), RootOff::Release { note: 60 }),
+        "full release must return the latched root for its note-off");
     assert_eq!(p.root_active, None, "latch must reset on full release");
 }
 
@@ -812,12 +841,13 @@ fn root_mode_latch_and_redetect() {
     assert!(matches!(p.root_on(64), RootDecision::Suppress));
     assert!(matches!(p.root_on(67), RootDecision::Suppress));
     assert_eq!(p.root_active, Some(60), "C-E-G must detect root C");
-    // RED today: root_off re-detects {64,67} (non-chord fallback → 64).
-    assert_eq!(p.root_off(60), None, "root-mode off with held members must not re-key (latch)");
+    // Root released first: latch keeps C (no re-detect of {64,67} → 64).
+    assert!(matches!(p.root_off(60), RootOff::Latch), "root-mode off with held members must not re-key (latch)");
     assert_eq!(p.root_active, Some(60), "root-mode latch lost on root release");
-    // Full release resets (green in both worlds — re-key chain ends at None).
-    let _ = p.root_off(64);
-    let _ = p.root_off(67);
+    // Full release: latch resets with the root off payload.
+    assert!(matches!(p.root_off(64), RootOff::Latch));
+    assert!(matches!(p.root_off(67), RootOff::Release { note: 60 }),
+        "full release must return the latched root for its note-off");
     assert_eq!(p.root_active, None, "full release must reset root tracking");
     // Fresh chord re-detects: {4,7,11} = Em → root E sounds.
     assert!(matches!(p.root_on(64), RootDecision::Sound { release: None, note: 64 }),
@@ -842,6 +872,25 @@ fn async_growth_rekey_preserved() {
 }
 
 #[test]
+fn async_growth_rekey_flushes_old_root_off() {
+    // TC3 strengthening (engine level): the ripening re-key's `release`
+    // payload must be a real flushed note-off — the old root G voice enters
+    // release while the new root C sounds (route_note_on release arm).
+    let mut e = bass_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 67, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 67),
+        "G alone did not sound");
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 60),
+        "new root C did not sound after the ripening re-key");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && v.is_releasing() && v.src_note == 67),
+        "old root G release was not flushed on the re-key");
+    assert_eq!(sounding(&e.parts[0]), 1, "old and new roots sounding at once");
+}
+
+#[test]
 fn mode_switch_resets_latch() {
     // TC6: SetPartNoteMode mid-hold clears root_held + root_active (mod.rs
     // handler, every change incl. re-click), so later offs pass through
@@ -857,7 +906,7 @@ fn mode_switch_resets_latch() {
     assert_eq!(e.parts[0].root_active, None, "mode switch did not reset root_active");
     assert!(!e.parts[0].root_held.iter().any(|&h| h), "mode switch did not reset root_held");
     let next = e.parts[0].root_off(60); // ghost off after the reset
-    assert_eq!(next, None, "off after mode switch must not re-key");
+    assert!(matches!(next, RootOff::Pass), "off after mode switch must pass through, not latch");
     assert_eq!(e.parts[0].root_active, None, "ghost off resurrected root tracking");
 }
 
@@ -963,35 +1012,47 @@ fn per_part_sustain_gate_holds_only_enabled_part() {
 }
 
 #[test]
-fn root_only_rekey_releases_old_root_even_under_pedal() {
-    // route_note_off DSP path: root key-up force-releases the old root voice
-    // (v.note_off(), sustained_notes cleared) even while the pedal holds it,
-    // then re-keys to the next-lowest held key.
+fn root_release_under_pedal_latches_until_full_release() {
+    // route_note_off DSP path, latch semantics (user decision 2026-11-08):
+    // root key-up while members are held = Latch — the pedal neither kills
+    // nor resurrects the root, it keeps sounding untouched (sustained flag
+    // untouched too). Only the FULL release force-releases the latched root
+    // and clears its sustained_notes flag even under the pedal (TC5).
     let mut e = bass_engine();
     e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 }); // pedal down
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 }); // suppressed
     for _ in 0..100 { e.tick(); }
     assert!(e.parts[0].voices.iter().any(|v| v.active), "root did not sound");
-    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // pedal still holding it
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // 64 still held → Latch
+    for _ in 0..100 { e.tick(); }
+    assert!(
+        e.parts[0].voices.iter().any(|v| v.active && v.src_note == 60 && !v.is_releasing()),
+        "latch lost the root voice on its key-up under the pedal"
+    );
+    assert_eq!(e.parts[0].root_active, Some(60), "partial release must not re-key to 64");
+    // The flag is only set when a note-off arrives under the pedal — latch
+    // suppresses that note-off, so the flag stays untouched (false): nothing
+    // for the pedal to resurrect, the voice simply keeps sounding.
+    assert!(!e.parts[0].sustained_notes[60],
+        "latch must not route the suppressed off through the pedal path");
+    // Full release: the latched root is force-released even under the pedal,
+    // its sustained_notes flag is cleared (no resurrection on pedal-up).
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 64 });
     for _ in 0..100 { e.tick(); }
     assert!(
         !e.parts[0].voices.iter().any(|v| v.active && v.src_note == 60 && !v.is_releasing()),
-        "old root voice is still sustain-held after its key-up under pedal"
+        "full release left the latched root sustain-held after its key-up under pedal"
     );
-    assert!(!e.parts[0].sustained_notes[60], "old root left in sustained_notes");
-    assert_eq!(e.parts[0].root_active, Some(64), "did not re-key to note 64");
-    assert!(
-        e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 64),
-        "re-keyed voice for note 64 did not sound"
-    );
+    assert!(!e.parts[0].sustained_notes[60], "latched root left in sustained_notes");
+    assert_eq!(e.parts[0].root_active, None, "full release must clear the latch");
 }
 
 #[test]
 fn root_only_key_up_kills_pedal_held_bass() {
-    // Plain key release with no re-key target: the root voice is force-killed
-    // at key-up even under the pedal (bass-split semantics: key-up = note
-    // done, the pedal must not resurrect the bass).
+    // Release of the LAST held key = RootOff::Release: the root voice is
+    // force-killed at key-up even under the pedal (bass-split semantics:
+    // full release = note done, the pedal must not resurrect the bass).
     let mut e = bass_engine();
     e.handle_event(MidiEvent::ControlChange { channel: 0, cc: 64, value: 127 }); // pedal down
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });

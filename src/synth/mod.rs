@@ -156,7 +156,7 @@ impl ScopeBuffer {
 mod events;
 pub use events::{ControlEvent, DrumParam, LoadPatchEvent, MidiEvent, NOTE_MODE_BASS, NOTE_MODE_POLY,
     NOTE_MODE_ROOT, ParamFeedback, PartFullState};
-pub(crate) use events::RootDecision;
+pub(crate) use events::{RootDecision, RootOff};
 // effective_pb/effective_mw: the engine path lives in part.rs; this re-export
 // is for tests.rs (`super::effective_pb`).
 #[allow(unused_imports)]
@@ -543,23 +543,37 @@ impl SynthEngine {
         true
     }
 
-    /// Shared part note-off dispatch with note-mode re-keying. Offs skip the
+    /// Shared part note-off dispatch with note-mode gating. Offs skip the
     /// range check (matching today's behavior) so a range change mid-note
-    /// cannot orphan a voice.
+    /// cannot orphan a voice. Bass/Root latch (user decision 2026-11-08):
+    /// a partial chord release NEVER re-keys — the root sounds until every
+    /// key is up; re-key-on-release blocks are gone (release never
+    /// re-detects, arranger-bass canon).
     fn route_note_off(&mut self, i: usize, raw: u8) {
-        let (sf2_mode, transpose, gated, last_vel, old_root) = {
+        let (sf2_mode, transpose, gated) = {
             let p = &self.parts[i];
-            (p.sf2_mode, p.transpose, p.note_mode != NOTE_MODE_POLY,
-             p.last_velocity, p.root_active)
+            (p.sf2_mode, p.transpose, p.note_mode != NOTE_MODE_POLY)
         };
-        let next = self.parts[i].root_off(raw);
+        let next_root = self.parts[i].root_off(raw);
         let tr = |n: u8| (n as i16 + transpose as i16).clamp(0, 127) as u8;
         if sf2_mode {
+            if gated {
+                match next_root {
+                    RootOff::Latch => { return; } // корень звучит — off подавлен
+                    RootOff::Release { note } => {
+                        self.sampler.note_off(i, tr(note));
+                        return;
+                    }
+                    // POLY/ghost/arp — обычный off по raw.
+                    RootOff::Pass => { self.sampler.note_off(i, tr(raw)); return; }
+                }
+            }
             // Last-note priority: отпустили звучащую клавишу — вернуться к
-            // последней из оставшихся зажатых (re-trigger, канон Moog/SoS)
+            // последней из оставшихся зажатых (re-trigger, канон Moog/SoS).
+            // POLY-only: gated вернулся выше, latch не доходит сюда.
             let (mono, vel) = { let p = &self.parts[i];
                 (p.params.play_mode as u8 == 1 || p.params.play_mode as u8 == 2, p.last_velocity) };
-            if mono && self.parts[i].note_mode == crate::synth::NOTE_MODE_POLY {
+            if mono {
                 let part = &mut self.parts[i];
                 let had = part.sf2_mono_stack.iter().any(|&(n, _)| n == raw);
                 part.sf2_mono_stack.retain(|&(n, _)| n != raw);
@@ -572,38 +586,45 @@ impl SynthEngine {
                 return;
             }
             self.sampler.note_off(i, tr(raw));
-            // Re-key в Root-режиме: синтезированный корень (old) может быть
-            // ≠ raw — отпустить и его, иначе дрон под новой нотой.
-            if let (Some(n), Some(old)) = (next, old_root) {
-                if old != raw { self.sampler.note_off(i, tr(old)); }
-                self.sampler.note_on(i, tr(n), (last_vel * 127.0) as u8);
-            } else if let Some(n) = next {
-                self.sampler.note_on(i, tr(n), (last_vel * 127.0) as u8);
-            }
         } else {
-            self.parts[i].note_off(raw);
-            if gated {
-                // Bass-split semantics (TECHDEBT #6): key-up = the note is DONE.
-                // Force-release the root voice even when the pedal holds it and
-                // clear its sustained_notes flag — the pedal must not resurrect
-                // a bass root whose key the player has already let go (that
-                // would drone the old root under the re-keyed one). Same for
-                // the replaced root in route_note_on above. In Root mode the
-                // sounding root may be a synthesized target (not `raw`), so
-                // release the OLD root when the re-key moved it.
-                let part = &mut self.parts[i];
-                for v in &mut part.voices {
-                    if v.active && v.src_note == raw { v.note_off(); }
-                }
-                part.sustained_notes[raw as usize] = false;
-                if let (Some(n), Some(old)) = (next, old_root) {
-                    if old != raw {
-                        for v in &mut part.voices {
-                            if v.active && v.src_note == old { v.note_off(); }
-                        }
-                        part.sustained_notes[old as usize] = false;
+            match next_root {
+                // Корень звучит — off raw подавлен целиком. keys_down[raw]
+                // НАМЕРЕННО не чистится: release_pedal_held (part.rs) щадит
+                // latched корень = желаемое поведение; инвариант «keys_down =
+                // физические клавиши» нарушается здесь осознанно (review M4).
+                // Пин #24: force-release только на Release (ниже).
+                RootOff::Latch => {}
+                RootOff::Release { note } => {
+                    let part = &mut self.parts[i];
+                    for v in &mut part.voices {
+                        if v.active && v.src_note == note { v.note_off(); }
                     }
-                    part.note_on(n, (last_vel * 127.0) as u8);
+                    // Пин #24: педаль не resurrect-ит корень с отпущенной
+                    // клавишей — полный релиз глушит голос и чистит флаг
+                    // даже под pedal-held.
+                    part.sustained_notes[note as usize] = false;
+                    // Бывший хвост parts.note_off: lowest/highest_held для
+                    // key-track модуляций (review F2).
+                    part.update_held_range();
+                    // MSEG-релиз: чек из parts.note_off — прежний gated off
+                    // звал note_off, который делал этот чек; без него
+                    // MSEG-патч дронит после полного релиза (review I1).
+                    if !part.has_active_notes() {
+                        part.mseg1_state.release();
+                        part.mseg2_state.release();
+                    }
+                }
+                RootOff::Pass => {
+                    self.parts[i].note_off(raw);
+                    if gated {
+                        // Пин #24: педаль не resurrect-ит корень с отпущенной
+                        // клавишей (ghost/arp off в gated-режиме).
+                        let part = &mut self.parts[i];
+                        for v in &mut part.voices {
+                            if v.active && v.src_note == raw { v.note_off(); }
+                        }
+                        part.sustained_notes[raw as usize] = false;
+                    }
                 }
             }
         }
