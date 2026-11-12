@@ -216,7 +216,8 @@ Modify `src/synth/part.rs:646-673 (root_off)`,
                     part.update_held_range(); // бывший хвост parts.note_off
                                               // (part.rs:584): lowest/highest_held
                                               // для key-track модуляций (review F2;
-                                              // visibility private → pub(super))
+                                              // visibility private → pub(super),
+                                              // как и has_active_notes part.rs:596)
                     // MSEG-релиз: чек из parts.note_off (part.rs:580-583) —
                     // прежний gated off звуал note_off, который делал этот
                     // чек; без него MSEG-патч дронит после полного релиза
