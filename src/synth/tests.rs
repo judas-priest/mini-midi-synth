@@ -769,6 +769,159 @@ fn root_mode_rekeys_on_chord_member_release_even_under_synthesized_root() {
     assert_eq!(sounding(&e.parts[0]), 1, "old synthesized root piled up with the new one");
 }
 
+// ── Bass/Root latch characterization (RED = target latch semantics) ──
+// Target (user decision 2026-11-08): releasing part of a chord NEVER re-keys
+// the sounding root — it sounds until every key is up (arranger-bass canon).
+// These tests use the CURRENT API (root_on → RootDecision, root_off →
+// Option<u8>, root_active/root_held); the two latch tests are RED today
+// because root_off still re-detects on releases. Inverted in Task 2.
+
+fn latch_part(mode: u8) -> Part {
+    let mut p = Part::new(48_000.0);
+    p.note_mode = mode;
+    p
+}
+
+#[test]
+fn bass_latch_survives_partial_release() {
+    // TC1: C-E-G (60/64/67) → C sounds; E off → latch; ROOT off first →
+    // latch keeps C; last key off → silence + latch reset.
+    let mut p = latch_part(NOTE_MODE_BASS);
+    assert!(matches!(p.root_on(60), RootDecision::Sound { release: None, note: 60 }),
+        "root C must sound");
+    assert!(matches!(p.root_on(64), RootDecision::Suppress), "chord member 64 must be suppressed");
+    assert!(matches!(p.root_on(67), RootDecision::Suppress), "chord member 67 must be suppressed");
+    // Non-root member release: off swallowed, latch unchanged (already green).
+    assert_eq!(p.root_off(64), None, "member off must not re-key");
+    assert_eq!(p.root_active, Some(60), "member release lost the latch");
+    // RED today: root_off re-detects {67} and re-keys to G.
+    assert_eq!(p.root_off(60), None, "root off with held members must not re-key (latch)");
+    assert_eq!(p.root_active, Some(60), "latch must keep the original root until full release");
+    // Full release: latch resets (green in both worlds).
+    assert_eq!(p.root_off(67), None);
+    assert_eq!(p.root_active, None, "latch must reset on full release");
+}
+
+#[test]
+fn root_mode_latch_and_redetect() {
+    // TC2: C-E-G → root C; C released first → latch keeps C; full release →
+    // reset; new chord E-G-B → re-detect E (root_on side, unchanged).
+    let mut p = latch_part(NOTE_MODE_ROOT);
+    assert!(matches!(p.root_on(60), RootDecision::Sound { release: None, note: 60 }),
+        "C must sound");
+    assert!(matches!(p.root_on(64), RootDecision::Suppress));
+    assert!(matches!(p.root_on(67), RootDecision::Suppress));
+    assert_eq!(p.root_active, Some(60), "C-E-G must detect root C");
+    // RED today: root_off re-detects {64,67} (non-chord fallback → 64).
+    assert_eq!(p.root_off(60), None, "root-mode off with held members must not re-key (latch)");
+    assert_eq!(p.root_active, Some(60), "root-mode latch lost on root release");
+    // Full release resets (green in both worlds — re-key chain ends at None).
+    let _ = p.root_off(64);
+    let _ = p.root_off(67);
+    assert_eq!(p.root_active, None, "full release must reset root tracking");
+    // Fresh chord re-detects: {4,7,11} = Em → root E sounds.
+    assert!(matches!(p.root_on(64), RootDecision::Sound { release: None, note: 64 }),
+        "fresh chord root E must sound after full release");
+    assert!(matches!(p.root_on(67), RootDecision::Suppress));
+    assert!(matches!(p.root_on(71), RootDecision::Suppress));
+    assert_eq!(p.root_active, Some(64), "E-G-B must re-detect root E");
+}
+
+#[test]
+fn async_growth_rekey_preserved() {
+    // TC3 regression lock: sequential chord ripening on the NOTE-ON side is
+    // kept verbatim (root_on is untouched by the latch change).
+    let mut p = latch_part(NOTE_MODE_BASS);
+    assert!(matches!(p.root_on(67), RootDecision::Sound { release: None, note: 67 }),
+        "G alone must sound");
+    assert!(matches!(p.root_on(60), RootDecision::Sound { release: Some(67), note: 60 }),
+        "lower C must re-key with the old G released");
+    assert!(matches!(p.root_on(64), RootDecision::Suppress),
+        "E must not move the target");
+    assert_eq!(p.root_active, Some(60));
+}
+
+#[test]
+fn mode_switch_resets_latch() {
+    // TC6: SetPartNoteMode mid-hold clears root_held + root_active (mod.rs
+    // handler, every change incl. re-click), so later offs pass through
+    // instead of feeding the gate a ghost chord. Only the TRACKING reset is
+    // asserted: silence is NOT guaranteed (a synthesized root keeps sounding
+    // until drain/pedal-up — pre-existing hang, out of scope).
+    let mut e = bass_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(e.parts[0].root_active, Some(60), "chord was not tracked before the switch");
+    let _ = e.handle_control(ControlEvent::SetPartNoteMode { part: 0, mode: NOTE_MODE_BASS });
+    assert_eq!(e.parts[0].root_active, None, "mode switch did not reset root_active");
+    assert!(!e.parts[0].root_held.iter().any(|&h| h), "mode switch did not reset root_held");
+    let next = e.parts[0].root_off(60); // ghost off after the reset
+    assert_eq!(next, None, "off after mode switch must not re-key");
+    assert_eq!(e.parts[0].root_active, None, "ghost off resurrected root tracking");
+}
+
+#[test]
+fn bass_full_release_silence() {
+    // Review gap: the latch keeps the root through partial releases, but a
+    // FULL release must still silence the gated DSP part (no voice left
+    // active-and-sounding; release tails allowed).
+    let mut e = bass_engine();
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 67, velocity: 100 });
+    for _ in 0..100 { e.tick(); }
+    assert_eq!(sounding(&e.parts[0]), 1, "chord members must stay suppressed");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 64 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 67 });
+    for _ in 0..100 { e.tick(); }
+    assert!(
+        e.parts[0].voices.iter().all(|v| !v.active || v.is_releasing()),
+        "full release must silence the bass part"
+    );
+    assert_eq!(e.parts[0].root_active, None, "full release must clear the latch");
+}
+
+#[test]
+fn gated_mseg_releases_on_full_release() {
+    // Review I1 regression lock: gated off must still release per-part MSEGs
+    // once no active notes remain (part.rs note_off tail). GatedLoop shape:
+    // while gated it loops segment 0 forever (playing stays true); only
+    // mseg*_state.release() lets it run out — if the gated path ever skips
+    // the release, the MSEG drones forever after the chord is gone.
+    let mut e = bass_engine();
+    e.parts[0].params.mseg_enabled = 1.0;
+    let gated_mseg = mseg::Mseg {
+        segments: vec![
+            mseg::MsegSegment { duration: 0.02, v0: 0.0, v1: 1.0, curve_type: mseg::CurveType::Linear, cpv: 0.0 },
+            mseg::MsegSegment { duration: 0.02, v0: 1.0, v1: 0.0, curve_type: mseg::CurveType::Linear, cpv: 0.0 },
+        ],
+        loop_mode: mseg::LoopMode::GatedLoop,
+        loop_start: 0,
+        loop_end: 0,
+    };
+    e.parts[0].mseg1 = gated_mseg.clone();
+    e.parts[0].mseg2 = gated_mseg;
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
+    e.handle_event(MidiEvent::NoteOn { channel: 0, note: 67, velocity: 100 });
+    for _ in 0..150 { e.tick(); }
+    assert!(e.parts[0].mseg1_state.playing && e.parts[0].mseg2_state.playing,
+        "gated MSEG must keep looping while the chord holds");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 64 });
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 67 });
+    // e.tick() advances the MSEG by one sample: the 2x0.02 s segments need
+    // 1920 samples to run out after the release — tick well past that.
+    for _ in 0..100 { e.tick(); }
+    for _ in 0..2500 { e.tick(); }
+    assert!(!e.parts[0].mseg1_state.playing,
+        "MSEG1 kept playing after full release (gated off missed the MSEG release)");
+    assert!(!e.parts[0].mseg2_state.playing,
+        "MSEG2 kept playing after full release (gated off missed the MSEG release)");
+}
+
 // ── Per-part sustain (Sus checkbox, TC1) ───────────────────────
 
 #[test]
