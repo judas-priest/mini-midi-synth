@@ -81,6 +81,18 @@ pub(crate) enum RootDecision {
     Sound { release: Option<u8>, note: u8 },
 }
 
+/// Note-off side решения note-mode гейта (TECHDEBT #24-семейство, latch-
+/// семантика аранжерных басов, юзер-решение 2026-11-08): отпускание части
+/// аккорда никогда не пере-детектит корень.
+pub(crate) enum RootOff {
+    /// POLY/ghost — обычный off по raw.
+    Pass,
+    /// Остались зажатые: off raw ПОДАВЛЕН, голос корня продолжает звучать.
+    Latch,
+    /// Все клавиши отпущены: off голоса последнего корня и сброс latch.
+    Release { note: u8 },
+}
+
 /// Per-part ignore: PB/MW-вклад конкретного парта (TECHDEBT #55).
 pub(crate) fn effective_pb(ignore: bool, pb: f32) -> f32 { if ignore { 0.0 } else { pb } }
 pub(crate) fn effective_mw(ignore: bool, mw: f32) -> f32 { if ignore { 0.0 } else { mw } }

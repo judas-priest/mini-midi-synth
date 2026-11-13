@@ -27,12 +27,13 @@ fn settle(engine: &mut SynthEngine) {
 
 #[test]
 fn root_only_key_ups_kill_pedal_held_roots_to_silence() {
-    // Bass-split semantics (route_note_off DSP path): root key-up force-releases
-    // the root voice and clears its sustained_notes flag — the pedal must not
-    // hold or resurrect a bass root whose key is up. Audio-level proof: after
-    // both key-ups (with a re-key in between) and the pedal STILL DOWN, the
-    // part is silent. If the old root were sustain-held instead of
-    // force-released, it would still ring here.
+    // Bass-split semantics (route_note_off DSP path): a FULL release
+    // force-releases the latched root voice and clears its sustained_notes
+    // flag — the pedal must not hold or resurrect a bass root after every
+    // key is up. Audio-level proof: after both key-ups (root-up first = the
+    // latch keeps it ringing) and the pedal STILL DOWN, the part is silent.
+    // If the latched root were sustain-held instead of force-released, it
+    // would still ring here.
     let patches = preset::load_all_patches();
     let patch = patches
         .iter()
@@ -52,10 +53,10 @@ fn root_only_key_ups_kill_pedal_held_roots_to_silence() {
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 127 }); // suppressed
     assert!(render_peak(&mut e, 100) > SILENCE, "root did not sound");
 
-    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // re-keys to 64, must not stay held
-    assert!(render_peak(&mut e, 20) > SILENCE, "re-keyed root is silent");
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 60 }); // 64 held → latch keeps 60
+    assert!(render_peak(&mut e, 20) > SILENCE, "latched root went silent on its own key-up");
 
-    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 64 }); // pedal still down
+    e.handle_event(MidiEvent::NoteOff { channel: 0, note: 64 }); // full release, pedal still down
     settle(&mut e);
     let after = render_peak(&mut e, 200);
     assert!(after < SILENCE, "pedal resurrected a released root (peak {after})");

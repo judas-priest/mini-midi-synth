@@ -3,7 +3,7 @@
 //! state. Move-only out of `mod.rs` — bodies verbatim; visibility widened
 //! to `pub(super)` where the parent (`mod.rs`) reads fields/methods.
 
-use super::events::{NOTE_MODE_POLY, NOTE_MODE_ROOT, RootDecision, effective_mw, effective_pb};
+use super::events::{NOTE_MODE_POLY, NOTE_MODE_ROOT, RootDecision, RootOff, effective_mw, effective_pb};
 use super::lfo::{Lfo, LfoWaveform};
 use super::mod_matrix::{self, ModMatrix};
 use super::mseg::{Mseg, MsegState};
@@ -593,7 +593,7 @@ impl Part {
         }
     }
 
-    fn has_active_notes(&self) -> bool {
+    pub(super) fn has_active_notes(&self) -> bool {
         self.voices.iter().any(|v| v.active && !v.is_releasing())
     }
 
@@ -641,35 +641,24 @@ impl Part {
         }
     }
 
-    /// Note-mode gate, note-off side. Returns the new root to re-key to
-    /// (Some only when the sounding root actually changed).
-    pub(super) fn root_off(&mut self, raw: u8) -> Option<u8> {
+    /// Note-mode gate, note-off side (latch-семантика, юзер-решение
+    /// 2026-11-08): отпускания НИКОГДА не пере-детектят корень — он звучит
+    /// до полного отпускания (канон аранжерных басов). root_on остался
+    /// точкой дозревания аккорда (re-detect по нажатиям).
+    pub(super) fn root_off(&mut self, raw: u8) -> RootOff {
         self.root_held[raw as usize] = false;
-        if self.note_mode == NOTE_MODE_POLY { return None; }
-        // Пересчитать таргет по оставшимся held (тот же стек-буфер +
-        // i16/saturating-математика, что в root_on).
-        let mut buf = [0u8; 128];
-        let mut n = 0usize;
-        for (k, &held_flag) in self.root_held.iter().enumerate() {
-            if held_flag { buf[n] = k as u8; n += 1; }
+        if self.note_mode == NOTE_MODE_POLY { return RootOff::Pass; }
+        // play_mode 3 (arp): on-сторона bypass'ится (606), off-сторона раньше
+        // ре-детектилась — теперь тоже Pass (review F3: live/looper offs
+        // в arp-комбо не должны подавляться latch'ем; arp gate-offs идут
+        // мимо route_note_off и не задеты).
+        if self.params.play_mode as u8 == 3 { return RootOff::Pass; }
+        if self.root_held.iter().any(|&h| h) { return RootOff::Latch; }
+        // Все клавиши отпущены: off голоса последнего корня и сброс.
+        match self.root_active.take() {
+            Some(note) => RootOff::Release { note },
+            None => RootOff::Pass,
         }
-        let held = &buf[..n];
-        let min_held = match held.iter().copied().min() {
-            Some(m) => m,
-            None => { self.root_active = None; return None; } // ни одной зажатой
-        };
-        let target = match self.note_mode {
-            NOTE_MODE_ROOT => crate::chord::detect_root(held)
-                .map(|pc| {
-                    let delta = (min_held as i16 - pc as i16).rem_euclid(12) as u8;
-                    min_held.saturating_sub(delta)
-                })
-                .unwrap_or(min_held),
-            _ => min_held,
-        };
-        if self.root_active == Some(target) { return None; } // не изменился — нет re-key
-        self.root_active = Some(target);
-        Some(target)
     }
 
     /// Drains a part on state changes / panic: releases (or kills) DSP voices,
@@ -746,7 +735,7 @@ impl Part {
         }
     }
 
-    fn update_held_range(&mut self) {
+    pub(super) fn update_held_range(&mut self) {
         let mut lo = 255u8;
         let mut hi = 0u8;
         for v in &self.voices {
