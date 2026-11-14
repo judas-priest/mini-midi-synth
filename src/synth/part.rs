@@ -617,7 +617,7 @@ impl Part {
         // корень звучит в басовой октаве и не прыгает вверх при добавлении
         // верхних нот.
         let min_held = held.iter().copied().min().unwrap_or(raw);
-        let target = match self.note_mode {
+        let mut target = match self.note_mode {
             NOTE_MODE_ROOT => crate::chord::detect_root(held)
                 .map(|pc| {
                     // i16-математика: `raw - pc` в u8 паникует при raw < pc;
@@ -628,6 +628,21 @@ impl Part {
                 .unwrap_or(min_held), // фолбэк: некордовый набор = нижняя
             _ => min_held, // Bass: нижняя зажатая
         };
+        // Октава корня — ОТ СПЛИТА (юзер-решение 2026-11-09, канон
+        // аранжерных басов): pitch-class корня ставится в ближайшую к
+        // min_note октаву внутри [min_note, max_note]; позиция аккорда
+        // в сплите на бас не влияет. ТОЛЬКО ROOT: Bass следует сыгранной
+        // октаве. ОГРАНИЧЕНИЕ: сплит уже 12 полутонов может отдать другой
+        // pitch-class у границы (в диапазоне нет представителя pc) —
+        // clamp осознанный (review M3).
+        if self.note_mode == NOTE_MODE_ROOT {
+            let pc = (target % 12) as i16;
+            let (lo, hi) = (self.min_note as i16, self.max_note as i16);
+            let mut t = (lo / 12) * 12 + pc;
+            if t < lo { t += 12; }
+            if t > hi { t -= 12; }
+            target = t.clamp(lo, hi) as u8;
+        }
         match self.root_active {
             Some(cur) if cur == target => RootDecision::Suppress, // дубликат/не-корневая нота
             Some(cur) => {
