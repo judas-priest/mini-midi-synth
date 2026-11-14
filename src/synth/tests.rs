@@ -688,31 +688,33 @@ fn root_only_out_of_range_key_does_not_join_held_mask() {
 #[test]
 fn root_mode_follows_chord_root_and_latches_on_release() {
     // TC1: C(48)+E(52) = {0,4} — некордово, фолбэк на нижнюю → звучит C.
-    // +A(45): {9,0,4} = Am → корень A, прежний C отпускается (re-key по
-    // НАЖАТИЮ — дозревание сохранено). Снять A (корень) → LATCH: A звучит
-    // дальше, ре-кей назад на C запрещён (юзер-решение 2026-11-08).
+    // Октава от сплита (юзер-решение 2026-11-09): дефолтный диапазон
+    // 0..127 → корень = pc в нижней октаве, C → 0. +A(45): {9,0,4} = Am →
+    // корень A → 9, прежний C(0) отпускается (re-key по НАЖАТИЮ —
+    // дозревание сохранено). Снять A (корень) → LATCH: A звучит дальше,
+    // ре-кей назад запрещён (юзер-решение 2026-11-08).
     let mut e = root_engine();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 48, velocity: 100 });
     for _ in 0..100 { e.tick(); }
-    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 48),
-        "C did not sound");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 0),
+        "C did not sound (normalized to pc in bottom octave)");
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 52, velocity: 100 });
     for _ in 0..100 { e.tick(); }
     assert_eq!(sounding(&e.parts[0]), 1, "E was not suppressed in C+E");
-    assert_eq!(e.parts[0].root_active, Some(48));
+    assert_eq!(e.parts[0].root_active, Some(0));
 
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 45, velocity: 100 }); // Am
     for _ in 0..100 { e.tick(); }
-    assert_eq!(e.parts[0].root_active, Some(45), "chord root A was not detected");
-    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 45),
-        "root A did not sound");
-    assert!(e.parts[0].voices.iter().any(|v| v.active && v.is_releasing() && v.src_note == 48),
+    assert_eq!(e.parts[0].root_active, Some(9), "chord root A was not detected");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 9),
+        "root A did not sound (normalized to 9)");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && v.is_releasing() && v.src_note == 0),
         "old root C was not released on re-key");
 
     e.handle_event(MidiEvent::NoteOff { channel: 0, note: 45 }); // E still held → latch
     for _ in 0..100 { e.tick(); }
-    assert_eq!(e.parts[0].root_active, Some(45), "root release latched away the root");
-    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 45),
+    assert_eq!(e.parts[0].root_active, Some(9), "root release latched away the root");
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 9),
         "latched root A did not keep sounding after its key-up");
     assert_eq!(sounding(&e.parts[0]), 1, "latch release must not re-key back to C");
 
@@ -747,13 +749,14 @@ fn root_mode_low_octave_no_wrap_no_panic() {
 
 #[test]
 fn root_mode_high_note_does_not_raise_root() {
-    // TC1c: верхняя нота не поднимает корень (якорь min_held).
+    // TC1c: верхняя нота не поднимает корень (якорь min_held). Октава от
+    // сплита: A → pc 9 в нижней октаве (дефолтный диапазон 0..127).
     let mut e = root_engine();
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 45, velocity: 100 });
     for _ in 0..100 { e.tick(); }
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 72, velocity: 100 });
     for _ in 0..100 { e.tick(); }
-    assert_eq!(e.parts[0].root_active, Some(45), "high note raised the root");
+    assert_eq!(e.parts[0].root_active, Some(9), "high note raised the root");
     assert_eq!(sounding(&e.parts[0]), 1, "high note was not suppressed");
 }
 
@@ -764,9 +767,9 @@ fn root_mode_nonchord_set_falls_back_to_bass() {
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 60, velocity: 100 });
     e.handle_event(MidiEvent::NoteOn { channel: 0, note: 64, velocity: 100 });
     for _ in 0..100 { e.tick(); }
-    assert_eq!(e.parts[0].root_active, Some(60), "fallback did not anchor on the lowest");
+    assert_eq!(e.parts[0].root_active, Some(0), "fallback did not anchor on the lowest (normalized pc of C in bottom octave)");
     assert_eq!(sounding(&e.parts[0]), 1, "more than one voice in fallback");
-    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 60),
+    assert!(e.parts[0].voices.iter().any(|v| v.active && !v.is_releasing() && v.note == 0),
         "lowest note did not sound in fallback");
 }
 
@@ -833,28 +836,29 @@ fn bass_latch_survives_partial_release() {
 
 #[test]
 fn root_mode_latch_and_redetect() {
-    // TC2: C-E-G → root C; C released first → latch keeps C; full release →
-    // reset; new chord E-G-B → re-detect E (root_on side, unchanged).
+    // TC2: C-E-G → root C (нормализация: pc 0 в нижней октаве диапазона
+    // 0..127); C released first → latch keeps C; full release → reset;
+    // new chord E-G-B → re-detect E → 4 (root_on side, unchanged).
     let mut p = latch_part(NOTE_MODE_ROOT);
-    assert!(matches!(p.root_on(60), RootDecision::Sound { release: None, note: 60 }),
-        "C must sound");
+    assert!(matches!(p.root_on(60), RootDecision::Sound { release: None, note: 0 }),
+        "C must sound (normalized to pc in bottom octave)");
     assert!(matches!(p.root_on(64), RootDecision::Suppress));
     assert!(matches!(p.root_on(67), RootDecision::Suppress));
-    assert_eq!(p.root_active, Some(60), "C-E-G must detect root C");
+    assert_eq!(p.root_active, Some(0), "C-E-G must detect root C");
     // Root released first: latch keeps C (no re-detect of {64,67} → 64).
     assert!(matches!(p.root_off(60), RootOff::Latch), "root-mode off with held members must not re-key (latch)");
-    assert_eq!(p.root_active, Some(60), "root-mode latch lost on root release");
+    assert_eq!(p.root_active, Some(0), "root-mode latch lost on root release");
     // Full release: latch resets with the root off payload.
     assert!(matches!(p.root_off(64), RootOff::Latch));
-    assert!(matches!(p.root_off(67), RootOff::Release { note: 60 }),
+    assert!(matches!(p.root_off(67), RootOff::Release { note: 0 }),
         "full release must return the latched root for its note-off");
     assert_eq!(p.root_active, None, "full release must reset root tracking");
-    // Fresh chord re-detects: {4,7,11} = Em → root E sounds.
-    assert!(matches!(p.root_on(64), RootDecision::Sound { release: None, note: 64 }),
-        "fresh chord root E must sound after full release");
+    // Fresh chord re-detects: {4,7,11} = Em → root E → 4 sounds.
+    assert!(matches!(p.root_on(64), RootDecision::Sound { release: None, note: 4 }),
+        "fresh chord root E must sound after full release (normalized to 4)");
     assert!(matches!(p.root_on(67), RootDecision::Suppress));
     assert!(matches!(p.root_on(71), RootDecision::Suppress));
-    assert_eq!(p.root_active, Some(64), "E-G-B must re-detect root E");
+    assert_eq!(p.root_active, Some(4), "E-G-B must re-detect root E");
 }
 
 #[test]
@@ -1046,6 +1050,7 @@ fn root_octave_latch_full_release_normalized() {
     assert!(matches!(part.root_on(60),
         RootDecision::Sound { release: None, note: 48 })); // нормализация
     assert!(matches!(part.root_on(64), RootDecision::Suppress));
+    assert!(matches!(part.root_on(67), RootDecision::Suppress));
     assert_eq!(part.root_active, Some(48));
     assert!(matches!(part.root_off(60), RootOff::Latch),
         "root off with held members must not re-key (latch)");
@@ -1054,6 +1059,28 @@ fn root_octave_latch_full_release_normalized() {
     assert!(matches!(part.root_off(67), RootOff::Release { note: 48 }),
         "full release must return the normalized latched root");
     assert_eq!(part.root_active, None, "full release must reset root tracking");
+}
+
+#[test]
+fn root_octave_narrow_split_edge() {
+    // TC4 (крайний кейс): узкий диапазон [60..=68] (ширина < 12): C-E-G
+    // (60/64/67) → база (60/12)*12 = 60, pc 0 → 60 ∈ диапазон → 60.
+    // Некордовый набор H-D (62/66) → фолбэк min_held 62, фолбэк ТОЖЕ
+    // нормализуется: pc 2 → 62 ∈ [60,68] → 62.
+    let mut part = latch_part(crate::synth::events::NOTE_MODE_ROOT);
+    part.min_note = 60; part.max_note = 68;
+    assert!(matches!(part.root_on(60),
+        RootDecision::Sound { release: None, note: 60 }));
+    assert!(matches!(part.root_on(64), RootDecision::Suppress));
+    assert!(matches!(part.root_on(67), RootDecision::Suppress));
+    assert_eq!(part.root_active, Some(60));
+    for n in [60, 64, 67] { part.root_off(n); }
+    assert_eq!(part.root_active, None);
+    assert!(matches!(part.root_on(62),
+        RootDecision::Sound { release: None, note: 62 }),
+        "non-chord fallback must be normalized into the narrow split");
+    assert!(matches!(part.root_on(66), RootDecision::Suppress));
+    assert_eq!(part.root_active, Some(62));
 }
 
 // ── Per-part sustain (Sus checkbox, TC1) ───────────────────────
