@@ -971,6 +971,91 @@ fn gated_mseg_releases_on_full_release() {
         "MSEG2 kept playing after full release (gated off missed the MSEG release)");
 }
 
+// ── Root octave from split range (user decision 2026-11-09) ────
+// NOTE_MODE_ROOT anchors the chord root's octave to the part range
+// (split bottom): the same chord at the top of the split sounds the
+// SAME bass note as at the bottom. Bass mode keeps following the
+// played octave (out of scope by decision).
+
+#[test]
+fn root_octave_normalized_to_split_bottom() {
+    let mut part = latch_part(crate::synth::events::NOTE_MODE_ROOT);
+    part.min_note = 48; part.max_note = 72;
+    // RootDecision НЕ derives PartialEq — ассерты через matches!
+    // (house style, как в latch-тестах)
+    // Аккорд у НИЗА сплита: 48 → Sound{None,48}; 52/55 → Suppress
+    // (detect_root даёт тот же нормализованный таргет 48)
+    assert!(matches!(part.root_on(48),
+        RootDecision::Sound { release: None, note: 48 }));
+    assert!(matches!(part.root_on(52), RootDecision::Suppress));
+    assert!(matches!(part.root_on(55), RootDecision::Suppress));
+    assert_eq!(part.root_active, Some(48));
+    for n in [48, 52, 55] { part.root_off(n); }
+    assert_eq!(part.root_active, None);
+    // ТОТ ЖЕ аккорд у ВЕРХА сплита: 60 → нормализация даёт 48 (было 60 —
+    // октава min_held); 64/67 → Suppress
+    assert!(matches!(part.root_on(60),
+        RootDecision::Sound { release: None, note: 48 })); // нормализация
+    assert!(matches!(part.root_on(64), RootDecision::Suppress));
+    assert!(matches!(part.root_on(67), RootDecision::Suppress));
+    assert_eq!(part.root_active, Some(48));
+    // TC2 (F-мажор): полный отпуск → F-A-C (53/57/60): 53 → Sound{None,53}
+    // (53 — pc F в нижней октаве диапазона; до реализации значение
+    // совпадает — фолбэк min_held), 57/60 → Suppress
+    for n in [60, 64, 67] { part.root_off(n); }
+    assert!(matches!(part.root_on(53),
+        RootDecision::Sound { release: None, note: 53 }));
+    assert!(matches!(part.root_on(57), RootDecision::Suppress));
+    assert!(matches!(part.root_on(60), RootDecision::Suppress));
+}
+
+#[test]
+fn root_octave_anchor_clamped_into_range_when_pc_below_lo() {
+    // TC3 lock: диапазон [50..=74], аккорд C-E-G (60/64/67): pc 0 → база
+    // (50/12)*12 = 48 < 50 → +12 → 60 — первая C-октава ВНУТРИ диапазона.
+    // Совпадает с до-нормализационным таргетом (октава min_held) — замок
+    // на то, что clamp не уводит таргет из диапазона.
+    let mut part = latch_part(crate::synth::events::NOTE_MODE_ROOT);
+    part.min_note = 50; part.max_note = 74;
+    assert!(matches!(part.root_on(60),
+        RootDecision::Sound { release: None, note: 60 }));
+    assert!(matches!(part.root_on(64), RootDecision::Suppress));
+    assert!(matches!(part.root_on(67), RootDecision::Suppress));
+    assert_eq!(part.root_active, Some(60));
+}
+
+#[test]
+fn bass_mode_follows_played_octave_no_normalization() {
+    // TC5 regression lock: BASS не нормализуется — юзер осознанно двигает
+    // октавы, on 60 в [48..=72] звучит 60 (не 48).
+    let mut part = latch_part(crate::synth::events::NOTE_MODE_BASS);
+    part.min_note = 48; part.max_note = 72;
+    assert!(matches!(part.root_on(60),
+        RootDecision::Sound { release: None, note: 60 }));
+    assert!(matches!(part.root_on(64), RootDecision::Suppress));
+    assert_eq!(part.root_active, Some(60));
+}
+
+#[test]
+fn root_octave_latch_full_release_normalized() {
+    // TC6: latch поверх нормализации — верхний аккорд C-E-G (60/64/67)
+    // звучит нормализованным 48; отпускания НЕ пере-детектят (latch #117),
+    // полный отпуск → Release{48} (off-сторона нормализации не требует).
+    let mut part = latch_part(crate::synth::events::NOTE_MODE_ROOT);
+    part.min_note = 48; part.max_note = 72;
+    assert!(matches!(part.root_on(60),
+        RootDecision::Sound { release: None, note: 48 })); // нормализация
+    assert!(matches!(part.root_on(64), RootDecision::Suppress));
+    assert_eq!(part.root_active, Some(48));
+    assert!(matches!(part.root_off(60), RootOff::Latch),
+        "root off with held members must not re-key (latch)");
+    assert_eq!(part.root_active, Some(48), "latch lost the normalized root");
+    assert!(matches!(part.root_off(64), RootOff::Latch));
+    assert!(matches!(part.root_off(67), RootOff::Release { note: 48 }),
+        "full release must return the normalized latched root");
+    assert_eq!(part.root_active, None, "full release must reset root tracking");
+}
+
 // ── Per-part sustain (Sus checkbox, TC1) ───────────────────────
 
 #[test]
